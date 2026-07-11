@@ -23,14 +23,18 @@ def init_workspace(slug: str, goal_file: Path, workspace_root: Path,
     ws = workspace_root / slug
     if ws.exists():
         raise FileExistsError(f"workspace already exists: {ws}")
-    (ws / "iterations").mkdir(parents=True)
-    (ws / "logs").mkdir()
-    shutil.copy(goal_file, ws / "goal.md")
-    (ws / "config.yml").write_text(yaml.safe_dump(cfg, sort_keys=False))
-    status_mod.write_status(ws, status_mod.new_status(slug, cfg["approval"]))
-    budget_mod.write_budget(ws, budget_mod.new_budget(
-        cfg["max_iterations"], cfg["max_experiment_runs"], cfg["max_wall_minutes"]))
-    (ws / "notebook.md").write_text(f"# Research notebook — {slug}\n\nGoal: see goal.md\n")
+    try:
+        (ws / "iterations").mkdir(parents=True)
+        (ws / "logs").mkdir()
+        shutil.copy(goal_file, ws / "goal.md")
+        (ws / "config.yml").write_text(yaml.safe_dump(cfg, sort_keys=False))
+        status_mod.write_status(ws, status_mod.new_status(slug, cfg["approval"]))
+        budget_mod.write_budget(ws, budget_mod.new_budget(
+            cfg["max_iterations"], cfg["max_experiment_runs"], cfg["max_wall_minutes"]))
+        (ws / "notebook.md").write_text(f"# Research notebook — {slug}\n\nGoal: see goal.md\n")
+    except BaseException:
+        shutil.rmtree(ws, ignore_errors=True)
+        raise
     return ws
 
 

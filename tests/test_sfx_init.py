@@ -37,3 +37,13 @@ def test_init_refuses_existing_workspace(tmp_path):
     sfx_init.init_workspace("dup", goal, tmp_path / "workspace", {}, ROOT)
     with pytest.raises(FileExistsError):
         sfx_init.init_workspace("dup", goal, tmp_path / "workspace", {}, ROOT)
+
+
+def test_failed_init_leaves_no_partial_workspace(tmp_path):
+    missing_goal = tmp_path / "nope.md"
+    with pytest.raises(FileNotFoundError):
+        sfx_init.init_workspace("part", missing_goal, tmp_path / "workspace", {}, ROOT)
+    assert not (tmp_path / "workspace" / "part").exists()
+    # retry with a real goal now succeeds
+    ws = sfx_init.init_workspace("part", make_goal(tmp_path), tmp_path / "workspace", {}, ROOT)
+    assert (ws / "status.yml").exists()
