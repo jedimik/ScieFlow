@@ -50,6 +50,8 @@ def main() -> None:
         sys.exit(f"unknown agent: {args.agent} (known: {', '.join(agents)})")
     agent_cfg = agents[args.agent]
     cwd = args.cwd or root
+    if not cwd.is_absolute():
+        cwd = root / cwd
 
     prompt = args.prompt_file.read_text()
     use_stdin = len(prompt.encode()) > PROMPT_ARGV_LIMIT
@@ -68,6 +70,8 @@ def main() -> None:
         args.transcript_file.write_text(f"{args.agent}: timed out after {timeout:.0f}s\n")
         sys.exit(124)
     except OSError as e:
+        args.transcript_file.parent.mkdir(parents=True, exist_ok=True)
+        args.transcript_file.write_text(f"{args.agent}: failed to launch subprocess: {e}\n")
         sys.exit(f"{args.agent}: failed to launch subprocess: {e}")
 
     args.transcript_file.parent.mkdir(parents=True, exist_ok=True)
