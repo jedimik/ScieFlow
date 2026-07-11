@@ -41,3 +41,16 @@ def test_roundtrip(tmp_path):
     budget.record(b, experiment_runs=3)
     budget.write_budget(tmp_path, b)
     assert budget.read_budget(tmp_path)["spent"]["experiment_runs"] == 3
+
+
+def test_record_is_all_or_nothing():
+    b = budget.new_budget(5, 40, 240)
+    with pytest.raises(ValueError):
+        budget.record(b, iterations=2, bogus=1)
+    assert b["spent"]["iterations"] == 0
+
+
+def test_wall_clock_rejects_naive_datetime():
+    b = budget.new_budget(5, 40, 60)
+    with pytest.raises(ValueError):
+        budget.set_wall_from_clock(b, now=datetime(2026, 7, 11, 12, 0, 0))

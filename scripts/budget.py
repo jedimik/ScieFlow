@@ -37,15 +37,18 @@ def write_budget(ws: Path, b: dict) -> None:
 
 
 def record(b: dict, **spent) -> dict:
-    """Add increments, e.g. record(b, iterations=1, experiment_runs=6)."""
-    for k, v in spent.items():
+    """Add increments, e.g. record(b, iterations=1, experiment_runs=6). All-or-nothing."""
+    for k in spent:
         if k not in DIMENSIONS:
             raise ValueError(f"unknown budget dimension: {k}")
+    for k, v in spent.items():
         b["spent"][k] += v
     return b
 
 
 def set_wall_from_clock(b: dict, now: datetime | None = None) -> dict:
+    if now is not None and now.tzinfo is None:
+        raise ValueError("now must be timezone-aware (use datetime.now(timezone.utc))")
     started = datetime.fromisoformat(b["started"])
     elapsed = ((now or _now()) - started).total_seconds() / 60
     b["spent"]["wall_minutes"] = max(0.0, elapsed)
