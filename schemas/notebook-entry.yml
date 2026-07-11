@@ -1,0 +1,2 @@
+# A notebook entry is markdown: '## Iteration <n> — <title>' plus these '###' sections.
+required_sections: [Hypothesis, Method, Results, Literature, Conclusion, Next step]

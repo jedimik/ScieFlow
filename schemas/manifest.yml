@@ -1,0 +1,5 @@
+# Handoff package manifest — mirrors ResearchX's data-package manifest
+# (vendors/ResearchX/docs/data-packages.md). Validated before dispatching paper-draft.
+required_keys: [package, delivered, processing, artifacts]
+artifact_keys: [id, file, kind, description]
+kinds: [table, figure, stats, model-output, other]
