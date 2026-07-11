@@ -1,0 +1,5 @@
+# Vocabulary for workspace/<slug>/status.yml. status.py and validate.py load this.
+phases: [hypothesize, experiment, literature, synthesize]
+states: [pending, running, done, failed]
+stop_reasons: [low-budget, max-iterations, converged, anomaly, user]
+approval_modes: [per-campaign, autonomous]
