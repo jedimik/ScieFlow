@@ -1,5 +1,7 @@
 # ScieFlow agent registry. v1 is claude-only, pinned to Fable — no model routing.
 # {model}/{prompt}/{root} are substituted by scripts/agent_run.py.
+# 'enabled' is advisory and binds the coordinator: skills dispatch only enabled agents.
+# agent_run.py does not enforce it; the stub is dispatched directly by the test suite.
 agents:
   claude:
     cmd: "claude -p --dangerously-skip-permissions --model {model} {prompt}"

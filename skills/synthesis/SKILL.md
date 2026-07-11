@@ -17,7 +17,9 @@ Done by the coordinator directly — no dispatch.
    potentially an artifact).
 3. Write `iterations/<n>/synthesis.md`: verdict + reasoning + a concrete
    `Decision:` line — one of `continue` (new/refined hypothesis, state it),
-   `stop-converged`, `stop-anomaly`.
+   `stop-converged`, `stop-anomaly`. Mapping to checkpoint reasons (from
+   `schemas/status.yml`): `stop-converged` → `checkpoint.py --reason
+   converged`; `stop-anomaly` → `--reason anomaly`.
 4. Compose the notebook entry per `skills/notebook/SKILL.md`, validate it,
    append it to `notebook.md`.
 5. Convergence check: if the last `convergence_window` iterations (from

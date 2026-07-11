@@ -17,8 +17,11 @@ description: Run or resume a ScieFlow research run — the outer experiment↔li
 ## Resuming a run
 
 Read `workspace/<slug>/status.yml`. If `stopped` is set, follow its `resume`
-text (clear `stopped` by continuing normally — phases already `done` stay
-done). Otherwise continue at the first phase not `done`.
+text, then clear the block through the scripts (python: `st =
+status.read_status(ws); status.write_status(ws, status.clear_stop(st))`) —
+phases already `done` stay done. Do not resume past a terminal stop
+(`max-iterations`, `converged`) without the user asking for it. Otherwise
+continue at the first phase not `done`.
 
 ## One iteration (phases in order)
 
@@ -39,7 +42,8 @@ After each phase:
    `record(b, experiment_runs=K)` and `set_wall_from_clock(b)` (see
    `scripts/budget.py`), or equivalently rewrites the file with the
    incremented `spent` values.
-2. Check budgets: if any dimension is in `low_dimensions(b)` (≤10%
+2. Check budgets: if any dimension is in `low_dimensions(b,
+   threshold=<low_budget_threshold from config.yml>)` (default 0.10 — ≤10%
    remaining), finish ONLY the current phase, then
    `uv run scripts/checkpoint.py workspace/<slug> --reason low-budget \
       --detail "<which dimension>"` and report to the user.

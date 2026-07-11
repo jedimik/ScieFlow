@@ -46,3 +46,10 @@ def test_stop_and_roundtrip(tmp_path):
     assert st2["stopped"]["resume"] == "resume at phase experiment"
     with pytest.raises(ValueError):
         status.stop(st, "because")
+
+
+def test_clear_stop():
+    st = status.new_status("run-a", "autonomous")
+    status.stop(st, "low-budget")
+    status.clear_stop(st)
+    assert st["stopped"] is None

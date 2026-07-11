@@ -69,3 +69,9 @@ def stop(st: dict, reason: str, detail: str = "", resume: str = "") -> dict:
         raise ValueError(f"unknown stop reason: {reason}")
     st["stopped"] = {"reason": reason, "at": _now(), "detail": detail, "resume": resume}
     return st
+
+
+def clear_stop(st: dict) -> dict:
+    """Resume: remove the stopped block recorded by stop()/checkpoint."""
+    st["stopped"] = None
+    return st
