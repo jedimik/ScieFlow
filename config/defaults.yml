@@ -1,0 +1,8 @@
+# Loop defaults. Per-run overrides live in workspace/<slug>/config.yml.
+approval: per-campaign        # per-campaign | autonomous
+agent: claude                 # agent used for all dispatches
+max_iterations: 5
+max_experiment_runs: 40
+max_wall_minutes: 240
+convergence_window: 2         # stop if this many consecutive iterations show no improvement
+low_budget_threshold: 0.10    # checkpoint when any budget dimension drops to <= this fraction

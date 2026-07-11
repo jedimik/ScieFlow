@@ -1,0 +1,13 @@
+# ScieFlow agent registry. v1 is claude-only, pinned to Fable — no model routing.
+# {model}/{prompt}/{root} are substituted by scripts/agent_run.py.
+agents:
+  claude:
+    cmd: "claude -p --dangerously-skip-permissions --model {model} {prompt}"
+    stdin_cmd: "claude -p --dangerously-skip-permissions --model {model}"
+    model: claude-fable-5
+    timeout_min: 30
+    enabled: true
+  stub:
+    cmd: "python3 {root}/scripts/stub_agent.py {prompt}"
+    timeout_min: 1
+    enabled: false            # tests/dry-run only
