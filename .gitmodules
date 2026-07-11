@@ -1,0 +1,6 @@
+[submodule "vendors/ExperimentX"]
+	path = vendors/ExperimentX
+	url = ../ExperimentX.git
+[submodule "vendors/ResearchX"]
+	path = vendors/ResearchX
+	url = ../ResearchX.git
