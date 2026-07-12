@@ -28,3 +28,12 @@ def load_run_config(ws: Path, root: Path) -> dict:
     if ws_file.exists():
         merged.update(yaml.safe_load(ws_file.read_text()) or {})
     return merged
+
+
+def tier_agents(agents: dict, tier: str) -> list[str]:
+    """Enabled agent names declaring this tier (AGENTS.md rule 10)."""
+    return [
+        name
+        for name, entry in agents.items()
+        if entry.get("enabled") and entry.get("tier") == tier
+    ]

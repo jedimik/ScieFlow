@@ -1,15 +1,34 @@
-# ScieFlow agent registry. v1 is claude-only, pinned to Fable — no model routing.
+# ScieFlow agent registry. Tier routing (AGENTS.md rule 10): primary agents
+# (claude, codex) take comprehensive work; support agents (agy) only easy /
+# large-context / paired web-search tasks.
 # {model}/{prompt}/{root} are substituted by scripts/agent_run.py.
-# 'enabled' is advisory and binds the coordinator: skills dispatch only enabled agents.
-# agent_run.py does not enforce it; the stub is dispatched directly by the test suite.
+# 'enabled' and 'tier' are advisory and bind the coordinator: skills dispatch
+# only enabled agents, respecting tiers. agent_run.py does not enforce them;
+# the stub is dispatched directly by the test suite.
 agents:
   claude:
     cmd: "claude -p --dangerously-skip-permissions --model {model} {prompt}"
     stdin_cmd: "claude -p --dangerously-skip-permissions --model {model}"
     model: claude-fable-5
+    tier: primary
     timeout_min: 30
+    enabled: true
+  codex:
+    cmd: "codex exec --sandbox workspace-write --model {model} {prompt}"
+    model: gpt-5.6-sol
+    tier: primary
+    timeout_min: 30
+    enabled: true
+  agy:
+    cmd: "agy --print {prompt} --model {model} --dangerously-skip-permissions"
+    stdin_cmd: "agy --model {model} --dangerously-skip-permissions"
+    model: "Gemini 3.1 Pro (High)"
+    tier: support
+    capabilities: [web-search, large-context]
+    timeout_min: 15
     enabled: true
   stub:
     cmd: "python3 {root}/scripts/stub_agent.py {prompt}"
+    tier: primary
     timeout_min: 1
     enabled: false            # tests/dry-run only
