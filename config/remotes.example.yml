@@ -1,0 +1,21 @@
+# Copy to config/remotes.yml (gitignored) and fill in your values.
+# Deny-by-default: any directory, operation, queue, or resource not listed
+# here is refused by scripts/remote/remote.py. This file is the user's
+# control surface over what the agent may touch remotely.
+remotes:
+  meta:
+    host: skirit.metacentrum.cz     # login node
+    user: YOUR_METACENTRUM_USERNAME
+    auth: kerberos        # uses the host PC's ticket (kinit); no keys stored
+    scheduler: pbs
+    allowed_dirs:         # the ONLY remote paths the agent may touch
+      - /storage/brno2/home/YOUR_USERNAME/projects/example
+    allowed_ops: [check, git-pull, qsub, qstat, logs, fetch]
+    limits:
+      max_walltime: "24:00:00"
+      max_cpus: 16
+      max_mem_gb: 64
+      max_gpus: 1
+      queues: [default]
+      max_concurrent_jobs: 4
+      max_fix_attempts: 3   # automatic fix-and-resubmit ceiling per task

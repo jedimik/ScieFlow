@@ -5,3 +5,4 @@ __pycache__/
 workspace/*
 !workspace/README.md
 .superpowers/
+config/remotes.yml
