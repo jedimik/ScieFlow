@@ -1,0 +1,117 @@
+from types import SimpleNamespace
+
+import pytest
+
+from remote import jobs, policy, remote as cli
+
+CFG_REMOTE = policy.Remote(
+    name="meta", host="h", user="u", auth="kerberos", scheduler="pbs",
+    allowed_dirs=["/storage/x"],
+    allowed_ops=["check", "git-pull", "qsub", "qstat", "logs", "fetch"],
+    limits={"max_walltime": "24:00:00", "max_cpus": 16, "max_mem_gb": 64,
+            "max_gpus": 1, "queues": ["default"], "max_concurrent_jobs": 2,
+            "max_fix_attempts": 1},
+)
+
+
+def fake_transport(script):
+    """script: list of (returncode, stdout) consumed per call; records argv."""
+    calls = []
+    replies = list(script)
+
+    def runner(argv):
+        calls.append(argv)
+        rc, out = replies.pop(0) if replies else (0, "")
+        return SimpleNamespace(returncode=rc, stdout=out, stderr="")
+
+    from remote import transport
+    return transport.Transport(CFG_REMOTE, runner=runner), calls
+
+
+def test_check_ok_and_no_ticket(capsys):
+    t, calls = fake_transport([(0, ""), (0, "OK\n")])
+    assert cli.cmd_check(CFG_REMOTE, t) == 0
+    assert calls[0] == ["klist", "-s"]
+    capsys.readouterr()                       # drain the OK output
+    t, _ = fake_transport([(1, "")])
+    assert cli.cmd_check(CFG_REMOTE, t) == 2
+    out = capsys.readouterr().out
+    assert "NO_TICKET" in out and "kinit" in out
+
+
+def test_pull_builds_command_and_respects_policy():
+    t, calls = fake_transport([(0, "Already up to date.\n")])
+    assert cli.cmd_pull(CFG_REMOTE, t, "/storage/x/repo") == 0
+    assert calls[0][-1] == "cd /storage/x/repo && git pull --ff-only"
+    with pytest.raises(policy.PolicyError):
+        cli.cmd_pull(CFG_REMOTE, t, "/etc")
+
+
+def test_submit_clamps_records_and_enforces_ceilings(tmp_path):
+    t, calls = fake_transport([(0, "101.meta-pbs\n")])
+    rc = cli.cmd_submit(CFG_REMOTE, t, "/storage/x/repo", "run.sh",
+                        workspace=tmp_path, task="expA",
+                        walltime="48:00:00", cpus=99, mem_gb=999, gpus=0,
+                        queue="default", name=None)
+    assert rc == 0
+    qsub = calls[0][-1]
+    assert "qsub" in qsub and "walltime=24:00:00" in qsub
+    assert "select=1:ncpus=16:mem=64gb" in qsub and "ngpus" not in qsub
+    ledger = jobs.load_jobs(tmp_path)
+    assert ledger[0]["job_id"] == "101.meta-pbs" and ledger[0]["attempt"] == 1
+
+    # max_fix_attempts=1 → total ceiling 2 submits for the same task
+    t2, _ = fake_transport([(0, "102.meta-pbs\n"), (0, "103.meta-pbs\n")])
+    assert cli.cmd_submit(CFG_REMOTE, t2, "/storage/x/repo", "run.sh",
+                          workspace=tmp_path, task="expA",
+                          walltime="01:00:00", cpus=1, mem_gb=1, gpus=0,
+                          queue="default", name=None) == 0
+    assert cli.cmd_submit(CFG_REMOTE, t2, "/storage/x/repo", "run.sh",
+                          workspace=tmp_path, task="expA",
+                          walltime="01:00:00", cpus=1, mem_gb=1, gpus=0,
+                          queue="default", name=None) == 4
+
+
+def test_submit_concurrency_ceiling(tmp_path):
+    script = [(0, f"{n}.meta\n") for n in (1, 2, 3)]
+    t, _ = fake_transport(script)
+    for n, task in [(1, "a"), (2, "b")]:
+        assert cli.cmd_submit(CFG_REMOTE, t, "/storage/x", "s.sh",
+                              workspace=tmp_path, task=task,
+                              walltime="01:00:00", cpus=1, mem_gb=1, gpus=0,
+                              queue="default", name=None) == 0
+    assert cli.cmd_submit(CFG_REMOTE, t, "/storage/x", "s.sh",
+                          workspace=tmp_path, task="c",
+                          walltime="01:00:00", cpus=1, mem_gb=1, gpus=0,
+                          queue="default", name=None) == 4
+
+
+def test_submit_gpu_flag(tmp_path):
+    t, calls = fake_transport([(0, "7.meta\n")])
+    cli.cmd_submit(CFG_REMOTE, t, "/storage/x", "s.sh", workspace=tmp_path,
+                   task="g", walltime="01:00:00", cpus=1, mem_gb=1, gpus=1,
+                   queue="default", name=None)
+    assert "ngpus=1" in calls[0][-1]
+
+
+def test_status_updates_ledger(tmp_path):
+    t, calls = fake_transport([(0, "5.meta\n")])
+    cli.cmd_submit(CFG_REMOTE, t, "/storage/x", "s.sh", workspace=tmp_path,
+                   task="s", walltime="01:00:00", cpus=1, mem_gb=1, gpus=0,
+                   queue="default", name=None)
+    t2, calls2 = fake_transport(
+        [(0, "    job_state = F\n    Exit_status = 1\n")])
+    assert cli.cmd_status(CFG_REMOTE, t2, "5.meta", workspace=tmp_path) == 0
+    assert "qstat -xf 5.meta" in calls2[0][-1]
+    assert jobs.load_jobs(tmp_path)[0]["state"] == "failed"
+
+
+def test_fetch_dest_must_be_inside_workspace(tmp_path):
+    t, calls = fake_transport([(0, "")])
+    dest = tmp_path / "remote" / "data"
+    assert cli.cmd_fetch(CFG_REMOTE, t, "/storage/x/out/", str(dest),
+                         workspace=tmp_path) == 0
+    assert calls[0][0] == "rsync"
+    with pytest.raises(policy.PolicyError, match="inside the workspace"):
+        cli.cmd_fetch(CFG_REMOTE, t, "/storage/x/out/", "/tmp/elsewhere",
+                      workspace=tmp_path)
