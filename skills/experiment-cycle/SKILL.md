@@ -8,6 +8,18 @@ description: Delegate one experiment campaign to ExperimentX and retrieve a resu
 Dispatches a sub-agent into `vendors/ExperimentX`. The sub-agent follows
 ExperimentX's own AGENTS.md and skills (designer → runner → evaluator).
 
+## Backend selection
+
+The campaign YAML may set `backend: local` (default) or `backend: remote`
+(+ `remote: meta`, per-task resource requests). `local` → dispatch into
+ExperimentX as below. `remote` → drive the campaign's tasks yourself via
+`skills/remote-exec/SKILL.md` (pull, snakemake dry-run gate, submit,
+monitor, fix, fetch), then write the same results-summary contract to
+`workspace/<slug>/iterations/<n>/results-summary.md` (campaign name, runs
+count, failed count, metrics table, best configuration, anomalies) so the
+rest of the loop is backend-agnostic. Budget: each real remote job counts
+as one experiment run.
+
 ## Per-campaign mode (two dispatches)
 
 1. **Design.** Write a prompt file (template below, `MODE: design-only`),

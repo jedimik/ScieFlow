@@ -56,6 +56,13 @@ hypotheses, interpretation, synthesis, and knowing when to stop.
     search; always paired with a primary agent that cross-checks the
     output. A run config may narrow the agent set but never promotes a
     support agent into a primary-only role.
+11. Remote execution (metacentrum) goes ONLY through
+    `uv run scripts/remote/remote.py` per `skills/remote-exec/SKILL.md` —
+    never raw `ssh`/`scp`. `config/remotes.yml` (user-owned,
+    deny-by-default) bounds every directory, operation, and resource; a
+    `POLICY:` refusal is a hard boundary. Kerberos is the user's: on
+    `NO_TICKET`, stop and ask them to `kinit`. Fixes reach the remote via
+    git (local edit → push → pull), never direct remote edits.
 
 ## Skills (read the relevant one before acting)
 
@@ -66,6 +73,7 @@ hypotheses, interpretation, synthesis, and knowing when to stop.
 | Ground results in literature | `skills/literature-cycle/SKILL.md` |
 | Synthesize an iteration | `skills/synthesis/SKILL.md` |
 | Notebook entries + paper handoff | `skills/notebook/SKILL.md` |
+| Run jobs on metacentrum | `skills/remote-exec/SKILL.md` |
 
 ## Orientation
 
