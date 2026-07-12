@@ -26,6 +26,7 @@ STATE_MAP = {"Q": "queued", "H": "queued", "R": "running", "E": "running"}
 
 
 def cmd_check(remote, t) -> int:
+    policy.check_op(remote, "check")
     if t.local(["klist", "-s"]).returncode != 0:
         print("NO_TICKET: no valid Kerberos ticket on this host — stop and "
               "ask the user to run `kinit` (agent must never authenticate).")
@@ -183,7 +184,6 @@ def main(argv=None) -> int:
         remote = policy.load_remote(root, args.remote)
         t = transport.Transport(remote)
         if args.cmd == "check":
-            policy.check_op(remote, "check")
             return cmd_check(remote, t)
         if args.cmd == "pull":
             return cmd_pull(remote, t, args.dir)
