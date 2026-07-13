@@ -69,7 +69,8 @@ def test_check_token_and_script():
         policy.check_token("1;rm", "job id")
     assert policy.check_script("run.sh") == "run.sh"
     assert policy.check_script("scripts/run.sh") == "scripts/run.sh"
-    for bad in ("run.sh; evil", "../escape.sh", "-rf", "a b.sh"):
+    for bad in ("run.sh; evil", "../escape.sh", "-rf", "a b.sh",
+                "/storage/other/x.sh", "a/../b.sh"):
         with pytest.raises(policy.PolicyError):
             policy.check_script(bad)
 

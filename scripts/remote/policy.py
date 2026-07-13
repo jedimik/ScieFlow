@@ -76,7 +76,10 @@ def check_token(value: str, what: str) -> str:
 
 
 def check_script(script: str) -> str:
-    if (not _SAFE_PATH_RE.match(script) or script.startswith("-")
+    # Relative to the submit <dir> (qsub runs `cd <dir> && qsub ... <script>`),
+    # so an absolute path, a leading '-' (option injection), or any '..'
+    # segment would escape the approved directory.
+    if (not _SAFE_PATH_RE.match(script) or script.startswith(("-", "/"))
             or ".." in script.split("/")):
         raise PolicyError(f"unsafe script path: '{script}'")
     return script
