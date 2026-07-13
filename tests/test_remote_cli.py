@@ -115,3 +115,41 @@ def test_fetch_dest_must_be_inside_workspace(tmp_path):
     with pytest.raises(policy.PolicyError, match="inside the workspace"):
         cli.cmd_fetch(CFG_REMOTE, t, "/storage/x/out/", "/tmp/elsewhere",
                       workspace=tmp_path)
+
+
+def test_submit_refuses_metachar_script_before_ssh(tmp_path):
+    t, calls = fake_transport([(0, "9.meta\n")])
+    with pytest.raises(policy.PolicyError, match="unsafe script"):
+        cli.cmd_submit(CFG_REMOTE, t, "/storage/x", "run.sh; rm -rf ~",
+                       workspace=tmp_path, task="expA", walltime="01:00:00",
+                       cpus=1, mem_gb=1, gpus=0, queue="default", name=None)
+    assert calls == []                         # refused before any ssh
+    assert jobs.load_jobs(tmp_path) == []      # nothing recorded
+
+
+def test_submit_refuses_metachar_dir_and_task(tmp_path):
+    t, _ = fake_transport([(0, "9.meta\n")])
+    with pytest.raises(policy.PolicyError):
+        cli.cmd_submit(CFG_REMOTE, t, "/storage/x/$(evil)", "run.sh",
+                       workspace=tmp_path, task="expA", walltime="01:00:00",
+                       cpus=1, mem_gb=1, gpus=0, queue="default", name=None)
+    with pytest.raises(policy.PolicyError, match="task name"):
+        cli.cmd_submit(CFG_REMOTE, t, "/storage/x", "run.sh",
+                       workspace=tmp_path, task="a;b", walltime="01:00:00",
+                       cpus=1, mem_gb=1, gpus=0, queue="default", name=None)
+
+
+def test_status_refuses_metachar_job_id(tmp_path):
+    t, calls = fake_transport([(0, "")])
+    with pytest.raises(policy.PolicyError, match="job id"):
+        cli.cmd_status(CFG_REMOTE, t, "5.meta; rm -rf ~", workspace=tmp_path)
+    assert calls == []
+
+
+def test_submit_empty_qsub_stdout_returns_one_no_ledger(tmp_path):
+    t, _ = fake_transport([(0, "   \n")])       # rc 0 but no job id
+    rc = cli.cmd_submit(CFG_REMOTE, t, "/storage/x", "run.sh",
+                        workspace=tmp_path, task="expA", walltime="01:00:00",
+                        cpus=1, mem_gb=1, gpus=0, queue="default", name=None)
+    assert rc == 1
+    assert jobs.load_jobs(tmp_path) == []

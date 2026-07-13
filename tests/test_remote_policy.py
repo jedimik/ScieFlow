@@ -54,6 +54,26 @@ def test_check_op(root):
         policy.check_op(r, "rm-rf")
 
 
+def test_check_dir_refuses_shell_metacharacters(root):
+    r = policy.load_remote(root, "meta")
+    base = "/storage/brno2/home/testuser/projx"
+    for bad in (base + "; rm -rf ~", base + "/$(evil)", base + "/a b",
+                base + "/x`id`"):
+        with pytest.raises(policy.PolicyError, match="unsafe characters"):
+            policy.check_dir(r, bad)
+
+
+def test_check_token_and_script():
+    assert policy.check_token("101.meta-pbs", "job id") == "101.meta-pbs"
+    with pytest.raises(policy.PolicyError, match="job id"):
+        policy.check_token("1;rm", "job id")
+    assert policy.check_script("run.sh") == "run.sh"
+    assert policy.check_script("scripts/run.sh") == "scripts/run.sh"
+    for bad in ("run.sh; evil", "../escape.sh", "-rf", "a b.sh"):
+        with pytest.raises(policy.PolicyError):
+            policy.check_script(bad)
+
+
 def test_check_dir_normalizes_and_refuses_escape(root):
     r = policy.load_remote(root, "meta")
     base = "/storage/brno2/home/testuser/projx"

@@ -8,6 +8,7 @@ any SSH. Exit codes: 0 ok, 1 remote command failed, 2 no Kerberos ticket,
 
 import argparse
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -42,7 +43,7 @@ def cmd_check(remote, t) -> int:
 def cmd_pull(remote, t, remote_dir: str) -> int:
     policy.check_op(remote, "git-pull")
     d = policy.check_dir(remote, remote_dir)
-    result = t.ssh(f"cd {d} && git pull --ff-only")
+    result = t.ssh(f"cd {shlex.quote(d)} && git pull --ff-only")
     print(result.stdout, end="")
     if result.returncode != 0:
         print(result.stderr.strip(), file=sys.stderr)
@@ -55,6 +56,10 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
     policy.check_op(remote, "qsub")
     d = policy.check_dir(remote, remote_dir)
     policy.check_queue(remote, queue)
+    policy.check_token(task, "task name")
+    policy.check_script(script)
+    if name is not None:
+        policy.check_token(name, "job name")
     res, warnings = policy.clamp_resources(remote, walltime, cpus, mem_gb, gpus)
     for w in warnings:
         print(f"CLAMPED: {w}")
@@ -77,13 +82,19 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
         select += f":ngpus={res['gpus']}"
     jobname = name or Path(script).stem
     result = t.ssh(
-        f"cd {d} && qsub -N {jobname} -q {queue} "
-        f"-l walltime={res['walltime']} -l {select} {script}"
+        f"cd {shlex.quote(d)} && qsub -N {shlex.quote(jobname)} "
+        f"-q {shlex.quote(queue)} "
+        f"-l walltime={shlex.quote(res['walltime'])} "
+        f"-l {shlex.quote(select)} {shlex.quote(script)}"
     )
     if result.returncode != 0:
         print(f"QSUB_FAILED: {result.stderr.strip()}", file=sys.stderr)
         return 1
-    job_id = result.stdout.strip().splitlines()[-1]
+    lines = result.stdout.strip().splitlines()
+    if not lines or not lines[-1].strip():
+        print("QSUB_FAILED: qsub returned success but no job id", file=sys.stderr)
+        return 1
+    job_id = lines[-1].strip()
     entry = jobs.record_submit(
         ledger, task=task, job_id=job_id, remote_name=remote.name,
         remote_dir=d, script=script, resources={**res, "queue": queue},
@@ -95,7 +106,8 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
 
 def cmd_status(remote, t, job_id: str, *, workspace: Path) -> int:
     policy.check_op(remote, "qstat")
-    result = t.ssh(f"qstat -xf {job_id}")
+    policy.check_token(job_id, "job id")
+    result = t.ssh(f"qstat -xf {shlex.quote(job_id)}")
     if result.returncode != 0:
         print(f"QSTAT_FAILED: {result.stderr.strip()}", file=sys.stderr)
         return 1
@@ -119,15 +131,21 @@ def cmd_status(remote, t, job_id: str, *, workspace: Path) -> int:
 
 def cmd_logs(remote, t, job_id: str, *, workspace: Path) -> int:
     policy.check_op(remote, "logs")
+    policy.check_token(job_id, "job id")
     ledger = jobs.load_jobs(workspace)
     entry = next((j for j in ledger if j["job_id"] == job_id), None)
     if entry is None:
         print(f"UNKNOWN_JOB: {job_id} not in jobs.yml", file=sys.stderr)
         return 1
-    seq = job_id.split(".")[0]
-    stem = Path(entry["script"]).stem
+    # Ledger fields were validated on submit, but re-check: the ledger file
+    # is agent-writable, so treat it as untrusted before shelling out.
+    d = policy.check_dir(remote, entry["dir"])
+    seq = policy.check_token(job_id.split(".")[0], "job sequence")
+    stem = policy.check_token(Path(entry["script"]).stem, "script stem")
     result = t.ssh(
-        f"cd {entry['dir']} && cat {stem}.o{seq} {stem}.e{seq} 2>/dev/null"
+        f"cd {shlex.quote(d)} && cat "
+        f"{shlex.quote(f'{stem}.o{seq}')} {shlex.quote(f'{stem}.e{seq}')} "
+        "2>/dev/null"
     )
     print(result.stdout, end="")
     return 0 if result.returncode == 0 else 1

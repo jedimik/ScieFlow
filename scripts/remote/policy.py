@@ -6,6 +6,7 @@ user's config forbids the operation — report it, never work around it.
 """
 
 import posixpath
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +16,12 @@ REQUIRED_KEYS = ["host", "user", "auth", "scheduler", "allowed_dirs",
                  "allowed_ops", "limits"]
 REQUIRED_LIMITS = ["max_walltime", "max_cpus", "max_mem_gb", "max_gpus",
                    "queues", "max_concurrent_jobs", "max_fix_attempts"]
+
+# Everything interpolated into a remote shell command must stay inside
+# these charsets — the remote side of ssh/rsync always goes through a
+# shell, so metacharacters here would bypass the allowlists entirely.
+_SAFE_TOKEN_RE = re.compile(r"^[\w.\-]+$")
+_SAFE_PATH_RE = re.compile(r"^[\w./\-]+$")
 
 
 class PolicyError(Exception):
@@ -61,7 +68,23 @@ def check_op(remote: Remote, op: str) -> None:
         )
 
 
+def check_token(value: str, what: str) -> str:
+    if not _SAFE_TOKEN_RE.match(value):
+        raise PolicyError(f"unsafe {what} (allowed: letters, digits, "
+                          f"'.', '-', '_'): '{value}'")
+    return value
+
+
+def check_script(script: str) -> str:
+    if (not _SAFE_PATH_RE.match(script) or script.startswith("-")
+            or ".." in script.split("/")):
+        raise PolicyError(f"unsafe script path: '{script}'")
+    return script
+
+
 def check_dir(remote: Remote, path: str) -> str:
+    if not _SAFE_PATH_RE.match(path):
+        raise PolicyError(f"remote path contains unsafe characters: '{path}'")
     norm = posixpath.normpath(path)
     if not norm.startswith("/"):
         raise PolicyError(f"remote path must be absolute: '{path}'")
