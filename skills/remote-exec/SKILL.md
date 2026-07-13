@@ -36,8 +36,9 @@ AGENTS.md rule 3 delegation applies, bounded by config/remotes.yml limits)
    most of the user's workloads):
    - Submit a dry-run first: the pipeline's runner script with
      `snakemake -n` semantics, `--gpus 0`, minimal resources
-     (e.g. `--cpus 1 --mem-gb 4 --walltime 00:30:00`), task name
-     `<task>-dryrun`.
+     (e.g. `--cpus 1 --mem-gb 4 --walltime 00:30:00`), reusing the SAME
+     `--task <task>` name as the real run so the dry-run counts against
+     that task's attempt ceiling (the ledger counts attempts by task name).
    - Wait for it; `remote.py logs` must show a clean exit AND the full
      job DAG. Save that output to `WS/remote/dag-<task>.txt` — it is the
      execution plan of record.
@@ -72,9 +73,11 @@ AGENTS.md rule 3 delegation applies, bounded by config/remotes.yml limits)
 ## Exhaustion and anomalies
 
 - Attempt ceiling hit (exit 4 on submit, or `max_fix_attempts` fixes
-  spent): mark the task `failed` in `status.yml`, run
-  `uv run scripts/checkpoint.py --reason anomaly`, report what you tried
-  and the last error. Never shop for workarounds past the ceiling.
+  spent): mark the experiment phase `failed` in `status.yml` (record the
+  failed task and last error in `WS/log.md` and the results summary), run
+  `uv run scripts/checkpoint.py workspace/<slug> --reason anomaly`, report
+  what you tried and the last error. Never shop for workarounds past the
+  ceiling.
 - Job stuck queued far beyond expectation: report to the user; never
   qdel (not an allowed op) or resubmit a duplicate.
 - Every submit/status/fix/fetch gets a line in `WS/log.md`; budget: record
