@@ -52,7 +52,8 @@ def cmd_pull(remote, t, remote_dir: str) -> int:
 
 def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
                task: str, walltime: str, cpus: int, mem_gb: int, gpus: int,
-               queue: str, name: str | None) -> int:
+               queue: str, name: str | None, scratch_type: str = "none",
+               scratch_gb: int = 0) -> int:
     policy.check_op(remote, "qsub")
     d = policy.check_dir(remote, remote_dir)
     policy.check_queue(remote, queue)
@@ -60,7 +61,15 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
     policy.check_script(script)
     if name is not None:
         policy.check_token(name, "job name")
-    res, warnings = policy.clamp_resources(remote, walltime, cpus, mem_gb, gpus)
+    res, warnings = policy.clamp_resources(
+        remote,
+        walltime,
+        cpus,
+        mem_gb,
+        gpus,
+        scratch_type,
+        scratch_gb,
+    )
     for w in warnings:
         print(f"CLAMPED: {w}")
 
@@ -78,6 +87,8 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
         return 4
 
     select = f"select=1:ncpus={res['cpus']}:mem={res['mem_gb']}gb"
+    if res["scratch_gb"] > 0:
+        select += f":{res['scratch_type']}={res['scratch_gb']}gb"
     if res["gpus"] > 0:
         select += f":ngpus={res['gpus']}"
     jobname = name or Path(script).stem
@@ -186,6 +197,8 @@ def main(argv=None) -> int:
             p.add_argument("--cpus", type=int, default=1)
             p.add_argument("--mem-gb", type=int, default=4)
             p.add_argument("--gpus", type=int, default=0)
+            p.add_argument("--scratch-type", default="none")
+            p.add_argument("--scratch-gb", type=int, default=0)
             p.add_argument("--queue", default="default")
             p.add_argument("--name")
         if name in ("status", "logs"):
@@ -210,7 +223,9 @@ def main(argv=None) -> int:
                               workspace=args.workspace, task=args.task,
                               walltime=args.walltime, cpus=args.cpus,
                               mem_gb=args.mem_gb, gpus=args.gpus,
-                              queue=args.queue, name=args.name)
+                              queue=args.queue, name=args.name,
+                              scratch_type=args.scratch_type,
+                              scratch_gb=args.scratch_gb)
         if args.cmd == "status":
             return cmd_status(remote, t, args.job_id, workspace=args.workspace)
         if args.cmd == "logs":

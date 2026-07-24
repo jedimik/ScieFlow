@@ -19,6 +19,8 @@ remotes:
       max_cpus: 16
       max_mem_gb: 64
       max_gpus: 1
+      max_scratch_gb: 100
+      scratch_types: [scratch_ssd]
       queues: [default]
       max_concurrent_jobs: 4
       max_fix_attempts: 3
@@ -91,10 +93,27 @@ def test_check_dir_normalizes_and_refuses_escape(root):
 def test_clamp_resources(root):
     r = policy.load_remote(root, "meta")
     res, warns = policy.clamp_resources(r, "48:00:00", 32, 128, 2)
-    assert res == {"walltime": "24:00:00", "cpus": 16, "mem_gb": 64, "gpus": 1}
+    assert res == {
+        "walltime": "24:00:00",
+        "cpus": 16,
+        "mem_gb": 64,
+        "gpus": 1,
+        "scratch_type": "none",
+        "scratch_gb": 0,
+    }
     assert len(warns) == 4
     res, warns = policy.clamp_resources(r, "01:00:00", 4, 8, 0)
     assert res["gpus"] == 0 and warns == []
+    res, warns = policy.clamp_resources(
+        r, "01:00:00", 4, 16, 0, "scratch_ssd", 120
+    )
+    assert res["scratch_type"] == "scratch_ssd"
+    assert res["scratch_gb"] == 100
+    assert warns == ["scratch_gb 120 clamped to 100"]
+    with pytest.raises(policy.PolicyError, match="scratch type"):
+        policy.clamp_resources(r, "01:00:00", 4, 16, 0, "scratch_local", 10)
+    with pytest.raises(policy.PolicyError, match="must be 'none'"):
+        policy.clamp_resources(r, "01:00:00", 4, 16, 0, "scratch_ssd", 0)
 
 
 def test_check_queue(root):

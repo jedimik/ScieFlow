@@ -14,8 +14,17 @@ import yaml
 
 REQUIRED_KEYS = ["host", "user", "auth", "scheduler", "allowed_dirs",
                  "allowed_ops", "limits"]
-REQUIRED_LIMITS = ["max_walltime", "max_cpus", "max_mem_gb", "max_gpus",
-                   "queues", "max_concurrent_jobs", "max_fix_attempts"]
+REQUIRED_LIMITS = [
+    "max_walltime",
+    "max_cpus",
+    "max_mem_gb",
+    "max_gpus",
+    "max_scratch_gb",
+    "scratch_types",
+    "queues",
+    "max_concurrent_jobs",
+    "max_fix_attempts",
+]
 
 # Everything interpolated into a remote shell command must stay inside
 # these charsets — the remote side of ssh/rsync always goes through a
@@ -117,10 +126,28 @@ def walltime_seconds(walltime: str) -> int:
     return h * 3600 + m * 60 + s
 
 
-def clamp_resources(remote: Remote, walltime: str, cpus: int, mem_gb: int,
-                    gpus: int) -> tuple[dict, list[str]]:
+def clamp_resources(
+    remote: Remote,
+    walltime: str,
+    cpus: int,
+    mem_gb: int,
+    gpus: int,
+    scratch_type: str = "none",
+    scratch_gb: int = 0,
+) -> tuple[dict, list[str]]:
     lim = remote.limits
     warnings = []
+    values = {
+        "cpus": cpus,
+        "mem_gb": mem_gb,
+        "gpus": gpus,
+        "scratch_gb": scratch_gb,
+    }
+    for label, value in values.items():
+        if not isinstance(value, int) or value < 0:
+            raise PolicyError(f"{label} must be a non-negative integer")
+    if cpus == 0 or mem_gb == 0:
+        raise PolicyError("cpus and mem_gb must be positive")
     if walltime_seconds(walltime) > walltime_seconds(lim["max_walltime"]):
         warnings.append(f"walltime {walltime} clamped to {lim['max_walltime']}")
         walltime = lim["max_walltime"]
@@ -132,4 +159,26 @@ def clamp_resources(remote: Remote, walltime: str, cpus: int, mem_gb: int,
             warnings.append(f"{label} {value} clamped to {cap}")
             value = cap
         clamped[label] = value
-    return {"walltime": walltime, **clamped}, warnings
+    check_token(scratch_type, "scratch type")
+    if scratch_gb == 0:
+        if scratch_type != "none":
+            raise PolicyError(
+                "scratch_type must be 'none' when scratch_gb is zero"
+            )
+    else:
+        if scratch_type not in lim["scratch_types"]:
+            raise PolicyError(
+                f"scratch type '{scratch_type}' not allowed for remote "
+                f"'{remote.name}' (allowed: {', '.join(lim['scratch_types'])})"
+            )
+        if scratch_gb > lim["max_scratch_gb"]:
+            warnings.append(
+                f"scratch_gb {scratch_gb} clamped to {lim['max_scratch_gb']}"
+            )
+            scratch_gb = lim["max_scratch_gb"]
+    return {
+        "walltime": walltime,
+        **clamped,
+        "scratch_type": scratch_type,
+        "scratch_gb": scratch_gb,
+    }, warnings

@@ -9,8 +9,9 @@ CFG_REMOTE = policy.Remote(
     allowed_dirs=["/storage/x"],
     allowed_ops=["check", "git-pull", "qsub", "qstat", "logs", "fetch"],
     limits={"max_walltime": "24:00:00", "max_cpus": 16, "max_mem_gb": 64,
-            "max_gpus": 1, "queues": ["default"], "max_concurrent_jobs": 2,
-            "max_fix_attempts": 1},
+            "max_gpus": 1, "max_scratch_gb": 100,
+            "scratch_types": ["scratch_ssd"], "queues": ["default"],
+            "max_concurrent_jobs": 2, "max_fix_attempts": 1},
 )
 
 
@@ -92,6 +93,30 @@ def test_submit_gpu_flag(tmp_path):
                    task="g", walltime="01:00:00", cpus=1, mem_gb=1, gpus=1,
                    queue="default", name=None)
     assert "ngpus=1" in calls[0][-1]
+
+
+def test_submit_scratch_flag_and_ledger(tmp_path):
+    t, calls = fake_transport([(0, "8.meta\n")])
+    cli.cmd_submit(
+        CFG_REMOTE,
+        t,
+        "/storage/x",
+        "s.sh",
+        workspace=tmp_path,
+        task="scratch",
+        walltime="00:30:00",
+        cpus=4,
+        mem_gb=16,
+        gpus=0,
+        queue="default",
+        name=None,
+        scratch_type="scratch_ssd",
+        scratch_gb=60,
+    )
+    assert "select=1:ncpus=4:mem=16gb:scratch_ssd=60gb" in calls[0][-1]
+    resources = jobs.load_jobs(tmp_path)[0]["resources"]
+    assert resources["scratch_type"] == "scratch_ssd"
+    assert resources["scratch_gb"] == 60
 
 
 def test_status_updates_ledger(tmp_path):

@@ -16,6 +16,8 @@ remotes:
       max_cpus: 16
       max_mem_gb: 64
       max_gpus: 1
+      max_scratch_gb: 600
+      scratch_types: [scratch_ssd]
       queues: [default]
       max_concurrent_jobs: 4
       max_fix_attempts: 3   # automatic fix-and-resubmit ceiling per task
