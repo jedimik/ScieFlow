@@ -42,13 +42,15 @@ def active_count(jobs: list, remote_name: str) -> int:
 
 def record_submit(jobs: list, *, task: str, job_id: str, remote_name: str,
                   remote_dir: str, script: str, resources: dict,
-                  environment: dict | None = None) -> dict:
+                  environment: dict | None = None,
+                  job_name: str | None = None) -> dict:
     entry = {
         "task": task,
         "job_id": job_id,
         "remote": remote_name,
         "dir": remote_dir,
         "script": script,
+        "job_name": job_name or Path(script).stem,
         "resources": resources,
         "environment": environment or {},
         "state": "queued",

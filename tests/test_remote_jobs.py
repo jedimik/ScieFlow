@@ -18,6 +18,7 @@ def test_roundtrip_and_attempts(tmp_path):
     entry = submit(j)
     assert entry["state"] == "queued" and entry["attempt"] == 1
     assert entry["environment"] == {}
+    assert entry["job_name"] == "run"
     submit(j, job_id="2.meta")
     assert jobs.attempts(j, "taskA") == 2
     jobs.save_jobs(tmp_path, j)
@@ -47,3 +48,13 @@ def test_submit_records_environment():
         environment={"SUBJECT": "105216"},
     )
     assert entry["environment"] == {"SUBJECT": "105216"}
+
+
+def test_submit_records_custom_job_name():
+    j = []
+    entry = jobs.record_submit(
+        j, task="taskA", job_id="1.meta", remote_name="meta",
+        remote_dir="/storage/x", script="run.sh",
+        resources={"walltime": "01:00:00"}, job_name="custom-name",
+    )
+    assert entry["job_name"] == "custom-name"

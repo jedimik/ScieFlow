@@ -171,6 +171,31 @@ def test_submit_environment_is_quoted_once_and_recorded(tmp_path):
     }
 
 
+def test_submit_and_logs_use_custom_pbs_job_name(tmp_path):
+    t, calls = fake_transport([(0, "9.meta\n")])
+    assert cli.cmd_submit(
+        CFG_REMOTE,
+        t,
+        "/storage/x",
+        "runner.sh",
+        workspace=tmp_path,
+        task="named",
+        walltime="00:30:00",
+        cpus=1,
+        mem_gb=4,
+        gpus=0,
+        queue="default",
+        name="paper1-dag",
+    ) == 0
+    assert jobs.load_jobs(tmp_path)[0]["job_name"] == "paper1-dag"
+
+    t2, calls2 = fake_transport([(0, "dag output\n")])
+    assert cli.cmd_logs(CFG_REMOTE, t2, "9.meta", workspace=tmp_path) == 0
+    assert calls2[0][-1] == (
+        "cd /storage/x && cat paper1-dag.o9 paper1-dag.e9 2>/dev/null"
+    )
+
+
 def test_status_updates_ledger(tmp_path):
     t, calls = fake_transport([(0, "5.meta\n")])
     cli.cmd_submit(CFG_REMOTE, t, "/storage/x", "s.sh", workspace=tmp_path,

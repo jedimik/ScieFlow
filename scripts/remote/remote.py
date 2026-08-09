@@ -149,7 +149,7 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
     entry = jobs.record_submit(
         ledger, task=task, job_id=job_id, remote_name=remote.name,
         remote_dir=d, script=script, resources={**res, "queue": queue},
-        environment=environment,
+        environment=environment, job_name=jobname,
     )
     jobs.save_jobs(workspace, ledger)
     print(f"SUBMITTED: {job_id} attempt={entry['attempt']}")
@@ -193,7 +193,11 @@ def cmd_logs(remote, t, job_id: str, *, workspace: Path) -> int:
     # is agent-writable, so treat it as untrusted before shelling out.
     d = policy.check_dir(remote, entry["dir"])
     seq = policy.check_token(job_id.split(".")[0], "job sequence")
-    stem = policy.check_token(Path(entry["script"]).stem, "script stem")
+    # PBS names default output files from `qsub -N`, which may differ from the
+    # submitted script stem. Older ledger entries predate job_name recording.
+    stem = policy.check_token(
+        entry.get("job_name", Path(entry["script"]).stem), "job name"
+    )
     result = t.ssh(
         f"cd {shlex.quote(d)} && cat "
         f"{shlex.quote(f'{stem}.o{seq}')} {shlex.quote(f'{stem}.e{seq}')} "
