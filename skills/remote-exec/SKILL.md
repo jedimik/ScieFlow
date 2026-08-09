@@ -30,8 +30,10 @@ never work around it. `<remote>` below is the remote's name in that file
 ## Task loop (per campaign task; autonomous within an approved campaign —
 AGENTS.md rule 3 delegation applies, bounded by config/remotes.yml limits)
 
-1. **Sync**: `remote.py pull <remote> <dir>` for each remote repo dir the
-   task needs. Pull failure (dirty tree, diverged) → report; do not force.
+1. **Sync**: `remote.py pull <remote> <dir> --branch <branch>` for each remote
+   repo dir the task needs. The wrapper refuses tracked changes before switching,
+   pulls the named branch with `--ff-only`, and reports the resulting branch and
+   SHA. Pull failure (dirty tree, diverged) → report; do not force.
 2. **Snakemake gate** (MANDATORY when the task runs a Snakemake pipeline —
    most of the user's workloads):
    - Submit a dry-run first: the pipeline's runner script with
@@ -48,6 +50,9 @@ AGENTS.md rule 3 delegation applies, bounded by config/remotes.yml limits)
 3. **Submit**:
    `remote.py submit <remote> <dir> <script> --workspace WS --task <task>
    --walltime ... --cpus ... --mem-gb ... [--gpus N] [--queue Q]`
+   Generic runners may receive non-secret values through repeatable
+   `--env NAME=VALUE`; the validated map is recorded in `jobs.yml`. Never pass
+   credential contents this way.
    Heed `CLAMPED:` warnings — if a clamp likely breaks the job (e.g.
    walltime halved), tell the user instead of submitting blind.
    Exit 4 (`LIMIT:`) → concurrency: wait and poll; attempts: go to

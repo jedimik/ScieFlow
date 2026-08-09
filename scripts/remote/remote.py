@@ -40,20 +40,53 @@ def cmd_check(remote, t) -> int:
     return 0
 
 
-def cmd_pull(remote, t, remote_dir: str) -> int:
+def cmd_pull(remote, t, remote_dir: str, *, branch: str | None = None) -> int:
     policy.check_op(remote, "git-pull")
+    policy.check_op(remote, "git-status")
     d = policy.check_dir(remote, remote_dir)
-    result = t.ssh(f"cd {shlex.quote(d)} && git pull --ff-only")
+    status = t.ssh(
+        f"cd {shlex.quote(d)} && "
+        "git status --porcelain --untracked-files=no"
+    )
+    if status.returncode != 0:
+        print(status.stderr.strip(), file=sys.stderr)
+        return 1
+    if status.stdout.strip():
+        print("DIRTY_TRACKED: refusing to pull or switch a remote repository "
+              "with tracked changes", file=sys.stderr)
+        print(status.stdout, end="", file=sys.stderr)
+        return 1
+
+    if branch is not None:
+        policy.check_op(remote, "git-switch")
+        branch = policy.check_token(branch, "branch")
+        command = (
+            f"cd {shlex.quote(d)} && git switch {shlex.quote(branch)} && "
+            f"git pull --ff-only origin {shlex.quote(branch)} && "
+            "printf 'BRANCH: ' && git branch --show-current && "
+            "printf 'SHA: ' && git rev-parse HEAD"
+        )
+    else:
+        command = (
+            f"cd {shlex.quote(d)} && git pull --ff-only && "
+            "printf 'BRANCH: ' && git branch --show-current && "
+            "printf 'SHA: ' && git rev-parse HEAD"
+        )
+    result = t.ssh(command)
     print(result.stdout, end="")
     if result.returncode != 0:
         print(result.stderr.strip(), file=sys.stderr)
+    elif branch is not None and f"BRANCH: {branch}\n" not in result.stdout:
+        print(f"BRANCH_MISMATCH: requested '{branch}'", file=sys.stderr)
+        return 1
     return 0 if result.returncode == 0 else 1
 
 
 def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
                task: str, walltime: str, cpus: int, mem_gb: int, gpus: int,
                queue: str, name: str | None, scratch_type: str = "none",
-               scratch_gb: int = 0) -> int:
+               scratch_gb: int = 0,
+               environment_assignments: list[str] | None = None) -> int:
     policy.check_op(remote, "qsub")
     d = policy.check_dir(remote, remote_dir)
     policy.check_queue(remote, queue)
@@ -61,6 +94,9 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
     policy.check_script(script)
     if name is not None:
         policy.check_token(name, "job name")
+    environment = policy.check_environment_assignments(
+        environment_assignments or []
+    )
     res, warnings = policy.clamp_resources(
         remote,
         walltime,
@@ -92,11 +128,15 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
     if res["gpus"] > 0:
         select += f":ngpus={res['gpus']}"
     jobname = name or Path(script).stem
+    env_arg = ""
+    if environment:
+        joined = ",".join(f"{key}={value}" for key, value in environment.items())
+        env_arg = f"-v {shlex.quote(joined)} "
     result = t.ssh(
         f"cd {shlex.quote(d)} && qsub -N {shlex.quote(jobname)} "
         f"-q {shlex.quote(queue)} "
         f"-l walltime={shlex.quote(res['walltime'])} "
-        f"-l {shlex.quote(select)} {shlex.quote(script)}"
+        f"-l {shlex.quote(select)} {env_arg}{shlex.quote(script)}"
     )
     if result.returncode != 0:
         print(f"QSUB_FAILED: {result.stderr.strip()}", file=sys.stderr)
@@ -109,6 +149,7 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
     entry = jobs.record_submit(
         ledger, task=task, job_id=job_id, remote_name=remote.name,
         remote_dir=d, script=script, resources={**res, "queue": queue},
+        environment=environment,
     )
     jobs.save_jobs(workspace, ledger)
     print(f"SUBMITTED: {job_id} attempt={entry['attempt']}")
@@ -189,6 +230,7 @@ def main(argv=None) -> int:
         p.add_argument("remote")
         if name == "pull":
             p.add_argument("dir")
+            p.add_argument("--branch")
         if name == "submit":
             p.add_argument("dir")
             p.add_argument("script")
@@ -201,6 +243,10 @@ def main(argv=None) -> int:
             p.add_argument("--scratch-gb", type=int, default=0)
             p.add_argument("--queue", default="default")
             p.add_argument("--name")
+            p.add_argument(
+                "--env", dest="environment_assignments", action="append",
+                default=[], metavar="NAME=VALUE",
+            )
         if name in ("status", "logs"):
             p.add_argument("job_id")
         if name == "fetch":
@@ -217,7 +263,7 @@ def main(argv=None) -> int:
         if args.cmd == "check":
             return cmd_check(remote, t)
         if args.cmd == "pull":
-            return cmd_pull(remote, t, args.dir)
+            return cmd_pull(remote, t, args.dir, branch=args.branch)
         if args.cmd == "submit":
             return cmd_submit(remote, t, args.dir, args.script,
                               workspace=args.workspace, task=args.task,
@@ -225,7 +271,8 @@ def main(argv=None) -> int:
                               mem_gb=args.mem_gb, gpus=args.gpus,
                               queue=args.queue, name=args.name,
                               scratch_type=args.scratch_type,
-                              scratch_gb=args.scratch_gb)
+                              scratch_gb=args.scratch_gb,
+                              environment_assignments=args.environment_assignments)
         if args.cmd == "status":
             return cmd_status(remote, t, args.job_id, workspace=args.workspace)
         if args.cmd == "logs":

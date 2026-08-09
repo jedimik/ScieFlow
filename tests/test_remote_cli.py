@@ -7,7 +7,8 @@ from remote import jobs, policy, remote as cli
 CFG_REMOTE = policy.Remote(
     name="meta", host="h", user="u", auth="kerberos", scheduler="pbs",
     allowed_dirs=["/storage/x"],
-    allowed_ops=["check", "git-pull", "qsub", "qstat", "logs", "fetch"],
+    allowed_ops=["check", "git-status", "git-switch", "git-pull", "qsub",
+                 "qstat", "logs", "fetch"],
     limits={"max_walltime": "24:00:00", "max_cpus": 16, "max_mem_gb": 64,
             "max_gpus": 1, "max_scratch_gb": 100,
             "scratch_types": ["scratch_ssd"], "queues": ["default"],
@@ -41,11 +42,33 @@ def test_check_ok_and_no_ticket(capsys):
 
 
 def test_pull_builds_command_and_respects_policy():
-    t, calls = fake_transport([(0, "Already up to date.\n")])
-    assert cli.cmd_pull(CFG_REMOTE, t, "/storage/x/repo") == 0
-    assert calls[0][-1] == "cd /storage/x/repo && git pull --ff-only"
+    t, calls = fake_transport([
+        (0, ""),
+        (0, "Already up to date.\nBRANCH: main\nSHA: abc123\n"),
+    ])
+    assert cli.cmd_pull(
+        CFG_REMOTE, t, "/storage/x/repo", branch="main"
+    ) == 0
+    assert calls[0][-1] == (
+        "cd /storage/x/repo && git status --porcelain --untracked-files=no"
+    )
+    assert calls[1][-1] == (
+        "cd /storage/x/repo && git switch main && "
+        "git pull --ff-only origin main && "
+        "printf 'BRANCH: ' && git branch --show-current && "
+        "printf 'SHA: ' && git rev-parse HEAD"
+    )
     with pytest.raises(policy.PolicyError):
         cli.cmd_pull(CFG_REMOTE, t, "/etc")
+
+
+def test_pull_refuses_tracked_remote_changes(capsys):
+    t, calls = fake_transport([(0, " M tracked.py\n")])
+    assert cli.cmd_pull(
+        CFG_REMOTE, t, "/storage/x/repo", branch="main"
+    ) == 1
+    assert len(calls) == 1
+    assert "DIRTY_TRACKED" in capsys.readouterr().err
 
 
 def test_submit_clamps_records_and_enforces_ceilings(tmp_path):
@@ -117,6 +140,35 @@ def test_submit_scratch_flag_and_ledger(tmp_path):
     resources = jobs.load_jobs(tmp_path)[0]["resources"]
     assert resources["scratch_type"] == "scratch_ssd"
     assert resources["scratch_gb"] == 60
+
+
+def test_submit_environment_is_quoted_once_and_recorded(tmp_path):
+    t, calls = fake_transport([(0, "9.meta\n")])
+    assert cli.cmd_submit(
+        CFG_REMOTE,
+        t,
+        "/storage/x",
+        "s.sh",
+        workspace=tmp_path,
+        task="environment",
+        walltime="00:30:00",
+        cpus=1,
+        mem_gb=4,
+        gpus=0,
+        queue="default",
+        name=None,
+        environment_assignments=[
+            "SUBJECT=105216",
+            "RESULTS_ROOT=/storage/x/results",
+        ],
+    ) == 0
+    command = calls[0][-1]
+    assert command.count(" -v ") == 1
+    assert "-v SUBJECT=105216,RESULTS_ROOT=/storage/x/results" in command
+    assert jobs.load_jobs(tmp_path)[0]["environment"] == {
+        "SUBJECT": "105216",
+        "RESULTS_ROOT": "/storage/x/results",
+    }
 
 
 def test_status_updates_ledger(tmp_path):

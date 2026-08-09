@@ -77,6 +77,28 @@ def test_check_token_and_script():
             policy.check_script(bad)
 
 
+def test_check_environment_assignments():
+    assert policy.check_environment_assignments([
+        "SUBJECT=105216",
+        "RESULTS_ROOT=/storage/project/results-v2",
+    ]) == {
+        "SUBJECT": "105216",
+        "RESULTS_ROOT": "/storage/project/results-v2",
+    }
+    for bad in (
+        "missing_equals",
+        "subject=105216",
+        "SUBJECT=",
+        "SUBJECT=1,2",
+        "SUBJECT=$(id)",
+        "SUBJECT=a b",
+    ):
+        with pytest.raises(policy.PolicyError):
+            policy.check_environment_assignments([bad])
+    with pytest.raises(policy.PolicyError, match="duplicate"):
+        policy.check_environment_assignments(["SUBJECT=1", "SUBJECT=2"])
+
+
 def test_check_dir_normalizes_and_refuses_escape(root):
     r = policy.load_remote(root, "meta")
     base = "/storage/brno2/home/testuser/projx"

@@ -41,7 +41,8 @@ def active_count(jobs: list, remote_name: str) -> int:
 
 
 def record_submit(jobs: list, *, task: str, job_id: str, remote_name: str,
-                  remote_dir: str, script: str, resources: dict) -> dict:
+                  remote_dir: str, script: str, resources: dict,
+                  environment: dict | None = None) -> dict:
     entry = {
         "task": task,
         "job_id": job_id,
@@ -49,6 +50,7 @@ def record_submit(jobs: list, *, task: str, job_id: str, remote_name: str,
         "dir": remote_dir,
         "script": script,
         "resources": resources,
+        "environment": environment or {},
         "state": "queued",
         "attempt": attempts(jobs, task) + 1,
         "submitted": datetime.now(timezone.utc).isoformat(timespec="seconds"),

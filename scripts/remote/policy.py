@@ -31,6 +31,8 @@ REQUIRED_LIMITS = [
 # shell, so metacharacters here would bypass the allowlists entirely.
 _SAFE_TOKEN_RE = re.compile(r"^[\w.\-]+$")
 _SAFE_PATH_RE = re.compile(r"^[\w./\-]+$")
+_SAFE_ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_SAFE_ENV_VALUE_RE = re.compile(r"^[\w./\-]+$")
 
 
 class PolicyError(Exception):
@@ -92,6 +94,35 @@ def check_script(script: str) -> str:
             or ".." in script.split("/")):
         raise PolicyError(f"unsafe script path: '{script}'")
     return script
+
+
+def check_environment_assignments(assignments: list[str]) -> dict[str, str]:
+    """Validate qsub environment assignments without shell expansion.
+
+    PBS separates assignments with commas, so commas are deliberately absent
+    from the accepted value alphabet. Secrets must not be passed this way;
+    callers should pass credential paths through checked configuration instead.
+    """
+    result = {}
+    for assignment in assignments:
+        if "=" not in assignment:
+            raise PolicyError(
+                f"bad environment assignment '{assignment}' (expected NAME=VALUE)"
+            )
+        name, value = assignment.split("=", 1)
+        if not _SAFE_ENV_NAME_RE.fullmatch(name):
+            raise PolicyError(
+                f"unsafe environment name '{name}' (expected uppercase NAME)"
+            )
+        if not value or not _SAFE_ENV_VALUE_RE.fullmatch(value):
+            raise PolicyError(
+                f"unsafe environment value for '{name}' (allowed: letters, "
+                "digits, '_', '.', '/', '-')"
+            )
+        if name in result:
+            raise PolicyError(f"duplicate environment assignment '{name}'")
+        result[name] = value
+    return result
 
 
 def check_dir(remote: Remote, path: str) -> str:
