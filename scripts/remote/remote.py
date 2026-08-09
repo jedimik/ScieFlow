@@ -101,6 +101,27 @@ def cmd_repo_status(remote, t, remote_dir: str, *, include_untracked: bool = Fal
     return 0
 
 
+def cmd_move(remote, t, source: str, destination: str) -> int:
+    """Move one policy-bounded remote path without overwriting its destination."""
+    policy.check_op(remote, "mv")
+    src = policy.check_dir(remote, source)
+    dest = policy.check_dir(remote, destination)
+    if src == dest:
+        raise policy.PolicyError("move source and destination must differ")
+    result = t.ssh(
+        f"test -e {shlex.quote(src)} && "
+        f"test ! -e {shlex.quote(dest)} && "
+        f"mv -- {shlex.quote(src)} {shlex.quote(dest)}"
+    )
+    if result.returncode != 0:
+        print("MOVE_FAILED: source must exist and destination must be absent", file=sys.stderr)
+        if result.stderr.strip():
+            print(result.stderr.strip(), file=sys.stderr)
+        return 1
+    print(f"MOVED: {src} -> {dest}")
+    return 0
+
+
 def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
                task: str, walltime: str, cpus: int, mem_gb: int, gpus: int,
                queue: str, name: str | None, scratch_type: str = "none",
@@ -249,7 +270,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="remote.py", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in (
-        "check", "pull", "repo-status", "submit", "status", "logs", "fetch"
+        "check", "pull", "repo-status", "move", "submit", "status", "logs",
+        "fetch"
     ):
         p = sub.add_parser(name)
         p.add_argument("remote")
@@ -259,6 +281,9 @@ def main(argv=None) -> int:
         if name == "repo-status":
             p.add_argument("dir")
             p.add_argument("--include-untracked", action="store_true")
+        if name == "move":
+            p.add_argument("source")
+            p.add_argument("destination")
         if name == "submit":
             p.add_argument("dir")
             p.add_argument("script")
@@ -296,6 +321,8 @@ def main(argv=None) -> int:
             return cmd_repo_status(
                 remote, t, args.dir, include_untracked=args.include_untracked
             )
+        if args.cmd == "move":
+            return cmd_move(remote, t, args.source, args.destination)
         if args.cmd == "submit":
             return cmd_submit(remote, t, args.dir, args.script,
                               workspace=args.workspace, task=args.task,

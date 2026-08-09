@@ -10,7 +10,7 @@ remotes:
     scheduler: pbs
     allowed_dirs:         # the ONLY remote paths the agent may touch
       - /storage/brno2/home/YOUR_USERNAME/projects/example
-    allowed_ops: [check, git-status, git-switch, git-pull, qsub, qstat, logs, fetch]
+    allowed_ops: [check, git-status, git-switch, git-pull, mv, qsub, qstat, logs, fetch]
     limits:
       max_walltime: "24:00:00"
       max_cpus: 16

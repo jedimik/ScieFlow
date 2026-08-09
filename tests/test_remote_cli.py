@@ -7,8 +7,8 @@ from remote import jobs, policy, remote as cli
 CFG_REMOTE = policy.Remote(
     name="meta", host="h", user="u", auth="kerberos", scheduler="pbs",
     allowed_dirs=["/storage/x"],
-    allowed_ops=["check", "git-status", "git-switch", "git-pull", "qsub",
-                 "qstat", "logs", "fetch"],
+    allowed_ops=["check", "git-status", "git-switch", "git-pull", "mv",
+                 "qsub", "qstat", "logs", "fetch"],
     limits={"max_walltime": "24:00:00", "max_cpus": 16, "max_mem_gb": 64,
             "max_gpus": 1, "max_scratch_gb": 100,
             "scratch_types": ["scratch_ssd"], "queues": ["default"],
@@ -88,6 +88,31 @@ def test_repo_status_reports_clean(capsys):
     assert cli.cmd_repo_status(CFG_REMOTE, t, "/storage/x/repo") == 0
     assert calls[0][-1].endswith("--untracked-files=no")
     assert capsys.readouterr().out == "CLEAN\n"
+
+
+def test_move_is_bounded_and_refuses_overwrite_command(capsys):
+    t, calls = fake_transport([(0, "")])
+    assert cli.cmd_move(
+        CFG_REMOTE, t, "/storage/x/source", "/storage/x/quarantine"
+    ) == 0
+    assert calls[0][-1] == (
+        "test -e /storage/x/source && "
+        "test ! -e /storage/x/quarantine && "
+        "mv -- /storage/x/source /storage/x/quarantine"
+    )
+    assert "MOVED:" in capsys.readouterr().out
+    with pytest.raises(policy.PolicyError):
+        cli.cmd_move(CFG_REMOTE, t, "/storage/x/source", "/etc/quarantine")
+    with pytest.raises(policy.PolicyError, match="must differ"):
+        cli.cmd_move(CFG_REMOTE, t, "/storage/x/source", "/storage/x/source")
+
+
+def test_move_reports_failed_precondition(capsys):
+    t, _ = fake_transport([(1, "")])
+    assert cli.cmd_move(
+        CFG_REMOTE, t, "/storage/x/source", "/storage/x/quarantine"
+    ) == 1
+    assert "MOVE_FAILED" in capsys.readouterr().err
 
 
 def test_submit_clamps_records_and_enforces_ceilings(tmp_path):
