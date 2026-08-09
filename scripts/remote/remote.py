@@ -82,6 +82,25 @@ def cmd_pull(remote, t, remote_dir: str, *, branch: str | None = None) -> int:
     return 0 if result.returncode == 0 else 1
 
 
+def cmd_repo_status(remote, t, remote_dir: str, *, include_untracked: bool = False) -> int:
+    """Report a remote checkout's porcelain status without changing it."""
+    policy.check_op(remote, "git-status")
+    d = policy.check_dir(remote, remote_dir)
+    untracked = "all" if include_untracked else "no"
+    result = t.ssh(
+        f"cd {shlex.quote(d)} && "
+        f"git status --porcelain=v1 --untracked-files={untracked}"
+    )
+    if result.returncode != 0:
+        print(result.stderr.strip(), file=sys.stderr)
+        return 1
+    if result.stdout:
+        print(result.stdout, end="")
+    else:
+        print("CLEAN")
+    return 0
+
+
 def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
                task: str, walltime: str, cpus: int, mem_gb: int, gpus: int,
                queue: str, name: str | None, scratch_type: str = "none",
@@ -229,12 +248,17 @@ def cmd_fetch(remote, t, src: str, dest: str, *, workspace: Path) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="remote.py", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("check", "pull", "submit", "status", "logs", "fetch"):
+    for name in (
+        "check", "pull", "repo-status", "submit", "status", "logs", "fetch"
+    ):
         p = sub.add_parser(name)
         p.add_argument("remote")
         if name == "pull":
             p.add_argument("dir")
             p.add_argument("--branch")
+        if name == "repo-status":
+            p.add_argument("dir")
+            p.add_argument("--include-untracked", action="store_true")
         if name == "submit":
             p.add_argument("dir")
             p.add_argument("script")
@@ -268,6 +292,10 @@ def main(argv=None) -> int:
             return cmd_check(remote, t)
         if args.cmd == "pull":
             return cmd_pull(remote, t, args.dir, branch=args.branch)
+        if args.cmd == "repo-status":
+            return cmd_repo_status(
+                remote, t, args.dir, include_untracked=args.include_untracked
+            )
         if args.cmd == "submit":
             return cmd_submit(remote, t, args.dir, args.script,
                               workspace=args.workspace, task=args.task,

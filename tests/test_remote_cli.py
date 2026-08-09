@@ -71,6 +71,25 @@ def test_pull_refuses_tracked_remote_changes(capsys):
     assert "DIRTY_TRACKED" in capsys.readouterr().err
 
 
+def test_repo_status_can_include_untracked(capsys):
+    t, calls = fake_transport([(0, "?? uv.lock\n")])
+    assert cli.cmd_repo_status(
+        CFG_REMOTE, t, "/storage/x/repo", include_untracked=True
+    ) == 0
+    assert calls[0][-1] == (
+        "cd /storage/x/repo && "
+        "git status --porcelain=v1 --untracked-files=all"
+    )
+    assert capsys.readouterr().out == "?? uv.lock\n"
+
+
+def test_repo_status_reports_clean(capsys):
+    t, calls = fake_transport([(0, "")])
+    assert cli.cmd_repo_status(CFG_REMOTE, t, "/storage/x/repo") == 0
+    assert calls[0][-1].endswith("--untracked-files=no")
+    assert capsys.readouterr().out == "CLEAN\n"
+
+
 def test_submit_clamps_records_and_enforces_ceilings(tmp_path):
     t, calls = fake_transport([(0, "101.meta-pbs\n")])
     rc = cli.cmd_submit(CFG_REMOTE, t, "/storage/x/repo", "run.sh",

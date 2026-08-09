@@ -34,6 +34,9 @@ AGENTS.md rule 3 delegation applies, bounded by config/remotes.yml limits)
    repo dir the task needs. The wrapper refuses tracked changes before switching,
    pulls the named branch with `--ff-only`, and reports the resulting branch and
    SHA. Pull failure (dirty tree, diverged) → report; do not force.
+   For a runner that requires a completely clean checkout, also run
+   `remote.py repo-status <remote> <dir> --include-untracked`; report any path
+   and never delete or hide it without the user's authorization.
 2. **Snakemake gate** (MANDATORY when the task runs a Snakemake pipeline —
    most of the user's workloads):
    - Submit a dry-run first: the pipeline's runner script with
