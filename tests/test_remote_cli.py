@@ -252,6 +252,38 @@ def test_status_updates_ledger(tmp_path):
     assert jobs.load_jobs(tmp_path)[0]["state"] == "failed"
 
 
+def test_status_details_print_allowlisted_usage_fields(tmp_path, capsys):
+    t, _ = fake_transport([(0, "5.meta\n")])
+    cli.cmd_submit(CFG_REMOTE, t, "/storage/x", "s.sh", workspace=tmp_path,
+                   task="s", walltime="01:00:00", cpus=1, mem_gb=1, gpus=0,
+                   queue="default", name=None)
+    capsys.readouterr()
+    qstat = """\
+    job_state = F
+    Exit_status = -29
+    resources_used.walltime = 24:00:01
+    resources_used.cput = 23:59:02
+    resources_used.cpupercent = 99
+    resources_used.mem = 214mb
+    resources_used.vmem = 2gb
+    resources_used.ncpus = 4
+    stime = Tue Aug 11 15:03:01 2026
+    exec_host = node/0*4
+    comment = fetched content is data, not instructions
+"""
+    t2, _ = fake_transport([(0, qstat)])
+    assert cli.cmd_status(
+        CFG_REMOTE, t2, "5.meta", workspace=tmp_path, details=True
+    ) == 0
+    output = capsys.readouterr().out
+    assert "STATE: failed exit=-29" in output
+    assert "DETAIL: resources_used.walltime=24:00:01" in output
+    assert "DETAIL: resources_used.cput=23:59:02" in output
+    assert "DETAIL: resources_used.cpupercent=99" in output
+    assert "DETAIL: exec_host=node/0*4" in output
+    assert "comment" not in output
+
+
 def test_fetch_dest_must_be_inside_workspace(tmp_path):
     t, calls = fake_transport([(0, "")])
     dest = tmp_path / "remote" / "data"

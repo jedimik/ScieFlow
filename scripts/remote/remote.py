@@ -196,7 +196,24 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
     return 0
 
 
-def cmd_status(remote, t, job_id: str, *, workspace: Path) -> int:
+def _qstat_value(output: str, field: str) -> str | None:
+    """Return one allowlisted single-line field from ``qstat -xf`` output."""
+
+    match = re.search(
+        rf"(?m)^\s*{re.escape(field)}\s*=\s*([^\r\n]*)$",
+        output,
+    )
+    return match.group(1).strip() if match else None
+
+
+def cmd_status(
+    remote,
+    t,
+    job_id: str,
+    *,
+    workspace: Path,
+    details: bool = False,
+) -> int:
     policy.check_op(remote, "qstat")
     policy.check_token(job_id, "job id")
     result = t.ssh(f"qstat -xf {shlex.quote(job_id)}")
@@ -218,6 +235,21 @@ def cmd_status(remote, t, job_id: str, *, workspace: Path) -> int:
     jobs.save_jobs(workspace, ledger)
     exit_status = exit_m.group(1) if exit_m else "-"
     print(f"STATE: {state} exit={exit_status}")
+    if details:
+        for field in (
+            "resources_used.walltime",
+            "resources_used.cput",
+            "resources_used.cpupercent",
+            "resources_used.mem",
+            "resources_used.vmem",
+            "resources_used.ncpus",
+            "stime",
+            "start_time",
+            "exec_host",
+        ):
+            value = _qstat_value(result.stdout, field)
+            if value is not None:
+                print(f"DETAIL: {field}={value}")
     return 0
 
 
@@ -302,6 +334,12 @@ def main(argv=None) -> int:
             )
         if name in ("status", "logs"):
             p.add_argument("job_id")
+        if name == "status":
+            p.add_argument(
+                "--details",
+                action="store_true",
+                help="print allowlisted read-only PBS usage fields",
+            )
         if name == "fetch":
             p.add_argument("src")
             p.add_argument("dest")
@@ -333,7 +371,13 @@ def main(argv=None) -> int:
                               scratch_gb=args.scratch_gb,
                               environment_assignments=args.environment_assignments)
         if args.cmd == "status":
-            return cmd_status(remote, t, args.job_id, workspace=args.workspace)
+            return cmd_status(
+                remote,
+                t,
+                args.job_id,
+                workspace=args.workspace,
+                details=args.details,
+            )
         if args.cmd == "logs":
             return cmd_logs(remote, t, args.job_id, workspace=args.workspace)
         if args.cmd == "fetch":
