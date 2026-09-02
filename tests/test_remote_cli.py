@@ -8,7 +8,7 @@ CFG_REMOTE = policy.Remote(
     name="meta", host="h", user="u", auth="kerberos", scheduler="pbs",
     allowed_dirs=["/storage/x"],
     allowed_ops=["check", "git-status", "git-switch", "git-pull", "mv",
-                 "qsub", "qstat", "logs", "fetch"],
+                 "qsub", "qstat", "logs", "fetch", "rsync"],
     limits={"max_walltime": "24:00:00", "max_cpus": 16, "max_mem_gb": 64,
             "max_gpus": 1, "max_scratch_gb": 100,
             "scratch_types": ["scratch_ssd"], "queues": ["default"],
@@ -293,6 +293,24 @@ def test_fetch_dest_must_be_inside_workspace(tmp_path):
     with pytest.raises(policy.PolicyError, match="inside the workspace"):
         cli.cmd_fetch(CFG_REMOTE, t, "/storage/x/out/", "/tmp/elsewhere",
                       workspace=tmp_path)
+
+
+def test_push_is_workspace_bounded_and_policy_checked(tmp_path, capsys):
+    source = tmp_path / "package"
+    source.mkdir()
+    t, calls = fake_transport([(0, "")])
+    assert cli.cmd_push(
+        CFG_REMOTE, t, str(source), "/storage/x/S3copy/paper1",
+        workspace=tmp_path,
+    ) == 0
+    assert calls[0] == [
+        "rsync", "-az", "--partial", "--append-verify",
+        f"{source}/", "u@h:/storage/x/S3copy/paper1/",
+    ]
+    assert "PUSHED:" in capsys.readouterr().out
+    with pytest.raises(policy.PolicyError, match="inside the workspace"):
+        cli.cmd_push(CFG_REMOTE, t, "/tmp/package", "/storage/x/dest",
+                     workspace=tmp_path)
 
 
 def test_submit_refuses_metachar_script_before_ssh(tmp_path):

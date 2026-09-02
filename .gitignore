@@ -4,5 +4,11 @@ __pycache__/
 .pytest_cache/
 workspace/*
 !workspace/README.md
+!workspace/**/*.dvc
+!workspace/*.dvc
+!workspace/**/.gitignore
 .superpowers/
 config/remotes.yml
+.env
+.env.*
+!.env_template

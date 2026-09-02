@@ -1,0 +1,6 @@
+outs:
+- md5: 03b3879fcdfedf17faa1f29493dd7b0b.dir
+  size: 211669085563
+  nfiles: 22059
+  hash: md5
+  path: 2026-07-segsnake-thalamus-mrtrix-validation

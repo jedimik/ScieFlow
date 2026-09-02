@@ -1,0 +1,6 @@
+outs:
+- md5: 0d89ea45c3ba2c80cf2ad9ed3063418c.dir
+  size: 295318
+  nfiles: 21
+  hash: md5
+  path: 2026-09-segsnake-paper1-technical-reproducibility

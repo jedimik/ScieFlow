@@ -298,12 +298,32 @@ def cmd_fetch(remote, t, src: str, dest: str, *, workspace: Path) -> int:
     return 0
 
 
+def cmd_push(remote, t, src: str, dest: str, *, workspace: Path) -> int:
+    """Push one workspace directory to an approved remote directory."""
+    policy.check_op(remote, "rsync")
+    remote_dest = policy.check_dir(remote, dest)
+    source_path = Path(src).resolve()
+    ws = Path(workspace).resolve()
+    if not source_path.is_relative_to(ws):
+        raise policy.PolicyError(
+            f"push source must be inside the workspace: {src}"
+        )
+    if not source_path.is_dir() and not source_path.is_file():
+        raise policy.PolicyError(f"push source must be a file or directory: {src}")
+    result = t.rsync_to(str(source_path), remote_dest)
+    if result.returncode != 0:
+        print(f"RSYNC_FAILED: {result.stderr.strip()}", file=sys.stderr)
+        return 1
+    print(f"PUSHED: {source_path} -> {remote_dest}")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="remote.py", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in (
         "check", "pull", "repo-status", "move", "submit", "status", "logs",
-        "fetch"
+        "fetch", "push"
     ):
         p = sub.add_parser(name)
         p.add_argument("remote")
@@ -343,7 +363,10 @@ def main(argv=None) -> int:
         if name == "fetch":
             p.add_argument("src")
             p.add_argument("dest")
-        if name in ("submit", "status", "logs", "fetch"):
+        if name == "push":
+            p.add_argument("src")
+            p.add_argument("dest")
+        if name in ("submit", "status", "logs", "fetch", "push"):
             p.add_argument("--workspace", type=Path, required=True)
     args = ap.parse_args(argv)
 
@@ -383,6 +406,9 @@ def main(argv=None) -> int:
         if args.cmd == "fetch":
             return cmd_fetch(remote, t, args.src, args.dest,
                              workspace=args.workspace)
+        if args.cmd == "push":
+            return cmd_push(remote, t, args.src, args.dest,
+                            workspace=args.workspace)
     except policy.PolicyError as exc:
         print(f"POLICY: {exc}", file=sys.stderr)
         return 3

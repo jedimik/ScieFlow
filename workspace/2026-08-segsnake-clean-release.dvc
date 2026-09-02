@@ -1,0 +1,6 @@
+outs:
+- md5: 68c1d3127031576cf055cb445c10fb32.dir
+  size: 22499
+  nfiles: 5
+  hash: md5
+  path: 2026-08-segsnake-clean-release

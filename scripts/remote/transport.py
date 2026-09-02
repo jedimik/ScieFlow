@@ -6,6 +6,7 @@ kinit instruction for the user.
 """
 
 import subprocess
+from pathlib import Path
 
 
 def _default_runner(argv):
@@ -32,3 +33,13 @@ class Transport:
 
     def rsync_from(self, remote_path: str, dest: str):
         return self.runner(["rsync", "-az", f"{self.target}:{remote_path}", dest])
+
+    def rsync_to(self, source: str, remote_path: str):
+        source_arg = source.rstrip("/")
+        remote_arg = remote_path.rstrip("/") + "/"
+        if not Path(source_arg).is_file():
+            source_arg += "/"
+        return self.runner([
+            "rsync", "-az", "--partial", "--append-verify",
+            source_arg, f"{self.target}:{remote_arg}",
+        ])

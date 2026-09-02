@@ -1,0 +1,6 @@
+outs:
+- md5: 62764a84760a34bf516a5968a6c5447a.dir
+  size: 1804692
+  nfiles: 65
+  hash: md5
+  path: 2026-07-segsnake-target-strategy

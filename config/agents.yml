@@ -17,7 +17,7 @@ agents:
     cmd: "codex exec --sandbox workspace-write --model {model} {prompt}"
     model: gpt-5.6-sol
     tier: primary
-    timeout_min: 30
+    timeout_min: 180
     enabled: true
   agy:
     cmd: "agy --print {prompt} --model {model} --dangerously-skip-permissions"

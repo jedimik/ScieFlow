@@ -1,0 +1,54 @@
+# Add patterns of files dvc should ignore, which could improve
+# the performance. Learn more at
+# https://dvc.org/doc/user-guide/dvcignore
+
+# Python & testing caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Temporary and build artifacts
+*.tmp
+*.log
+*.sif
+build/
+dist/
+site/
+
+# Git and editor metadata
+.git/
+.superpowers/
+.idea/
+.vscode/
+.env
+.env.*
+
+# Git-tracked repository code, configuration, and docs
+# DVC should never touch or scan code, but allows vendor workspace/data
+/config/
+/docs/
+/schemas/
+/scripts/
+/setup/
+/skills/
+/tests/
+vendors/ResearchX/.git
+vendors/ResearchX/src
+vendors/ResearchX/tests
+vendors/ResearchX/docs
+vendors/ResearchX/site
+vendors/ResearchX/skills
+vendors/ExperimentX/.git
+vendors/ExperimentX/src
+vendors/ExperimentX/tests
+vendors/ExperimentX/docs
+vendors/ExperimentX/skills
+vendors/ExperimentX/pipelines
+AGENTS.md
+CLAUDE.md
+README.md
+pyproject.toml
+uv.lock
