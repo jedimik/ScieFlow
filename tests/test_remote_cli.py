@@ -53,7 +53,8 @@ def test_pull_builds_command_and_respects_policy():
         "cd /storage/x/repo && git status --porcelain --untracked-files=no"
     )
     assert calls[1][-1] == (
-        "cd /storage/x/repo && git switch main && "
+        "cd /storage/x/repo && git fetch --prune origin && "
+        "git switch main && "
         "git pull --ff-only origin main && "
         "printf 'BRANCH: ' && git branch --show-current && "
         "printf 'SHA: ' && git rev-parse HEAD"
@@ -71,6 +72,7 @@ def test_pull_accepts_slash_separated_branch():
     assert cli.cmd_pull(
         CFG_REMOTE, t, "/storage/x/repo", branch=branch
     ) == 0
+    assert "git fetch --prune origin" in calls[1][-1]
     assert f"git switch {branch}" in calls[1][-1]
     assert f"git pull --ff-only origin {branch}" in calls[1][-1]
 

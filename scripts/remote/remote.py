@@ -61,7 +61,8 @@ def cmd_pull(remote, t, remote_dir: str, *, branch: str | None = None) -> int:
         policy.check_op(remote, "git-switch")
         branch = policy.check_branch(branch)
         command = (
-            f"cd {shlex.quote(d)} && git switch {shlex.quote(branch)} && "
+            f"cd {shlex.quote(d)} && git fetch --prune origin && "
+            f"git switch {shlex.quote(branch)} && "
             f"git pull --ff-only origin {shlex.quote(branch)} && "
             "printf 'BRANCH: ' && git branch --show-current && "
             "printf 'SHA: ' && git rev-parse HEAD"
