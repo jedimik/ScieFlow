@@ -77,6 +77,28 @@ def test_check_token_and_script():
             policy.check_script(bad)
 
 
+def test_check_branch_accepts_slash_separated_names_and_rejects_unsafe_refs():
+    assert (
+        policy.check_branch("feat/tractography-sampling-v1")
+        == "feat/tractography-sampling-v1"
+    )
+    assert policy.check_branch("release/2026.09") == "release/2026.09"
+    for bad in (
+        "-option",
+        "feat//empty",
+        "feat/../main",
+        "feat/.hidden",
+        "feat/trailing.",
+        "feat/name.lock",
+        "feat/@{upstream}",
+        "feat/name with space",
+        "feat/name;evil",
+        "@",
+    ):
+        with pytest.raises(policy.PolicyError, match="unsafe branch"):
+            policy.check_branch(bad)
+
+
 def test_check_environment_assignments():
     assert policy.check_environment_assignments([
         "SUBJECT=105216",

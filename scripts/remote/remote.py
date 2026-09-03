@@ -59,7 +59,7 @@ def cmd_pull(remote, t, remote_dir: str, *, branch: str | None = None) -> int:
 
     if branch is not None:
         policy.check_op(remote, "git-switch")
-        branch = policy.check_token(branch, "branch")
+        branch = policy.check_branch(branch)
         command = (
             f"cd {shlex.quote(d)} && git switch {shlex.quote(branch)} && "
             f"git pull --ff-only origin {shlex.quote(branch)} && "

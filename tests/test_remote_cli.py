@@ -62,6 +62,19 @@ def test_pull_builds_command_and_respects_policy():
         cli.cmd_pull(CFG_REMOTE, t, "/etc")
 
 
+def test_pull_accepts_slash_separated_branch():
+    branch = "feat/tractography-sampling-v1"
+    t, calls = fake_transport([
+        (0, ""),
+        (0, f"BRANCH: {branch}\nSHA: abc123\n"),
+    ])
+    assert cli.cmd_pull(
+        CFG_REMOTE, t, "/storage/x/repo", branch=branch
+    ) == 0
+    assert f"git switch {branch}" in calls[1][-1]
+    assert f"git pull --ff-only origin {branch}" in calls[1][-1]
+
+
 def test_pull_refuses_tracked_remote_changes(capsys):
     t, calls = fake_transport([(0, " M tracked.py\n")])
     assert cli.cmd_pull(

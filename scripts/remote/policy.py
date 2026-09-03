@@ -30,6 +30,7 @@ REQUIRED_LIMITS = [
 # these charsets — the remote side of ssh/rsync always goes through a
 # shell, so metacharacters here would bypass the allowlists entirely.
 _SAFE_TOKEN_RE = re.compile(r"^[\w.\-]+$")
+_SAFE_BRANCH_RE = re.compile(r"^[\w./\-]+$")
 _SAFE_PATH_RE = re.compile(r"^[\w./\-]+$")
 _SAFE_ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _SAFE_ENV_VALUE_RE = re.compile(r"^[\w./\-]+$")
@@ -83,6 +84,35 @@ def check_token(value: str, what: str) -> str:
     if not _SAFE_TOKEN_RE.match(value):
         raise PolicyError(f"unsafe {what} (allowed: letters, digits, "
                           f"'.', '-', '_'): '{value}'")
+    return value
+
+
+def check_branch(value: str) -> str:
+    """Validate a Git branch name without weakening generic shell tokens.
+
+    Slash-separated branches are conventional Git refs, but the branch is
+    still interpolated into a remote command.  Keep the character allowlist
+    deliberately small and reject Git's ambiguous or special ref forms.
+    """
+    components = value.split("/")
+    invalid_component = any(
+        not component
+        or component.startswith(".")
+        or component.endswith((".", ".lock"))
+        for component in components
+    )
+    if (
+        not _SAFE_BRANCH_RE.fullmatch(value)
+        or value.startswith("-")
+        or value == "@"
+        or invalid_component
+        or ".." in value
+        or "@{" in value
+    ):
+        raise PolicyError(
+            "unsafe branch (expected a shell-safe Git branch name): "
+            f"'{value}'"
+        )
     return value
 
 
