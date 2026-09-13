@@ -1,0 +1,28 @@
+# Copy to config/notebooklm.yml (gitignored) and fill in your values.
+# Deny-by-default: any operation, host, notebook name, or ceiling not listed
+# here is refused by scripts/nblm/nblm.py. This file is the user's control
+# surface over what the agent may do with your NotebookLM account.
+profiles:
+  default:
+    # Written by YOU, never by the agent:
+    #   python -m notebooklm.notebooklm_cli login --storage <this path>
+    # The agent reads only whether the file exists; never its contents.
+    session_state: ~/.research_hub/nlm_sessions/state.json
+    # The agent may only create or touch notebooks whose title starts with this.
+    notebook_prefix: scieflow-
+    allowed_ops: [check, resolve, fetch, upload, ask, verify]  # note: no delete
+    source_hosts:         # the ONLY hosts a source PDF may be downloaded from
+      - europepmc.org
+      - www.ebi.ac.uk
+      - arxiv.org
+      - export.arxiv.org
+    limits:
+      max_sources_per_notebook: 50    # free tier; 100 Plus, 300 Pro
+      max_source_mb: 50
+      max_questions_per_run: 40
+      max_questions_per_day: 45       # stay under the ~50/day free ceiling
+      max_claims_per_question: 5
+      # Re-ask singly at this verdict or worse. 'not-addressed' is the tested
+      # default: a 'partial' already carries a verbatim quote, so re-asking it
+      # rarely changes the verdict (measured: 22 questions -> 8 for 16 claims).
+      reask_threshold: not-addressed

@@ -22,12 +22,83 @@ campaign) or `autonomous` (you approve the goal + scope + budget once).
 
 - `AGENTS.md` — coordinator contract (read this first)
 - `skills/` — loop protocols (research-loop, experiment-cycle,
-  literature-cycle, synthesis, notebook)
+  literature-cycle, synthesis, notebook) plus the optional modules
+  (remote-exec, claim-check)
 - `scripts/` — deterministic core (workspace init, dispatch, status,
-  budget, validation, checkpoint)
-- `config/` — agent registry (Fable-only in v1) + loop defaults
+  budget, validation, checkpoint); optional modules live in their own
+  packages (`scripts/remote/`, `scripts/nblm/`)
+- `config/` — agent registry (tiered: claude/codex primary, agy support) +
+  loop defaults; optional per-module configs you create from the shipped
+  `*.example.yml` (`remotes.yml`, `notebooklm.yml`) and which stay
+  gitignored
 - `vendors/` — ExperimentX and ResearchX submodules
 - `workspace/` — one folder per research run (gitignored; synced via DVC)
+
+## Citation checking (optional, opt-in)
+
+ScieFlow accepts a DOI as provenance for any non-experimental claim — but
+nothing checks that the cited paper actually says the thing. The
+**claim-check** module closes that gap: it pulls each citing sentence out of
+a manuscript, downloads the open-access sources, uploads them to **your own
+NotebookLM account**, and asks whether each sentence is supported — with a
+verbatim quote as evidence.
+
+It is off until you turn it on, and the agent must ask before using it.
+
+```bash
+uv sync --group notebooklm                       # optional dependency
+cp config/notebooklm.example.yml config/notebooklm.yml   # then edit it
+python -m notebooklm.notebooklm_cli login --storage ~/.research_hub/nlm_sessions/state.json
+```
+
+`config/notebooklm.yml` is yours and deny-by-default: it names the operations
+the agent may perform, the hosts it may download from, the notebook-title
+prefix it may touch, and hard ceilings on questions per day and per run
+(NotebookLM's free tier allows roughly 50 chats a day). Anything not listed
+is refused. The agent never logs in, never reads your session file, and never
+deletes a notebook or a source.
+
+**Consent.** Each run carries a `claim_check` setting (`config/defaults.yml`,
+copied into `workspace/<slug>/config.yml`):
+
+| Value | Behaviour |
+|---|---|
+| `never` | Never used, never offered. |
+| `ask` *(default)* | The agent proposes an audit with its question cost and waits for your explicit yes. |
+| `approved` | You pre-authorized audits for this run. Only you may set this. |
+
+Verdicts are **advisory**: `supported`, `partial`, `not-addressed`,
+`unsupported`, `contradicted`, or `unparseable`. They never fail a phase or
+block a draft, and a positive verdict with no quote is automatically
+downgraded — a verdict without evidence is not evidence.
+
+```bash
+# audit an existing paper (extract costs nothing and needs no account)
+uv run scripts/nblm/nblm.py extract --manuscript manuscript/main.tex \
+    --bib manuscript/references.bib --out workspace/<slug>/nblm/claims.yml
+uv run scripts/nblm/nblm.py resolve default --workspace workspace/<slug> \
+    --claims workspace/<slug>/nblm/claims.yml --out workspace/<slug>/nblm/sources.yml
+uv run scripts/nblm/nblm.py fetch   default --workspace workspace/<slug> \
+    --sources workspace/<slug>/nblm/sources.yml
+uv run scripts/nblm/nblm.py upload  default --workspace workspace/<slug>
+uv run scripts/nblm/nblm.py verify  default --workspace workspace/<slug> \
+    --claims workspace/<slug>/nblm/claims.yml
+# or check one sentence inline
+uv run scripts/nblm/nblm.py verify default --workspace workspace/<slug> \
+    --claim "<sentence>" --doi 10.1234/abc
+```
+
+`resolve` looks each DOI up in Europe PMC; expect partial coverage (64% on a
+59-source neuroimaging bibliography — paywalled publishers often have no
+open-access full text at all). Every DOI it cannot reach is listed with a
+reason and simply not audited.
+
+The report lands at `workspace/<slug>/nblm/citation-audit.md`, worst verdicts
+first. Protocol: [`skills/claim-check/SKILL.md`](skills/claim-check/SKILL.md).
+NotebookLM has no official public API; this uses the unofficial
+[`notebooklm-py`](https://github.com/teng-lin/notebooklm-py) client, so it can
+break when Google changes things — all of it is contained in
+`scripts/nblm/session.py`.
 
 ## Data & Workspace Storage (DVC + S3)
 

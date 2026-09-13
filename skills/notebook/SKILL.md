@@ -22,13 +22,18 @@ the input to a future paper draft. One entry per iteration.
     <key metrics with [run:<id>] provenance>
 
     ### Literature
-    <citations: author, year, title, DOI — with per-paper verdict>
+    <citations: author, year, title, DOI — with per-paper verdict; a verdict
+    checked via skills/claim-check/SKILL.md carries its quote and locator>
 
     ### Conclusion
     <supported | contradicted | unexplained — one paragraph>
 
     ### Next step
     <the decision and why>
+
+A DOI alone does not show the source says the thing. To check that, offer
+`skills/claim-check/SKILL.md` (opt-in, AGENTS.md rule 12) — never run it
+unasked; a checked verdict then carries its quote and locator into the entry.
 
 Validate before appending:
 `uv run scripts/validate.py <entry-file> --schema notebook-entry`

@@ -9,6 +9,7 @@ workspace/*
 !workspace/**/.gitignore
 .superpowers/
 config/remotes.yml
+config/notebooklm.yml
 .env
 .env.*
 !.env_template

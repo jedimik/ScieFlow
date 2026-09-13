@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate ScieFlow artifacts against schemas/.
 
-usage: validate.py <file> --schema status|notebook-entry|manifest
+usage: validate.py <file> --schema status|notebook-entry|manifest|claim-audit
 Prints 'INVALID: <error>' per problem; exit 1 if any.
 """
 
@@ -60,15 +60,30 @@ def validate_manifest(d: dict) -> list[str]:
     return errors
 
 
+def validate_claim_audit(text: str) -> list[str]:
+    s = _schema("claim-audit")
+    errors = []
+    for section in s["required_sections"]:
+        if not re.search(rf"^## {re.escape(section)}\s*$", text, re.M):
+            errors.append(f"missing section: ## {section}")
+    for heading in re.findall(r"^### ([a-z-]+) \(\d+\)\s*$", text, re.M):
+        if heading not in s["verdicts"]:
+            errors.append(f"unknown verdict section: {heading}")
+    return errors
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("file", type=Path)
     ap.add_argument("--schema", required=True,
-                    choices=["status", "notebook-entry", "manifest"])
+                    choices=["status", "notebook-entry", "manifest",
+                             "claim-audit"])
     args = ap.parse_args()
     text = args.file.read_text()
     if args.schema == "notebook-entry":
         errors = validate_notebook_entry(text)
+    elif args.schema == "claim-audit":
+        errors = validate_claim_audit(text)
     elif args.schema == "status":
         errors = validate_status(yaml.safe_load(text))
     else:

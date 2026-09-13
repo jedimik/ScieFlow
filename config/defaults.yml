@@ -6,3 +6,7 @@ max_experiment_runs: 40
 max_wall_minutes: 240
 convergence_window: 2         # stop if this many consecutive iterations show no improvement
 low_budget_threshold: 0.10    # checkpoint when any budget dimension drops to <= this fraction
+claim_check: ask              # never | ask | approved — verify claims against cited
+                              # sources (skills/claim-check/SKILL.md). 'ask' means
+                              # the coordinator must ask before the first audit of a
+                              # run. Only the user may set 'approved'.

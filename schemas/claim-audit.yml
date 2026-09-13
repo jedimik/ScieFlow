@@ -1,0 +1,14 @@
+# Vocabulary and report contract for the claim-check module (scripts/nblm/).
+# Ordered best -> worst; reask_threshold in config/notebooklm.yml names a
+# member of this list and means "this verdict or worse".
+verdicts:
+  - supported
+  - partial
+  - not-addressed
+  - unsupported
+  - contradicted
+  - unparseable
+required_sections:
+  - Summary
+  - Findings
+  - Provenance

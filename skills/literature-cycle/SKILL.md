@@ -18,6 +18,18 @@ for support/contradiction of the current iteration's results.
    ids returned by the search scripts, and give a per-paper verdict.
    Retry-once rule on failure.
 
+## Verifying the verdicts (optional, opt-in)
+
+The per-paper verdict above is formed from the search scripts' **abstract**
+only — nothing has read the paper body. The claim-check module can close that
+gap: write each `supports`/`contradicts` sentence plus its DOI into a
+`claims.yml` and run `skills/claim-check/SKILL.md` steps 2-5. Report the audit
+alongside `literature.md`; it never changes the phase outcome.
+
+Gated by AGENTS.md rule 12: only when `config/notebooklm.yml` exists AND the
+run's `claim_check` allows it — under the default `ask`, propose it and wait
+for the user's explicit yes. Never run it unasked.
+
 For broad questions (start of a project, major pivot), delegate a full
 lit-review instead: instruct the sub-agent to follow
 `skills/lit-review/SKILL.md` in its repo, then summarize its report into
