@@ -1,0 +1,6 @@
+outs:
+- md5: f00cb976b686074e1da556db109875bb.dir
+  size: 5783003
+  nfiles: 384
+  hash: md5
+  path: 2026-09-job1-memory35-retry
