@@ -20,12 +20,16 @@ agents:
     timeout_min: 180
     enabled: true
   agy:
-    cmd: "agy --print {prompt} --model {model} --dangerously-skip-permissions"
-    stdin_cmd: "agy --model {model} --dangerously-skip-permissions"
-    model: "Gemini 3.1 Pro (High)"
+    cmd: "agy --print {prompt} --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions"
+    # Piped prompts must not leave --print waiting for a positional value.
+    stdin_cmd: "agy --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions"
+    # Highest Pro-tier Gemini exposed by `agy models` on 2026-09-06.
+    # Keep the CLI's inner timeout below ScieFlow's outer timeout.
+    model: gemini-3.1-pro-high
+    reasoning: high
     tier: support
     capabilities: [web-search, large-context]
-    timeout_min: 15
+    timeout_min: 60
     enabled: true
   stub:
     cmd: "python3 {root}/scripts/stub_agent.py {prompt}"
