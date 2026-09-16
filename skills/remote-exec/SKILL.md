@@ -34,6 +34,9 @@ AGENTS.md rule 3 delegation applies, bounded by config/remotes.yml limits)
    repo dir the task needs. The wrapper refuses tracked changes before switching,
    pulls the named branch with `--ff-only`, and reports the resulting branch and
    SHA. Pull failure (dirty tree, diverged) → report; do not force.
+   Jobs use the package environment (`uv sync --extra experiments`). A remote
+   checkout made before the module merge needs the one-time cleanup in
+   `docs/MIGRATION.md` — report it to the user; never delete paths yourself.
    For a runner that requires a completely clean checkout, also run
    `remote.py repo-status <remote> <dir> --include-untracked`; report any path
    and never delete or hide it without the user's authorization.

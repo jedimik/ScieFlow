@@ -1,16 +1,17 @@
 # ScieFlow
 
-Agent-driven research loop: computational experiments (via
-[ExperimentX](vendors/ExperimentX)) hand in hand with literature research
-(via [ResearchX](vendors/ResearchX)). Each iteration runs
-hypothesis → experiment → literature grounding → synthesis, accumulating a
-research notebook that can be handed to ResearchX's paper-draft workflow.
+Agent-driven research loop: computational experiments (the **experiments**
+module) hand in hand with literature research (the **research** module).
+Each iteration runs hypothesis → experiment → literature grounding →
+synthesis, accumulating a research notebook that can be handed to the
+research module's paper-draft workflow. Either module also works on its own.
 
 ## Quick start
 
 ```bash
-git clone --recurse-submodules git@github.com:jedimik/ScieFlow.git
-cd ScieFlow && setup/install.sh
+git clone git@github.com:jedimik/ScieFlow.git
+cd ScieFlow && setup/install.sh      # uv sync --all-extras + tool checks
+setup/doctor.sh                       # environment check (--agents pings agent CLIs)
 ```
 
 Then ask your agent (e.g. `claude`) to start a research run — it reads
@@ -24,14 +25,21 @@ campaign) or `autonomous` (you approve the goal + scope + budget once).
 - `skills/` — loop protocols (research-loop, experiment-cycle,
   literature-cycle, synthesis, notebook) plus the optional modules
   (remote-exec, claim-check)
-- `scripts/` — deterministic core (workspace init, dispatch, status,
-  budget, validation, checkpoint); optional modules live in their own
-  packages (`scripts/remote/`, `scripts/nblm/`)
+- `src/scieflow/` — the `scieflow` package and CLI:
+  - `core/` — agent dispatch (`scieflow agent run`), stub agent, config loader
+  - `experiments/` — campaigns, sweeps, metrics, reports
+    (`scieflow experiment`; own `AGENTS.md` + skills)
+  - `research/` — literature search, review, gap discovery, paper drafting
+    (`scieflow research`; own `AGENTS.md` + skills)
+- `scripts/` — research-loop mechanics (workspace init, status, budget,
+  validation, checkpoint, DVC sync); optional modules `scripts/remote/`,
+  `scripts/nblm/`
+- `pipelines/` — experiment pipelines (reference: `pipelines/denoise/`);
+  `envs/` — conda environment for container builds
 - `config/` — agent registry (tiered: claude/codex primary, agy support) +
-  loop defaults; optional per-module configs you create from the shipped
+  loop and research defaults, cached journal profiles; optional per-module configs you create from the shipped
   `*.example.yml` (`remotes.yml`, `notebooklm.yml`) and which stay
   gitignored
-- `vendors/` — ExperimentX and ResearchX submodules
 - `workspace/` — one folder per research run (gitignored; synced via DVC)
 
 ## Citation checking (optional, opt-in)
@@ -155,8 +163,14 @@ See [`docs/DVC_STORAGE.md`](docs/DVC_STORAGE.md) for full configuration details.
 ## Development
 
 ```bash
-uv run pytest -q        # offline test suite (stub agent, no LLM calls)
+uv sync --all-extras --all-groups
+uv run pytest -q                  # offline test suite (stub agent, no LLM calls)
+uv run pytest -q -m slow          # container-build tests (needs apptainer)
+uv run --group docs mkdocs serve  # documentation site
 ```
+
+Coming from the former standalone experiment or research repositories? See
+[`docs/MIGRATION.md`](docs/MIGRATION.md).
 
 Design spec: `docs/superpowers/specs/2026-07-11-scieflow-design.md`.
 

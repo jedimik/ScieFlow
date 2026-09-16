@@ -40,19 +40,20 @@ Validate before appending:
 
 ## Paper handoff (only on explicit user request — never automatic)
 
-1. Create a ResearchX workspace data package under
-   `vendors/ResearchX/workspace/<paper-slug>/inputs/`:
+1. Create a research-module data package in its own run workspace,
+   `workspace/<paper-slug>/inputs/`:
    - `processing.md` — how the results were produced (pipelines, stages,
-     parameters, expx campaign reports).
+     parameters, experiment campaign reports).
    - `results/` — the summary tables/figures selected from the ScieFlow run
      (copy them in; agents quote from delivered files only).
-   - `manifest.yml` — per ResearchX `docs/data-packages.md`; one artifact id
+   - `manifest.yml` — per `docs/research/data-packages.md`; one artifact id
      per claimable result. Validate ScieFlow-side first:
      `uv run scripts/validate.py <manifest.yml> --schema manifest`
 2. Include `notebook.md` in the package as the narrative source.
 3. Dispatch the paper-draft workflow:
-   `uv run scripts/agent_run.py claude <prompt> <transcript> --cwd vendors/ResearchX`
-   with a prompt instructing: follow `skills/paper-draft/SKILL.md` for the
+   `uv run scieflow agent run claude <prompt> <transcript>`
+   with a prompt instructing: read only `src/scieflow/research/AGENTS.md`,
+   then follow `src/scieflow/research/skills/paper-draft/SKILL.md` for the
    prepared workspace <paper-slug>.
-4. Deliverables land in the ResearchX workspace; report their paths to the
+4. Deliverables land in `workspace/<paper-slug>/`; report their paths to the
    user.

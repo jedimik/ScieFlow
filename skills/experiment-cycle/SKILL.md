@@ -1,18 +1,19 @@
 ---
 name: experiment-cycle
-description: Delegate one experiment campaign to ExperimentX and retrieve a results summary
+description: Delegate one experiment campaign to the experiments module and retrieve a results summary
 ---
 
 # Experiment Cycle
 
-Dispatches a sub-agent into `vendors/ExperimentX`. The sub-agent follows
-ExperimentX's own AGENTS.md and skills (designer → runner → evaluator).
+Dispatches a sub-agent to the experiments module. The sub-agent follows
+`src/scieflow/experiments/AGENTS.md` and its skills (designer → runner →
+evaluator). Campaign runs are recorded under `workspace/<slug>/experiments/`.
 
 ## Backend selection
 
 The campaign YAML may set `backend: local` (default) or `backend: remote`
-(+ `remote: meta`, per-task resource requests). `local` → dispatch into
-ExperimentX as below. `remote` → drive the campaign's tasks yourself via
+(+ `remote: meta`, per-task resource requests). `local` → dispatch to the
+experiments module as below. `remote` → drive the campaign's tasks yourself via
 `skills/remote-exec/SKILL.md` (pull, snakemake dry-run gate, submit,
 monitor, fix, fetch), then write the same results-summary contract to
 `workspace/<slug>/iterations/<n>/results-summary.md` (campaign name, runs
@@ -23,7 +24,7 @@ as one experiment run.
 ## Per-campaign mode (two dispatches)
 
 1. **Design.** Write a prompt file (template below, `MODE: design-only`),
-   then: `uv run scripts/agent_run.py claude <prompt> <transcript> --cwd vendors/ExperimentX`.
+   then: `uv run scieflow agent run claude <prompt> <transcript>`.
    The sub-agent writes the proposed campaign YAML + rationale to the path
    you gave it. Present both to the user.
 2. **Run.** Only after explicit user approval, dispatch again with
@@ -37,14 +38,17 @@ without further approval (delegation per ScieFlow AGENTS.md rule 3).
 
 ## Prompt template
 
-    You are a sub-agent operating the ExperimentX repo (your cwd). Read
-    AGENTS.md and the relevant skills, then do exactly this task and exit.
+    You are a sub-agent operating the ScieFlow experiments module (your cwd
+    is the repo root). Read only src/scieflow/experiments/AGENTS.md and the
+    skills it names, then do exactly this task and exit.
 
     MODE: <design-only | run-approved | design-and-run>
     HYPOTHESIS AND INTENT:
     <contents of iterations/<n>/hypothesis.md>
     SCOPE BOUNDS (do not exceed):
     <pipeline, parameter ranges, max runs — from goal.md>
+    RUN OUTPUTS: pass --experiments-dir <ABSOLUTE path to
+    workspace/<slug>/experiments> to every scieflow experiment run/sweep.
     RULES:
     - Do NOT use the literature-support skill; literature is handled elsewhere.
     - Report honestly: failed runs stay in the summary.

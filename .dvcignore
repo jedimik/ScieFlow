@@ -27,7 +27,7 @@ site/
 .env.*
 
 # Git-tracked repository code, configuration, and docs
-# DVC should never touch or scan code, but allows vendor workspace/data
+# DVC should never touch or scan code, docs, or package sources
 /config/
 /docs/
 /schemas/
@@ -35,18 +35,11 @@ site/
 /setup/
 /skills/
 /tests/
-vendors/ResearchX/.git
-vendors/ResearchX/src
-vendors/ResearchX/tests
-vendors/ResearchX/docs
-vendors/ResearchX/site
-vendors/ResearchX/skills
-vendors/ExperimentX/.git
-vendors/ExperimentX/src
-vendors/ExperimentX/tests
-vendors/ExperimentX/docs
-vendors/ExperimentX/skills
-vendors/ExperimentX/pipelines
+/src/
+/pipelines/
+/envs/
+/.github/
+mkdocs.yml
 AGENTS.md
 CLAUDE.md
 README.md

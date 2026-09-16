@@ -1,0 +1,62 @@
+name: Docs
+
+# Every push to main that touches docs BUILDS the site under --strict
+# (validates it compiles; works on private repos with zero setup).
+#
+# Deploying a PUBLIC docs site while the source repo stays PRIVATE — two routes,
+# see docs/publishing.md:
+#   * GitHub Pro/Team/Enterprise: publish Pages from THIS repo. Enable
+#     Settings -> Pages -> Source = "GitHub Actions", then set an Actions
+#     repository variable DEPLOY_PAGES = true. The deploy job then runs on push.
+#   * GitHub Free: private repos can't publish Pages. Use the cross-repo
+#     workflow in docs/publishing.md to push built HTML to a separate PUBLIC repo.
+#
+# The deploy job below is inert until DEPLOY_PAGES=true (or you click
+# "Run workflow"), so it never fails while unused.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Build site (strict)
+        run: uv run --group docs mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    # runs on a manual dispatch, or on push once you opt in via the
+    # DEPLOY_PAGES repository variable (Settings -> Secrets and variables ->
+    # Actions -> Variables). Requires Pages Source = "GitHub Actions".
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && vars.DEPLOY_PAGES == 'true')
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -4,7 +4,7 @@ A claim is one sentence that carries a citation, paired with one cited DOI.
 A sentence citing two sources yields two claims: verification is per-source.
 
 The .bib DOI scan here is deliberately entry-scoped and unanchored. The older
-vendors/ResearchX/scripts/check_citations.py anchors its DOI regex with
+src/scieflow/research/citations.py anchors its DOI regex with
 re.M + '^\\s*doi', so a 'doi=' field on a single-line BibTeX entry is silently
 missed — a documented live bug this module must not inherit.
 """

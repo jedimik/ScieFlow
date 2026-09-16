@@ -1,28 +1,30 @@
 # ScieFlow — instructions for AI agents
 
 You are operating a research-loop framework that couples computational
-experiments (ExperimentX) with literature research (ResearchX). The
-deterministic mechanics live in `scripts/`; your job is judgment:
-hypotheses, interpretation, synthesis, and knowing when to stop.
+experiments (the experiments module) with literature research (the research
+module). The deterministic mechanics live in `scripts/` and the `scieflow`
+CLI; your job is judgment: hypotheses, interpretation, synthesis, and knowing
+when to stop.
 
 ## Roles
 
 - **Coordinator**: the agent the human talks to. Owns the run: creates the
-  workspace, dispatches sub-agents into `vendors/`, validates outputs,
+  workspace, dispatches sub-agents to a module, validates outputs,
   maintains the notebook, enforces budgets and stop criteria.
-- **Sub-agent**: invoked headless by the coordinator inside a vendor repo.
-  It follows that repo's own AGENTS.md and skills, does exactly the task in
-  its prompt file, writes the requested output file, and exits. Sub-agents
-  never dispatch other agents.
+- **Sub-agent**: invoked headless by the coordinator for one module. It
+  follows only that module's AGENTS.md (named in its prompt) and skills, does
+  exactly the task in its prompt file, writes the requested output file, and
+  exits. Sub-agents never dispatch other agents.
 
 ## Hard rules
 
-1. All run artifacts live in `workspace/<slug>/`. Never write run artifacts
-   anywhere else. Vendor repos are never modified (their own gitignored run
-   outputs — `experiments/`, `workspace/` — are theirs, not yours).
+1. All run artifacts live in `workspace/<slug>/` — including experiment
+   campaign runs (`workspace/<slug>/experiments/`). Never write run artifacts
+   anywhere else. A run never modifies module code under `src/scieflow/`.
 2. Inter-agent communication is file-based only: write a prompt file to
    `workspace/<slug>/logs/`, then run
-   `uv run scripts/agent_run.py <agent> <prompt> <transcript> [--cwd vendors/<X>]`.
+   `uv run scieflow agent run <agent> <prompt> <transcript>` (sub-agents run
+   from the repo root).
 3. **Approval contract.** `per-campaign`: present each proposed campaign
    YAML to the user and wait for approval before any experiment runs.
    `autonomous`: the user's approval of `goal.md` (question, scope bounds,
@@ -36,9 +38,10 @@ hypotheses, interpretation, synthesis, and knowing when to stop.
    anomaly (failed runs, metric collapse — report honestly, never
    rerun-until-green); low budget (any dimension ≤ 10% remaining → finish
    the current phase only, then `checkpoint.py --reason low-budget`).
-6. Literature comes only from ResearchX's search scripts via the
-   literature-cycle skill. Never invent papers, DOIs, or citation counts.
-   Instruct ExperimentX sub-agents NOT to use their literature-support skill.
+6. Literature comes only from the research module's search commands
+   (`scieflow research search <source>`) via the literature-cycle skill.
+   Never invent papers, DOIs, or citation counts. Instruct experiments-module
+   sub-agents NOT to use their literature-support skill.
 7. Sub-agent failure or invalid output: retry once with the errors appended
    to the prompt; on second failure mark the phase `failed` and checkpoint
    with `--reason anomaly`.
@@ -96,6 +99,11 @@ hypotheses, interpretation, synthesis, and knowing when to stop.
 ## Orientation
 
 - Setup: `setup/install.sh`. Tests: `uv run pytest -q` (offline).
-- Vendors: `vendors/ExperimentX` (campaigns via `expx`),
-  `vendors/ResearchX` (literature workflows). Read their AGENTS.md before
-  first dispatch.
+- Modules (read the module's AGENTS.md before its first dispatch):
+  - experiments — `src/scieflow/experiments/AGENTS.md`; campaigns via
+    `scieflow experiment` (extra: `experiments`).
+  - research — `src/scieflow/research/AGENTS.md`; literature review, gap
+    discovery, paper review and drafting via `scieflow research`
+    (extra: `research`).
+- **Sub-agents: read only the module AGENTS.md your prompt names**, not this
+  file — it keeps a single-module task's context small.

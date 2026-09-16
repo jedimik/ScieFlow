@@ -1,0 +1,81 @@
+site_name: ScieFlow
+site_description: Agent-driven research framework — computational experiments and literature research in one research loop.
+site_url: https://jedimik.github.io/ScieFlow/
+repo_url: https://github.com/jedimik/ScieFlow
+repo_name: jedimik/ScieFlow
+
+# emit page.html instead of page/index.html so the built site/ opens
+# directly via file:// (double-click), no web server needed
+use_directory_urls: false
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.tabs.link
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - tables
+  - toc:
+      permalink: true
+
+# internal design docs are kept in the repo but not published
+exclude_docs: |
+  superpowers/
+
+nav:
+  - Home: index.md
+  - Experiments:
+      - Overview: experiments/index.md
+      - Quickstart: experiments/quickstart.md
+      - Concepts: experiments/concepts.md
+      - CLI Reference: experiments/cli.md
+      - Agent Workflow: experiments/agent-workflow.md
+      - Model Routing: experiments/model-routing.md
+      - Skills Reference: experiments/skills.md
+      - Writing a New Stage: experiments/new-stage.md
+      - Adapting to a New Domain: experiments/new-domain.md
+  - Research:
+      - Overview: research/index.md
+      - Getting Started: research/getting-started.md
+      - Examples: research/examples.md
+      - Workflows:
+          - Literature Review: research/workflows/lit-review.md
+          - Paper Review: research/workflows/paper-review.md
+          - Gap Discovery: research/workflows/gap-discovery.md
+          - Paper Draft: research/workflows/paper-draft.md
+      - Data Packages: research/data-packages.md
+      - Perspective Debate: research/debate.md
+      - Configuration: research/configuration.md
+      - Architecture: research/architecture.md
+      - Publishing Docs: research/publishing.md
+  - Storage (DVC): DVC_STORAGE.md
+  - Migration from separate repos: MIGRATION.md

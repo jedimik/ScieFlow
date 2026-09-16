@@ -1,6 +1,6 @@
 """Resolve DOIs to open-access PDF URLs via Europe PMC — the sources.yml builder.
 
-`cmd_fetch` consumes sources.yml but nothing built it: ResearchX's four search
+`cmd_fetch` consumes sources.yml but nothing built it: the research module's four search
 scripts all send their argument as a free-text keyword query and cannot look a
 known DOI up (search_openalex.py:42, search_crossref.py:45, search_arxiv.py:45).
 Crossref returns DOI landing pages, never PDFs; OpenAlex returns arbitrary hosts
@@ -60,7 +60,7 @@ def pick_pdf_url(result: dict, profile: policy.Profile) -> tuple[str | None, boo
     """Choose an allowlisted PDF url. Returns (url, upgraded, reason_if_none).
 
     Prefers an allowlisted host rather than taking the last entry — the flaw in
-    vendors/ResearchX/scripts/search_europepmc.py:12-15, whose loop has no
+    src/scieflow/research/search/europepmc.py:11-14, whose loop has no
     break and so silently keeps whichever PDF came last, often the publisher's
     own paywalled domain.
     """
