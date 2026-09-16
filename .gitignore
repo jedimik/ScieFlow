@@ -7,6 +7,9 @@ workspace/*
 !workspace/**/*.dvc
 !workspace/*.dvc
 !workspace/**/.gitignore
+!workspace/_archives/
+workspace/_archives/*
+!workspace/_archives/*.dvc
 .superpowers/
 config/remotes.yml
 config/notebooklm.yml

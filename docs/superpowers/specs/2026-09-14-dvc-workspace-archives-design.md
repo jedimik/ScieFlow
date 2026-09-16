@@ -234,11 +234,20 @@ archived slug with no local directory instead of failing.
 - **`docs/DVC_STORAGE.md`** — new section covering archive mode: when to opt
   in, the commands, the disk requirement, and the dedup trade-off.
 
-- **`.gitignore` / `.dvcignore`** — expected to need no change:
-  `workspace/*` already hides archive bodies, `!workspace/**/*.dvc` already
-  admits the pointer, and `_archives/` must stay visible to DVC. To be
-  confirmed with `git check-ignore -v` during implementation rather than
-  assumed.
+- **`.gitignore`** — amended 2026-09-16 after verification. `workspace/*`
+  ignores the `_archives/` directory itself, and git never descends into an
+  ignored directory, so `!workspace/**/*.dvc` could not re-include the
+  pointer. Added after `!workspace/**/.gitignore`:
+
+  ```
+  !workspace/_archives/
+  workspace/_archives/*
+  !workspace/_archives/*.dvc
+  ```
+
+  Without this, an archive push staged deletion of the old
+  `workspace/<slug>.dvc` while the new pointer stayed ignored.
+- **`.dvcignore`** — no change; nothing in it hides `workspace/_archives/`.
 
 ### Adjacent issue, not part of this change
 

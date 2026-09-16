@@ -1296,6 +1296,8 @@ rmdir workspace/_archives
 ```
 Expected: the zip is ignored (`.gitignore:…:workspace/*`, `zip rc=0`), and the pointer is **not** ignored (no output, `pointer rc=1`). If either result differs, stop and report it. Do not edit `.gitignore` without asking.
 
+> **Executed 2026-09-16:** the pointer *was* ignored (`workspace/*` hides the `_archives/` directory, so the nested `!` rule never applies). With the user's approval, `.gitignore` gained `!workspace/_archives/`, `workspace/_archives/*`, `!workspace/_archives/*.dvc` after `!workspace/**/.gitignore`. The smoke test below should copy the repo's `.gitignore` instead of the two-line `printf`.
+
 `.dvcignore` has no `workspace` or `_archives` pattern, so DVC can see `workspace/_archives/`. Confirm with `grep -n "workspace\|_archives" .dvcignore` (expect no output).
 
 - [ ] **Step 2: Document archive mode** — in `docs/DVC_STORAGE.md`, insert this section after section 3.4 and before `## 4. Cache & Ignore Policies`:
