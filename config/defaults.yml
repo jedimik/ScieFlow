@@ -1,6 +1,5 @@
 # Loop defaults. Per-run overrides live in workspace/<slug>/config.yml.
 approval: per-campaign        # per-campaign | autonomous
-agent: claude                 # agent used for all dispatches
 max_iterations: 5
 max_experiment_runs: 40
 max_wall_minutes: 240
@@ -27,3 +26,24 @@ research:
   auto_approve_outline: false   # paper-draft: pause for user outline approval
   zotero:
     library: user               # or "group:<id>"
+
+# Which agent performs each dispatched role (catalogue: src/scieflow/core/agent_config.py).
+# Fan-out roles take a list. A run inherits these; override per run with
+# `scieflow agent configure --workspace <slug>`, which writes only the differences
+# to workspace/<slug>/config.yml. Change the defaults with `scieflow agent configure`.
+# Support-tier agents (agy) are refused outside support roles, and there only
+# alongside a primary agent (AGENTS.md rule 10).
+assignments:
+  loop.experiment: claude
+  loop.literature: claude
+  loop.paper-draft: claude
+  research.search: [claude, codex, agy]
+  research.cross-review: [claude, codex]
+  research.gap-analysis: [claude, codex]
+  research.debate: [claude, codex]
+  research.journal-profile: [agy, claude]
+  research.reviewer: codex
+  research.submitter: claude
+  research.outline: claude
+  research.draft-authors: [claude, codex]
+  research.consistency: codex
