@@ -18,12 +18,23 @@ research = [
     "requests>=2.31",
     "jsonschema>=4.21",
 ]
+# News module (scieflow.news): track what changed in tools and topics you follow.
+news = [
+    "tinydb>=4.8",
+    "filelock>=3.12",
+]
+# Local web GUI for the news module (`scieflow news gui`).
+news-gui = [
+    "tinydb>=4.8",
+    "filelock>=3.12",
+    "nicegui>=2.0",
+]
 
 [project.scripts]
 scieflow = "scieflow.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "responses>=0.25"]
+dev = ["pytest>=8", "responses>=0.25", "pytest-asyncio>=0.23"]
 docs = ["mkdocs-material>=9.5"]
 # Optional: the claim-check module (scripts/nblm/). Install with
 #   uv sync --group notebooklm
@@ -40,5 +51,11 @@ packages = ["src/scieflow"]
 [tool.pytest.ini_options]
 pythonpath = ["scripts"]
 testpaths = ["tests"]
-addopts = "-m 'not slow' --import-mode=importlib"
-markers = ["slow: requires apptainer container builds"]
+addopts = "-m 'not slow and not live' --import-mode=importlib"
+asyncio_mode = "auto"
+# nicegui.testing user plugin: GUI tests build pages in-process, no main.py
+main_file = ""
+markers = [
+    "slow: requires apptainer container builds",
+    "live: invokes a real agent CLI (spends quota; run explicitly with -m live)",
+]

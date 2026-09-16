@@ -1,0 +1,12 @@
+agent: claude          # default agent: claude | codex | agy
+lookback_days: 30      # window for interests never checked before
+# timeout: 900         # optional — overrides the per-template default (science 900s, most others 300s)
+
+interests:
+  - name: Snakemake
+    context: >                            # optional — enables Gaps & Blind Spots
+      HPC pipelines with SLURM, containerized rules
+    repo: snakemake/snakemake             # optional GitHub hint
+    urls:                                 # optional extra sources
+      - https://snakemake.readthedocs.io
+    keywords: [workflow, bioinformatics]  # optional disambiguation

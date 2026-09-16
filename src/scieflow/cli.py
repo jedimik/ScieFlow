@@ -24,6 +24,12 @@ GROUPS = {
         "research",
         "Literature research: search, validation, citations, Zotero.",
     ),
+    "news": (
+        "scieflow.news.cli",
+        "news",
+        "news",
+        "Track what changed in the tools and topics you follow.",
+    ),
 }
 
 
