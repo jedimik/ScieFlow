@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ScieFlow research manuscript cross-review",
+  "type": "object",
+  "required": ["agent", "reviewed", "recommendation", "major", "minor", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "agent": {"type": "string", "minLength": 1},
+    "reviewed": {"type": "string", "minLength": 1},
+    "recommendation": {"enum": ["ACCEPT", "MINOR REVISION", "MAJOR REVISION"]},
+    "major": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "location", "problem", "why_it_matters", "resolution"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^M[0-9]+$"},
+          "location": {"type": "string", "minLength": 1},
+          "problem": {"type": "string", "minLength": 1},
+          "why_it_matters": {"type": "string", "minLength": 1},
+          "resolution": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "minor": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "location", "comment"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^m[0-9]+$"},
+          "location": {"type": "string", "minLength": 1},
+          "comment": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "summary": {"type": "string", "minLength": 1}
+  }
+}

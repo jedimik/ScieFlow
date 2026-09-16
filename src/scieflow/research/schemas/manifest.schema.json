@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ScieFlow research data package manifest",
+  "type": "object",
+  "required": ["package", "delivered", "processing", "artifacts"],
+  "properties": {
+    "package": {"type": "string", "minLength": 1},
+    "delivered": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "processing": {"type": "string", "minLength": 1},
+    "article": {"type": ["string", "null"]},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "file", "kind", "description"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+          "file": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["table", "figure", "stats", "model-output", "other"]},
+          "description": {"type": "string", "minLength": 1},
+          "produced_by": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}
