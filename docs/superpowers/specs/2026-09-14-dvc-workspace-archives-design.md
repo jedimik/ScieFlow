@@ -50,7 +50,7 @@ Two consequences shape the design:
 | Existing directory tracking | Archive pointer replaces it; old S3 blobs left in place, never `dvc gc` |
 | Format | `.zip`, `ZIP_STORED` (no compression), Zip64 |
 | Pull onto an existing directory | Refuse, unless `--force` |
-| Kept archives vs cache | `cache.type = hardlink` so a kept zip costs its bytes once |
+| Kept archives vs cache | After pull, the kept zip is hardlinked to its own DVC cache object; `.dvc/config` unchanged (amended 2026-09-16) |
 
 `ZIP_STORED` is chosen because the payload is already-compressed data
 (`.nii.gz`, `.mif`, `.png`); DEFLATE would spend hours of CPU on the large
@@ -105,12 +105,14 @@ Pure filesystem functions. No `dvc` invocation, no network, so the whole
 module is testable offline.
 
 ```python
-def archive_path(root: Path, slug: str) -> Path        # root/workspace/_archives/<slug>.zip
-def pointer_path(root: Path, slug: str) -> Path        # the same, + ".dvc"
-def workspace_size(src_dir: Path) -> int               # bytes, for the preflight
+def archive_path(workspace_root: Path, slug: str) -> Path   # workspace_root/_archives/<slug>.zip
+def pointer_path(workspace_root: Path, slug: str) -> Path   # the same, + ".dvc"
+def workspace_size(src_dir: Path) -> int                    # bytes, for the preflight
+def ensure_space(src_dir: Path, dest_dir: Path, headroom: float = 1.05) -> None
 def build_zip(src_dir: Path, dest_zip: Path) -> None
-def verify_zip(zip_path: Path) -> int                  # returns member count
+def verify_zip(zip_path: Path) -> int                       # returns member count
 def extract_zip(zip_path: Path, dest: Path, *, force: bool = False) -> None
+def link_to_cache(zip_path: Path, pointer: Path, cache_root: Path) -> bool
 ```
 
 ### `build_zip`
@@ -179,7 +181,15 @@ Directory mode is unchanged.
 2. `verify_zip`
 3. `extract_zip` into `workspace/<slug>`, refusing a non-empty directory
    unless `--force` was passed
-4. Keep the zip
+4. `link_to_cache`: replace the pulled zip with a hardlink to its own cache
+   object (`.dvc/cache/files/md5/<first 2 hex>/<remaining hex>`, hash read
+   from the pointer's `outs[0].md5`). Skipped — leaving the copy in place and
+   saying so — when the object is missing, the sizes differ, or `os.link`
+   fails. The linked zip inherits the cache object's read-only mode.
+5. Keep the zip
+
+`--remote NAME` applies to directory-mode push and pull as well, so one flag
+never silently targets two different remotes in a mixed batch.
 
 ### `cmd_status`
 
@@ -195,30 +205,29 @@ Three states per workspace instead of two:
 
 Excludes `_archives` so `--all` never treats the archive directory as a run
 slug. `resolve_slugs` rejects `_archives` as an explicit argument for the
-same reason.
+same reason, accepts a slug whose only trace is its archive pointer, and
+`--all` is the union of local run directories and archived slugs — so
+`pull --all` on a fresh clone finds archived runs. `push --all` skips an
+archived slug with no local directory instead of failing.
 
 ### New flags
 
 - `push`: `--archive`, `--no-archive`, `--keep-zip`, `--remote NAME`
-- `pull`: `--force`
+- `pull`: `--force`, `--remote NAME`
 
 ---
 
 ## 4. Repo configuration
 
-- **`.dvc/config`** — add:
-
-  ```ini
-  [cache]
-      type = hardlink
-  ```
-
-  A pulled archive is written to `.dvc/cache` and linked into
-  `workspace/_archives/`; with the default link strategy on this filesystem
-  that is two full copies, and archives are kept after extraction by design.
-  Hardlinking makes them one inode. DVC marks hardlinked outputs read-only to
-  protect the cache, which is correct for an archive that is never edited.
-  The setting applies to every DVC output in the repo, not only archives.
+- **`.dvc/config`** — no change. The original design set repo-wide
+  `cache.type = hardlink`. Amended 2026-09-16: with hardlink cache DVC makes
+  every tracked output read-only, so directory-mode workspaces the research
+  loop keeps writing to (`status.yml`, budget, `logs/`) would fail with
+  `PermissionError` until `dvc unprotect`. The default (`reflink,copy`, which
+  is copy on this ext4) stays; archives alone get deduplicated through
+  `link_to_cache` (section 3). This relies on DVC 3's cache layout
+  (`files/md5/xx/rest`, verified on this machine) and degrades to a plain copy
+  if that layout is absent.
 
 - **`config/defaults.yml`** — add `archive: false` (section 1).
 
@@ -258,6 +267,9 @@ Offline, no `dvc` binary, no S3 — matching the existing fake-`run_cmd` style.
 - a symlink under the source raises, naming the symlink
 - `verify_zip` fails on a truncated file
 - a build that raises part-way leaves neither the `.zip` nor the `.partial`
+- `link_to_cache` hardlinks to a fake `files/md5/xx/rest` object (same inode
+  afterwards) and returns `False` without touching the zip when the object is
+  missing, the size differs, or the pointer hash is a `.dir` hash
 
 `scripts/dvc_sync.py`:
 
@@ -269,7 +281,7 @@ Offline, no `dvc` binary, no S3 — matching the existing fake-`run_cmd` style.
   (`dvc add --to-remote …` with no `-r`, then `dvc remove …`; and `-r alt`
   present when `--remote alt` is passed) and archive
   pull (`dvc pull …`)
-- `find_workspaces` skips `_archives`
+- `find_workspaces` skips `_archives`; `--all` includes pointer-only slugs
 - directory-mode push and pull argv unchanged from today
 
 ---
