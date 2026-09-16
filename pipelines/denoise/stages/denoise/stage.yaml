@@ -1,0 +1,7 @@
+name: denoise
+description: Gaussian denoising of a 2D image
+script: run.py
+output_file: denoised.png
+environment:
+  base_image: python:3.12-slim
+  pip: [numpy, scikit-image, imageio]

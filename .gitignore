@@ -16,3 +16,12 @@ config/notebooklm.yml
 .env
 .env.*
 !.env_template
+# Package build output
+*.egg-info/
+build/
+dist/
+site/
+# Experiments module: generated pipeline data and container images
+*.sif
+pipelines/*/data/
+pipelines/*/stages/*/env/

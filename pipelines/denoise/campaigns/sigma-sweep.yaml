@@ -1,0 +1,15 @@
+name: denoise-sigma-sweep
+pipeline: denoise
+stage: denoise
+input: ../data/noisy.png
+reference: ../data/truth.png
+parameters:
+  sigma: {grid: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]}
+metrics: [ssim, psnr, mse]
+rank_by: ssim
+validation:
+  ssim: {min: 0.6}
+notes: >
+  Sweep gaussian smoothing strength on synthetic noisy data (sigma_noise=25).
+  Hypothesis: SSIM peaks at moderate sigma — too little leaves noise,
+  too much destroys structure.
