@@ -1,21 +1,45 @@
 [project]
 name = "scieflow"
-version = "0.1.0"
-description = "Agent-driven research loop coupling ExperimentX experiments with ResearchX literature support"
+version = "0.2.0"
+description = "Agent-driven research framework: computational experiments and literature research in one research loop"
 requires-python = ">=3.11"
-dependencies = ["pyyaml>=6"]
+dependencies = ["pyyaml>=6", "click>=8.1"]
+
+[project.optional-dependencies]
+# Experiments module (scieflow.experiments): campaigns, sweeps, metrics, reports.
+experiments = [
+    "numpy>=1.26",
+    "scikit-image>=0.22",
+    "imageio>=2.34",
+    "matplotlib>=3.8",
+]
+# Research module (scieflow.research): literature search, validation, Zotero.
+research = [
+    "requests>=2.31",
+    "jsonschema>=4.21",
+]
+
+[project.scripts]
+scieflow = "scieflow.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "responses>=0.25"]
+docs = ["mkdocs-material>=9.5"]
 # Optional: the claim-check module (scripts/nblm/). Install with
 #   uv sync --group notebooklm
 # Pinned below 0.9 because the dist is renamed to gemini-notebook-py there.
 notebooklm = ["notebooklm-py>=0.8,<0.9"]
 
-[tool.uv]
-package = false
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scieflow"]
 
 [tool.pytest.ini_options]
 pythonpath = ["scripts"]
 testpaths = ["tests"]
 norecursedirs = ["vendors"]
+addopts = "-m 'not slow' --import-mode=importlib"
+markers = ["slow: requires apptainer container builds"]
