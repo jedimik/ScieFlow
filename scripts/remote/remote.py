@@ -26,21 +26,52 @@ from remote import jobs, policy, transport
 STATE_MAP = {"Q": "queued", "H": "queued", "R": "running", "E": "running"}
 
 
+def _remote_credentials_failed(stderr: str) -> bool:
+    """Recognize observed missing/expired credentials without inspecting secrets."""
+    message = stderr.lower()
+    return any(marker in message for marker in (
+        "remote_no_ticket", "key has expired", "no credentials were supplied",
+        "no kerberos credentials available", "credentials cache file not found",
+    ))
+
+
+def _report_remote_credentials() -> int:
+    print("NO_TICKET: remote Kerberos/filesystem credentials are missing or expired "
+          "even if the local ticket is valid. Stop and ask the user to run `kinit`; "
+          "if this persists, inspect credential forwarding. Agent must never authenticate.")
+    return 2
+
+
 def cmd_check(remote, t) -> int:
     policy.check_op(remote, "check")
     if t.local(["klist", "-s"]).returncode != 0:
         print("NO_TICKET: no valid Kerberos ticket on this host — stop and "
               "ask the user to run `kinit` (agent must never authenticate).")
         return 2
-    result = t.ssh("echo OK")
+    # SSH login can work while PBS and Kerberized filesystems cannot. A plain
+    # echo previously masked expired remote credentials (job23754591 follow-up).
+    result = t.ssh("if klist -s; then printf 'REMOTE_TICKET_OK\\n'; "
+                   "else printf 'REMOTE_NO_TICKET\\n' >&2; exit 2; fi")
+    if _remote_credentials_failed(result.stderr):
+        return _report_remote_credentials()
     if result.returncode != 0:
         print(f"SSH_FAILED: {result.stderr.strip()}")
+        return 1
+    if result.stdout.strip() != "REMOTE_TICKET_OK":
+        print("CHECK_FAILED: remote credential check did not return its success marker")
         return 1
     print("OK")
     return 0
 
 
-def cmd_pull(remote, t, remote_dir: str, *, branch: str | None = None) -> int:
+def cmd_pull(
+    remote,
+    t,
+    remote_dir: str,
+    *,
+    branch: str | None = None,
+    reconcile_exact_target: bool = False,
+) -> int:
     policy.check_op(remote, "git-pull")
     policy.check_op(remote, "git-status")
     d = policy.check_dir(remote, remote_dir)
@@ -51,11 +82,53 @@ def cmd_pull(remote, t, remote_dir: str, *, branch: str | None = None) -> int:
     if status.returncode != 0:
         print(status.stderr.strip(), file=sys.stderr)
         return 1
-    if status.stdout.strip():
+    if status.stdout.strip() and not reconcile_exact_target:
         print("DIRTY_TRACKED: refusing to pull or switch a remote repository "
               "with tracked changes", file=sys.stderr)
         print(status.stdout, end="", file=sys.stderr)
         return 1
+
+    if reconcile_exact_target:
+        if branch is None:
+            raise policy.PolicyError(
+                "--reconcile-exact-target requires an explicit --branch"
+            )
+        policy.check_op(remote, "git-switch")
+        branch = policy.check_branch(branch)
+        # This repairs a partially synchronized checkout without discarding any
+        # content.  The branch pointer advances only when both the index and
+        # working tree already equal the fetched target tree, no untracked
+        # files exist, and the update is a fast-forward.
+        command = (
+            f"cd {shlex.quote(d)} && "
+            f"test \"$(git symbolic-ref --short HEAD)\" = {shlex.quote(branch)} && "
+            "git fetch --prune origin && "
+            f"target={shlex.quote('refs/remotes/origin/' + branch)} && "
+            "git merge-base --is-ancestor HEAD \"$target\" && "
+            "git diff --quiet \"$target\" -- && "
+            "git diff --cached --quiet \"$target\" -- && "
+            "test -z \"$(git ls-files --others --exclude-standard)\" && "
+            "old=$(git rev-parse HEAD) && new=$(git rev-parse \"$target\") && "
+            "git update-ref HEAD \"$new\" \"$old\" && "
+            "test -z \"$(git status --porcelain=v1 --untracked-files=all)\" && "
+            "printf 'RECONCILED_EXACT_TARGET\nBRANCH: ' && "
+            "git branch --show-current && printf 'SHA: ' && git rev-parse HEAD"
+        )
+        result = t.ssh(command)
+        print(result.stdout, end="")
+        if result.returncode != 0:
+            print(
+                "RECONCILE_REFUSED: remote content/index must exactly match "
+                "a clean fast-forward target",
+                file=sys.stderr,
+            )
+            if result.stderr.strip():
+                print(result.stderr.strip(), file=sys.stderr)
+            return 1
+        if f"BRANCH: {branch}\n" not in result.stdout:
+            print(f"BRANCH_MISMATCH: requested '{branch}'", file=sys.stderr)
+            return 1
+        return 0
 
     if branch is not None:
         policy.check_op(remote, "git-switch")
@@ -123,16 +196,152 @@ def cmd_move(remote, t, source: str, destination: str) -> int:
     return 0
 
 
+def cmd_verify_sampling_stage(remote, t, remote_dir: str, subject_root: str, commit: str) -> int:
+    """Run the pinned repository's read-only stage verifier on an allowed tree."""
+    policy.check_op(remote, "bash")
+    policy.check_op(remote, "git-status")
+    directory = policy.check_dir(remote, remote_dir)
+    subject = policy.check_dir(remote, subject_root)
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise policy.PolicyError("stage verification requires a full lowercase Git commit SHA")
+    result = t.ssh(
+        f"cd {shlex.quote(directory)} && "
+        f'test "$(git rev-parse HEAD)" = {commit} && '
+        'test -z "$(git status --porcelain=v1 --untracked-files=all)" && '
+        "python3 -B workflow/scripts/sampling_resume.py verify "
+        f"{shlex.quote(subject)} && "
+        f"sha256sum -- {shlex.quote(subject + '/.sampling-stage.json')}"
+    )
+    print(result.stdout, end="")
+    if result.returncode:
+        print("STAGE_VERIFY_FAILED: pinned clean source and complete stage integrity required", file=sys.stderr)
+        print(result.stderr.strip(), file=sys.stderr)
+        return 1
+    print(f"VERIFIED_STAGE: {subject}")
+    return 0
+
+
+def cmd_storage_status(remote, t, remote_dir: str, *, ceph: bool = False) -> int:
+    """Read filesystem capacity for one allowed path; never imply quota headroom.
+
+    The existing bash permission authorizes this fixed diagnostic command, not
+    arbitrary shell input. No recursion, writes, user-supplied commands, or
+    alternate remote host are accepted.
+    """
+    policy.check_op(remote, "bash")
+    d = policy.check_dir(remote, remote_dir)
+    result = t.ssh(f"LC_ALL=C df -Pk -- {shlex.quote(d)}")
+    print(result.stdout, end="")
+    if result.returncode != 0:
+        print(result.stderr.strip(), file=sys.stderr)
+        return 1
+    if ceph:
+        for attribute in (
+            "ceph.quota.max_bytes", "ceph.quota.max_files",
+            "ceph.dir.rbytes", "ceph.dir.rfiles",
+        ):
+            value = t.ssh(
+                f"LC_ALL=C getfattr --absolute-names -n {attribute} -- {shlex.quote(d)}"
+            )
+            print(value.stdout, end="")
+            if value.returncode != 0:
+                print(f"ATTRIBUTE_UNAVAILABLE: {attribute}: {value.stderr.strip()}")
+        print("QUOTA: directory attributes only; ancestor quotas not inspected")
+    print("QUOTA: filesystem availability only; user/project quota not verified")
+    return 0
+
+
+def cmd_path_info(remote, t, remote_dir: str) -> int:
+    """Inspect path components only; no arbitrary shell or path outside policy."""
+    policy.check_op(remote, "bash")
+    directory = policy.check_dir(remote, remote_dir)
+    result = t.ssh(f"LC_ALL=C namei -l -- {shlex.quote(directory)}")
+    print(result.stdout, end="")
+    if result.returncode:
+        print(result.stderr.strip(), file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_runtime_info(remote, t, remote_dir: str) -> int:
+    """Fixed read-only frontend container-runtime discovery; no arbitrary command."""
+    policy.check_op(remote, "bash")
+    directory = policy.check_dir(remote, remote_dir)
+    probe = (
+        "import json,shutil,subprocess; rows=[]\n"
+        "for scope,path in [('login',None),('sanitized','/usr/local/bin:/usr/bin:/bin')]:\n"
+        " for name in ['apptainer','singularity']:\n"
+        "  executable=shutil.which(name,path=path); row={'scope':scope,'name':name,'path':executable}\n"
+        "  if executable:\n"
+        "   result=subprocess.run([executable,'--version'],capture_output=True,text=True,timeout=15)\n"
+        "   row.update(returncode=result.returncode,stdout=result.stdout[:512],stderr=result.stderr[:512])\n"
+        "  rows.append(row)\n"
+        "print(json.dumps({'frontend_only':True,'runtimes':rows},indent=2))\n"
+    )
+    result = t.ssh(f"cd {shlex.quote(directory)} && python3 -c {shlex.quote(probe)}")
+    print(result.stdout, end="")
+    if result.returncode:
+        print(result.stderr.strip(), file=sys.stderr)
+    return result.returncode
+
+
+def cmd_mkdir(remote, t, remote_dir: str) -> int:
+    """Create one allowed directory tree, without touching code or file data."""
+    policy.check_op(remote, "mkdir")
+    directory = policy.check_dir(remote, remote_dir)
+    if directory != remote_dir:
+        raise policy.PolicyError("mkdir requires a normalized absolute path")
+    result = t.ssh(f"mkdir -p -- {shlex.quote(directory)}")
+    if result.returncode:
+        print(result.stderr.strip(), file=sys.stderr)
+        return 1
+    print(f"DIRECTORY_READY: {directory}")
+    return 0
+
+
+def cmd_verify_posthoc_deployment(remote, t, remote_dir: str, control_dir: str,
+                                 commit: str, request_sha256: str) -> int:
+    """Read-only fixed Job1 verifier from an authenticated Git deployment."""
+    policy.check_op(remote, "bash")
+    policy.check_op(remote, "git-status")
+    directory = policy.check_dir(remote, remote_dir)
+    control = policy.check_dir(remote, control_dir)
+    if not re.fullmatch(r"[0-9a-f]{40}", commit) or not re.fullmatch(r"[0-9a-f]{64}", request_sha256):
+        raise policy.PolicyError("deployment verification requires full Git and request digests")
+    interpreter = control + "/runtime/host/bin/python"
+    verifier = directory + "/research/job1-posthoc-meta/verify_deployment.py"
+    result = t.ssh(
+        f"cd {shlex.quote(directory)} && "
+        f'test "$(git rev-parse HEAD)" = {commit} && '
+        'test -z "$(git status --porcelain=v1 --untracked-files=all)" && '
+        f"{shlex.quote(interpreter)} -B -I {shlex.quote(verifier)} "
+        f"--request-sha256 {request_sha256}"
+    )
+    print(result.stdout, end="")
+    if result.returncode:
+        print("DEPLOYMENT_VERIFY_FAILED", file=sys.stderr)
+        print(result.stderr.strip(), file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
                task: str, walltime: str, cpus: int, mem_gb: int, gpus: int,
                queue: str, name: str | None, scratch_type: str = "none",
                scratch_gb: int = 0,
-               environment_assignments: list[str] | None = None) -> int:
+               environment_assignments: list[str] | None = None,
+               submit_dir: str | None = None) -> int:
     policy.check_op(remote, "qsub")
     d = policy.check_dir(remote, remote_dir)
     policy.check_queue(remote, queue)
     policy.check_token(task, "task name")
     policy.check_script(script)
+    # Keep PBS logs outside a pinned clean code checkout. The script remains
+    # relative to the authorized code dir; only qsub's working dir changes.
+    submission_directory = policy.check_dir(remote, submit_dir) if submit_dir is not None else d
+    if submit_dir is not None and submission_directory != submit_dir:
+        raise policy.PolicyError("submit directory must be a normalized absolute path")
+    submitted_script = str(Path(d) / script) if submit_dir is not None else script
     if name is not None:
         policy.check_token(name, "job name")
     environment = policy.check_environment_assignments(
@@ -174,10 +383,10 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
         joined = ",".join(f"{key}={value}" for key, value in environment.items())
         env_arg = f"-v {shlex.quote(joined)} "
     result = t.ssh(
-        f"cd {shlex.quote(d)} && qsub -N {shlex.quote(jobname)} "
+        f"cd {shlex.quote(submission_directory)} && qsub -N {shlex.quote(jobname)} "
         f"-q {shlex.quote(queue)} "
         f"-l walltime={shlex.quote(res['walltime'])} "
-        f"-l {shlex.quote(select)} {env_arg}{shlex.quote(script)}"
+        f"-l {shlex.quote(select)} {env_arg}{shlex.quote(submitted_script)}"
     )
     if result.returncode != 0:
         print(f"QSUB_FAILED: {result.stderr.strip()}", file=sys.stderr)
@@ -189,9 +398,11 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
     job_id = lines[-1].strip()
     entry = jobs.record_submit(
         ledger, task=task, job_id=job_id, remote_name=remote.name,
-        remote_dir=d, script=script, resources={**res, "queue": queue},
+        remote_dir=submission_directory, script=script, resources={**res, "queue": queue},
         environment=environment, job_name=jobname,
     )
+    if submit_dir is not None:
+        entry["code_dir"] = d
     jobs.save_jobs(workspace, ledger)
     print(f"SUBMITTED: {job_id} attempt={entry['attempt']}")
     return 0
@@ -218,6 +429,8 @@ def cmd_status(
     policy.check_op(remote, "qstat")
     policy.check_token(job_id, "job id")
     result = t.ssh(f"qstat -xf {shlex.quote(job_id)}")
+    if _remote_credentials_failed(result.stderr):
+        return _report_remote_credentials()
     if result.returncode != 0:
         print(f"QSTAT_FAILED: {result.stderr.strip()}", file=sys.stderr)
         return 1
@@ -299,7 +512,8 @@ def cmd_fetch(remote, t, src: str, dest: str, *, workspace: Path) -> int:
     return 0
 
 
-def cmd_push(remote, t, src: str, dest: str, *, workspace: Path) -> int:
+def cmd_push(remote, t, src: str, dest: str, *, workspace: Path,
+             checksum: bool = False) -> int:
     """Push one workspace directory to an approved remote directory."""
     policy.check_op(remote, "rsync")
     remote_dest = policy.check_dir(remote, dest)
@@ -311,7 +525,8 @@ def cmd_push(remote, t, src: str, dest: str, *, workspace: Path) -> int:
         )
     if not source_path.is_dir() and not source_path.is_file():
         raise policy.PolicyError(f"push source must be a file or directory: {src}")
-    result = t.rsync_to(str(source_path), remote_dest)
+    result = (t.rsync_to(str(source_path), remote_dest, checksum=True)
+              if checksum else t.rsync_to(str(source_path), remote_dest))
     if result.returncode != 0:
         print(f"RSYNC_FAILED: {result.stderr.strip()}", file=sys.stderr)
         return 1
@@ -319,21 +534,64 @@ def cmd_push(remote, t, src: str, dest: str, *, workspace: Path) -> int:
     return 0
 
 
+def cmd_git_push(remote, t, directory: str, branch: str) -> int:
+    """Push a clean local-published branch through the governed transport."""
+    policy.check_op(remote, "git-push")
+    d = policy.check_dir(remote, directory)
+    result = t.ssh(
+        f"cd {shlex.quote(d)} && git status --porcelain=v1 --untracked-files=all "
+        f"&& test -z \"$(git status --porcelain=v1 --untracked-files=all)\" "
+        f"&& test \"$(git symbolic-ref --short HEAD)\" = {shlex.quote(branch)} "
+        f"&& git push origin {shlex.quote(branch)}"
+    )
+    print(result.stdout, end="")
+    if result.returncode:
+        print(result.stderr, file=sys.stderr, end="")
+        return 1
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="remote.py", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in (
-        "check", "pull", "repo-status", "move", "submit", "status", "logs",
-        "fetch", "push"
+        "check", "pull", "repo-status", "move", "mkdir", "submit", "status", "logs",
+        "fetch", "push", "git-push", "storage-status", "path-info", "verify-sampling-stage",
+        "verify-posthoc-deployment", "runtime-info"
     ):
         p = sub.add_parser(name)
         p.add_argument("remote")
         if name == "pull":
             p.add_argument("dir")
             p.add_argument("--branch")
+            p.add_argument(
+                "--reconcile-exact-target",
+                action="store_true",
+                help=(
+                    "advance a dirty branch only when its index and working "
+                    "tree exactly equal the fetched fast-forward target"
+                ),
+            )
         if name == "repo-status":
             p.add_argument("dir")
             p.add_argument("--include-untracked", action="store_true")
+        if name in ("path-info", "runtime-info"):
+            p.add_argument("dir")
+        if name == "mkdir":
+            p.add_argument("dir")
+        if name == "verify-posthoc-deployment":
+            p.add_argument("dir")
+            p.add_argument("control_dir")
+            p.add_argument("--commit", required=True)
+            p.add_argument("--request-sha256", required=True)
+        if name == "storage-status":
+            p.add_argument("dir")
+            p.add_argument("--ceph", action="store_true",
+                           help="read four fixed CephFS quota/usage attributes for this path only")
+        if name == "verify-sampling-stage":
+            p.add_argument("dir")
+            p.add_argument("subject_root")
+            p.add_argument("--commit", required=True)
         if name == "move":
             p.add_argument("source")
             p.add_argument("destination")
@@ -349,6 +607,7 @@ def main(argv=None) -> int:
             p.add_argument("--scratch-gb", type=int, default=0)
             p.add_argument("--queue", default="default")
             p.add_argument("--name")
+            p.add_argument("--submit-dir", help="allowed PBS working/log directory, separate from code dir")
             p.add_argument(
                 "--env", dest="environment_assignments", action="append",
                 default=[], metavar="NAME=VALUE",
@@ -367,6 +626,11 @@ def main(argv=None) -> int:
         if name == "push":
             p.add_argument("src")
             p.add_argument("dest")
+            p.add_argument("--checksum", action="store_true",
+                           help="checksum-based sync instead of append-only resume; reconcile content and metadata")
+        if name == "git-push":
+            p.add_argument("dir")
+            p.add_argument("--branch", required=True)
         if name in ("submit", "status", "logs", "fetch", "push"):
             p.add_argument("--workspace", type=Path, required=True)
     args = ap.parse_args(argv)
@@ -378,13 +642,32 @@ def main(argv=None) -> int:
         if args.cmd == "check":
             return cmd_check(remote, t)
         if args.cmd == "pull":
-            return cmd_pull(remote, t, args.dir, branch=args.branch)
+            return cmd_pull(
+                remote,
+                t,
+                args.dir,
+                branch=args.branch,
+                reconcile_exact_target=args.reconcile_exact_target,
+            )
         if args.cmd == "repo-status":
             return cmd_repo_status(
                 remote, t, args.dir, include_untracked=args.include_untracked
             )
         if args.cmd == "move":
             return cmd_move(remote, t, args.source, args.destination)
+        if args.cmd == "storage-status":
+            return cmd_storage_status(remote, t, args.dir, ceph=args.ceph)
+        if args.cmd == "path-info":
+            return cmd_path_info(remote, t, args.dir)
+        if args.cmd == "runtime-info":
+            return cmd_runtime_info(remote, t, args.dir)
+        if args.cmd == "mkdir":
+            return cmd_mkdir(remote, t, args.dir)
+        if args.cmd == "verify-posthoc-deployment":
+            return cmd_verify_posthoc_deployment(remote, t, args.dir, args.control_dir,
+                                                args.commit, args.request_sha256)
+        if args.cmd == "verify-sampling-stage":
+            return cmd_verify_sampling_stage(remote, t, args.dir, args.subject_root, args.commit)
         if args.cmd == "submit":
             return cmd_submit(remote, t, args.dir, args.script,
                               workspace=args.workspace, task=args.task,
@@ -393,7 +676,8 @@ def main(argv=None) -> int:
                               queue=args.queue, name=args.name,
                               scratch_type=args.scratch_type,
                               scratch_gb=args.scratch_gb,
-                              environment_assignments=args.environment_assignments)
+                              environment_assignments=args.environment_assignments,
+                              submit_dir=args.submit_dir)
         if args.cmd == "status":
             return cmd_status(
                 remote,
@@ -409,7 +693,9 @@ def main(argv=None) -> int:
                              workspace=args.workspace)
         if args.cmd == "push":
             return cmd_push(remote, t, args.src, args.dest,
-                            workspace=args.workspace)
+                            workspace=args.workspace, checksum=args.checksum)
+        if args.cmd == "git-push":
+            return cmd_git_push(remote, t, args.dir, args.branch)
     except policy.PolicyError as exc:
         print(f"POLICY: {exc}", file=sys.stderr)
         return 3

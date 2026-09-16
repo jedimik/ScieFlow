@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from dataclasses import replace
 
 import pytest
 
@@ -31,14 +32,66 @@ def fake_transport(script):
 
 
 def test_check_ok_and_no_ticket(capsys):
-    t, calls = fake_transport([(0, ""), (0, "OK\n")])
+    t, calls = fake_transport([(0, ""), (0, "REMOTE_TICKET_OK\n")])
     assert cli.cmd_check(CFG_REMOTE, t) == 0
     assert calls[0] == ["klist", "-s"]
+    assert "klist -s" in calls[1][-1] and "REMOTE_TICKET_OK" in calls[1][-1]
+    assert "kinit" not in calls[1][-1]
     capsys.readouterr()                       # drain the OK output
     t, _ = fake_transport([(1, "")])
     assert cli.cmd_check(CFG_REMOTE, t) == 2
     out = capsys.readouterr().out
     assert "NO_TICKET" in out and "kinit" in out
+
+
+@pytest.mark.parametrize("code,stdout,stderr", [
+    (2, "", "REMOTE_NO_TICKET\n"),
+    (0, "REMOTE_TICKET_OK\n", "Could not chdir to home directory: Key has expired"),
+    (1, "", "gss_acquire_cred: No credentials were supplied"),
+])
+def test_check_rejects_remote_credentials_even_when_local_ticket_is_valid(capsys, code, stdout, stderr):
+    calls = []
+    t = SimpleNamespace(local=lambda argv: SimpleNamespace(returncode=0),
+        ssh=lambda command: (calls.append(command) or SimpleNamespace(
+            returncode=code, stdout=stdout, stderr=stderr)))
+    assert cli.cmd_check(CFG_REMOTE, t) == 2
+    assert len(calls) == 1 and "kinit" not in calls[0]
+    assert "NO_TICKET" in capsys.readouterr().out
+
+
+def test_check_missing_marker_and_network_error_are_not_success(capsys):
+    t, _ = fake_transport([(0, ""), (0, "OK\n")])
+    assert cli.cmd_check(CFG_REMOTE, t) == 1
+    assert "CHECK_FAILED" in capsys.readouterr().out
+    t, _ = fake_transport([(0, ""), (255, "")])
+    assert cli.cmd_check(CFG_REMOTE, t) == 1
+    assert "SSH_FAILED" in capsys.readouterr().out
+
+
+def test_status_remote_auth_failure_does_not_rewrite_job_state(tmp_path, capsys):
+    entry = {"job_id": "123.pbs", "state": "queued"}
+    jobs.save_jobs(tmp_path, [entry])
+    t = SimpleNamespace(ssh=lambda command: SimpleNamespace(returncode=1, stdout="", stderr=
+        "Could not chdir to home directory: Key has expired\n"
+        "pbs_gss_establish_context: No credentials were supplied"))
+    assert cli.cmd_status(CFG_REMOTE, t, "123.pbs", workspace=tmp_path) == 2
+    assert jobs.load_jobs(tmp_path) == [entry]
+    assert "NO_TICKET" in capsys.readouterr().out
+
+
+def test_runtime_info_is_fixed_read_only_and_policy_bound():
+    remote = replace(CFG_REMOTE, allowed_ops=[*CFG_REMOTE.allowed_ops, "bash"])
+    t, calls = fake_transport([(0, '{"frontend_only": true}\n')])
+    assert cli.cmd_runtime_info(remote, t, "/storage/x/repo") == 0
+    command = calls[0][-1]
+    assert command.startswith("cd /storage/x/repo && python3 -c ")
+    assert "apptainer" in command and "singularity" in command
+    assert "--version" in command and "timeout=15" in command
+    assert "frontend_only" in command
+    assert "env.items" not in command and "module load" not in command
+    with pytest.raises(policy.PolicyError): cli.cmd_runtime_info(remote, t, "/etc")
+    with pytest.raises(policy.PolicyError): cli.cmd_runtime_info(CFG_REMOTE, t, "/storage/x/repo")
+    assert len(calls) == 1
 
 
 def test_pull_builds_command_and_respects_policy():
@@ -120,6 +173,127 @@ def test_move_is_bounded_and_refuses_overwrite_command(capsys):
         cli.cmd_move(CFG_REMOTE, t, "/storage/x/source", "/etc/quarantine")
     with pytest.raises(policy.PolicyError, match="must differ"):
         cli.cmd_move(CFG_REMOTE, t, "/storage/x/source", "/storage/x/source")
+
+
+def test_pull_can_reconcile_only_an_exact_fast_forward_target(capsys):
+    configured = replace(
+        CFG_REMOTE,
+        allowed_ops=[*CFG_REMOTE.allowed_ops, "git-switch"],
+    )
+    t, calls = fake_transport([
+        (0, "M  workflow/scripts/sampling_resume.py\n"),
+        (0, "RECONCILED_EXACT_TARGET\nBRANCH: fix/recovery\nSHA: " + "a" * 40 + "\n"),
+    ])
+
+    assert cli.cmd_pull(
+        configured,
+        t,
+        "/storage/x/repo",
+        branch="fix/recovery",
+        reconcile_exact_target=True,
+    ) == 0
+    command = calls[1][-1]
+    assert "git merge-base --is-ancestor HEAD" in command
+    assert 'git diff --quiet "$target" --' in command
+    assert 'git diff --cached --quiet "$target" --' in command
+    assert "git ls-files --others --exclude-standard" in command
+    assert 'git update-ref HEAD "$new" "$old"' in command
+    assert "RECONCILED_EXACT_TARGET" in capsys.readouterr().out
+
+
+def test_pull_exact_target_reconciliation_refuses_a_mismatch(capsys):
+    configured = replace(
+        CFG_REMOTE,
+        allowed_ops=[*CFG_REMOTE.allowed_ops, "git-switch"],
+    )
+    t, _ = fake_transport([
+        (0, "M  workflow/scripts/sampling_resume.py\n"),
+        (1, ""),
+    ])
+
+    assert cli.cmd_pull(
+        configured,
+        t,
+        "/storage/x/repo",
+        branch="fix/recovery",
+        reconcile_exact_target=True,
+    ) == 1
+    assert "RECONCILE_REFUSED" in capsys.readouterr().err
+
+
+def test_storage_status_read_only_bounded_and_quota_caveat(capsys):
+    configured = replace(CFG_REMOTE, allowed_ops=[*CFG_REMOTE.allowed_ops, "bash"])
+    t, calls = fake_transport([(0, "Filesystem 1024-blocks Used Available Capacity Mounted on\n")])
+    assert cli.cmd_storage_status(configured, t, "/storage/x/out") == 0
+    assert calls[0][-1] == "LC_ALL=C df -Pk -- /storage/x/out"
+    assert "quota not verified" in capsys.readouterr().out
+    with pytest.raises(policy.PolicyError):
+        cli.cmd_storage_status(configured, t, "/etc")
+    with pytest.raises(policy.PolicyError):
+        cli.cmd_storage_status(configured, t, "/storage/x/../../etc")
+    with pytest.raises(policy.PolicyError):
+        cli.cmd_storage_status(configured, t, "/storage/x/ok;id")
+    assert len(calls) == 1
+
+
+def test_storage_status_requires_permission_before_transport():
+    t, calls = fake_transport([])
+    with pytest.raises(policy.PolicyError, match="bash"):
+        cli.cmd_storage_status(CFG_REMOTE, t, "/storage/x/out")
+    assert calls == []
+
+
+def test_stage_verify_pins_source_disables_bytecode_and_only_verifies():
+    configured = replace(CFG_REMOTE, allowed_ops=[*CFG_REMOTE.allowed_ops, "bash"])
+    t, calls = fake_transport([(0, "abc  /storage/x/output/100610/.sampling-stage.json\n")])
+    assert cli.cmd_verify_sampling_stage(configured, t, "/storage/x/repo", "/storage/x/output/100610", "a" * 40) == 0
+    command = calls[0][-1]
+    assert 'test "$(git rev-parse HEAD)" = ' + "a" * 40 in command
+    assert 'test -z "$(git status --porcelain=v1 --untracked-files=all)"' in command
+    assert "python3 -B workflow/scripts/sampling_resume.py verify /storage/x/output/100610" in command
+    assert "sha256sum -- /storage/x/output/100610/.sampling-stage.json" in command
+
+
+def test_stage_verify_rejects_unauthorized_paths_and_commit_before_transport():
+    configured = replace(CFG_REMOTE, allowed_ops=[*CFG_REMOTE.allowed_ops, "bash"])
+    t, calls = fake_transport([])
+    for repo, subject, commit in (("/etc", "/storage/x/output", "a" * 40),
+        ("/storage/x/repo", "/etc", "a" * 40),
+        ("/storage/x/repo", "/storage/x/output", "HEAD;id")):
+        with pytest.raises(policy.PolicyError):
+            cli.cmd_verify_sampling_stage(configured, t, repo, subject, commit)
+    with pytest.raises(policy.PolicyError):
+        cli.cmd_verify_sampling_stage(CFG_REMOTE, t, "/storage/x/repo", "/storage/x/output", "a" * 40)
+    assert not calls
+
+
+def test_stage_verify_failure_cannot_report_success(capsys):
+    configured = replace(CFG_REMOTE, allowed_ops=[*CFG_REMOTE.allowed_ops, "bash"])
+    t, _ = fake_transport([(2, "")])
+    assert cli.cmd_verify_sampling_stage(configured, t, "/storage/x/repo", "/storage/x/output", "a" * 40) == 1
+    captured = capsys.readouterr()
+    assert "STAGE_VERIFY_FAILED" in captured.err and "VERIFIED_STAGE:" not in captured.out
+
+
+def test_storage_status_ceph_only_reads_fixed_attributes_at_allowed_path(capsys):
+    configured = replace(CFG_REMOTE, allowed_ops=[*CFG_REMOTE.allowed_ops, "bash"])
+    t, calls = fake_transport([(0, "df output\n"), (1, ""), (1, ""),
+                               (0, 'ceph.dir.rbytes="123"\n'), (0, 'ceph.dir.rfiles="2"\n')])
+    assert cli.cmd_storage_status(configured, t, "/storage/x/out", ceph=True) == 0
+    assert len(calls) == 5
+    for call, attribute in zip(calls[1:], (
+        "ceph.quota.max_bytes", "ceph.quota.max_files", "ceph.dir.rbytes", "ceph.dir.rfiles"
+    )):
+        assert call[-1] == f"LC_ALL=C getfattr --absolute-names -n {attribute} -- /storage/x/out"
+    output = capsys.readouterr().out
+    assert "ATTRIBUTE_UNAVAILABLE: ceph.quota.max_bytes" in output
+    assert "ancestor quotas not inspected" in output
+
+
+def test_storage_status_reports_command_failure():
+    configured = replace(CFG_REMOTE, allowed_ops=[*CFG_REMOTE.allowed_ops, "bash"])
+    t, _ = fake_transport([(1, "")])
+    assert cli.cmd_storage_status(configured, t, "/storage/x/missing") == 1
 
 
 def test_move_reports_failed_precondition(capsys):

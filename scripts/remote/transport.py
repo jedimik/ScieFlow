@@ -10,7 +10,10 @@ from pathlib import Path
 
 
 def _default_runner(argv):
-    return subprocess.run(argv, capture_output=True, text=True)
+    # MetaCentrum occasionally emits locale-specific bytes in git diagnostics;
+    # preserve command results while keeping governed wrapper operations
+    # inspectable instead of failing during UTF-8 decoding.
+    return subprocess.run(argv, capture_output=True, text=True, errors="replace")
 
 
 class Transport:
@@ -34,12 +37,13 @@ class Transport:
     def rsync_from(self, remote_path: str, dest: str):
         return self.runner(["rsync", "-az", f"{self.target}:{remote_path}", dest])
 
-    def rsync_to(self, source: str, remote_path: str):
+    def rsync_to(self, source: str, remote_path: str, *, checksum: bool = False):
         source_arg = source.rstrip("/")
         remote_arg = remote_path.rstrip("/") + "/"
         if not Path(source_arg).is_file():
             source_arg += "/"
         return self.runner([
-            "rsync", "-az", "--partial", "--append-verify",
+            "rsync", "-az", "--partial",
+            "--checksum" if checksum else "--append-verify",
             source_arg, f"{self.target}:{remote_arg}",
         ])
