@@ -51,7 +51,8 @@ Validate before appending:
      `uv run scripts/validate.py <manifest.yml> --schema manifest`
 2. Include `notebook.md` in the package as the narrative source.
 3. Dispatch the paper-draft workflow:
-   `uv run scieflow agent run claude <prompt> <transcript>`
+   `uv run scieflow agent run <agent> <prompt> <transcript>` — `<agent>` is
+   the agent assigned to `loop.paper-draft` (`uv run scieflow agent show --workspace <slug> --json`, AGENTS.md rule 13)
    with a prompt instructing: read only `src/scieflow/research/AGENTS.md`,
    then follow `src/scieflow/research/skills/paper-draft/SKILL.md` for the
    prepared workspace <paper-slug>.

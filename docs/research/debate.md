@@ -38,7 +38,7 @@ immediately**:
 
 ## Tuning
 
-- `max_debate_rounds` (default 2) in `config/agents.yml` or per-workspace
+- `max_debate_rounds` (default 2) under `research:` in `config/defaults.yml` or per-workspace
   `config.yml`. Round 0 (propose) is not counted.
 - More rounds rarely help: if two agents still disagree after two
   discussion rounds, that disagreement is signal — read the dissent

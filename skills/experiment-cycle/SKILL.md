@@ -24,7 +24,8 @@ as one experiment run.
 ## Per-campaign mode (two dispatches)
 
 1. **Design.** Write a prompt file (template below, `MODE: design-only`),
-   then: `uv run scieflow agent run claude <prompt> <transcript>`.
+   then: `uv run scieflow agent run <agent> <prompt> <transcript>`, where
+   `<agent>` is the agent assigned to `loop.experiment` (`uv run scieflow agent show --workspace <slug> --json`, AGENTS.md rule 13).
    The sub-agent writes the proposed campaign YAML + rationale to the path
    you gave it. Present both to the user.
 2. **Run.** Only after explicit user approval, dispatch again with

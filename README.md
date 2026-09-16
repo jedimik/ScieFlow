@@ -5,6 +5,7 @@ module) hand in hand with literature research (the **research** module).
 Each iteration runs hypothesis → experiment → literature grounding →
 synthesis, accumulating a research notebook that can be handed to the
 research module's paper-draft workflow. Either module also works on its own.
+A third module, **news**, keeps you current on the tools and topics you follow.
 
 ## Quick start
 
@@ -31,16 +32,46 @@ campaign) or `autonomous` (you approve the goal + scope + budget once).
     (`scieflow experiment`; own `AGENTS.md` + skills)
   - `research/` — literature search, review, gap discovery, paper drafting
     (`scieflow research`; own `AGENTS.md` + skills)
+  - `news/` — what changed in your tools and topics (`scieflow news`, optional
+    web GUI; own `AGENTS.md`)
 - `scripts/` — research-loop mechanics (workspace init, status, budget,
   validation, checkpoint, DVC sync); optional modules `scripts/remote/`,
   `scripts/nblm/`
 - `pipelines/` — experiment pipelines (reference: `pipelines/denoise/`);
   `envs/` — conda environment for container builds
-- `config/` — agent registry (tiered: claude/codex primary, agy support) +
-  loop and research defaults, cached journal profiles; optional per-module configs you create from the shipped
+- `config/` — agent registry (tiered: claude/codex primary, agy support),
+  role assignments and loop/research defaults, news interests (`news.yml`),
+  cached journal profiles; optional per-module configs you create from the shipped
   `*.example.yml` (`remotes.yml`, `notebooklm.yml`) and which stay
   gitignored
-- `workspace/` — one folder per research run (gitignored; synced via DVC)
+- `workspace/` — one folder per research run, plus `workspace/news/`
+  (gitignored; synced via DVC)
+
+## Agents: who does what
+
+Each role (`loop.experiment`, `research.reviewer`, …) is assigned an agent in
+`config/defaults.yml`; a run can override roles and per-agent model, reasoning
+and timeout in its own `config.yml`. Unset values inherit.
+
+```bash
+uv run scieflow agent show --workspace <slug>     # effective config, value by value
+uv run scieflow agent configure                   # interactive: defaults, a workspace, or news
+uv run scieflow agent configure --workspace <slug> --assign loop.experiment=codex --yes
+```
+
+Changes are validated (tier routing, disabled agents), shown as a diff, and
+keep your YAML comments. Guide: [`docs/agents.md`](docs/agents.md).
+
+## News
+
+```bash
+uv run scieflow news status                  # interests from config/news.yml
+uv run scieflow news run --interest Snakemake
+uv run scieflow news export --latest         # → workspace/news/reports/
+uv run scieflow news gui                     # local web GUI (extra: news-gui)
+```
+
+Guide: [`docs/news/index.md`](docs/news/index.md).
 
 ## Citation checking (optional, opt-in)
 
@@ -169,7 +200,7 @@ uv run pytest -q -m slow          # container-build tests (needs apptainer)
 uv run --group docs mkdocs serve  # documentation site
 ```
 
-Coming from the former standalone experiment or research repositories? See
+Coming from the former standalone experiment, research or news repositories? See
 [`docs/MIGRATION.md`](docs/MIGRATION.md).
 
 Design spec: `docs/superpowers/specs/2026-07-11-scieflow-design.md`.

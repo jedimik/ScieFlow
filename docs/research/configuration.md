@@ -1,51 +1,66 @@
 # Configuration
 
-Two layers: a global registry (`config/agents.yml`) and optional per-run
-overrides (`workspace/<slug>/config.yml`). Scripts and skills read these —
-nothing else hardcodes models, flags, or Zotero targets.
+Research workflows read three layers — nothing else hardcodes models, flags,
+roles, or Zotero targets:
 
-## Global: `config/agents.yml`
+1. `config/agents.yml` — the agent registry (shared by all ScieFlow modules).
+2. `config/defaults.yml` — role assignments (`assignments:`) and the research
+   workflow defaults (`research:`).
+3. `workspace/<slug>/config.yml` — per-run overrides.
 
-```yaml
-# Edit models/flags here; nothing else hardcodes them.
-defaults:
-  max_papers: 40
-  max_review_rounds: 3
-  max_debate_rounds: 2      # perspective debate: discussion rounds after propose
-  max_gaps: 10              # gap-discovery: per-agent cap
-  max_hypotheses: 5         # gap-discovery: per-agent cap
-  auto_approve_outline: false   # paper-draft: pause for user outline approval
-  zotero:
-    library: user            # or "group:<id>"; workspace config.yml overrides
+Inspect the effective result with `scieflow agent show [--workspace <slug>]`
+and change agents with `scieflow agent configure`; see the
+[agent configuration guide](../agents.md).
 
+## Global: `config/agents.yml` and `config/defaults.yml`
+
+```yaml title="config/agents.yml (excerpt)"
 agents:
   claude:
     cmd: "claude -p --dangerously-skip-permissions --model {model} {prompt}"
     model: claude-fable-5
     tier: primary
-    timeout_min: 15
+    timeout_min: 30
     enabled: true
   codex:
     cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
     model: gpt-5.6-sol
     reasoning: medium
     tier: primary
-    timeout_min: 15
+    timeout_min: 180
     enabled: true
   agy:
-    cmd: "agy --print {prompt} --model {model} --dangerously-skip-permissions"
-    # agy --print consumes --model as its value when {prompt} is absent
-    stdin_cmd: "agy --model {model} --dangerously-skip-permissions"
-    model: "Gemini 3.1 Pro (High)"
+    cmd: "agy --print {prompt} --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions"
+    model: gemini-3.1-pro-high
+    reasoning: high
     tier: support
     capabilities: [web-search, large-context]
-    timeout_min: 15
+    timeout_min: 60
     enabled: true
-  stub:
-    cmd: "python -m scieflow.core.stub_agent {prompt}"
-    tier: primary          # tests dispatch it into primary-only roles
-    timeout_min: 1
-    enabled: false            # test/dry-run only
+```
+
+```yaml title="config/defaults.yml (research excerpt)"
+research:
+  max_papers: 40
+  max_review_rounds: 3
+  max_debate_rounds: 2          # perspective debate: discussion rounds after propose
+  max_gaps: 10                  # gap-discovery: per-agent cap
+  max_hypotheses: 5             # gap-discovery: per-agent cap
+  auto_approve_outline: false   # paper-draft: pause for user outline approval
+  zotero:
+    library: user               # or "group:<id>"
+
+assignments:
+  research.search: [claude, codex, agy]
+  research.cross-review: [claude, codex]
+  research.gap-analysis: [claude, codex]
+  research.debate: [claude, codex]
+  research.journal-profile: [agy, claude]
+  research.reviewer: codex
+  research.submitter: claude
+  research.outline: claude
+  research.draft-authors: [claude, codex]
+  research.consistency: codex
 ```
 
 ### Agent fields
@@ -55,12 +70,12 @@ agents:
 | `cmd` | Command template. `{model}` and `{prompt}` are substituted as single argv tokens (safe for multi-line prompts and model names with spaces). |
 | `stdin_cmd` | *Optional.* Alternate template used when a prompt is too large for argv (delivered via stdin instead). Needed only for CLIs like `agy` whose flag parsing breaks when the prompt token is dropped. |
 | `model` | Model passed as `{model}`. Omit if the CLI should use its account default. |
-| `tier` | `primary` or `support` — routing rule 9 in AGENTS.md: comprehensive tasks dispatch primary agents only. |
+| `tier` | `primary` or `support` — tier routing (root AGENTS.md rule 10): support agents only in support roles, paired with a primary. |
 | `capabilities` | *Optional.* Free-form hints (e.g. `web-search`) coordinators use when routing support-tier tasks. |
 | `reasoning` | *Optional.* Substituted as `{reasoning}` in the cmd template (e.g. codex `model_reasoning_effort`). |
 | `timeout_min` | Per-dispatch timeout in minutes. A timed-out agent is logged and the phase continues without it. |
-| `enabled` | `false` excludes the agent from all runs by default. |
-| `menu` | *Optional, read by coordinators, not code.* The provider menu shown to the user at the run configuration gate (AGENTS.md): available models, reasoning levels, and how each choice maps to `agent_overrides`. |
+| `enabled` | `false` excludes the agent everywhere; `configure` refuses to assign a disabled agent. |
+| `menu` | *Optional, read by coordinators, not code.* The provider menu shown to the user at the run configuration gate and by the `configure` wizard: available models, reasoning levels, and how each choice maps to `agent_overrides`. |
 
 ### How the runner picks argv vs. stdin
 
@@ -73,26 +88,27 @@ prompts.
 
 ## Per-run: `workspace/<slug>/config.yml`
 
-Any key here overrides the global default **for that research only**:
+Any key here overrides the global default **for that research only**.
 
-The `agents:` run set, role keys, and `agent_overrides:` are normally written
-by the coordinator after the **run configuration gate** (AGENTS.md), where it
-recommends an agent/model/reasoning assignment and asks you to confirm or
-adjust it.
+Agent choices (`assignments:`, `agent_overrides:`) are written by
+`scieflow agent configure --workspace <slug>` after the **run configuration
+gate** (research AGENTS.md), where the coordinator recommends an
+agent/model/reasoning assignment and asks you to confirm or adjust it. Only
+differences from the defaults are stored.
 
 ```yaml
-agents: [claude, agy]         # subset of agents for this run
-agent_overrides:              # per-agent model/reasoning for this run only;
-  claude:                     # applied by scieflow agent run to prompts under
-    model: claude-opus-4-8    # workspace/<slug>/prompts/
+assignments:                  # written by scieflow agent configure
+  research.search: [claude, agy]
+  research.reviewer: codex
+  research.submitter: claude
+  research.outline: claude
+agent_overrides:              # per-agent settings for this run only
+  claude:
+    model: claude-opus-5
   codex:
     reasoning: high           # fills {reasoning} in the cmd template
-outline_agent: claude         # paper-draft: role assignments from the gate
-consistency_agent: agy
 max_papers: 30
 journal: "Nature Methods"     # paper-review + paper-draft: target journal
-reviewer: codex               # paper-review: role assignments
-submitter: claude
 scope: full                   # or: sections: [Introduction, Methods]
 max_debate_rounds: 1          # gap-discovery: shorter debate for this run
 max_gaps: 6                   # gap-discovery: per-agent caps
@@ -113,7 +129,7 @@ Each research — and each paper — can save citations to a **different** Zoter
 library or group. The target is resolved in order:
 
 1. Workspace `config.yml` → `zotero:` block
-2. Global `config/agents.yml` → `defaults.zotero`
+2. Global `config/defaults.yml` → `research.zotero`
 3. Fallback: your personal library (`user`)
 
 The collection defaults to `ScieFlow/<slug>` when not specified. Export uses

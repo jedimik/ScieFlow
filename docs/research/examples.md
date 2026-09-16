@@ -195,7 +195,8 @@ Drop a `config.yml` into a workspace to override the global defaults for that
 research only:
 
 ```yaml title="workspace/2026-07-my-topic/config.yml"
-agents: [claude, agy]         # skip codex for this run
+assignments:                  # via scieflow agent configure --workspace <slug>
+  research.search: [claude, agy]   # skip codex for this run
 max_papers: 20
 zotero:
   library: "group:4815162"    # this topic saves to a specific group...
@@ -203,7 +204,7 @@ zotero:
 ```
 
 A different research can target a **different** Zotero group — the resolution
-order is workspace `config.yml` → global `config/agents.yml` → your personal
+order is workspace `config.yml` → global `config/defaults.yml` → your personal
 library. See [Configuration](configuration.md).
 
 ---

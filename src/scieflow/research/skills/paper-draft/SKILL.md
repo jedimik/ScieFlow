@@ -28,8 +28,10 @@ You are the **coordinator**. Phases run in order; each is resumable via
    author, the two draft authors (primary tier only, rule 9),
    consistency-pass agent (and journal profiler when `journal:` is set) —
    plus model and reasoning per agent, then ask the user to confirm or
-   adjust before any dispatch. Record it in `config.yml` (`agents`,
-   `outline_agent`, `consistency_agent`, `agent_overrides`).
+   adjust before any dispatch. Persist it with `scieflow agent configure
+   --workspace <slug>` (roles `research.outline`, `research.draft-authors`,
+   `research.consistency`, `research.debate`, and
+   `research.journal-profile` when `journal:` is set).
 4. Read `workspace/<slug>/config.yml`. Relevant keys:
    - `gaps_from: workspace/<other-slug>` — copy that run's
      `report/hypotheses.json`, `report/gaps.md`, and
@@ -38,7 +40,7 @@ You are the **coordinator**. Phases run in order; each is resumable via
      `src/scieflow/research/skills/paper-review/SKILL.md` (same cache in `config/journals/`),
      copy the profile to `workspace/<slug>/journal/profile.md`.
    - `title`, `authors`, `language`, `target_length`,
-     `auto_approve_outline` (default from config/agents.yml: false).
+     `auto_approve_outline` (default from `research:` in config/defaults.yml: false).
 5. References: if `report/selected_dois.txt` is missing (no `gaps_from`),
    run the lit-review Phase 2 search fan-out (grounding mode, no
    cross-review) to produce findings, then write the DOI list from the
@@ -50,8 +52,8 @@ You are the **coordinator**. Phases run in order; each is resumable via
 
 ## Phase 2 — outline
 
-1. Dispatch ONE **primary-tier** agent (`outline_agent:` from config.yml;
-   else your pick from the run set) with `prompts/outline.md`:
+1. Dispatch the agent assigned to `research.outline` (primary tier) with
+   `prompts/outline.md`:
 
 ```text
 # ScieFlow research sub-agent task: article outline
@@ -77,8 +79,8 @@ its evidence ref in square brackets. Methods MUST include a
 ```
 
 2. Perspective pass: run `src/scieflow/research/templates/debate-protocol.md` LIMITED to round 0
-   plus ONE discussion round, participants = two other primary-tier agents (fall back to one if only
-   two primary agents exist), evidence
+   plus ONE discussion round, participants = the `research.debate` agents other than the outline
+   author (fall back to one if only one remains), evidence
    bundle = the outline + manifest summary. Merge accepted critique into
    `outline/outline.md` yourself; log dissent in `outline/dissent.md`.
 3. Unless `auto_approve_outline: true`, SHOW the outline to the user and
@@ -86,8 +88,8 @@ its evidence ref in square brackets. Methods MUST include a
 
 ## Phase 3 — draft (two full independent drafts)
 
-The authors are the primary-tier agents of the run set (default: claude
-and codex; AGENTS.md rule 9). Each author writes a COMPLETE draft — every
+The authors are the agents assigned to `research.draft-authors` (primary
+tier; default claude and codex; AGENTS.md rule 9). Each author writes a COMPLETE draft — every
 section — independently from the same inputs. Do not share one author's
 text with the other during this phase.
 
@@ -224,8 +226,7 @@ REVIEW:
 3. Copy `src/scieflow/research/templates/paper/main.tex` and `src/scieflow/research/templates/paper/preamble.tex` into
    `manuscript/`; replace `%%TITLE%%`, `%%AUTHORS%%`, `%%DATE%%` from
    config (missing → ask the user, don't invent author lists).
-4. Consistency pass: dispatch one primary agent (`consistency_agent:`
-   from config.yml if set) with the merged sections pasted, instructed to
+4. Consistency pass: dispatch the agent assigned to `research.consistency` with the merged sections pasted, instructed to
    fix cross-section contradictions, duplicated content, and tone drift
    by editing `manuscript/sections/*.tex` directly — minimal diffs, and
    it must not change any number or `% source:` comment.

@@ -20,15 +20,16 @@ You are the **coordinator**. Phases run in order; each is resumable via
    workflow's parts — search fan-out membership, cross-review membership
    (synthesis and export are coordinator-only) — plus model and reasoning
    per agent, then ask the user to confirm or adjust before dispatching
-   anything. Write the selection to `workspace/<slug>/config.yml`
-   (keys: `agents`, `agent_overrides`, `max_papers`, `zotero`).
+   anything. Persist agents with `scieflow agent configure --workspace
+   <slug>` (roles `research.search`, `research.cross-review`); write
+   `max_papers` and `zotero` to `workspace/<slug>/config.yml`.
 4. Initialize `status.yml` (workflow `lit-review`, all phases pending,
    brief: done). Start `log.md` with a timestamped entry.
 
 ## Phase 2 — search (fan-out)
 
-For each agent in the run set (from `config.yml` override or the enabled
-agents in `config/agents.yml`) **except yourself**, write
+For each agent assigned to `research.search` (`scieflow agent show
+--workspace <slug> --json`) **except yourself**, write
 `prompts/search-<agent>.md` from this template — replace `<agent>`, `<slug>`
 verbatim, include the whole brief:
 
@@ -83,8 +84,8 @@ re-dispatch that agent once. Second failure → mark the agent `failed` in
 Skip (mark `skipped-quorum`) if fewer than 2 agents produced valid findings;
 the report must then say "single-agent, unreviewed".
 
-For each ordered pair (reviewer R, author A), R ≠ A, where **R is a
-primary-tier agent** (support agents' findings are still reviewed; they
+For each ordered pair (reviewer R, author A), R ≠ A, where **R is assigned
+to `research.cross-review`** (primary tier only) (support agents' findings are still reviewed; they
 never review — AGENTS.md rule 9) and A produced valid findings: write
 `prompts/review-<R>-on-<A>.md`:
 

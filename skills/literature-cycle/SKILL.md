@@ -13,7 +13,8 @@ for support/contradiction of the current iteration's results.
 1. Derive 2–4 precise queries from `results-summary.md` (method +
    observation, e.g. "gaussian filter parameter selection SSIM denoising").
 2. Write the prompt file (template below), then:
-   `uv run scieflow agent run claude <prompt> <transcript>`
+   `uv run scieflow agent run <agent> <prompt> <transcript>`, where `<agent>`
+   is the agent assigned to `loop.literature` (`uv run scieflow agent show --workspace <slug> --json`, AGENTS.md rule 13)
 3. Validate: `literature.md` must exist, cite only papers with DOIs/arXiv
    ids returned by the search scripts, and give a per-paper verdict.
    Retry-once rule on failure.

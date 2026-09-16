@@ -19,16 +19,17 @@ copy is).
    is set, who profiles the journal) with model + reasoning per agent —
    respecting tier routing (rule 9) — then ask the user to confirm or
    adjust before any dispatch. Record the answer in
-   `workspace/<slug>/config.yml` (`reviewer`, `submitter`,
-   `agent_overrides`).
+   `workspace/<slug>/config.yml` via `scieflow agent configure --workspace
+   <slug> --assign research.reviewer=... --assign research.submitter=...
+   [--assign research.journal-profile=...] --yes`.
 3. Read `workspace/<slug>/config.yml`. Relevant keys and defaults:
-   - `reviewer:` / `submitter:` — agent names, both **primary tier**
-     (AGENTS.md rule 9). Default: reviewer is an enabled primary agent
-     that is NOT you; submitter is you. Reviewer and submitter MUST
-     differ (never grade your own edits).
+   - `research.reviewer` / `research.submitter` (from `scieflow agent show
+     --workspace <slug> --json`) — both **primary tier** (AGENTS.md rule 9)
+     and always different agents (never grade your own edits); `configure`
+     refuses otherwise.
    - `agent_overrides:` — per-agent model/reasoning/cmd from the gate
      (applied automatically by `scieflow agent run`).
-   - `max_review_rounds:` — default from `config/agents.yml` defaults (3).
+   - `max_review_rounds:` — default from `research:` in `config/defaults.yml` (3).
    - `scope:` — `full` (default) or `sections: [list of section titles]`.
    - `journal:` — optional target journal name.
 
@@ -37,10 +38,10 @@ asks "how does journal X accept papers", in which case run ONLY this phase)
 
 1. Slugify the journal name (`Nature Methods` → `nature-methods`). If
    `config/journals/<slug>.md` exists, reuse it.
-2. Otherwise dispatch one enabled agent with web access (a support-tier
-   agent like agy is a good fit here — but never alone: also dispatch or
-   perform a primary-agent pass that cross-checks its profile against the
-   guideline URLs it cites, per AGENTS.md rule 9) via
+2. Otherwise dispatch the agents assigned to `research.journal-profile`
+   (a support-tier agent like agy is a good fit here — but never alone: the
+   assignment always includes a primary agent whose pass cross-checks the
+   profile against the guideline URLs it cites, per AGENTS.md rule 9) via
    `prompts/journal-profile.md`:
 
 ```text

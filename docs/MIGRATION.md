@@ -1,12 +1,14 @@
-# Migration: ExperimentX and ResearchX folded into ScieFlow
+# Migration: ExperimentX, ResearchX and WhatsNEW folded into ScieFlow
 
-As of 2026-09-16 (branch `feat/unify-modules`), the two former submodules are
-part of ScieFlow itself and are no longer maintained separately:
+As of 2026-09-16 (branch `feat/unify-modules`), the two former submodules and
+the standalone WhatsNEW tool are part of ScieFlow itself and are no longer
+maintained separately:
 
 | Former repository | Snapshot imported | Now |
 |---|---|---|
 | ExperimentX | `b771da4` (standalone `main`) | `scieflow.experiments` — `src/scieflow/experiments/` |
 | ResearchX | `49fb773` (`feat/claim-check-support`) | `scieflow.research` — `src/scieflow/research/` |
+| WhatsNEW | `2837e70` (`main`) | `scieflow.news` — `src/scieflow/news/` |
 
 The code was copied as a snapshot, not with its git history. The full history
 stays in the archived repositories.
@@ -16,6 +18,7 @@ stays in the archived repositories.
 ```bash
 uv sync --extra experiments --extra research   # both modules (setup/install.sh does this)
 uv sync --extra research                       # literature work only
+uv sync --extra news --extra news-gui          # news CLI + web GUI
 ```
 
 The former `expx` conda environment is now `scieflow-experiments`
@@ -34,6 +37,9 @@ container builds rely on conda.
 | `uv run scripts/check_citations.py --workspace …` | `uv run scieflow research check-citations --workspace …` |
 | `uv run scripts/zotero_export.py --workspace …` | `uv run scieflow research zotero-export --workspace …` |
 | `python scripts/stub_agent.py` | `python -m scieflow.core.stub_agent` |
+| `whatsnew init / run / status / export / models / templates / gui` | `scieflow news init / run / status / export / models / templates / gui` |
+| `WHATSNEW_DB=…` | `SCIEFLOW_NEWS_DB=…` |
+| editing agent YAML by hand | `scieflow agent show` / `scieflow agent configure` (see `docs/agents.md`) |
 
 ## Paths
 
@@ -54,6 +60,13 @@ container builds rely on conda.
 
 ## Configuration
 
+- **Role assignments replace `agent: claude`.** `config/defaults.yml` no longer
+  has a single `agent:` key; `assignments:` names the agent for each role
+  (`loop.experiment`, `research.reviewer`, …). A run overrides roles and
+  per-agent settings in its `config.yml` via `scieflow agent configure
+  --workspace <slug>`. The research role keys older runs wrote at the top
+  level (`agents`, `reviewer`, `submitter`, `outline_agent`,
+  `consistency_agent`) are still read; new runs use `assignments:`.
 - **One agent registry:** `config/agents.yml`. It keeps ScieFlow's models,
   commands and timeouts and gains ResearchX's `menu:` blocks. Codex now
   receives `-c model_reasoning_effort={reasoning}` (default `medium`).
@@ -123,3 +136,22 @@ files you still want before deleting.
 
 The same applies to remote (metacentrum) clones: pull, then clean up by hand.
 Remote jobs use the package environment.
+
+## WhatsNEW
+
+| Before | After |
+|---|---|
+| `src/whatsnew/` (`import whatsnew`) | `src/scieflow/news/` (`import scieflow.news`) |
+| `./whatsnew.yaml` | `config/news.yml` (copied from the WhatsNEW checkout) |
+| `~/.local/share/whatsnew/whatsnew.json` | `workspace/news/news.json` (copied once; the original is untouched) |
+| `reports/YYYY-MM-DD-whatsnew.md` | `workspace/news/reports/YYYY-MM-DD-news.md` |
+| `uv tool install .` → `whatsnew` | `uv run scieflow news` from the ScieFlow checkout |
+| cron: `cd WhatsNEW && uv run whatsnew run` | `cd ScieFlow && uv run scieflow news run` |
+
+Reports and the GUI are titled "ScieFlow News". The claude/codex/agy command
+lines are unchanged: news research still gives claude web tools only. Model
+suggestions now come from each agent's `menu.models` in `config/agents.yml`,
+and `scieflow agent configure --news` changes the news agent settings with
+validation. The GUI needs the `news-gui` extra. If you installed `whatsnew`
+globally with `uv tool install`, remove it with `uv tool uninstall whatsnew`
+once you have switched, and update any cron entries.

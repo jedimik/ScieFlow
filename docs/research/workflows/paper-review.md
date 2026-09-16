@@ -22,9 +22,10 @@ your files are elsewhere, the coordinator copies them there and tells you where
 the working copy is. Relevant `config.yml` keys:
 
 ```yaml
-reviewer: codex               # default: an enabled agent that isn't the coordinator
-submitter: claude             # default: the coordinator
-max_review_rounds: 3          # default from config/agents.yml
+assignments:                  # set with: scieflow agent configure --workspace <slug>
+  research.reviewer: codex
+  research.submitter: claude  # must differ from the reviewer
+max_review_rounds: 3          # default from config/defaults.yml (research:)
 scope: full                   # or: sections: [Introduction, Methods]
 journal: "Nature Methods"     # optional target journal
 ```

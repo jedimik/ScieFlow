@@ -12,7 +12,11 @@ description: Run or resume a ScieFlow research run — the outer experiment↔li
    mode these bounds ARE the delegation — be precise.
 2. `uv run scripts/sfx_init.py <slug> --goal <goal.md> --approval <mode> \
       [--max-iterations N] [--max-experiment-runs N] [--max-wall-minutes N]`
-3. Confirm the workspace with the user, then begin iteration 1.
+3. Confirm the workspace with the user, including who does the work: show
+   `uv run scieflow agent show --workspace <slug>` and ask whether any role
+   or model should differ for this run. Apply changes with
+   `scieflow agent configure --workspace <slug> ... --yes` (AGENTS.md rule
+   13). Then begin iteration 1.
 
 ## Resuming a run
 

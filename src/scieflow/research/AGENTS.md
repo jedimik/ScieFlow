@@ -21,9 +21,11 @@ Whichever agent is coordinator — claude, codex, or agy alike — MUST settle
 run staffing **with the user** before the first sub-agent dispatch of a new
 run:
 
-1. Build the provider menu from `config/agents.yml`: every enabled agent's
-   `menu:` block (provider, available models, reasoning levels and how each
-   choice is applied).
+1. Show the current staffing with `uv run scieflow agent show --workspace
+   <slug>` (role assignments and per-agent model/reasoning, with where each
+   value comes from) and build the provider menu from `config/agents.yml`:
+   every enabled agent's `menu:` block (provider, available models, reasoning
+   levels and how each choice is applied).
 2. Propose a recommended assignment: which parts of the workflow (the
    phases/roles named in the workflow's SKILL.md) go to which agent, and
    which model + reasoning each agent should run. Recommend the registry
@@ -32,19 +34,26 @@ run:
    support agent for a primary-only role.
 3. Then ASK the user to confirm or adjust: parts → agents, model per agent,
    reasoning per agent. Never proceed on the recommendation alone.
-4. Persist the selection in `workspace/<slug>/config.yml`:
-   - `agents:` — the run set (which agents participate at all);
-   - the workflow's role keys (e.g. `reviewer:`, `submitter:`,
-     `outline_agent:`, `consistency_agent:`) as its SKILL.md defines them;
-   - `agent_overrides:` — per-agent `model:`, `reasoning:`, `timeout_min:`,
-     or full `cmd:`, following the menu's `how` notes. `scieflow agent run`
-     applies these automatically to any prompt under
-     `workspace/<slug>/prompts/`.
+4. Persist the selection — never by editing YAML — with
+   `uv run scieflow agent configure --workspace <slug> --assign ROLE=AGENT[,AGENT]
+   --set AGENT.model=... --set AGENT.reasoning=... --yes`
+   (root AGENTS.md rule 13). It validates tier routing and writes only the
+   differences from the defaults into `workspace/<slug>/config.yml`:
+   - `assignments:` — the workflow's `research.*` roles as its SKILL.md names
+     them (e.g. `research.search`, `research.reviewer`);
+   - `agent_overrides:` — per-agent `model`, `reasoning`, `timeout_min`, or
+     a full `cmd`, following the menu's `how` notes. `scieflow agent run`
+     applies these automatically to prompts inside the run.
+   Create `status.yml` before the first dispatch: `scieflow agent run`
+   refuses a run folder that has `config.yml` but no `status.yml`.
    Record the selection (and your recommendation, if it differed) in
-   `log.md`.
+   `log.md`. Older runs may still carry top-level `agents:`, `reviewer:`,
+   `submitter:`, `outline_agent:` or `consistency_agent:` keys; they are
+   read as a fallback, and `configure` output overrides them.
 
 Skip the question only when (a) resuming a run whose `config.yml` already
-records a selection, or (b) the user's request already named the agents,
+records a selection (`scieflow agent show --workspace <slug>` shows
+`workspace` sources), or (b) the user's request already named the agents,
 models, and reasoning — partial answers mean you ask about the rest. The
 gate is coordinator-only: sub-agents never ask.
 

@@ -44,9 +44,10 @@ You are the **coordinator**. Phases run in order; each is resumable via
    recommend an assignment for this workflow's parts — literature fan-out,
    gap-analysis fan-out, debate participants (synthesis is
    coordinator-only) — plus model and reasoning per agent, then ask the
-   user to confirm or adjust before any dispatch. Write the selection and
-   any other constraints to `config.yml` (keys: `agents`,
-   `agent_overrides`, `max_papers`, `max_gaps`, `max_hypotheses`,
+   user to confirm or adjust before any dispatch. Persist agents with
+   `scieflow agent configure --workspace <slug>` (roles `research.search`,
+   `research.gap-analysis`, `research.debate`); write the other constraints
+   to `config.yml` (keys: `max_papers`, `max_gaps`, `max_hypotheses`,
    `max_debate_rounds`, `zotero`, `literature_from`).
 6. Initialize `status.yml` (workflow `gap-discovery`; phases `intake`,
    `literature`, `gap-analysis`, `debate`, `synthesize`; intake: done).
@@ -66,8 +67,8 @@ This is grounding, not a full review.
 
 ## Phase 3 — gap-analysis (fan-out)
 
-For each **primary-tier** agent in the run set (including yourself — write
-your own file last; support agents do not do gap analysis, AGENTS.md
+For each agent assigned to `research.gap-analysis` (primary tier;
+including yourself if assigned — write your own file last; support agents do not do gap analysis, AGENTS.md
 rule 9), write `prompts/gaps-<agent>.md`:
 
 ```text
@@ -128,7 +129,8 @@ Skip (mark `skipped-quorum`) if fewer than 2 agents produced valid gaps;
 the report must then say "single-agent, undebated".
 
 Otherwise run `src/scieflow/research/templates/debate-protocol.md` with:
-- participants = primary-tier agents with valid gaps files, plus you;
+- participants = agents assigned to `research.debate` that produced valid
+  gaps files, plus you;
 - EVIDENCE BUNDLE = brief + manifest (ids + descriptions only) + the merged
   gaps/hypotheses of all agents;
 - `max_debate_rounds` from config.
