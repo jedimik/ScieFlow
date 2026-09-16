@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
 """Invoke one agent CLI headless, per config/agents.yml.
 
-usage: agent_run.py <agent> <prompt_file> <transcript_file> [--cwd DIR]
-Substitutes {model}/{prompt}/{root} in the cmd template, enforces timeout_min,
-runs from --cwd (default: ScieFlow repo root), saves stdout to <transcript_file>.
-Exit codes: 0 ok, 124 timeout, otherwise the agent's exit code.
-Adapted from ResearchX scripts/agent_run.py; adds --cwd and {root}.
+usage: scieflow agent run <agent> <prompt_file> <transcript_file> [--cwd DIR]
+Substitutes {model}/{reasoning}/{prompt}/{root}/{python} in the cmd template,
+enforces timeout_min, runs from --cwd (default: repo root), saves stdout to
+<transcript_file>. When the prompt lives inside workspace/<slug>/, that run's
+`agent_overrides:` (config.yml, alongside status.yml) are merged over the
+registry entry. Exit codes: 0 ok, 124 timeout, otherwise the agent's exit code.
 """
 
 import argparse
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import yaml
 
-from sflib import config
+from scieflow.core import config
 
 # Linux caps a single argv string around 128 KiB; above this size the prompt
 # goes to the agent via stdin (using stdin_cmd when defined) instead of argv.
@@ -37,6 +37,7 @@ def build_argv(agent_cfg: dict, prompt: str, root: Path,
             token.replace("{model}", model)
             .replace("{reasoning}", reasoning)
             .replace("{root}", str(root))
+            .replace("{python}", sys.executable)
         )
         argv.append(token.replace("{prompt}", prompt))
     return argv
@@ -96,14 +97,14 @@ def load_prompt_override(prompt_file: Path, agent: str) -> dict:
     return override
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(prog="scieflow agent run")
     ap.add_argument("agent")
     ap.add_argument("prompt_file", type=Path)
     ap.add_argument("transcript_file", type=Path)
     ap.add_argument("--cwd", type=Path, default=None,
-                    help="working directory for the agent (e.g. vendors/ExperimentX)")
-    args = ap.parse_args()
+                    help="working directory for the agent (default: repo root)")
+    args = ap.parse_args(argv)
 
     root = config.repo_root()
     agents = config.load_agents(root)

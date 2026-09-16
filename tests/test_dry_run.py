@@ -33,7 +33,7 @@ def dispatch_stub(ws: Path, kind: str, out_path: Path) -> None:
     prompt.write_text(f"output: {out_path}\nkind: {kind}\n")
     transcript = ws / "logs" / f"{kind}.transcript.md"
     subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "agent_run.py"),
+        [sys.executable, "-m", "scieflow.core.agent_run",
          "stub", str(prompt), str(transcript)],
         check=True,
     )

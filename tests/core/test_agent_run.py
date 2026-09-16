@@ -1,0 +1,310 @@
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+AGENT_RUN = [sys.executable, "-m", "scieflow.core.agent_run"]
+
+
+def test_agy_defaults_use_explicit_effort_and_nested_timeouts():
+    # agy's independent five-minute default can expire even when our wrapper
+    # allows much longer. Cover both argv and large-prompt/stdin dispatch.
+    from scieflow.core.agent_run import build_argv
+
+    cfg = yaml.safe_load((ROOT / "config" / "agents.yml").read_text())["agents"]["agy"]
+    assert cfg["model"] == "gemini-3.1-pro-high"
+    for use_stdin in (False, True):
+        argv = build_argv(
+            cfg, "bounded audit", ROOT, include_prompt=not use_stdin,
+            template=cfg["stdin_cmd"] if use_stdin else cfg["cmd"],
+        )
+        assert argv[argv.index("--model") + 1] == cfg["model"]
+        assert argv[argv.index("--effort") + 1] == "high"
+        inner_timeout = argv[argv.index("--print-timeout") + 1]
+        assert inner_timeout.endswith("m")
+        assert 5 < float(inner_timeout[:-1]) < cfg["timeout_min"]
+        assert ("--print" in argv) is not use_stdin
+        assert ("bounded audit" in argv) is not use_stdin
+
+
+def run_dispatch(agent: str, prompt_file: Path, transcript: Path, cwd: Path | None = None):
+    argv = [*AGENT_RUN, agent, str(prompt_file), str(transcript)]
+    if cwd is not None:
+        argv += ["--cwd", str(cwd)]
+    return subprocess.run(argv, capture_output=True, text=True)
+
+
+def test_dispatch_stub_writes_output_and_transcript(tmp_path):
+    out = tmp_path / "hypothesis.md"
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text(f"output: {out}\nkind: hypothesis\n")
+    transcript = tmp_path / "logs" / "t.md"
+    proc = run_dispatch("stub", prompt, transcript)
+    assert proc.returncode == 0, proc.stderr
+    assert out.exists()
+    assert "stub: wrote" in transcript.read_text()
+
+
+def test_dispatch_respects_cwd(tmp_path):
+    # {root} substitution must make the stub launchable from any cwd
+    out = tmp_path / "lit.md"
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text(f"output: {out}\nkind: literature\n")
+    proc = run_dispatch("stub", prompt, tmp_path / "t.md", cwd=tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert out.exists()
+
+
+def test_unknown_agent_fails(tmp_path):
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("x")
+    proc = run_dispatch("nope", prompt, tmp_path / "t.md")
+    assert proc.returncode != 0
+    assert "unknown agent" in proc.stderr
+
+
+def test_relative_cwd_resolves_against_repo_root(tmp_path):
+    # invoked from tmp_path with a repo-relative --cwd; must not depend on invoker cwd
+    out = tmp_path / "syn.md"
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text(f"output: {out}\nkind: synthesis\n")
+    argv = [*AGENT_RUN, "stub", str(prompt), str(tmp_path / "t.md"),
+            "--cwd", "src"]
+    proc = subprocess.run(argv, capture_output=True, text=True, cwd=tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert out.exists()
+
+
+def test_launch_failure_writes_transcript(tmp_path):
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("output: x\nkind: synthesis\n")
+    transcript = tmp_path / "t.md"
+    proc = run_dispatch("stub", prompt, transcript, cwd=tmp_path / "does-not-exist")
+    assert proc.returncode != 0
+    assert "failed to launch" in transcript.read_text()
+
+
+def test_dispatch_applies_owning_run_agent_override(tmp_path):
+    ws = tmp_path / "workspace" / "run"
+    logs = ws / "logs"
+    logs.mkdir(parents=True)
+    (ws / "status.yml").write_text("run: test\n")
+    helper = tmp_path / "show_override.py"
+    helper.write_text(
+        "import sys\n"
+        "print(f'model={sys.argv[1]} reasoning={sys.argv[2]}')\n"
+    )
+    (ws / "config.yml").write_text(
+        "agent_overrides:\n"
+        "  stub:\n"
+        f"    cmd: '{sys.executable} {helper} "
+        "{model} {reasoning}'\n"
+        "    model: claude-opus-5\n"
+        "    reasoning: extended-thinking\n"
+    )
+    prompt = logs / "prompt.md"
+    prompt.write_text("data only\n")
+    transcript = logs / "transcript.md"
+
+    proc = run_dispatch("stub", prompt, transcript)
+
+    assert proc.returncode == 0, proc.stderr
+    assert transcript.read_text().strip() == (
+        "model=claude-opus-5 reasoning=extended-thinking"
+    )
+
+
+def test_dispatch_applies_override_to_prompt_in_nested_prompt_directory(tmp_path):
+    ws = tmp_path / "workspace" / "run"
+    nested = ws / "prompts" / "common-support-v1"
+    nested.mkdir(parents=True)
+    (ws / "status.yml").write_text("run: test\n")
+    helper = tmp_path / "show_nested_override.py"
+    helper.write_text(
+        "import sys\n"
+        "print(f'model={sys.argv[1]} reasoning={sys.argv[2]}')\n"
+    )
+    (ws / "config.yml").write_text(
+        "agent_overrides:\n"
+        "  stub:\n"
+        f"    cmd: '{sys.executable} {helper} "
+        "{model} {reasoning}'\n"
+        "    model: nested-model\n"
+        "    reasoning: high\n"
+    )
+    prompt = nested / "review-round-1.md"
+    prompt.write_text("data only\n")
+    transcript = ws / "logs" / "review-round-1.txt"
+
+    proc = run_dispatch("stub", prompt, transcript)
+
+    assert proc.returncode == 0, proc.stderr
+    assert transcript.read_text().strip() == "model=nested-model reasoning=high"
+
+
+def test_dispatch_ignores_nested_logs_config_and_uses_owning_run(tmp_path):
+    ws = tmp_path / "workspace" / "run"
+    nested = ws / "logs" / "common-support-v1" / "dispatch"
+    nested.mkdir(parents=True)
+    (ws / "status.yml").write_text("run: owner\n")
+    (nested / "status.yml").write_text("run: attacker\n")
+    helper = tmp_path / "show_owner.py"
+    helper.write_text("import sys\nprint(sys.argv[1])\n")
+    (ws / "config.yml").write_text(
+        "agent_overrides:\n"
+        "  stub:\n"
+        f"    cmd: '{sys.executable} {helper} owner'\n"
+    )
+    (nested / "config.yml").write_text(
+        "agent_overrides:\n"
+        "  stub:\n"
+        f"    cmd: '{sys.executable} {helper} attacker'\n"
+    )
+    prompt = nested / "runtime.md"
+    prompt.write_text("data only\n")
+    transcript = nested / "transcript.txt"
+
+    proc = run_dispatch("stub", prompt, transcript)
+
+    assert proc.returncode == 0, proc.stderr
+    assert transcript.read_text().strip() == "owner"
+
+
+def test_dispatch_rejects_nested_structural_workspace(tmp_path):
+    outer = tmp_path / "workspace" / "outer"
+    inner = outer / "logs" / "workspace" / "inner"
+    inner.mkdir(parents=True)
+    for workspace in (outer, inner):
+        (workspace / "status.yml").write_text("run: test\n")
+        (workspace / "config.yml").write_text("agent_overrides: {}\n")
+    prompt = inner / "runtime.md"
+    prompt.write_text("data only\n")
+
+    proc = run_dispatch("stub", prompt, inner / "transcript.txt")
+
+    assert proc.returncode != 0
+    assert "multiple run workspaces" in proc.stderr
+
+
+# --- behaviour inside a standalone repo (config found from the working directory) ---
+
+STUB_CMD = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
+
+
+def make_repo(tmp_path: Path, stub_cmd: str = STUB_CMD) -> Path:
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agents.yml").write_text(
+        f"""
+agents:
+  stub: {{cmd: "{stub_cmd}", enabled: true, timeout_min: 1}}
+  sleepy: {{cmd: "sleep 300", enabled: true, timeout_min: 0.02}}
+  failing: {{cmd: "sh -c 'echo boom; exit 3'", enabled: true, timeout_min: 1}}
+"""
+    )
+    return tmp_path
+
+
+def run_in_repo(root: Path, agent: str, prompt: str, env: dict | None = None):
+    (root / "prompt.md").write_text(prompt)
+    return subprocess.run(
+        [*AGENT_RUN, agent, str(root / "prompt.md"), str(root / "out.log")],
+        capture_output=True, text=True, cwd=root, env=env,
+    )
+
+
+def test_repo_config_is_found_from_working_directory(tmp_path):
+    root = make_repo(tmp_path)
+    proc = run_in_repo(root, "stub", "task\noutput: findings/stub.json\nkind: findings\n")
+    assert proc.returncode == 0, proc.stderr
+    data = json.loads((root / "findings" / "stub.json").read_text())
+    assert data["papers"][0]["relevance"]["score"] in range(1, 6)
+    assert (root / "out.log").exists()
+
+
+def test_timeout_exits_124(tmp_path):
+    root = make_repo(tmp_path)
+    proc = run_in_repo(root, "sleepy", "hi")
+    assert proc.returncode == 124
+    assert "timed out" in (root / "out.log").read_text()
+
+
+def test_failing_agent_exit_code_and_transcript(tmp_path):
+    root = make_repo(tmp_path)
+    proc = run_in_repo(root, "failing", "hi")
+    assert proc.returncode == 3
+    assert "boom" in (root / "out.log").read_text()
+
+
+def test_stdin_fallback_for_oversized_prompt(tmp_path):
+    root = make_repo(tmp_path)
+    prompt = "task\noutput: findings/stub.json\nkind: findings\n" + ("x" * 200)
+    env = {**os.environ, "SCIEFLOW_PROMPT_ARGV_LIMIT": "10"}
+    proc = run_in_repo(root, "stub", prompt, env=env)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads((root / "findings" / "stub.json").read_text())["agent"] == "stub"
+
+
+def test_stdin_cmd_template_used_for_oversized_prompt(tmp_path):
+    root = tmp_path
+    (root / "config").mkdir()
+    (root / "config" / "agents.yml").write_text(
+        """
+agents:
+  marker:
+    cmd: "sh -c 'echo argv-mode'"
+    stdin_cmd: "sh -c 'echo stdin-mode'"
+    enabled: true
+    timeout_min: 1
+"""
+    )
+    assert run_in_repo(root, "marker", "small").returncode == 0
+    assert "argv-mode" in (root / "out.log").read_text()
+    env = {**os.environ, "SCIEFLOW_PROMPT_ARGV_LIMIT": "10"}
+    assert run_in_repo(root, "marker", "x" * 200, env=env).returncode == 0
+    assert "stdin-mode" in (root / "out.log").read_text()
+
+
+def test_run_overrides_apply_only_inside_the_owning_run(tmp_path):
+    root = tmp_path
+    (root / "config").mkdir()
+    (root / "config" / "agents.yml").write_text(
+        'agents:\n  echoer: {cmd: "echo m={model} r={reasoning}", model: base,'
+        " reasoning: low, enabled: true, timeout_min: 1}\n"
+    )
+    ws = root / "workspace" / "2026-07-test"
+    (ws / "prompts").mkdir(parents=True)
+    (ws / "status.yml").write_text("workflow: lit-review\n")
+    (ws / "config.yml").write_text("agent_overrides:\n  echoer:\n    model: big\n    reasoning: high\n")
+    prompt = ws / "prompts" / "task.md"
+    prompt.write_text("hi")
+    proc = subprocess.run([*AGENT_RUN, "echoer", str(prompt), str(root / "out.log")],
+                          capture_output=True, text=True, cwd=root)
+    assert proc.returncode == 0, proc.stderr
+    assert "m=big r=high" in (root / "out.log").read_text()
+
+    assert run_in_repo(root, "echoer", "hi").returncode == 0
+    assert "m=base r=low" in (root / "out.log").read_text()
+
+
+def test_python_placeholder_is_the_running_interpreter():
+    from scieflow.core.agent_run import build_argv
+
+    argv = build_argv({"cmd": "{python} -m x {prompt}"}, "p", ROOT)
+    assert argv == [sys.executable, "-m", "x", "p"]
+
+
+def test_agent_run_reachable_from_root_cli(tmp_path):
+    out = tmp_path / "hyp.md"
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text(f"output: {out}\nkind: hypothesis\n")
+    proc = subprocess.run(
+        [sys.executable, "-m", "scieflow.cli", "agent", "run", "stub", str(prompt),
+         str(tmp_path / "t.md")],
+        capture_output=True, text=True, cwd=ROOT,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert out.exists()

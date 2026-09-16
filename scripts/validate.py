@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from sflib import config
+from scieflow.core import config
 
 
 def _schema(name: str) -> dict:

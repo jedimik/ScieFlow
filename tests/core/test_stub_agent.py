@@ -1,13 +1,10 @@
 import subprocess
 import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-STUB = ROOT / "scripts" / "stub_agent.py"
 
 
 def run_stub(prompt: str):
-    return subprocess.run([sys.executable, str(STUB), prompt], capture_output=True, text=True)
+    return subprocess.run([sys.executable, "-m", "scieflow.core.stub_agent", prompt], capture_output=True, text=True)
 
 
 def test_stub_writes_each_kind(tmp_path):
@@ -29,3 +26,17 @@ def test_stub_notebook_entry_has_required_sections(tmp_path):
     text = out.read_text()
     for section in ["Hypothesis", "Method", "Results", "Literature", "Conclusion", "Next step"]:
         assert f"### {section}" in text
+
+
+def test_stub_writes_research_json_and_text_kinds(tmp_path):
+    import json
+
+    for kind in ["findings", "review", "gaps", "manuscript-review"]:
+        out = tmp_path / f"{kind}.json"
+        assert run_stub(f"output: {out}\nkind: {kind}\n").returncode == 0
+        assert json.loads(out.read_text())["agent"] == "stub"
+    for kind, marker in [("perspective", "P1."), ("debate-response", "AGREE"),
+                         ("tex-section", "\\cite{stub}")]:
+        out = tmp_path / f"{kind}.txt"
+        assert run_stub(f"output: {out}\nkind: {kind}\n").returncode == 0
+        assert marker in out.read_text()

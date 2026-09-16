@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from sflib import config
+from scieflow.core import config
 
 _SCHEMA = yaml.safe_load((config.repo_root() / "schemas" / "status.yml").read_text())
 PHASES: list = _SCHEMA["phases"]

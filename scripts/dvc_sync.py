@@ -26,7 +26,8 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from sflib import archive, config
+from scieflow.core import config
+from sflib import archive
 
 
 def load_env_into_environ(env_path: Path) -> None:

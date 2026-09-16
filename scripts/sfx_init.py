@@ -13,7 +13,7 @@ import yaml
 
 import budget as budget_mod
 import status as status_mod
-from sflib import config
+from scieflow.core import config
 
 
 def init_workspace(slug: str, goal_file: Path, workspace_root: Path,

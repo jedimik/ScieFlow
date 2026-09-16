@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from nblm import nblm, policy
-from sflib import config as sf_config
+from scieflow.core import config as sf_config
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "config" / "notebooklm.example.yml"

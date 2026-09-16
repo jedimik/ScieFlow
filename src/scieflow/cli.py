@@ -56,3 +56,7 @@ class LazyGroup(click.Group):
 @click.version_option(package_name="scieflow")
 def main():
     """ScieFlow — agent-driven experiments and literature research."""
+
+
+if __name__ == "__main__":
+    main()

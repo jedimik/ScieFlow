@@ -1,10 +1,16 @@
-# ScieFlow agent registry. Tier routing (AGENTS.md rule 10): primary agents
-# (claude, codex) take comprehensive work; support agents (agy) only easy /
-# large-context / paired web-search tasks.
-# {model}/{prompt}/{root} are substituted by scripts/agent_run.py.
+# ScieFlow agent registry — the only place models, commands, and timeouts live.
+# Tier routing (AGENTS.md rule 10): primary agents (claude, codex) take
+# comprehensive work; support agents (agy) only easy / large-context / paired
+# web-search tasks.
+# {model}/{reasoning}/{prompt}/{root}/{python} are substituted by
+# `scieflow agent run` (src/scieflow/core/agent_run.py).
 # 'enabled' and 'tier' are advisory and bind the coordinator: skills dispatch
-# only enabled agents, respecting tiers. agent_run.py does not enforce them;
+# only enabled agents, respecting tiers. agent_run does not enforce them;
 # the stub is dispatched directly by the test suite.
+# Each `menu:` block is what a coordinator presents to the user when settling
+# run staffing (research module AGENTS.md, run configuration gate): available
+# models, reasoning levels, and how a choice maps to `agent_overrides:` in the
+# run's workspace config.yml. `menu:` is read by coordinators, not by code.
 agents:
   claude:
     cmd: "claude -p --dangerously-skip-permissions --model {model} {prompt}"
@@ -13,26 +19,60 @@ agents:
     tier: primary
     timeout_min: 30
     enabled: true
+    menu:
+      provider: "Anthropic — Claude Code CLI"
+      models:
+        - claude-fable-5        # recommended default
+        - claude-opus-5
+        - claude-sonnet-5
+        - claude-haiku-4-5
+      reasoning:
+        levels: [default, extended-thinking]
+        how: >-
+          No CLI reasoning flag; the model choice carries capability. For
+          extended thinking, override the whole cmd in agent_overrides, e.g.
+          cmd: 'env MAX_THINKING_TOKENS=32000 claude -p
+          --dangerously-skip-permissions --model {model} {prompt}'
   codex:
-    cmd: "codex exec --sandbox workspace-write --model {model} {prompt}"
+    cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
     model: gpt-5.6-sol
+    reasoning: medium
     tier: primary
     timeout_min: 180
     enabled: true
+    menu:
+      provider: "OpenAI — Codex CLI"
+      models:
+        - gpt-5.6-sol           # recommended default (registry-pinned)
+      models_note: >-
+        Other models depend on the user's Codex account — ask them; set
+        `model:` in agent_overrides to switch.
+      reasoning:
+        levels: [minimal, low, medium, high]   # medium = default
+        how: "set `reasoning: <level>` in agent_overrides (fills {reasoning})"
   agy:
     cmd: "agy --print {prompt} --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions"
     # Piped prompts must not leave --print waiting for a positional value.
     stdin_cmd: "agy --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions"
     # Highest Pro-tier Gemini exposed by `agy models` on 2026-09-06.
-    # Keep the CLI's inner timeout below ScieFlow's outer timeout.
+    # Keep the CLI's inner timeout below the outer timeout_min.
     model: gemini-3.1-pro-high
     reasoning: high
     tier: support
     capabilities: [web-search, large-context]
     timeout_min: 60
     enabled: true
+    menu:
+      provider: "Google — Antigravity CLI (Gemini)"
+      models:
+        - gemini-3.1-pro-high   # recommended default
+      models_note: >-
+        Run `agy models` for what the user's account exposes; set `model:` in
+        agent_overrides to switch.
+      reasoning:
+        how: "set `reasoning:` in agent_overrides (fills --effort {reasoning}); registry default high"
   stub:
-    cmd: "python3 {root}/scripts/stub_agent.py {prompt}"
-    tier: primary
+    cmd: "{python} -m scieflow.core.stub_agent {prompt}"
+    tier: primary            # tests dispatch it into primary-only roles
     timeout_min: 1
     enabled: false            # tests/dry-run only

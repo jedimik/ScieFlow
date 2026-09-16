@@ -1,16 +1,37 @@
-"""Load ScieFlow configuration: agent registry, loop defaults, per-run overrides."""
+"""ScieFlow configuration: agent registry, defaults, per-run overrides."""
 
 from pathlib import Path
 
 import yaml
 
 
-def repo_root(start: Path | None = None) -> Path:
-    p = (start or Path(__file__)).resolve()
+def _find_root(start: Path) -> Path | None:
+    p = start.resolve()
     for candidate in [p, *p.parents]:
         if (candidate / "config" / "agents.yml").exists():
             return candidate
-    raise FileNotFoundError(f"config/agents.yml not found above {p}")
+    return None
+
+
+def repo_root(start: Path | None = None) -> Path:
+    """The ScieFlow repo root: nearest ancestor holding config/agents.yml.
+
+    With an explicit `start`, only that path is searched. Otherwise the current
+    working directory wins (so a command run inside a repo uses that repo's
+    config), falling back to the installed package's own checkout.
+    """
+    if start is not None:
+        found = _find_root(start)
+        if found is None:
+            raise FileNotFoundError(f"config/agents.yml not found above {start}")
+        return found
+    for origin in (Path.cwd(), Path(__file__)):
+        found = _find_root(origin)
+        if found is not None:
+            return found
+    raise FileNotFoundError(
+        f"config/agents.yml not found above {Path.cwd()} or {Path(__file__)}"
+    )
 
 
 def load_agents(root: Path) -> dict:

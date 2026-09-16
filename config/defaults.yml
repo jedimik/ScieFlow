@@ -15,3 +15,15 @@ archive: false                # true = push/pull this run as a single zip
                               # run in workspace/<slug>/config.yml once the run
                               # is finished: it trades DVC's per-file dedup for
                               # far fewer S3 objects.
+
+# Research module workflow defaults (src/scieflow/research/AGENTS.md). A run's
+# workspace/<slug>/config.yml overrides any of these at top level.
+research:
+  max_papers: 40
+  max_review_rounds: 3
+  max_debate_rounds: 2          # perspective debate: discussion rounds after propose
+  max_gaps: 10                  # gap-discovery: per-agent cap
+  max_hypotheses: 5             # gap-discovery: per-agent cap
+  auto_approve_outline: false   # paper-draft: pause for user outline approval
+  zotero:
+    library: user               # or "group:<id>"

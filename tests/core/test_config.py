@@ -3,9 +3,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from sflib import config
+from scieflow.core import config
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_repo_root_finds_scieflow_root():
@@ -51,3 +51,26 @@ def test_tier_agents_filters_enabled_only():
     }
     assert config.tier_agents(agents, "primary") == ["claude"]
     assert config.tier_agents(agents, "support") == ["agy"]
+
+
+def test_repo_root_prefers_working_directory_repo(tmp_path, monkeypatch):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agents.yml").write_text("agents: {}\n")
+    monkeypatch.chdir(tmp_path / "config")
+    assert config.repo_root() == tmp_path
+
+
+def test_repo_root_falls_back_to_package_checkout(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert config.repo_root() == ROOT
+
+
+def test_registry_menus_and_research_defaults():
+    agents = config.load_agents(ROOT)
+    for name in ("claude", "codex", "agy"):
+        assert agents[name]["menu"]["provider"]
+    assert agents["agy"]["capabilities"] == ["web-search", "large-context"]
+    assert "{reasoning}" in agents["codex"]["cmd"]
+    research = config.load_defaults(ROOT)["research"]
+    assert research["max_debate_rounds"] == 2
+    assert research["auto_approve_outline"] is False
