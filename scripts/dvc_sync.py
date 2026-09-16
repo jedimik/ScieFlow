@@ -23,7 +23,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from sflib import config
+from sflib import archive, config
 
 
 def load_env_into_environ(env_path: Path) -> None:
@@ -48,24 +48,34 @@ def find_workspaces(workspace_root: Path) -> list[str]:
         return []
     slugs = []
     for item in sorted(workspace_root.iterdir()):
-        if item.is_dir() and not item.name.startswith("."):
+        if item.is_dir() and not item.name.startswith(".") and item.name != archive.ARCHIVE_DIR:
             slugs.append(item.name)
     return slugs
+
+
+def _clean_slug(raw: str) -> str:
+    slug = raw.strip().rstrip("/")
+    return slug[len("workspace/"):] if slug.startswith("workspace/") else slug
 
 
 def resolve_slugs(args_slugs: list[str], all_flag: bool, workspace_root: Path) -> list[str]:
     available = find_workspaces(workspace_root)
     if all_flag:
-        return available
+        return sorted(set(available) | set(archive.archived_slugs(workspace_root)))
     if not args_slugs:
         raise ValueError("Specify at least one workspace slug or use --all")
-    for s in args_slugs:
-        s_clean = s.strip().rstrip("/")
-        if s_clean.startswith("workspace/"):
-            s_clean = s_clean[len("workspace/"):]
-        if s_clean not in available and not (workspace_root / s_clean).exists() and not (workspace_root / f"{s_clean}.dvc").exists():
-            raise FileNotFoundError(f"Workspace run '{s}' not found in {workspace_root}")
-    return [s.strip().rstrip("/")[len("workspace/"):] if s.strip().rstrip("/").startswith("workspace/") else s.strip().rstrip("/") for s in args_slugs]
+    slugs = [_clean_slug(s) for s in args_slugs]
+    for raw, slug in zip(args_slugs, slugs):
+        if slug == archive.ARCHIVE_DIR:
+            raise ValueError(f"'{raw}' is the archive directory, not a workspace run")
+        if (
+            slug not in available
+            and not (workspace_root / slug).exists()
+            and not (workspace_root / f"{slug}.dvc").exists()
+            and not archive.pointer_path(workspace_root, slug).exists()
+        ):
+            raise FileNotFoundError(f"Workspace run '{raw}' not found in {workspace_root}")
+    return slugs
 
 
 def run_cmd(cmd: list[str], cwd: Path) -> int:
@@ -78,6 +88,9 @@ def cmd_track(slugs: list[str], root: Path, workspace_root: Path) -> int:
     exit_code = 0
     for slug in slugs:
         ws_dir = workspace_root / slug
+        if archive.pointer_path(workspace_root, slug).exists():
+            print(f"Skipping {slug}: archived; `push` manages its archive pointer.")
+            continue
         if not ws_dir.exists():
             print(f"Skipping {slug}: directory {ws_dir} does not exist.")
             continue
@@ -87,6 +100,32 @@ def cmd_track(slugs: list[str], root: Path, workspace_root: Path) -> int:
         if rc != 0:
             exit_code = rc
     return exit_code
+
+
+def use_archive(
+    slug: str,
+    root: Path,
+    workspace_root: Path,
+    *,
+    command: str,
+    archive_flag: bool | None = None,
+) -> bool:
+    """Decide archive vs directory mode for one slug (spec section 1).
+
+    Pull: the archive pointer alone decides. Push: --no-archive wins, then an
+    existing pointer, then --archive, then `archive: true` in the run config.
+    """
+    has_pointer = archive.pointer_path(workspace_root, slug).exists()
+    if command == "pull":
+        return has_pointer
+    if archive_flag is False:
+        return False
+    if has_pointer or archive_flag is True:
+        return True
+    ws_dir = workspace_root / slug
+    if not ws_dir.is_dir():
+        return False
+    return config.load_run_config(ws_dir, root).get("archive") is True
 
 
 def cmd_push(slugs: list[str], root: Path, workspace_root: Path) -> int:
@@ -133,15 +172,26 @@ def cmd_status(root: Path, workspace_root: Path) -> int:
     print("=== DVC Status ===")
     rc = run_cmd(["dvc", "status"], cwd=root)
     print("\n=== Workspace Runs Summary ===")
-    available = find_workspaces(workspace_root)
-    if not available:
-        print("No workspace runs found.")
-        return rc
-    for slug in available:
-        dvc_file = workspace_root / f"{slug}.dvc"
-        tracked = "[TRACKED in DVC]" if dvc_file.exists() else "[LOCAL ONLY - NOT TRACKED]"
-        print(f" - workspace/{slug:60} {tracked}")
+    for line in workspace_summary(workspace_root):
+        print(line)
     return rc
+
+
+def workspace_summary(workspace_root: Path) -> list[str]:
+    available = sorted(set(find_workspaces(workspace_root)) | set(archive.archived_slugs(workspace_root)))
+    if not available:
+        return ["No workspace runs found."]
+    lines = []
+    for slug in available:
+        if archive.pointer_path(workspace_root, slug).exists():
+            present = archive.archive_path(workspace_root, slug).exists()
+            tracked = f"[ARCHIVE] zip: {'present' if present else 'not downloaded'}"
+        elif (workspace_root / f"{slug}.dvc").exists():
+            tracked = "[TRACKED in DVC]"
+        else:
+            tracked = "[LOCAL ONLY - NOT TRACKED]"
+        lines.append(f" - workspace/{slug:60} {tracked}")
+    return lines
 
 
 def main() -> None:

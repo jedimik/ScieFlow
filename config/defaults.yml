@@ -10,3 +10,8 @@ claim_check: ask              # never | ask | approved — verify claims against
                               # sources (skills/claim-check/SKILL.md). 'ask' means
                               # the coordinator must ask before the first audit of a
                               # run. Only the user may set 'approved'.
+archive: false                # true = push/pull this run as a single zip
+                              # (docs/DVC_STORAGE.md, archive mode). Opt in per
+                              # run in workspace/<slug>/config.yml once the run
+                              # is finished: it trades DVC's per-file dedup for
+                              # far fewer S3 objects.
