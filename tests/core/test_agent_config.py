@@ -7,57 +7,6 @@ from click.testing import CliRunner
 
 from scieflow.core import agent_config as ac
 
-REGISTRY = {
-    "agents": {
-        "claude": {"cmd": "claude -p --model {model} {prompt}", "model": "fable",
-                   "tier": "primary", "timeout_min": 30, "enabled": True,
-                   "menu": {"models": ["fable", "opus"],
-                            "reasoning": {"levels": ["default", "extended-thinking"]}}},
-        "codex": {"cmd": "codex exec --model {model} -c effort={reasoning} {prompt}",
-                  "model": "sol", "reasoning": "medium", "tier": "primary",
-                  "timeout_min": 180, "enabled": True,
-                  "menu": {"models": ["sol"],
-                           "reasoning": {"levels": ["minimal", "low", "medium", "high"]}}},
-        "agy": {"cmd": "agy --print {prompt} --model {model} --effort {reasoning}",
-                "model": "gem", "reasoning": "high", "tier": "support",
-                "timeout_min": 60, "enabled": True},
-        "off": {"cmd": "off {prompt}", "tier": "primary", "enabled": False},
-    }
-}
-
-ASSIGNMENTS = {
-    "loop.experiment": "claude",
-    "loop.literature": "claude",
-    "loop.paper-draft": "claude",
-    "research.search": ["claude", "codex", "agy"],
-    "research.cross-review": ["claude", "codex"],
-    "research.gap-analysis": ["claude", "codex"],
-    "research.debate": ["claude", "codex"],
-    "research.journal-profile": ["agy", "claude"],
-    "research.reviewer": "codex",
-    "research.submitter": "claude",
-    "research.outline": "claude",
-    "research.draft-authors": ["claude", "codex"],
-    "research.consistency": "codex",
-}
-
-
-@pytest.fixture
-def repo(tmp_path, monkeypatch):
-    (tmp_path / "config").mkdir()
-    (tmp_path / "config" / "agents.yml").write_text(yaml.safe_dump(REGISTRY, sort_keys=False))
-    (tmp_path / "config" / "defaults.yml").write_text(
-        yaml.safe_dump({"archive": False, "assignments": ASSIGNMENTS}, sort_keys=False)
-    )
-    (tmp_path / "workspace" / "run-1").mkdir(parents=True)
-    monkeypatch.chdir(tmp_path)
-    return tmp_path
-
-
-def write_ws(repo: Path, data: dict, slug: str = "run-1") -> None:
-    (repo / "workspace" / slug / "config.yml").write_text(yaml.safe_dump(data))
-
-
 def test_real_repo_defaults_are_complete_and_valid():
     eff = ac.resolve(Path(__file__).resolve().parents[2])
     assert eff.problems == []
@@ -72,7 +21,7 @@ def test_defaults_resolve_with_default_source(repo):
     assert eff.agents["codex"]["reasoning"].value == "medium"
 
 
-def test_workspace_overrides_win_and_rest_inherits(repo):
+def test_workspace_overrides_win_and_rest_inherits(repo, write_ws):
     write_ws(repo, {"assignments": {"loop.experiment": "codex"},
                     "agent_overrides": {"codex": {"reasoning": "high"}}})
     eff = ac.resolve(repo, "run-1")
@@ -84,7 +33,7 @@ def test_workspace_overrides_win_and_rest_inherits(repo):
     assert eff.agents["codex"]["model"].source == "default"
 
 
-def test_legacy_research_keys_are_read(repo):
+def test_legacy_research_keys_are_read(repo, write_ws):
     write_ws(repo, {"agents": ["claude", "codex"], "reviewer": "claude", "submitter": "codex"})
     eff = ac.resolve(repo, "run-1")
     assert eff.value("research.search") == ["claude", "codex"]
@@ -93,7 +42,7 @@ def test_legacy_research_keys_are_read(repo):
     assert eff.problems == []
 
 
-def test_new_assignments_beat_legacy_keys(repo):
+def test_new_assignments_beat_legacy_keys(repo, write_ws):
     write_ws(repo, {"reviewer": "claude", "submitter": "codex",
                     "assignments": {"research.reviewer": "codex", "research.submitter": "claude"}})
     eff = ac.resolve(repo, "run-1")
@@ -111,13 +60,13 @@ def test_new_assignments_beat_legacy_keys(repo):
     ({"research.submitter": "codex"}, "must be different"),
     ({"loop.nonsense": "claude"}, "unknown role"),
 ])
-def test_validation_refusals(repo, assignments, fragment):
+def test_validation_refusals(repo, write_ws, assignments, fragment):
     write_ws(repo, {"assignments": assignments})
     problems = ac.resolve(repo, "run-1").problems
     assert any(fragment in p for p in problems), problems
 
 
-def test_reasoning_label_and_unlisted_level_only_warn(repo):
+def test_reasoning_label_and_unlisted_level_only_warn(repo, write_ws):
     write_ws(repo, {"agent_overrides": {"claude": {"reasoning": "max"},
                                         "codex": {"reasoning": "ultra"}}})
     eff = ac.resolve(repo, "run-1")
@@ -126,7 +75,7 @@ def test_reasoning_label_and_unlisted_level_only_warn(repo):
     assert any("'ultra' is not in the menu" in w for w in eff.warnings)
 
 
-def test_legacy_run_set_never_empties_an_unused_role(repo):
+def test_legacy_run_set_never_empties_an_unused_role(repo, write_ws):
     write_ws(repo, {"agents": ["codex"]})
     eff = ac.resolve(repo, "run-1")
     assert eff.value("research.search") == ["codex"]
@@ -139,19 +88,19 @@ def test_legacy_run_set_never_empties_an_unused_role(repo):
     ({"codex": {"model": ""}}, "non-empty string"),
     ({"ghost": {"model": "x"}}, "unknown agent"),
 ])
-def test_agent_setting_refusals(repo, overrides, fragment):
+def test_agent_setting_refusals(repo, write_ws, overrides, fragment):
     write_ws(repo, {"agent_overrides": overrides})
     problems = ac.resolve(repo, "run-1").problems
     assert any(fragment in p for p in problems), problems
 
 
-def test_missing_default_role_is_reported(repo):
-    doc = {"assignments": {k: v for k, v in ASSIGNMENTS.items() if k != "loop.literature"}}
+def test_missing_default_role_is_reported(repo, default_assignments):
+    doc = {"assignments": {k: v for k, v in default_assignments.items() if k != "loop.literature"}}
     (repo / "config" / "defaults.yml").write_text(yaml.safe_dump(doc))
     assert "role loop.literature: no agent assigned" in ac.resolve(repo).problems
 
 
-def test_show_cli_json_and_exit_code(repo):
+def test_show_cli_json_and_exit_code(repo, write_ws):
     from scieflow.core.cli import agent
 
     result = CliRunner().invoke(agent, ["show", "--workspace", "run-1", "--json"])

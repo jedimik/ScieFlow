@@ -46,3 +46,143 @@ def show(slug, as_json):
         click.echo(agent_config.format_table(eff, title))
     if eff.problems:
         raise SystemExit(1)
+
+
+def _print_plan(plan, root) -> None:
+    for change in plan.changes:
+        click.echo(change.diff(root), nl=False)
+    for warning in plan.warnings:
+        click.echo(f"warning: {warning}", err=True)
+    for note in plan.notes:
+        click.echo(f"note: {note}", err=True)
+
+
+def _choose(label: str, options: list[str], default: str | None = None) -> str:
+    for i, option in enumerate(options, 1):
+        click.echo(f"  {i}. {option}")
+    while True:
+        raw = click.prompt(label, default=default if default else None, show_default=bool(default))
+        if raw in options:
+            return raw
+        if raw.isdigit() and 1 <= int(raw) <= len(options):
+            return options[int(raw) - 1]
+        click.echo(f"  choose a number 1-{len(options)} or a name")
+
+
+def _wizard_ops(root, slug, target) -> list:
+    """Interactive questions -> list of Op. Each change is validated as it is added."""
+    from scieflow.core import agent_config as ac
+    from scieflow.core import agent_configure as acf
+
+    ops: list = []
+    registry = ac._load_yaml(root / "config" / "agents.yml").get("agents") or {}
+
+    def attempt(op) -> None:
+        try:
+            if target == "workspace":
+                acf.plan_workspace(root, slug, ops + [op])
+            else:
+                acf.plan_defaults(root, ops + [op])
+        except acf.ConfigureError as exc:
+            click.echo(f"  not applied: {exc}")
+            return
+        ops.append(op)
+        click.echo(f"  queued: {op.kind} {op.key}" + ("" if op.value is None else f" = {op.value}"))
+
+    while True:
+        eff = ac.resolve(root, slug if target == "workspace" else None)
+        action = _choose("What to change? (roles / agent / done)", ["roles", "agent", "done"], "done")
+        if action == "done":
+            return ops
+        if action == "roles":
+            role = _choose("Role", list(ac.ROLES))
+            spec = ac.ROLES[role]
+            enabled = [n for n, e in registry.items() if e.get("enabled")]
+            current = eff.value(role)
+            click.echo(f"  {spec.help}; enabled agents: {', '.join(enabled)}"
+                       + ("; support agents allowed alongside a primary" if spec.support_ok else "; primary tier only"))
+            if spec.many:
+                shown = ",".join(current) if isinstance(current, list) else (current or "")
+                raw = click.prompt("  Agents (comma-separated)", default=shown)
+                attempt(acf.parse_assign(f"{role}={raw}"))
+            else:
+                attempt(acf.Op("assign", role, _choose("  Agent", enabled, current)))
+        else:
+            agent_name = _choose("Agent", list(registry))
+            fields = ac.AGENT_FIELDS if target == "default" else ac.WORKSPACE_AGENT_FIELDS
+            field_name = _choose("  Setting", list(fields), "model")
+            setting = eff.agents.get(agent_name, {}).get(field_name)
+            current = None if setting is None else str(setting.value)
+            menu = registry[agent_name].get("menu") or {}
+            if field_name == "model" and menu.get("models"):
+                click.echo(f"  menu models: {', '.join(menu['models'])}")
+            if field_name == "reasoning":
+                reasoning = menu.get("reasoning") or {}
+                if reasoning.get("levels"):
+                    click.echo(f"  menu levels: {', '.join(map(str, reasoning['levels']))}")
+                if reasoning.get("how"):
+                    click.echo(f"  how: {reasoning['how']}")
+            raw = click.prompt(f"  {field_name}", default=current)
+            try:
+                attempt(acf.Op("set", f"{agent_name}.{field_name}", acf.coerce(field_name, raw)))
+            except acf.ConfigureError as exc:
+                click.echo(f"  not applied: {exc}")
+
+
+@agent.command("configure")
+@click.option("--workspace", "slug", help="Change workspace/<SLUG> only (stores differences from the defaults).")
+@click.option("--assign", "assigns", multiple=True, metavar="ROLE=AGENT[,AGENT]",
+              help="Assign agent(s) to a role (repeatable).")
+@click.option("--set", "sets", multiple=True, metavar="AGENT.FIELD=VALUE",
+              help="Set model, reasoning, timeout_min, cmd, stdin_cmd or enabled (repeatable).")
+@click.option("--unset", "unsets", multiple=True, metavar="KEY",
+              help="Remove a workspace override (ROLE or AGENT.FIELD), or an optional default field.")
+@click.option("--yes", is_flag=True, help="Write without asking for confirmation.")
+def configure(slug, assigns, sets, unsets, yes):
+    """Change agent configuration: the defaults, or one workspace.
+
+    Without change options, asks interactive questions. With them (as a
+    coordinator agent does after asking the user in chat), applies them
+    directly. Every change is validated and shown as a diff before writing.
+    """
+    import sys
+
+    from scieflow.core import agent_configure as acf
+
+    root = _root()
+    try:
+        ops = ([acf.parse_assign(a) for a in assigns] + [acf.parse_set(s) for s in sets]
+               + [acf.parse_unset(u) for u in unsets])
+        if ops:
+            target = "workspace" if slug else "default"
+        else:
+            if slug:
+                target = "workspace"
+            else:
+                target = _choose("Configure (default / workspace)", ["default", "workspace"], "default")
+                if target == "workspace":
+                    slugs = sorted(p.name for p in (root / "workspace").iterdir() if p.is_dir())
+                    slug = _choose("Workspace", slugs)
+            ops = _wizard_ops(root, slug, target)
+            if not ops:
+                click.echo("nothing to change")
+                return
+            yes = False
+        plan = (acf.plan_workspace(root, slug, ops) if target == "workspace"
+                else acf.plan_defaults(root, ops))
+    except acf.ConfigureError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if not plan.changes:
+        click.echo("already configured that way; nothing to write")
+        return
+    _print_plan(plan, root)
+    if not yes:
+        interactive = not assigns and not sets and not unsets
+        if not (interactive or sys.stdin.isatty()):
+            raise click.ClickException("not written: pass --yes to confirm non-interactively")
+        if not click.confirm("Write these changes?", default=False):
+            click.echo("not written")
+            return
+    acf.write(plan)
+    click.echo("written: " + ", ".join(str(c.path.relative_to(root)) for c in plan.changes))
