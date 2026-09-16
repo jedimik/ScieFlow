@@ -119,6 +119,44 @@ uv run scripts/dvc_sync.py pull 2026-09-segsnake-paper1-technical-reproducibilit
 uv run scripts/dvc_sync.py pull --all
 ```
 
+### 3.5 Archive Mode (single zip per workspace)
+
+Large finished runs with many small files transfer much faster as one S3
+object. Archive mode packs `workspace/<slug>` into
+`workspace/_archives/<slug>.zip` (uncompressed, Zip64) and tracks that zip
+instead of the directory.
+
+**Trade-off.** DVC deduplicates per file. An archive is one blob, so changing
+any file re-uploads the whole run. Use archive mode for finished runs, not
+runs you are still iterating on.
+
+**Opt in** with a flag on the first push, or in the run's config:
+```bash
+uv run scripts/dvc_sync.py push 2026-09-job1-posthoc-wta --archive
+```
+```yaml
+# workspace/<slug>/config.yml
+archive: true
+```
+After the first archive push, the pointer `workspace/_archives/<slug>.zip.dvc`
+decides the mode on its own; later `push` and `pull` need no flag.
+
+**Push** checks free disk (the workspace size + 5%), builds the zip, uploads it
+with `dvc add --to-remote` (no local cache copy), deletes the local zip
+(`--keep-zip` keeps it), and replaces any old `workspace/<slug>.dvc` pointer
+with `dvc remove`. Old per-file data in S3 is left untouched. The command
+prints the `git add -A …` line to run; it never commits.
+
+**Pull** downloads the zip, verifies it, extracts it into `workspace/<slug>`,
+and keeps the zip, hardlinked to its DVC cache object so it takes no extra
+disk. If `workspace/<slug>` already has content, pull refuses; rerun with
+`--force` to replace it.
+
+**Back to directory mode:** `push <slug> --no-archive`.
+
+**Limits.** Building an archive needs free disk equal to the workspace size.
+Symlinks inside a workspace are refused, not followed.
+
 ---
 
 ## 4. Cache & Ignore Policies
