@@ -45,3 +45,7 @@ CLAUDE.md
 README.md
 pyproject.toml
 uv.lock
+
+# Symlinks to external project checkouts (1.4T); never hash their targets
+/workspace/neuroSnake/SegSnake
+/workspace/neuroSnake/SoftwareX_SegSnake
