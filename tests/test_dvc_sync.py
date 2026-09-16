@@ -192,3 +192,127 @@ def test_workspace_summary_three_states(repo):
     assert "[TRACKED in DVC]" in lines[1]
     assert "[LOCAL ONLY - NOT TRACKED]" in lines[2]
     assert "[ARCHIVE] zip: present" in lines[3]
+
+
+def test_push_archive_uploads_removes_zip_and_old_pointer(repo, calls, capsys):
+    root, ws = repo
+    make_ws(ws, "run-01")
+    (ws / "run-01.dvc").write_text("outs: []\n")
+
+    rc = dvc_sync.cmd_push(["run-01"], root, ws, archive_flag=True)
+
+    assert rc == 0
+    assert calls == [
+        ["dvc", "add", "--to-remote", "workspace/_archives/run-01.zip"],
+        ["dvc", "remove", "workspace/run-01.dvc"],
+    ]
+    assert not archive.archive_path(ws, "run-01").exists()
+    out = capsys.readouterr().out
+    assert "git add -A workspace/_archives workspace/run-01.dvc\n" in out
+
+
+def test_push_archive_keep_zip_and_remote(repo, calls):
+    root, ws = repo
+    make_ws(ws, "run-01")
+
+    rc = dvc_sync.cmd_push(["run-01"], root, ws, archive_flag=True, keep_zip=True, remote="alt")
+
+    assert rc == 0
+    assert calls == [["dvc", "add", "--to-remote", "-r", "alt", "workspace/_archives/run-01.zip"]]
+    assert archive.verify_zip(archive.archive_path(ws, "run-01")) > 0
+
+
+def test_push_archive_upload_failure_keeps_zip(repo, monkeypatch):
+    root, ws = repo
+    make_ws(ws, "run-01")
+    monkeypatch.setattr(dvc_sync, "run_cmd", lambda cmd, cwd: 3)
+
+    assert dvc_sync.cmd_push(["run-01"], root, ws, archive_flag=True) == 3
+    assert archive.archive_path(ws, "run-01").exists()
+
+
+def test_push_archive_disk_preflight_refuses(repo, calls, monkeypatch, capsys):
+    root, ws = repo
+    make_ws(ws, "run-01")
+    monkeypatch.setattr(archive, "workspace_size", lambda _src: 254 * 1024**3)
+    monkeypatch.setattr(archive.shutil, "disk_usage", lambda _p: SimpleNamespace(free=100 * 1024**3))
+
+    assert dvc_sync.cmd_push(["run-01"], root, ws, archive_flag=True) == 1
+    assert calls == []
+    assert "needs 266.7G, 100.0G free" in capsys.readouterr().out
+
+
+def test_push_archive_skips_pointer_only_slug(repo, calls):
+    root, ws = repo
+    add_pointer(ws, "run-00-archived")
+    assert dvc_sync.cmd_push(["run-00-archived"], root, ws) == 0
+    assert calls == []
+
+
+def test_push_mixed_batch_keeps_directory_argv(repo, calls):
+    root, ws = repo
+    make_ws(ws, "run-01", {"archive": True})
+    make_ws(ws, "run-02")
+    (ws / "run-02.dvc").write_text("outs: []\n")
+
+    assert dvc_sync.cmd_push(["run-01", "run-02"], root, ws) == 0
+    assert calls == [
+        ["dvc", "add", "--to-remote", "workspace/_archives/run-01.zip"],
+        ["dvc", "push", "workspace/run-02.dvc"],
+    ]
+
+
+def test_pull_archive_extracts_and_keeps_zip(repo, monkeypatch, capsys):
+    root, ws = repo
+    source = make_ws(root / "elsewhere", "run-01")
+    zip_path = archive.archive_path(ws, "run-01")
+    add_pointer(ws, "run-01")
+    recorded = []
+
+    def fake_pull(cmd, cwd):  # dvc pull materializes the zip
+        recorded.append(cmd)
+        archive.build_zip(source, zip_path)
+        return 0
+
+    monkeypatch.setattr(dvc_sync, "run_cmd", fake_pull)
+
+    assert dvc_sync.cmd_pull(["run-01"], root, ws) == 0
+    assert recorded == [["dvc", "pull", "workspace/_archives/run-01.zip.dvc"]]
+    assert (ws / "run-01" / "logs" / "agent.log").read_text() == "transcript\n"
+    assert zip_path.exists()
+    assert "could not hardlink" in capsys.readouterr().out  # no cache object in tmp repo
+
+
+def test_pull_archive_refuses_non_empty_dir_without_force(repo, monkeypatch):
+    root, ws = repo
+    source = make_ws(root / "elsewhere", "run-01")
+    make_ws(ws, "run-01")
+    (ws / "run-01" / "local-only.txt").write_text("keep me")
+    add_pointer(ws, "run-01")
+    monkeypatch.setattr(
+        dvc_sync, "run_cmd",
+        lambda cmd, cwd: archive.build_zip(source, archive.archive_path(ws, "run-01")) or 0,
+    )
+
+    assert dvc_sync.cmd_pull(["run-01"], root, ws) == 1
+    assert (ws / "run-01" / "local-only.txt").exists()
+    assert dvc_sync.cmd_pull(["run-01"], root, ws, force=True) == 0
+    assert not (ws / "run-01" / "local-only.txt").exists()
+
+
+def test_pull_directory_argv_unchanged(repo, calls):
+    root, ws = repo
+    (ws / "run-02.dvc").write_text("outs: []\n")
+    assert dvc_sync.cmd_pull(["run-02"], root, ws) == 0
+    assert calls == [["dvc", "pull", "workspace/run-02.dvc"]]
+
+
+def test_parser_archive_flags():
+    parser = dvc_sync.build_parser(Path(".env"))
+    assert parser.parse_args(["push", "run-01"]).archive is None
+    assert parser.parse_args(["push", "run-01", "--archive"]).archive is True
+    assert parser.parse_args(["push", "run-01", "--no-archive"]).archive is False
+    with pytest.raises(SystemExit):
+        parser.parse_args(["push", "run-01", "--archive", "--no-archive"])
+    pulled = parser.parse_args(["pull", "--all", "--force", "--remote", "alt"])
+    assert (pulled.force, pulled.remote) == (True, "alt")

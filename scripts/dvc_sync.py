@@ -6,10 +6,13 @@ Manages data tracking and S3 sync for:
 
 Supports auto-loading credentials and remote settings from .env.
 
+Archive mode (opt-in per workspace, see docs/DVC_STORAGE.md) packs a run
+into workspace/_archives/<slug>.zip before push and unpacks it after pull.
+
 Usage:
     uv run scripts/dvc_sync.py track [SLUG ...] [--all]
-    uv run scripts/dvc_sync.py push [SLUG ...] [--all]
-    uv run scripts/dvc_sync.py pull [SLUG ...] [--all]
+    uv run scripts/dvc_sync.py push [SLUG ...] [--all] [--archive | --no-archive] [--keep-zip] [--remote NAME]
+    uv run scripts/dvc_sync.py pull [SLUG ...] [--all] [--force] [--remote NAME]
     uv run scripts/dvc_sync.py status
 """
 
@@ -128,7 +131,91 @@ def use_archive(
     return config.load_run_config(ws_dir, root).get("archive") is True
 
 
-def cmd_push(slugs: list[str], root: Path, workspace_root: Path) -> int:
+def _remote_args(remote: str | None) -> list[str]:
+    return ["-r", remote] if remote else []
+
+
+def push_archive(
+    slug: str,
+    root: Path,
+    workspace_root: Path,
+    *,
+    keep_zip: bool = False,
+    remote: str | None = None,
+) -> int:
+    ws_dir = workspace_root / slug
+    if not ws_dir.is_dir():
+        print(f"Skipping {slug}: directory {ws_dir} does not exist.")
+        return 0
+    zip_path = archive.archive_path(workspace_root, slug)
+    rel_zip = str(zip_path.relative_to(root))
+    try:
+        archive.ensure_space(ws_dir, zip_path.parent)
+        print(f"Archiving workspace/{slug} -> {rel_zip} ...")
+        archive.build_zip(ws_dir, zip_path)
+    except archive.ArchiveError as exc:
+        print(f"Error: {slug}: {exc}")
+        return 1
+
+    rc = run_cmd(["dvc", "add", "--to-remote", *_remote_args(remote), rel_zip], cwd=root)
+    if rc != 0:
+        print(f"Error: upload of {slug} failed; archive kept at {rel_zip}")
+        return rc
+    if keep_zip:
+        print(f"Kept local archive {rel_zip}")
+    else:
+        zip_path.unlink()
+        print(f"Removed local archive {rel_zip}")
+
+    # `git add -A <path>` also stages deletions; list only paths git can resolve.
+    to_stage = [str(zip_path.parent.relative_to(root))]
+    old_pointer = workspace_root / f"{slug}.dvc"
+    if old_pointer.exists():
+        rel_old = str(old_pointer.relative_to(root))
+        gitignore = workspace_root / ".gitignore"
+        had_gitignore = gitignore.exists()
+        rc = run_cmd(["dvc", "remove", rel_old], cwd=root)
+        if rc != 0:
+            return rc
+        to_stage.append(rel_old)
+        if had_gitignore:
+            to_stage.append(str(gitignore.relative_to(root)))
+    print(f"Next: git add -A {' '.join(to_stage)}")
+    print(f'      git commit -m "chore(dvc): archive workspace {slug}"')
+    return 0
+
+
+def pull_archive(
+    slug: str,
+    root: Path,
+    workspace_root: Path,
+    *,
+    force: bool = False,
+    remote: str | None = None,
+) -> int:
+    zip_path = archive.archive_path(workspace_root, slug)
+    pointer = archive.pointer_path(workspace_root, slug)
+    rc = run_cmd(["dvc", "pull", *_remote_args(remote), str(pointer.relative_to(root))], cwd=root)
+    if rc != 0:
+        return rc
+    try:
+        count = archive.verify_zip(zip_path)
+        archive.extract_zip(zip_path, workspace_root / slug, force=force)
+    except archive.ArchiveError as exc:
+        print(f"Error: {slug}: {exc}")
+        return 1
+    rel_zip = zip_path.relative_to(root)
+    if archive.link_to_cache(zip_path, pointer, root / ".dvc" / "cache"):
+        print(f"Kept {rel_zip} (hardlinked to DVC cache)")
+    else:
+        print(f"Kept {rel_zip} (copy; could not hardlink to DVC cache)")
+    print(f"Extracted {count} entries into workspace/{slug}")
+    return 0
+
+
+def _push_directories(
+    slugs: list[str], root: Path, workspace_root: Path, remote: str | None = None
+) -> int:
     targets = []
     for slug in slugs:
         dvc_file = workspace_root / f"{slug}.dvc"
@@ -148,10 +235,34 @@ def cmd_push(slugs: list[str], root: Path, workspace_root: Path) -> int:
         print("No DVC targets found to push.")
         return 0
 
-    return run_cmd(["dvc", "push", *targets], cwd=root)
+    return run_cmd(["dvc", "push", *_remote_args(remote), *targets], cwd=root)
 
 
-def cmd_pull(slugs: list[str], root: Path, workspace_root: Path) -> int:
+def cmd_push(
+    slugs: list[str],
+    root: Path,
+    workspace_root: Path,
+    *,
+    archive_flag: bool | None = None,
+    keep_zip: bool = False,
+    remote: str | None = None,
+) -> int:
+    archived = [s for s in slugs
+                if use_archive(s, root, workspace_root, command="push", archive_flag=archive_flag)]
+    directories = [s for s in slugs if s not in archived]
+    exit_code = 0
+    for slug in archived:
+        rc = push_archive(slug, root, workspace_root, keep_zip=keep_zip, remote=remote)
+        exit_code = exit_code or rc
+    if directories or not archived:
+        rc = _push_directories(directories, root, workspace_root, remote)
+        exit_code = exit_code or rc
+    return exit_code
+
+
+def _pull_directories(
+    slugs: list[str], root: Path, workspace_root: Path, remote: str | None = None
+) -> int:
     targets = []
     for slug in slugs:
         dvc_file = workspace_root / f"{slug}.dvc"
@@ -165,7 +276,27 @@ def cmd_pull(slugs: list[str], root: Path, workspace_root: Path) -> int:
         print("No DVC targets found to pull.")
         return 0
 
-    return run_cmd(["dvc", "pull", *targets], cwd=root)
+    return run_cmd(["dvc", "pull", *_remote_args(remote), *targets], cwd=root)
+
+
+def cmd_pull(
+    slugs: list[str],
+    root: Path,
+    workspace_root: Path,
+    *,
+    force: bool = False,
+    remote: str | None = None,
+) -> int:
+    archived = [s for s in slugs if use_archive(s, root, workspace_root, command="pull")]
+    directories = [s for s in slugs if s not in archived]
+    exit_code = 0
+    for slug in archived:
+        rc = pull_archive(slug, root, workspace_root, force=force, remote=remote)
+        exit_code = exit_code or rc
+    if directories or not archived:
+        rc = _pull_directories(directories, root, workspace_root, remote)
+        exit_code = exit_code or rc
+    return exit_code
 
 
 def cmd_status(root: Path, workspace_root: Path) -> int:
@@ -194,11 +325,7 @@ def workspace_summary(workspace_root: Path) -> list[str]:
     return lines
 
 
-def main() -> None:
-    root = config.repo_root()
-    workspace_root = root / "workspace"
-    default_env_path = root / ".env"
-
+def build_parser(default_env_path: Path) -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="ScieFlow DVC Workspace Sync Helper")
     ap.add_argument("--env-file", type=Path, default=default_env_path, help="Path to .env file")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -212,16 +339,33 @@ def main() -> None:
     p_push = sub.add_parser("push", help="Push tracked workspace(s) to remote storage")
     p_push.add_argument("slugs", nargs="*", help="Workspace slug(s)")
     p_push.add_argument("--all", action="store_true", help="Push all workspaces")
+    mode = p_push.add_mutually_exclusive_group()
+    mode.add_argument("--archive", dest="archive", action="store_true",
+                      help="Push as a single zip (archive mode)")
+    mode.add_argument("--no-archive", dest="archive", action="store_false",
+                      help="Force directory mode, even for archived workspaces")
+    p_push.set_defaults(archive=None)
+    p_push.add_argument("--keep-zip", action="store_true",
+                        help="Keep the local zip after an archive-mode upload")
+    p_push.add_argument("--remote", help="DVC remote name (default: core.remote)")
 
     # pull
     p_pull = sub.add_parser("pull", help="Pull workspace data from remote storage")
     p_pull.add_argument("slugs", nargs="*", help="Workspace slug(s)")
     p_pull.add_argument("--all", action="store_true", help="Pull all workspaces")
+    p_pull.add_argument("--force", action="store_true",
+                        help="Replace a non-empty workspace directory when extracting an archive")
+    p_pull.add_argument("--remote", help="DVC remote name (default: core.remote)")
 
     # status
     sub.add_parser("status", help="Show DVC and workspace tracking status")
+    return ap
 
-    args = ap.parse_args()
+
+def main() -> None:
+    root = config.repo_root()
+    workspace_root = root / "workspace"
+    args = build_parser(root / ".env").parse_args()
 
     # Automatically load environment variables into execution environment
     if args.env_file.exists():
@@ -235,9 +379,10 @@ def main() -> None:
     if args.command == "track":
         sys.exit(cmd_track(slugs, root, workspace_root))
     elif args.command == "push":
-        sys.exit(cmd_push(slugs, root, workspace_root))
+        sys.exit(cmd_push(slugs, root, workspace_root, archive_flag=args.archive,
+                          keep_zip=args.keep_zip, remote=args.remote))
     elif args.command == "pull":
-        sys.exit(cmd_pull(slugs, root, workspace_root))
+        sys.exit(cmd_pull(slugs, root, workspace_root, force=args.force, remote=args.remote))
 
 
 if __name__ == "__main__":
