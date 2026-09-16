@@ -93,17 +93,36 @@ def _wizard_ops(root, slug, target) -> list:
     ops: list = []
     registry = ac._load_yaml(root / "config" / "agents.yml").get("agents") or {}
 
+    def plan(candidate) -> None:
+        if target == "workspace":
+            acf.plan_workspace(root, slug, candidate)
+        else:
+            acf.plan_defaults(root, candidate)
+
     def attempt(op) -> None:
+        new = [op]
         try:
-            if target == "workspace":
-                acf.plan_workspace(root, slug, ops + [op])
-            else:
-                acf.plan_defaults(root, ops + [op])
+            plan(ops + new)
         except acf.ConfigureError as exc:
-            click.echo(f"  not applied: {exc}")
-            return
-        ops.append(op)
-        click.echo(f"  queued: {op.kind} {op.key}" + ("" if op.value is None else f" = {op.value}"))
+            if not (op.kind == "assign" and "primary-only unless the role is promoted" in str(exc)):
+                click.echo(f"  not applied: {exc}")
+                return
+            click.echo(f"  {op.key} is primary-only and the choice includes a support-tier agent.")
+            if not click.confirm(
+                f"  Let it act as primary for {op.key} only (explicit exception)?", default=False
+            ):
+                click.echo("  not applied")
+                return
+            new = [acf.Op("promote", op.key), op]
+            try:
+                plan(ops + new)
+            except acf.ConfigureError as exc2:
+                click.echo(f"  not applied: {exc2}")
+                return
+        ops.extend(new)
+        for queued in new:
+            click.echo(f"  queued: {queued.kind} {queued.key}"
+                       + ("" if queued.value is None else f" = {queued.value}"))
 
     while True:
         eff = ac.resolve(root, slug if target == "workspace" else None)
@@ -116,7 +135,8 @@ def _wizard_ops(root, slug, target) -> list:
             enabled = [n for n, e in registry.items() if e.get("enabled")]
             current = eff.value(role)
             click.echo(f"  {spec.help}; enabled agents: {', '.join(enabled)}"
-                       + ("; support agents allowed alongside a primary" if spec.support_ok else "; primary tier only"))
+                       + ("; support agents allowed alongside a primary" if spec.support_ok
+                          else "; primary tier (a support agent needs an explicit exception)"))
             if spec.many:
                 shown = ",".join(current) if isinstance(current, list) else (current or "")
                 raw = click.prompt("  Agents (comma-separated)", default=shown)
@@ -196,10 +216,14 @@ def _news_wizard_ops(root) -> list:
               help="Assign agent(s) to a role (repeatable).")
 @click.option("--set", "sets", multiple=True, metavar="AGENT.FIELD=VALUE",
               help="Set model, reasoning, timeout_min, cmd, stdin_cmd or enabled (repeatable).")
+@click.option("--promote", "promotes", multiple=True, metavar="ROLE",
+              help="Let a support-tier agent act as primary for this role only (explicit exception).")
+@click.option("--demote", "demotes", multiple=True, metavar="ROLE",
+              help="Remove a role's support-as-primary exception.")
 @click.option("--unset", "unsets", multiple=True, metavar="KEY",
               help="Remove a workspace override (ROLE or AGENT.FIELD), or an optional default field.")
 @click.option("--yes", is_flag=True, help="Write without asking for confirmation.")
-def configure(slug, news, assigns, sets, unsets, yes):
+def configure(slug, news, assigns, sets, promotes, demotes, unsets, yes):
     """Change agent configuration: the defaults, one workspace, or the news module.
 
     Without change options, asks interactive questions. With them (as a
@@ -216,6 +240,8 @@ def configure(slug, news, assigns, sets, unsets, yes):
     try:
         ops = ([acf.parse_assign(a) for a in assigns]
                + [acf.parse_set(s, news=news) for s in sets]
+               + [acf.parse_role_exception("promote", r) for r in promotes]
+               + [acf.parse_role_exception("demote", r) for r in demotes]
                + [acf.parse_unset(u) for u in unsets])
         if ops:
             target = "news" if news else "workspace" if slug else "default"
@@ -249,7 +275,7 @@ def configure(slug, news, assigns, sets, unsets, yes):
         return
     _print_plan(plan, root)
     if not yes:
-        interactive = not assigns and not sets and not unsets
+        interactive = not (assigns or sets or unsets or promotes or demotes)
         if not (interactive or sys.stdin.isatty()):
             raise click.ClickException("not written: pass --yes to confirm non-interactively")
         if not click.confirm("Write these changes?", default=False):

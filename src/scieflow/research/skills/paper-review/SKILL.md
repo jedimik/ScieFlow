@@ -24,7 +24,8 @@ copy is).
    [--assign research.journal-profile=...] --yes`.
 3. Read `workspace/<slug>/config.yml`. Relevant keys and defaults:
    - `research.reviewer` / `research.submitter` (from `scieflow agent show
-     --workspace <slug> --json`) — both **primary tier** (AGENTS.md rule 9)
+     --workspace <slug> --json`) — both **primary tier** unless the user
+     promoted the role (`support_as_primary`, AGENTS.md rule 9)
      and always different agents (never grade your own edits); `configure`
      refuses otherwise.
    - `agent_overrides:` — per-agent model/reasoning/cmd from the gate

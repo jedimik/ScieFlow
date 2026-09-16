@@ -119,9 +119,11 @@ manuscript, reviews, and evidence packages) to an external model provider.
    agents only**. Support agents are allowed only for: the
    literature-search fan-out; web-search tasks (e.g. journal profiling),
    and never alone there — always paired with at least one primary agent
-   whose output cross-checks it; and long-document condensation. A
-   workspace `config.yml` may narrow the run set but never promotes a
-   support agent into a primary-only role.
+   whose output cross-checks it; and long-document condensation. The one
+   exception is explicit and per role: when the user asks for it,
+   `scieflow agent configure --workspace <slug> --promote <role>` lets a
+   support agent act as primary for that role only (root AGENTS.md rule
+   10). Never promote on your own initiative.
 
 ## Workflows
 

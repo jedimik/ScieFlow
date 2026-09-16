@@ -92,7 +92,7 @@ def test_legacy_role_key_forces_an_explicit_assignment(repo, write_ws):
 
 
 @pytest.mark.parametrize("args, fragment", [
-    (["--assign", "research.reviewer=agy"], "primary-only"),
+    (["--assign", "research.reviewer=agy"], "--promote research.reviewer"),
     (["--assign", "research.search=agy"], "paired with a primary"),
     (["--assign", "loop.bogus=claude"], "unknown role"),
     (["--set", "codex.enabled=false"], "enabled is global"),
@@ -182,11 +182,12 @@ def test_wizard_assigns_a_role_in_a_workspace(repo):
                                "agent_overrides": {"codex": {"reasoning": "high"}}}
 
 
-def test_wizard_rejects_invalid_choice_and_can_decline(repo):
-    answers = "\n".join(["roles", "research.reviewer", "agy", "done", "n"]) + "\n"
+def test_wizard_can_decline_a_support_agent_exception(repo):
+    answers = "\n".join(["roles", "research.reviewer", "agy", "n", "done"]) + "\n"
     result = CliRunner().invoke(agent, ["configure", "--workspace", "run-1"], input=answers)
     assert result.exit_code == 0, result.output
-    assert "not applied" in result.output and "primary-only" in result.output
+    assert "primary-only and the choice includes a support-tier agent" in result.output
+    assert "not applied" in result.output
     assert "nothing to change" in result.output
     assert not (repo / "workspace" / "run-1" / "config.yml").exists()
 
@@ -295,3 +296,82 @@ def test_news_and_workspace_are_mutually_exclusive(news_repo):
     result = configure("--news", "--workspace", "run-1", "--set", "model=x", "--yes")
     assert result.exit_code != 0
     assert "mutually exclusive" in result.output
+
+
+def test_promote_lets_agy_act_as_primary_for_that_role_only(repo):
+    result = configure("--workspace", "run-1", "--assign", "research.reviewer=agy",
+                       "--promote", "research.reviewer", "--yes")
+    assert result.exit_code == 0, result.output
+    assert "acts as a primary agent here" in result.output
+    assert ws_config(repo) == {"assignments": {"research.reviewer": "agy"},
+                               "support_as_primary": ["research.reviewer"]}
+    eff = ac.resolve(repo, "run-1")
+    assert eff.problems == []
+    assert eff.support_as_primary == {"research.reviewer": "workspace"}
+    # the exception does not leak into other primary-only roles
+    result = configure("--workspace", "run-1", "--assign", "research.outline=agy", "--yes")
+    assert result.exit_code != 0 and "--promote research.outline" in result.output
+
+
+def test_promoted_support_agent_satisfies_pairing_in_support_roles(repo):
+    result = configure("--workspace", "run-1", "--assign", "research.search=agy", "--yes")
+    assert result.exit_code != 0 and "paired with a primary" in result.output
+    result = configure("--workspace", "run-1", "--assign", "research.search=agy",
+                       "--promote", "research.search", "--yes")
+    assert result.exit_code == 0, result.output
+
+
+def test_demote_removes_the_exception_and_revalidates(repo):
+    configure("--workspace", "run-1", "--assign", "research.reviewer=agy",
+              "--promote", "research.reviewer", "--yes")
+    result = configure("--workspace", "run-1", "--demote", "research.reviewer", "--yes")
+    assert result.exit_code != 0 and "primary-only" in result.output
+    result = configure("--workspace", "run-1", "--demote", "research.reviewer",
+                       "--assign", "research.reviewer=codex", "--yes")
+    assert result.exit_code == 0, result.output
+    assert ws_config(repo) == {}
+
+
+def test_default_exception_is_inherited_and_only_demoted_in_the_defaults(repo):
+    result = configure("--promote", "research.consistency",
+                       "--assign", "research.consistency=agy", "--yes")
+    assert result.exit_code == 0, result.output
+    defaults = yaml.safe_load((repo / "config" / "defaults.yml").read_text())
+    assert defaults["support_as_primary"] == ["research.consistency"]
+
+    eff = ac.resolve(repo, "run-1")
+    assert eff.support_as_primary == {"research.consistency": "default"}
+    # promoting again in a workspace stores nothing
+    result = configure("--workspace", "run-1", "--promote", "research.consistency", "--yes")
+    assert result.exit_code == 0 and "nothing to write" in result.output
+    result = configure("--workspace", "run-1", "--demote", "research.consistency", "--yes")
+    assert result.exit_code != 0 and "demote it there" in result.output
+
+
+def test_unused_exception_warns_and_unknown_role_is_a_problem(repo, write_ws):
+    write_ws(repo, {"support_as_primary": ["research.outline"]})
+    eff = ac.resolve(repo, "run-1")
+    assert eff.problems == []
+    assert any("exception is unused" in w for w in eff.warnings)
+    write_ws(repo, {"support_as_primary": ["loop.bogus"]})
+    assert any("unknown role 'loop.bogus'" in p for p in ac.resolve(repo, "run-1").problems)
+
+
+def test_wizard_accepts_a_support_agent_exception(repo):
+    answers = "\n".join(["roles", "research.reviewer", "agy", "y", "done", "y"]) + "\n"
+    result = CliRunner().invoke(agent, ["configure", "--workspace", "run-1"], input=answers)
+    assert result.exit_code == 0, result.output
+    assert "queued: promote research.reviewer" in result.output
+    assert ws_config(repo)["support_as_primary"] == ["research.reviewer"]
+
+
+def test_show_json_lists_exceptions(repo, write_ws):
+    import json
+
+    write_ws(repo, {"assignments": {"research.reviewer": "agy"},
+                    "support_as_primary": ["research.reviewer"]})
+    result = CliRunner().invoke(agent, ["show", "--workspace", "run-1", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["support_as_primary"] == {"research.reviewer": "workspace"}
+    text = CliRunner().invoke(agent, ["show", "--workspace", "run-1"]).output
+    assert "[support as primary: workspace]" in text

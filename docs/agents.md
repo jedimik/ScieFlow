@@ -13,7 +13,7 @@ configured in layers; each layer only states what differs from the one below.
 
 ## Roles
 
-| Role | Takes | Support tier allowed |
+| Role | Takes | Support tier allowed (without an exception) |
 |---|---|---|
 | `loop.experiment` | one agent | no |
 | `loop.literature` | one agent | no |
@@ -28,6 +28,35 @@ configured in layers; each layer only states what differs from the one below.
 | `research.outline` | one agent | no |
 | `research.draft-authors` | list | no |
 | `research.consistency` | one agent | no |
+
+### Support agents as primary, per role
+
+agy is a support-tier agent by default. You can still let it do a
+primary-only role — or stand in for the primary partner in a support role —
+for one role at a time:
+
+```bash
+# this run: agy reviews the manuscript
+uv run scieflow agent configure --workspace <slug> \
+    --assign research.reviewer=agy --promote research.reviewer --yes
+
+# every run: agy does the consistency pass
+uv run scieflow agent configure --assign research.consistency=agy \
+    --promote research.consistency --yes
+
+# remove the exception again
+uv run scieflow agent configure --workspace <slug> --demote research.reviewer \
+    --assign research.reviewer=codex --yes
+```
+
+The exception is stored as `support_as_primary: [role, …]` in
+`config/defaults.yml` or the run's `config.yml`; run exceptions add to the
+default ones, and one inherited from the defaults can only be removed there.
+It covers that role only: agy stays support-tier everywhere else. `show`
+marks promoted roles, warns while the exception is in use, and warns about an
+exception whose role has no support agent assigned. Coordinator agents never
+promote a role unless you ask for it (AGENTS.md rules 10 and 13). The
+interactive wizard asks before adding the exception.
 
 ## See what is in effect
 

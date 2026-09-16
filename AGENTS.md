@@ -57,8 +57,12 @@ when to stop.
     well-scoped tasks: literature-search fan-out, long-document
     condensation, and web-search auxiliaries — never alone for web
     search; always paired with a primary agent that cross-checks the
-    output. A run config may narrow the agent set but never promotes a
-    support agent into a primary-only role.
+    output. **Exception, per role and only on the user's word:** a role
+    listed in `support_as_primary` (set with `scieflow agent configure
+    [--workspace <slug>] --promote <role>`) may be staffed by a support
+    agent acting as primary for that role alone; its other roles keep the
+    support rules. Never propose or apply a promotion on your own
+    initiative — ask, and record the user's reason in the run's `log.md`.
 11. Remote execution (metacentrum) goes ONLY through
     `uv run scripts/remote/remote.py` per `skills/remote-exec/SKILL.md` —
     never raw `ssh`/`scp`. `config/remotes.yml` (user-owned,
@@ -93,7 +97,8 @@ when to stop.
     --assign ROLE=AGENT --set AGENT.FIELD=VALUE --yes` — never hand-edit
     agent YAML. Change the defaults only when the user says so; a run-specific
     choice goes to `--workspace`. A refusal from `configure` (tier rule 10,
-    disabled or unknown agent) is a boundary, not something to work around.
+    disabled or unknown agent) is a boundary: never add `--promote` to get
+    past it unless the user asked for that exception.
 
 ## Skills (read the relevant one before acting)
 

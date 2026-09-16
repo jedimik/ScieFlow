@@ -9,6 +9,10 @@ Three layers, later ones win and only hold differences:
 3. ``workspace/<slug>/config.yml`` — ``assignments:`` and ``agent_overrides:``
    for one run.
 
+``support_as_primary:`` (a list of roles, in the defaults or a run) is the
+explicit, per-role exception that lets a support-tier agent act as a primary
+agent for that role only. Run exceptions add to the default ones.
+
 `resolve` merges them and records where every value came from; `validate`
 enforces the catalogue and tier routing (root AGENTS.md rule 10).
 """
@@ -75,6 +79,7 @@ class Effective:
     tiers: dict[str, str]
     menus: dict[str, dict]
     assignments: dict[str, Setting]
+    support_as_primary: dict[str, str] = field(default_factory=dict)   # role -> source
     problems: list[str] = field(default_factory=list)   # block writes, exit 1
     warnings: list[str] = field(default_factory=list)   # shown, never block
 
@@ -91,6 +96,7 @@ class Effective:
                 | {"tier": {"value": self.tiers.get(name), "source": DEFAULT}}
                 for name, fields in self.agents.items()
             },
+            "support_as_primary": dict(self.support_as_primary),
             "problems": list(self.problems),
             "warnings": list(self.warnings),
         }
@@ -144,7 +150,16 @@ def resolve_data(registry: dict, defaults: dict, workspace: dict | None = None) 
         for f, value in overrides.items():
             target[f] = Setting(value, WORKSPACE)
 
-    eff = Effective(agents=agents, tiers=tiers, menus=menus, assignments=assignments)
+    exceptions: dict[str, str] = {}
+    for doc, source in ((defaults, DEFAULT), (ws, WORKSPACE)):
+        listed = doc.get("support_as_primary") or []
+        if isinstance(listed, str):
+            listed = [listed]
+        for role in listed if isinstance(listed, list) else []:
+            exceptions.setdefault(str(role), source)
+
+    eff = Effective(agents=agents, tiers=tiers, menus=menus, assignments=assignments,
+                    support_as_primary=exceptions)
     eff.problems, eff.warnings = validate(eff)
     return eff
 
@@ -183,6 +198,7 @@ def validate(eff: Effective) -> tuple[list[str], list[str]]:
                 problems.append(f"role {role}: needs exactly one agent name")
                 continue
             names = [names]
+        promoted = role in eff.support_as_primary
         tiers_here = set()
         for name in names:
             if name not in eff.agents or name not in eff.tiers:
@@ -192,16 +208,35 @@ def validate(eff: Effective) -> tuple[list[str], list[str]]:
             if enabled is not None and enabled.value is False:
                 problems.append(f"role {role}: agent {name!r} is disabled")
             tier = eff.tiers.get(name)
+            if tier == "support" and promoted:
+                warnings.append(
+                    f"role {role}: support-tier {name!r} acts as a primary agent here "
+                    f"(explicit exception, {eff.support_as_primary[role]})"
+                )
+                tier = "primary"
             tiers_here.add(tier)
             if tier == "support" and not spec.support_ok:
                 problems.append(
                     f"role {role}: {name!r} is a support-tier agent; this role is "
-                    "primary-only (AGENTS.md rule 10)"
+                    "primary-only unless the role is promoted with --promote "
+                    f"{role} (AGENTS.md rule 10)"
                 )
         if "support" in tiers_here and spec.support_ok and "primary" not in tiers_here:
             problems.append(
                 f"role {role}: a support-tier agent must be paired with a primary "
                 "agent (AGENTS.md rule 10)"
+            )
+
+    for role, source in eff.support_as_primary.items():
+        if role not in ROLES:
+            problems.append(f"support_as_primary: unknown role {role!r}")
+            continue
+        assigned = eff.value(role)
+        names = assigned if isinstance(assigned, list) else [assigned]
+        if not any(eff.tiers.get(n) == "support" for n in names):
+            warnings.append(
+                f"support_as_primary: {role} ({source}) has no support-tier agent "
+                "assigned; the exception is unused"
             )
 
     reviewer, submitter = eff.value("research.reviewer"), eff.value("research.submitter")
@@ -256,6 +291,8 @@ def format_table(eff: Effective, title: str) -> str:
             ", ".join(setting.value) if isinstance(setting.value, list) else str(setting.value)
         )
         source = "" if setting is None else setting.source
+        if role in eff.support_as_primary:
+            source += f"  [support as primary: {eff.support_as_primary[role]}]"
         lines.append(f"  {role:<{width}}  {shown:<24}  {source}")
     lines += ["", "Agents:"]
     for name, fields in eff.agents.items():

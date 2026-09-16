@@ -25,7 +25,8 @@ You are the **coordinator**. Phases run in order; each is resumable via
    `--schema manifest` validation).
 3. Run the **run configuration gate** (AGENTS.md): present the provider
    menu, recommend an assignment for this workflow's parts — outline
-   author, the two draft authors (primary tier only, rule 9),
+   author, the two draft authors (primary tier only unless the user
+   promotes the role, rule 9),
    consistency-pass agent (and journal profiler when `journal:` is set) —
    plus model and reasoning per agent, then ask the user to confirm or
    adjust before any dispatch. Persist it with `scieflow agent configure

@@ -31,7 +31,7 @@ class ConfigureError(Exception):
 
 @dataclass(frozen=True)
 class Op:
-    kind: str       # "assign" | "set" | "unset"
+    kind: str       # "assign" | "set" | "unset" | "promote" | "demote"
     key: str        # role | "agent.field" | news field
     value: object = None
 
@@ -103,6 +103,25 @@ def parse_set(text: str, *, news: bool = False) -> Op:
 
 def parse_unset(text: str) -> Op:
     return Op("unset", text.strip())
+
+
+def parse_role_exception(kind: str, text: str) -> Op:
+    role = text.strip()
+    if role not in ac.ROLES:
+        raise ConfigureError(f"unknown role {role!r} (known: {', '.join(ac.ROLES)})")
+    return Op(kind, role)
+
+
+def _exceptions(doc) -> list:
+    listed = doc.get("support_as_primary")
+    return list(listed) if isinstance(listed, list) else []
+
+
+def _set_exceptions(doc, roles: list) -> None:
+    if roles:
+        doc["support_as_primary"] = _flow(roles)
+    else:
+        doc.pop("support_as_primary", None)
 
 
 # --- round-trip YAML ---------------------------------------------------------
@@ -267,7 +286,14 @@ def plan_defaults(root: Path, ops: list[Op]) -> Plan:
     registry = agents_doc.get("agents") or {}
 
     for op in ops:
-        if op.kind == "assign":
+        if op.kind in ("promote", "demote"):
+            roles = _exceptions(defaults_doc)
+            if op.kind == "promote" and op.key not in roles:
+                roles.append(op.key)
+            if op.kind == "demote":
+                roles = [r for r in roles if r != op.key]
+            _set_exceptions(defaults_doc, roles)
+        elif op.kind == "assign":
             _child(defaults_doc, "assignments")[op.key] = _flow(op.value)
         elif op.kind == "set":
             agent, field_name = _split_agent_key(op.key)
@@ -306,8 +332,22 @@ def plan_workspace(root: Path, slug: str, ops: list[Op]) -> Plan:
     legacy_roles = {role for key, role in ac.LEGACY_ROLE_KEYS.items() if key in doc}
     has_run_set = isinstance(doc.get("agents"), list)
 
+    default_exceptions = defaults.get("support_as_primary") or []
     for op in ops:
-        if op.kind == "assign":
+        if op.kind in ("promote", "demote"):
+            roles = _exceptions(doc)
+            if op.kind == "promote":
+                if op.key not in roles and op.key not in default_exceptions:
+                    roles.append(op.key)
+            elif op.key in roles:
+                roles = [r for r in roles if r != op.key]
+            elif op.key in default_exceptions:
+                raise ConfigureError(
+                    f"{op.key} is promoted in the defaults; demote it there "
+                    "(scieflow agent configure --demote ...)"
+                )
+            _set_exceptions(doc, roles)
+        elif op.kind == "assign":
             spec = ac.ROLES[op.key]
             shadowed = op.key in legacy_roles or (has_run_set and spec.many)
             if op.value == baseline.value(op.key) and not shadowed:

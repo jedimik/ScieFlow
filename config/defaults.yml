@@ -32,7 +32,9 @@ research:
 # `scieflow agent configure --workspace <slug>`, which writes only the differences
 # to workspace/<slug>/config.yml. Change the defaults with `scieflow agent configure`.
 # Support-tier agents (agy) are refused outside support roles, and there only
-# alongside a primary agent (AGENTS.md rule 10).
+# alongside a primary agent (AGENTS.md rule 10) — unless a role is listed in
+# `support_as_primary:` (here or in a run), an explicit per-role exception set
+# with `scieflow agent configure --promote <role>`.
 assignments:
   loop.experiment: claude
   loop.literature: claude
