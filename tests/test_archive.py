@@ -122,3 +122,115 @@ def test_verify_zip_rejects_truncated_file(tmp_path):
     dest.write_bytes(dest.read_bytes()[:100])
     with pytest.raises(archive.ArchiveError, match="not a readable zip"):
         archive.verify_zip(dest)
+
+
+# --- disk preflight ----------------------------------------------------------
+
+def test_ensure_space_refuses_with_both_figures(tmp_path, monkeypatch):
+    run = make_run(tmp_path)
+    monkeypatch.setattr(archive, "workspace_size", lambda _src: 254 * 1024**3)
+    monkeypatch.setattr(archive.shutil, "disk_usage", lambda _p: SimpleNamespace(free=100 * 1024**3))
+    with pytest.raises(archive.ArchiveError, match=r"needs 266\.7G, 100\.0G free"):
+        archive.ensure_space(run, tmp_path / "workspace" / "_archives")
+
+
+def test_ensure_space_passes_with_headroom(tmp_path, monkeypatch):
+    run = make_run(tmp_path)
+    monkeypatch.setattr(archive, "workspace_size", lambda _src: 10 * 1024**3)
+    monkeypatch.setattr(archive.shutil, "disk_usage", lambda _p: SimpleNamespace(free=11 * 1024**3))
+    archive.ensure_space(run, tmp_path / "does" / "not" / "exist")
+
+
+# --- extract -----------------------------------------------------------------
+
+def test_extract_zip_refuses_non_empty_dest_without_force(tmp_path):
+    run = make_run(tmp_path)
+    dest_zip = tmp_path / "run-01.zip"
+    archive.build_zip(run, dest_zip)
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "local-only.txt").write_text("keep me")
+
+    with pytest.raises(archive.ArchiveError, match="--force"):
+        archive.extract_zip(dest_zip, target)
+    assert (target / "local-only.txt").read_text() == "keep me"
+
+
+def test_extract_zip_force_replaces_dest(tmp_path):
+    run = make_run(tmp_path)
+    dest_zip = tmp_path / "run-01.zip"
+    archive.build_zip(run, dest_zip)
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "local-only.txt").write_text("stale")
+
+    archive.extract_zip(dest_zip, target, force=True)
+    assert not (target / "local-only.txt").exists()
+    assert (target / "status.yml").read_text() == "phase: done\n"
+    assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".")] == []
+
+
+def test_extract_zip_into_empty_existing_dir_needs_no_force(tmp_path):
+    run = make_run(tmp_path)
+    dest_zip = tmp_path / "run-01.zip"
+    archive.build_zip(run, dest_zip)
+    (tmp_path / "target").mkdir()
+    archive.extract_zip(dest_zip, tmp_path / "target")
+    assert (tmp_path / "target" / "status.yml").exists()
+
+
+@pytest.mark.parametrize("name", ["../evil.txt", "/abs/evil.txt", "C:evil.txt"])
+def test_extract_zip_rejects_unsafe_member_and_writes_nothing(tmp_path, name):
+    bad = tmp_path / "bad.zip"
+    with zipfile.ZipFile(bad, "w") as zf:
+        zf.writestr("ok.txt", "fine")
+        zf.writestr(name, "pwned")
+    target = tmp_path / "area" / "target"
+
+    with pytest.raises(archive.ArchiveError, match="unsafe member"):
+        archive.extract_zip(bad, target)
+    assert not target.exists()
+    assert not (tmp_path / "area" / "evil.txt").exists()
+    assert list((tmp_path / "area").iterdir()) == []
+
+
+# --- cache hardlink ----------------------------------------------------------
+
+def fake_cache(tmp_path: Path, body: bytes, md5: str = "4d3431208b9bf81bdaa193b71a99af1c"):
+    cache = tmp_path / "cache"
+    obj = cache / "files" / "md5" / md5[:2] / md5[2:]
+    obj.parent.mkdir(parents=True)
+    obj.write_bytes(body)
+    pointer = tmp_path / "run-01.zip.dvc"
+    pointer.write_text(f"outs:\n- md5: {md5}\n  size: {len(body)}\n  hash: md5\n  path: run-01.zip\n")
+    zip_path = tmp_path / "run-01.zip"
+    zip_path.write_bytes(body)
+    return cache, obj, pointer, zip_path
+
+
+def test_link_to_cache_hardlinks_zip_to_cache_object(tmp_path):
+    cache, obj, pointer, zip_path = fake_cache(tmp_path, b"archive body")
+    assert archive.link_to_cache(zip_path, pointer, cache) is True
+    assert os.path.samefile(zip_path, obj)
+    assert zip_path.read_bytes() == b"archive body"
+    assert archive.link_to_cache(zip_path, pointer, cache) is True
+
+
+def test_link_to_cache_missing_object_leaves_copy(tmp_path):
+    cache, obj, pointer, zip_path = fake_cache(tmp_path, b"archive body")
+    obj.unlink()
+    assert archive.link_to_cache(zip_path, pointer, cache) is False
+    assert zip_path.read_bytes() == b"archive body"
+
+
+def test_link_to_cache_size_mismatch_leaves_copy(tmp_path):
+    cache, obj, pointer, zip_path = fake_cache(tmp_path, b"archive body")
+    obj.write_bytes(b"something else entirely")
+    assert archive.link_to_cache(zip_path, pointer, cache) is False
+    assert not os.path.samefile(zip_path, obj)
+
+
+def test_link_to_cache_ignores_directory_hash(tmp_path):
+    cache, obj, pointer, zip_path = fake_cache(tmp_path, b"archive body")
+    pointer.write_text("outs:\n- md5: 68c1d3127031576cf055cb445c10fb32.dir\n  path: run-01\n")
+    assert archive.link_to_cache(zip_path, pointer, cache) is False
