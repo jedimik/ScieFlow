@@ -121,8 +121,30 @@ def test_discover_models_agy_parses_lines(monkeypatch):
 
 def test_discover_models_fallback_curated(monkeypatch):
     monkeypatch.setattr(agents_mod.shutil, "which", lambda name: None)
-    assert discover_models("codex") == CURATED_MODELS["codex"]
-    assert discover_models("claude") == CURATED_MODELS["claude"]
+    from scieflow.news.agents import curated_models
+
+    assert discover_models("codex") == curated_models("codex")
+    assert discover_models("claude") == curated_models("claude")
+
+
+def test_curated_models_come_from_the_shared_registry_menu():
+    from scieflow.core import config
+    from scieflow.news.agents import curated_models
+
+    registry = config.load_agents(config.repo_root())
+    assert curated_models("claude") == registry["claude"]["menu"]["models"]
+    assert curated_models("codex") == registry["codex"]["menu"]["models"]
+
+
+def test_curated_models_fall_back_without_a_registry(monkeypatch):
+    from scieflow.core import config
+    from scieflow.news.agents import curated_models
+
+    def broken_root():
+        raise FileNotFoundError("no repo")
+
+    monkeypatch.setattr(config, "repo_root", broken_root)
+    assert curated_models("codex") == CURATED_MODELS["codex"]
 
 
 def test_discover_models_unknown_agent():

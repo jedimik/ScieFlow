@@ -9,11 +9,31 @@ VALID_AGENTS = ("claude", "codex", "agy")
 
 THINKING_TOKENS = {"low": "4096", "medium": "16384", "high": "31999"}
 
+# Fallback model lists when the shared registry cannot be read. The live
+# source is each agent's `menu.models` in config/agents.yml (see curated_models).
 CURATED_MODELS: dict[str, list[str]] = {
-    "claude": ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"],
-    "codex": ["gpt-5.2-codex", "gpt-5.2"],
+    "claude": ["claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+    "codex": ["gpt-5.6-sol"],
     "agy": [],  # always discovered live via `agy models`
 }
+
+
+def curated_models(agent: str) -> list[str]:
+    """Model names for `agent` from the shared registry menu, else the fallback.
+
+    Only the model list is shared: news research keeps its own restricted
+    command lines (web tools only, no permission bypass).
+    """
+    try:
+        from scieflow.core import config
+
+        registry = config.load_agents(config.repo_root())
+    except (OSError, KeyError, TypeError, ValueError):
+        registry = {}
+    models = ((registry.get(agent) or {}).get("menu") or {}).get("models")
+    if isinstance(models, list) and models:
+        return [str(m) for m in models]
+    return list(CURATED_MODELS.get(agent, []))
 
 
 class AgentError(Exception):
@@ -102,7 +122,7 @@ def discover_models(agent: str, timeout: int = 30) -> list[str]:
     Step 1 (empirical, see report): neither `claude --help` nor
     `codex --help` / `codex exec --help` expose a model-listing subcommand
     or flag, so only `agy` supports live discovery via `agy models`. claude
-    and codex always fall back to CURATED_MODELS.
+    and codex always fall back to curated_models().
     """
     if agent not in VALID_AGENTS:
         raise AgentError(f"unknown agent: {agent}")
@@ -117,4 +137,4 @@ def discover_models(agent: str, timeout: int = 30) -> list[str]:
                     return lines
         except (subprocess.TimeoutExpired, OSError):
             pass
-    return list(CURATED_MODELS.get(agent, []))
+    return curated_models(agent)

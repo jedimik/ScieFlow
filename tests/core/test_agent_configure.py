@@ -226,3 +226,72 @@ def test_pyyaml_wrapped_file_keeps_untouched_top_level_blocks_verbatim(repo):
     assert sharing_block in after
     assert after.startswith("approval: per-campaign\nagents:\n- codex\n- claude\n")
     assert yaml.safe_load(after) == {**data, "agent_overrides": {"codex": {"timeout_min": 25}}}
+
+
+NEWS_YML = """agent: claude          # default agent: claude | codex | agy
+lookback_days: 30      # window for interests never checked before
+
+interests:
+  - name: Snakemake
+    keywords: [workflow]  # disambiguation
+"""
+
+
+@pytest.fixture
+def news_repo(repo):
+    (repo / "config" / "news.yml").write_text(NEWS_YML)
+    return repo
+
+
+def test_news_set_keeps_comments_and_groups_agent_keys(news_repo):
+    result = configure("--news", "--set", "model=claude-sonnet-5", "--set", "timeout=900", "--yes")
+    assert result.exit_code == 0, result.output
+    text = (news_repo / "config" / "news.yml").read_text()
+    assert text.startswith("agent: claude          # default agent: claude | codex | agy\n"
+                           "model: claude-sonnet-5\ntimeout: 900\n")
+    assert "keywords: [workflow]  # disambiguation" in text
+    from scieflow.news.config import load_config
+
+    cfg = load_config(news_repo / "config" / "news.yml")
+    assert (cfg.model, cfg.timeout) == ("claude-sonnet-5", 900)
+
+
+def test_news_unset_and_invalid_values(news_repo):
+    configure("--news", "--set", "reasoning=high", "--yes")
+    result = configure("--news", "--unset", "reasoning", "--yes")
+    assert result.exit_code == 0, result.output
+    assert (news_repo / "config" / "news.yml").read_text() == NEWS_YML
+
+    for args, fragment in [(["--set", "agent=gemini"], "agent must be one of"),
+                           (["--set", "reasoning=ultra"], "reasoning must be one of"),
+                           (["--set", "timeout=1.5"], "timeout must be a positive integer"),
+                           (["--set", "lookback_days=3"], "unknown"),
+                           (["--assign", "loop.experiment=codex"], "no roles")]:
+        result = configure("--news", *args, "--yes")
+        assert result.exit_code != 0, args
+        assert fragment in result.output, (args, result.output)
+    assert (news_repo / "config" / "news.yml").read_text() == NEWS_YML
+
+
+def test_news_agy_warns_about_support_tier(news_repo):
+    result = configure("--news", "--set", "agent=agy", "--yes")
+    assert result.exit_code == 0, result.output
+    assert "support-tier" in result.output
+
+
+def test_news_wizard_and_show(news_repo):
+    answers = "\n".join(["agent", "codex", "reasoning", "high", "done", "y"]) + "\n"
+    result = CliRunner().invoke(agent, ["configure", "--news"], input=answers)
+    assert result.exit_code == 0, result.output
+    shown = CliRunner().invoke(agent, ["show", "--news", "--json"])
+    assert shown.exit_code == 0, shown.output
+    import json
+
+    assert json.loads(shown.output) == {"agent": "codex", "model": None,
+                                        "reasoning": "high", "timeout": None}
+
+
+def test_news_and_workspace_are_mutually_exclusive(news_repo):
+    result = configure("--news", "--workspace", "run-1", "--set", "model=x", "--yes")
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output

@@ -352,3 +352,65 @@ def plan_workspace(root: Path, slug: str, ops: list[Op]) -> Plan:
             "run's status.yml before dispatching"
         )
     return plan
+
+
+NEWS_FIELDS = ("agent", "model", "reasoning", "timeout")
+
+
+def news_config_path(root: Path) -> Path:
+    return root / "config" / "news.yml"
+
+
+def plan_news(root: Path, ops: list[Op], config_path: Path | None = None) -> Plan:
+    """Agent settings of the news module (its own restricted adapter)."""
+    import tempfile
+
+    from scieflow.news.config import ConfigError, load_config
+
+    path = config_path or news_config_path(root)
+    if not path.exists():
+        raise ConfigureError(f"{path} does not exist; create it with `scieflow news init`")
+    before, doc, style = _load(path)
+    for op in ops:
+        if op.kind == "assign":
+            raise ConfigureError("the news module has no roles; use --set agent=<name>")
+        if op.key not in NEWS_FIELDS:
+            raise ConfigureError(f"news setting {op.key!r} unknown (settable: {', '.join(NEWS_FIELDS)})")
+        if op.kind == "set":
+            if op.key in doc or not isinstance(doc, CommentedMap):
+                doc[op.key] = op.value
+            else:
+                # keep agent settings together at the top, not after the interests
+                anchors = [k for k in NEWS_FIELDS if k in doc]
+                position = (list(doc).index(anchors[-1]) + 1) if anchors else 0
+                doc.insert(position, op.key, op.value)
+        else:
+            doc.pop(op.key, None)
+    change = _change(path, before, doc, style)
+    after = change.after if change else before
+    with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False) as handle:
+        handle.write(after)
+    try:
+        cfg = load_config(Path(handle.name))
+    except ConfigError as exc:
+        raise ConfigureError(f"refused, the news config would be invalid: {exc}") from exc
+    finally:
+        os.unlink(handle.name)
+    plan = Plan([change] if change else [])
+    if cfg.agent == "agy":
+        plan.warnings.append(
+            "agy is a support-tier agent (AGENTS.md rule 10); news research runs it "
+            "alone, so choose it only on the user's explicit request"
+        )
+    return plan
+
+
+def news_settings(root: Path, config_path: Path | None = None) -> dict:
+    path = config_path or news_config_path(root)
+    data = ac._load_yaml(path)
+    return {
+        "agent": data.get("agent", "claude"),
+        "model": data.get("model"),
+        "reasoning": data.get("reasoning"),
+        "timeout": data.get("timeout"),
+    }

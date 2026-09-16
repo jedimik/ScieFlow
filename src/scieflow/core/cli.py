@@ -28,14 +28,30 @@ def _root():
 
 @agent.command("show")
 @click.option("--workspace", "slug", help="Show the effective config of workspace/<SLUG>.")
+@click.option("--news", "news", is_flag=True, help="Show the news module's agent settings.")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
-def show(slug, as_json):
+def show(slug, news, as_json):
     """Effective role assignments and agent settings, with where each comes from."""
     import json
 
     from scieflow.core import agent_config
 
     root = _root()
+    if news and slug:
+        raise click.UsageError("--news and --workspace are mutually exclusive")
+    if news:
+        from scieflow.core import agent_configure
+
+        settings = agent_configure.news_settings(root)
+        if as_json:
+            click.echo(json.dumps(settings, indent=2))
+        else:
+            click.echo("News module (config/news.yml; restricted web-only agent adapter)")
+            shown = {"model": "(agent CLI default)", "reasoning": "(not set)",
+                     "timeout": "(per-template default)"}
+            for key, value in settings.items():
+                click.echo(f"  {key:<10} {value if value is not None else shown[key]}")
+        return
     if slug and not agent_config.workspace_dir(root, slug).is_dir():
         raise click.ClickException(f"no workspace {slug!r} under {root / 'workspace'}")
     eff = agent_config.resolve(root, slug)
@@ -129,8 +145,53 @@ def _wizard_ops(root, slug, target) -> list:
                 click.echo(f"  not applied: {exc}")
 
 
+def _news_wizard_ops(root) -> list:
+    from scieflow.core import agent_configure as acf
+
+    ops: list = []
+    while True:
+        current = acf.news_settings(root)
+        for op in ops:
+            current[op.key] = op.value if op.kind == "set" else None
+        field_name = _choose("News setting (agent / model / reasoning / timeout / done)",
+                             list(acf.NEWS_FIELDS) + ["done"], "done")
+        if field_name == "done":
+            return ops
+        if field_name == "agent":
+            op = acf.Op("set", "agent", _choose("  Agent", ["claude", "codex", "agy"], current["agent"]))
+        elif field_name == "reasoning":
+            value = _choose("  Reasoning", ["low", "medium", "high", "unset"], current["reasoning"] or "unset")
+            op = acf.Op("unset", "reasoning") if value == "unset" else acf.Op("set", "reasoning", value)
+        else:
+            if field_name == "model":
+                from scieflow.news.agents import curated_models
+
+                models = curated_models(current["agent"])
+                if models:
+                    click.echo(f"  models for {current['agent']}: {', '.join(models)}")
+            raw = click.prompt(f"  {field_name} (empty to unset)", default=str(current[field_name] or ""),
+                               show_default=bool(current[field_name]))
+            if not raw.strip():
+                op = acf.Op("unset", field_name)
+            else:
+                try:
+                    op = acf.Op("set", field_name, acf.coerce(field_name, raw.strip()))
+                except acf.ConfigureError as exc:
+                    click.echo(f"  not applied: {exc}")
+                    continue
+        try:
+            acf.plan_news(root, ops + [op])
+        except acf.ConfigureError as exc:
+            click.echo(f"  not applied: {exc}")
+            continue
+        ops.append(op)
+        click.echo(f"  queued: {op.kind} {op.key}" + ("" if op.value is None else f" = {op.value}"))
+
+
 @agent.command("configure")
 @click.option("--workspace", "slug", help="Change workspace/<SLUG> only (stores differences from the defaults).")
+@click.option("--news", "news", is_flag=True,
+              help="Change the news module's agent settings (--set agent|model|reasoning|timeout=VALUE).")
 @click.option("--assign", "assigns", multiple=True, metavar="ROLE=AGENT[,AGENT]",
               help="Assign agent(s) to a role (repeatable).")
 @click.option("--set", "sets", multiple=True, metavar="AGENT.FIELD=VALUE",
@@ -138,8 +199,8 @@ def _wizard_ops(root, slug, target) -> list:
 @click.option("--unset", "unsets", multiple=True, metavar="KEY",
               help="Remove a workspace override (ROLE or AGENT.FIELD), or an optional default field.")
 @click.option("--yes", is_flag=True, help="Write without asking for confirmation.")
-def configure(slug, assigns, sets, unsets, yes):
-    """Change agent configuration: the defaults, or one workspace.
+def configure(slug, news, assigns, sets, unsets, yes):
+    """Change agent configuration: the defaults, one workspace, or the news module.
 
     Without change options, asks interactive questions. With them (as a
     coordinator agent does after asking the user in chat), applies them
@@ -150,26 +211,36 @@ def configure(slug, assigns, sets, unsets, yes):
     from scieflow.core import agent_configure as acf
 
     root = _root()
+    if news and slug:
+        raise click.UsageError("--news and --workspace are mutually exclusive")
     try:
-        ops = ([acf.parse_assign(a) for a in assigns] + [acf.parse_set(s) for s in sets]
+        ops = ([acf.parse_assign(a) for a in assigns]
+               + [acf.parse_set(s, news=news) for s in sets]
                + [acf.parse_unset(u) for u in unsets])
         if ops:
-            target = "workspace" if slug else "default"
+            target = "news" if news else "workspace" if slug else "default"
         else:
-            if slug:
+            if news:
+                target = "news"
+            elif slug:
                 target = "workspace"
             else:
-                target = _choose("Configure (default / workspace)", ["default", "workspace"], "default")
+                target = _choose("Configure (default / workspace / news)",
+                                 ["default", "workspace", "news"], "default")
                 if target == "workspace":
                     slugs = sorted(p.name for p in (root / "workspace").iterdir() if p.is_dir())
                     slug = _choose("Workspace", slugs)
-            ops = _wizard_ops(root, slug, target)
+            ops = _news_wizard_ops(root) if target == "news" else _wizard_ops(root, slug, target)
             if not ops:
                 click.echo("nothing to change")
                 return
             yes = False
-        plan = (acf.plan_workspace(root, slug, ops) if target == "workspace"
-                else acf.plan_defaults(root, ops))
+        if target == "news":
+            plan = acf.plan_news(root, ops)
+        elif target == "workspace":
+            plan = acf.plan_workspace(root, slug, ops)
+        else:
+            plan = acf.plan_defaults(root, ops)
     except acf.ConfigureError as exc:
         raise click.ClickException(str(exc)) from exc
 

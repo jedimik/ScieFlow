@@ -53,8 +53,12 @@ pythonpath = ["scripts"]
 testpaths = ["tests"]
 addopts = "-m 'not slow and not live' --import-mode=importlib"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 # nicegui.testing user plugin: GUI tests build pages in-process, no main.py
 main_file = ""
+# main_file is only known once the nicegui plugin loads (GUI test modules)
+# (regex "." stands in for the colon, which the filter syntax reserves)
+filterwarnings = ["ignore:Unknown config option. main_file:pytest.PytestConfigWarning"]
 markers = [
     "slow: requires apptainer container builds",
     "live: invokes a real agent CLI (spends quota; run explicitly with -m live)",
