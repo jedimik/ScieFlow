@@ -12,3 +12,6 @@ config/remotes.yml
 .env
 .env.*
 !.env_template
+
+# Editor and tool backups (e.g. .dvc/config.bak while migrating)
+*.bak
