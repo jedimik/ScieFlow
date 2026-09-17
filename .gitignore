@@ -25,3 +25,5 @@ site/
 *.sif
 pipelines/*/data/
 pipelines/*/stages/*/env/
+# Editor and tool backups (e.g. .dvc/config.bak while migrating)
+*.bak
