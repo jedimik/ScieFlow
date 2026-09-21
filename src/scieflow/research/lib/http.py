@@ -1,14 +1,15 @@
 """HTTP GET with retries/backoff for scholarly APIs. Be polite: identify ourselves."""
 
-import os
 import time
 
 import requests
 
+from scieflow.core import legacy
+
 
 def _user_agent() -> str:
     ua = "ScieFlow/0.2 (https://github.com/jedimik/ScieFlow)"
-    mailto = os.environ.get("SCIEFLOW_MAILTO")
+    mailto = legacy.env("SCIEFLOW_MAILTO")  # RESEARCHX_MAILTO still honoured
     return f"{ua} mailto:{mailto}" if mailto else ua
 
 

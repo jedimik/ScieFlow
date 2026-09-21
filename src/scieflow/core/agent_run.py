@@ -18,10 +18,11 @@ from pathlib import Path
 import yaml
 
 from scieflow.core import config
+from scieflow.core import legacy
 
 # Linux caps a single argv string around 128 KiB; above this size the prompt
 # goes to the agent via stdin (using stdin_cmd when defined) instead of argv.
-PROMPT_ARGV_LIMIT = int(os.environ.get("SCIEFLOW_PROMPT_ARGV_LIMIT", "100000"))
+PROMPT_ARGV_LIMIT = int(legacy.env("SCIEFLOW_PROMPT_ARGV_LIMIT", "100000"))
 
 
 def build_argv(agent_cfg: dict, prompt: str, root: Path,

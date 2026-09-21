@@ -6,6 +6,7 @@ from pathlib import Path
 import click
 
 from scieflow.core import config as config_mod
+from scieflow.core import legacy
 
 from . import agents
 from .config import EXAMPLE_CONFIG, VALID_AGENTS, ConfigError, load_config
@@ -38,7 +39,7 @@ DB_OPT = click.option(
 def resolve_db_path(db_path: Path | None) -> Path:
     if db_path is not None:
         return db_path
-    env = os.environ.get("SCIEFLOW_NEWS_DB")
+    env = legacy.env("SCIEFLOW_NEWS_DB")  # WHATSNEW_DB still honoured
     return Path(env) if env else config_mod.repo_root() / "workspace" / "news" / "news.json"
 
 

@@ -37,6 +37,10 @@ news-gui = [
 
 [project.scripts]
 scieflow = "scieflow.cli:main"
+# Legacy names from before the module merge; they print the new command and
+# delegate (src/scieflow/core/legacy.py, docs/MIGRATION.md).
+expx = "scieflow.core.legacy:expx_main"
+whatsnew = "scieflow.core.legacy:whatsnew_main"
 
 [dependency-groups]
 dev = ["pytest>=8", "responses>=0.25", "pytest-asyncio>=0.23"]
