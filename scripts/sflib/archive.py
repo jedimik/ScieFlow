@@ -81,15 +81,21 @@ def workspace_size(src_dir: Path) -> int:
     return sum(f.stat().st_size for f in files)
 
 
-def build_zip(src_dir: Path, dest_zip: Path) -> None:
-    """Pack src_dir into dest_zip (ZIP_STORED, Zip64), atomically."""
+def build_zip(
+    src_dir: Path, dest_zip: Path, compression: int = zipfile.ZIP_STORED
+) -> None:
+    """Pack src_dir into dest_zip (Zip64, stored by default), atomically.
+
+    Workspace archives stay ZIP_STORED so DVC can dedupe them; callers packing
+    text (chat transcripts) pass ZIP_DEFLATED instead.
+    """
     src_dir, dest_zip = Path(src_dir), Path(dest_zip)
     dirs, files = _collect(src_dir)
     dest_zip.parent.mkdir(parents=True, exist_ok=True)
     partial = dest_zip.with_name(dest_zip.name + ".partial")
     try:
         with zipfile.ZipFile(
-            partial, "w", zipfile.ZIP_STORED, allowZip64=True, strict_timestamps=False
+            partial, "w", compression, allowZip64=True, strict_timestamps=False
         ) as zf:
             for d in dirs:
                 zf.write(d, d.relative_to(src_dir).as_posix() + "/")

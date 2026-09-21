@@ -9,11 +9,13 @@ claim_check: ask              # never | ask | approved — verify claims against
                               # sources (skills/claim-check/SKILL.md). 'ask' means
                               # the coordinator must ask before the first audit of a
                               # run. Only the user may set 'approved'.
-archive: false                # true = push/pull this run as a single zip
-                              # (docs/DVC_STORAGE.md, archive mode). Opt in per
-                              # run in workspace/<slug>/config.yml once the run
-                              # is finished: it trades DVC's per-file dedup for
-                              # far fewer S3 objects.
+archive: true                 # push/pull a run as a single zip
+                              # (docs/DVC_STORAGE.md, archive mode). This is the
+                              # default: per-file directory tracking turns one
+                              # run into tens of thousands of S3 objects. Set
+                              # false in workspace/<slug>/config.yml only if you
+                              # need DVC's per-file dedup for that run, and then
+                              # push it with an explicit --no-archive.
 
 # Research module workflow defaults (src/scieflow/research/AGENTS.md). A run's
 # workspace/<slug>/config.yml overrides any of these at top level.

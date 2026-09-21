@@ -95,28 +95,32 @@ uv run scripts/dvc_sync.py track --all
 This runs `dvc add workspace/<slug>`, creating `workspace/<slug>.dvc`.
 Then commit the `.dvc` file to Git:
 ```bash
-git add workspace/*.dvc .dvc/config
+git add workspace/*.dvc
 git commit -m "chore(dvc): track workspace run data"
 ```
+`.dvc/config` is gitignored: the remote URL and endpoint are machine-local, so
+they do not follow a branch into every checkout. Recreate it on a new machine
+with `dvc remote add` (see §2), and keep credentials in `.dvc/config.local`.
 
 ### 3.3 Push Data to S3
-Sync your tracked workspace files to the S3 bucket:
-```bash
-# Push a specific run
-uv run scripts/dvc_sync.py push 2026-09-segsnake-paper1-technical-reproducibility
 
-# Push all tracked runs
-uv run scripts/dvc_sync.py push --all
+**Name the runs you mean.** `push` and `pull` have no `--all`: moving hundreds
+of gigabytes should never be one flag away. `--all` remains on `track`.
+
+```bash
+uv run scripts/dvc_sync.py push 2026-09-segsnake-paper1-technical-reproducibility
 ```
+
+Runs go up as a **single zip** (archive mode, §3.5) — that is the default.
+Per-file directory tracking turns one run into tens of thousands of S3
+objects, so it is never implicit: a run that would use it is refused with a
+message telling you to pass `--archive` or, if you really want per-file
+tracking, `--no-archive`.
 
 ### 3.4 Pull Data from S3 (e.g. on another machine or fresh clone)
 On a fresh clone or another workstation:
 ```bash
-# Pull a specific run
 uv run scripts/dvc_sync.py pull 2026-09-segsnake-paper1-technical-reproducibility
-
-# Pull all tracked runs
-uv run scripts/dvc_sync.py pull --all
 ```
 
 ### 3.5 Archive Mode (single zip per workspace)
@@ -130,13 +134,14 @@ instead of the directory.
 any file re-uploads the whole run. Use archive mode for finished runs, not
 runs you are still iterating on.
 
-**Opt in** with a flag on the first push, or in the run's config:
+**This is the default** (`archive: true` in `config/defaults.yml`). Opt *out*
+per run, and then say so on every push:
 ```bash
-uv run scripts/dvc_sync.py push 2026-09-job1-posthoc-wta --archive
+uv run scripts/dvc_sync.py push 2026-09-job1-posthoc-wta --no-archive
 ```
 ```yaml
 # workspace/<slug>/config.yml
-archive: true
+archive: false   # keep DVC's per-file dedup for this run
 ```
 After the first archive push, the pointer `workspace/_archives/<slug>.zip.dvc`
 decides the mode on its own; later `push` and `pull` need no flag.
@@ -163,3 +168,11 @@ Symlinks inside a workspace are refused, not followed.
 
 - `.gitignore` ignores all raw contents inside `workspace/*`, while explicitly allowing `.dvc` files and DVC-generated ignore files.
 - `.dvcignore` ignores non-essential cache and temporary files (`__pycache__`, `.pytest_cache`, `*.pyc`, `*.tmp`, `*.sif`, `.venv`, `.superpowers`), ensuring DVC does not waste S3 bandwidth or storage on cache.
+
+
+## 5. Chat bundles (separate, optional)
+
+`scieflow chats push` / `pull` can move encrypted chat bundles through the same
+remote. It is a different thing from workspace sync: one bundle file at a time,
+never a directory, off until `remote.enabled` is set in `config/chats.yml`.
+See [chats/remote.md](chats/remote.md).

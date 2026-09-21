@@ -4,15 +4,21 @@ __pycache__/
 .pytest_cache/
 workspace/*
 !workspace/README.md
-!workspace/**/*.dvc
 !workspace/*.dvc
-!workspace/**/.gitignore
+# git never descends into an ignored directory, so `!workspace/**/*.dvc` would
+# be a no-op: every subdirectory holding pointers is re-included explicitly.
 !workspace/_archives/
 workspace/_archives/*
 !workspace/_archives/*.dvc
+!workspace/chats/
+workspace/chats/*
+!workspace/chats/*.dvc
 .superpowers/
 config/remotes.yml
 config/notebooklm.yml
+config/chats.yml
+# Machine-local DVC remote (endpoint + bucket); credentials live in config.local
+.dvc/config
 .env
 .env.*
 !.env_template

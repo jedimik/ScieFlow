@@ -6,13 +6,15 @@ Manages data tracking and S3 sync for:
 
 Supports auto-loading credentials and remote settings from .env.
 
-Archive mode (opt-in per workspace, see docs/DVC_STORAGE.md) packs a run
-into workspace/_archives/<slug>.zip before push and unpacks it after pull.
+Archive mode (the default, see docs/DVC_STORAGE.md) packs a run into
+workspace/_archives/<slug>.zip before push and unpacks it after pull, so one
+run is one remote object instead of tens of thousands. Per-file directory
+tracking still exists but must be asked for with --no-archive.
 
 Usage:
     uv run scripts/dvc_sync.py track [SLUG ...] [--all]
-    uv run scripts/dvc_sync.py push [SLUG ...] [--all] [--archive | --no-archive] [--keep-zip] [--remote NAME]
-    uv run scripts/dvc_sync.py pull [SLUG ...] [--all] [--force] [--remote NAME]
+    uv run scripts/dvc_sync.py push SLUG [SLUG ...] [--archive | --no-archive] [--keep-zip] [--remote NAME]
+    uv run scripts/dvc_sync.py pull SLUG [SLUG ...] [--force] [--remote NAME]
     uv run scripts/dvc_sync.py status
 """
 
@@ -251,6 +253,18 @@ def cmd_push(
     archived = [s for s in slugs
                 if use_archive(s, root, workspace_root, command="push", archive_flag=archive_flag)]
     directories = [s for s in slugs if s not in archived]
+    if directories and archive_flag is None:
+        # Directory mode uploads every file separately: one run can become tens
+        # of thousands of remote objects. Never fall into it by accident.
+        print(
+            "Error: directory mode is not implicit. These runs would upload "
+            "file-by-file:\n  " + "\n  ".join(directories)
+        )
+        print("Push them as a single zip (recommended):")
+        print(f"  uv run scripts/dvc_sync.py push --archive {' '.join(directories)}")
+        print("Or ask for per-file tracking explicitly:")
+        print(f"  uv run scripts/dvc_sync.py push --no-archive {' '.join(directories)}")
+        return 1
     exit_code = 0
     for slug in archived:
         rc = push_archive(slug, root, workspace_root, keep_zip=keep_zip, remote=remote)
@@ -337,9 +351,8 @@ def build_parser(default_env_path: Path) -> argparse.ArgumentParser:
     p_track.add_argument("--all", action="store_true", help="Track all workspaces")
 
     # push
-    p_push = sub.add_parser("push", help="Push tracked workspace(s) to remote storage")
-    p_push.add_argument("slugs", nargs="*", help="Workspace slug(s)")
-    p_push.add_argument("--all", action="store_true", help="Push all workspaces")
+    p_push = sub.add_parser("push", help="Push named workspace(s) to remote storage")
+    p_push.add_argument("slugs", nargs="+", help="Workspace slug(s) — name them explicitly")
     mode = p_push.add_mutually_exclusive_group()
     mode.add_argument("--archive", dest="archive", action="store_true",
                       help="Push as a single zip (archive mode)")
@@ -351,9 +364,8 @@ def build_parser(default_env_path: Path) -> argparse.ArgumentParser:
     p_push.add_argument("--remote", help="DVC remote name (default: core.remote)")
 
     # pull
-    p_pull = sub.add_parser("pull", help="Pull workspace data from remote storage")
-    p_pull.add_argument("slugs", nargs="*", help="Workspace slug(s)")
-    p_pull.add_argument("--all", action="store_true", help="Pull all workspaces")
+    p_pull = sub.add_parser("pull", help="Pull named workspace(s) from remote storage")
+    p_pull.add_argument("slugs", nargs="+", help="Workspace slug(s) — name them explicitly")
     p_pull.add_argument("--force", action="store_true",
                         help="Replace a non-empty workspace directory when extracting an archive")
     p_pull.add_argument("--remote", help="DVC remote name (default: core.remote)")
@@ -375,7 +387,9 @@ def main() -> None:
     if args.command == "status":
         sys.exit(cmd_status(root, workspace_root))
 
-    slugs = resolve_slugs(args.slugs, args.all, workspace_root)
+    # push/pull are selection-only: `--all` exists for `track` alone, because
+    # moving hundreds of gigabytes should never be one flag away.
+    slugs = resolve_slugs(args.slugs, getattr(args, "all", False), workspace_root)
 
     if args.command == "track":
         sys.exit(cmd_track(slugs, root, workspace_root))

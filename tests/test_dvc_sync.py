@@ -249,17 +249,27 @@ def test_push_archive_skips_pointer_only_slug(repo, calls):
     assert calls == []
 
 
-def test_push_mixed_batch_keeps_directory_argv(repo, calls):
+def test_push_refuses_implicit_directory_mode(repo, calls, capsys):
+    """Directory mode uploads file-by-file; it must never happen by default."""
     root, ws = repo
     make_ws(ws, "run-01", {"archive": True})
-    make_ws(ws, "run-02")
+    make_ws(ws, "run-02", {"archive": False})
     (ws / "run-02.dvc").write_text("outs: []\n")
 
-    assert dvc_sync.cmd_push(["run-01", "run-02"], root, ws) == 0
-    assert calls == [
-        ["dvc", "add", "--to-remote", "workspace/_archives/run-01.zip"],
-        ["dvc", "push", "workspace/run-02.dvc"],
-    ]
+    assert dvc_sync.cmd_push(["run-01", "run-02"], root, ws) == 1
+    out = capsys.readouterr().out
+    assert "directory mode is not implicit" in out
+    assert "run-02" in out
+    assert calls == []
+
+
+def test_push_directory_mode_when_asked_for(repo, calls):
+    root, ws = repo
+    make_ws(ws, "run-02", {"archive": False})
+    (ws / "run-02.dvc").write_text("outs: []\n")
+
+    assert dvc_sync.cmd_push(["run-02"], root, ws, archive_flag=False) == 0
+    assert calls == [["dvc", "push", "workspace/run-02.dvc"]]
 
 
 def test_pull_archive_extracts_and_keeps_zip(repo, monkeypatch, capsys):
@@ -314,5 +324,16 @@ def test_parser_archive_flags():
     assert parser.parse_args(["push", "run-01", "--no-archive"]).archive is False
     with pytest.raises(SystemExit):
         parser.parse_args(["push", "run-01", "--archive", "--no-archive"])
-    pulled = parser.parse_args(["pull", "--all", "--force", "--remote", "alt"])
+    pulled = parser.parse_args(["pull", "run-01", "--force", "--remote", "alt"])
     assert (pulled.force, pulled.remote) == (True, "alt")
+
+
+def test_push_and_pull_require_explicit_slugs():
+    """`--all` is for `track` only: moving data is never one flag away."""
+    parser = dvc_sync.build_parser(Path(".env"))
+    for command in ("push", "pull"):
+        with pytest.raises(SystemExit):
+            parser.parse_args([command])
+        with pytest.raises(SystemExit):
+            parser.parse_args([command, "--all"])
+    assert parser.parse_args(["track", "--all"]).all is True
