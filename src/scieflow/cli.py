@@ -6,11 +6,14 @@ instead of an ImportError, and `scieflow --help` always works.
 """
 
 import importlib
+import sys
 
 import click
 
 # name -> (module, attribute, optional extra that provides its dependencies, help)
 GROUPS = {
+    "menu": ("scieflow.core.menu", "menu", None,
+             "Interactive menu (also what bare `scieflow` opens)."),
     "agent": ("scieflow.core.cli", "agent", None, "Dispatch headless agents."),
     "experiment": (
         "scieflow.experiments.cli",
@@ -70,10 +73,22 @@ class LazyGroup(click.Group):
             formatter.write_dl(rows)
 
 
-@click.group(cls=LazyGroup)
+@click.group(cls=LazyGroup, invoke_without_command=True)
 @click.version_option(package_name="scieflow")
-def main():
-    """ScieFlow — agent-driven experiments and literature research."""
+@click.pass_context
+def main(ctx):
+    """ScieFlow — agent-driven experiments and literature research.
+
+    Run with no command in a terminal to open the interactive menu.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        from scieflow.core.menu import run_menu
+
+        run_menu()
+    else:
+        click.echo(ctx.get_help())
 
 
 if __name__ == "__main__":

@@ -2557,13 +2557,13 @@ source = { editable = "." }
 dependencies = [
     { name = "click" },
     { name = "pyyaml" },
+    { name = "questionary" },
     { name = "ruamel-yaml" },
 ]
 
 [package.optional-dependencies]
 chats = [
     { name = "jsonschema" },
-    { name = "questionary" },
 ]
 experiments = [
     { name = "imageio" },
@@ -2611,7 +2611,7 @@ requires-dist = [
     { name = "nicegui", marker = "extra == 'news-gui'", specifier = ">=2.0" },
     { name = "numpy", marker = "extra == 'experiments'", specifier = ">=1.26" },
     { name = "pyyaml", specifier = ">=6" },
-    { name = "questionary", marker = "extra == 'chats'", specifier = ">=2.0" },
+    { name = "questionary", specifier = ">=2.0" },
     { name = "requests", marker = "extra == 'research'", specifier = ">=2.31" },
     { name = "ruamel-yaml", specifier = ">=0.18" },
     { name = "scikit-image", marker = "extra == 'experiments'", specifier = ">=0.22" },
