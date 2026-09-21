@@ -18,6 +18,13 @@ each role, and with which model, is layered defaults → per-run overrides; see
 [Agent configuration](agents.md) (`scieflow agent show` / `scieflow agent configure`). Run data lives in `workspace/<slug>/` and is synced with
 DVC ([Storage](DVC_STORAGE.md)).
 
+Start with the interactive menu — arrow keys, space and enter — to pick a
+workflow, continue a run or change agent settings ([guide](menu.md)):
+
+```bash
+uv run scieflow
+```
+
 Install only what you use:
 
 ```bash

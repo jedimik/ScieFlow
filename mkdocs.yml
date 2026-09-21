@@ -53,6 +53,7 @@ exclude_docs: |
 
 nav:
   - Home: index.md
+  - Menu: menu.md
   - Experiments:
       - Overview: experiments/index.md
       - Quickstart: experiments/quickstart.md

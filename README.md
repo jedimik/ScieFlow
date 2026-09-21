@@ -17,8 +17,17 @@ cd ScieFlow && setup/install.sh      # uv sync --all-extras + tool checks
 setup/doctor.sh                       # environment check (--agents pings agent CLIs)
 ```
 
-Then ask your agent (e.g. `claude`) to start a research run — it reads
-`AGENTS.md` and follows `skills/research-loop/SKILL.md`. Choose the
+Then open the menu and pick what to do — a research workflow, an experiment,
+what's new, continuing a run, or agent settings (arrow keys, space, enter;
+[`docs/menu.md`](docs/menu.md)):
+
+```bash
+uv run scieflow
+```
+
+Or ask your agent (e.g. `claude`) directly — it reads `AGENTS.md`; "show me
+the ScieFlow options" gets you the same menu in the chat. To start a research
+run it follows `skills/research-loop/SKILL.md`. Choose the
 approval mode per run: `per-campaign` (you approve every experiment
 campaign) or `autonomous` (you approve the goal + scope + budget once).
 
@@ -29,7 +38,10 @@ campaign) or `autonomous` (you approve the goal + scope + budget once).
   literature-cycle, synthesis, notebook) plus the optional modules
   (remote-exec, claim-check)
 - `src/scieflow/` — the `scieflow` package and CLI:
-  - `core/` — agent dispatch (`scieflow agent run`), stub agent, config loader
+  - `core/` — agent dispatch (`scieflow agent run`), stub agent, config loader,
+    the menu (bare `scieflow`), `scieflow workspace list|doctor|index`, and the
+    legacy shims that keep pre-merge commands (`scripts/agent_run.py`, `expx`,
+    `whatsnew`) working ([`docs/MIGRATION.md`](docs/MIGRATION.md))
   - `experiments/` — campaigns, sweeps, metrics, reports
     (`scieflow experiment`; own `AGENTS.md` + skills)
   - `research/` — literature search, review, gap discovery, paper drafting
