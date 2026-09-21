@@ -172,7 +172,7 @@ def test_verify_zip_rejects_truncated_file(tmp_path):
 
 def test_ensure_space_refuses_with_both_figures(tmp_path, monkeypatch):
     run = make_run(tmp_path)
-    monkeypatch.setattr(archive, "workspace_size", lambda _src: 254 * 1024**3)
+    monkeypatch.setattr(archive, "workspace_size", lambda _src, *_a, **_k: 254 * 1024**3)
     monkeypatch.setattr(archive.shutil, "disk_usage", lambda _p: SimpleNamespace(free=100 * 1024**3))
     with pytest.raises(archive.ArchiveError, match=r"needs 266\.7G, 100\.0G free"):
         archive.ensure_space(run, tmp_path / "workspace" / "_archives")
@@ -180,7 +180,7 @@ def test_ensure_space_refuses_with_both_figures(tmp_path, monkeypatch):
 
 def test_ensure_space_passes_with_headroom(tmp_path, monkeypatch):
     run = make_run(tmp_path)
-    monkeypatch.setattr(archive, "workspace_size", lambda _src: 10 * 1024**3)
+    monkeypatch.setattr(archive, "workspace_size", lambda _src, *_a, **_k: 10 * 1024**3)
     monkeypatch.setattr(archive.shutil, "disk_usage", lambda _p: SimpleNamespace(free=11 * 1024**3))
     archive.ensure_space(run, tmp_path / "does" / "not" / "exist")
 
@@ -278,3 +278,13 @@ def test_link_to_cache_ignores_directory_hash(tmp_path):
     cache, obj, pointer, zip_path = fake_cache(tmp_path, b"archive body")
     pointer.write_text("outs:\n- md5: 68c1d3127031576cf055cb445c10fb32.dir\n  path: run-01\n")
     assert archive.link_to_cache(zip_path, pointer, cache) is False
+
+
+def test_skip_rules_can_be_turned_off_for_non_run_trees(tmp_path):
+    tree_dir = tmp_path / "bundle"
+    (tree_dir / "tmp" / "slug" / "chats").mkdir(parents=True)
+    (tree_dir / "tmp" / "slug" / "chats" / "s.jsonl").write_text("{}")
+    dest = tmp_path / "b.zip"
+    archive.build_zip(tree_dir, dest, skip_rebuildable=False)
+    with zipfile.ZipFile(dest) as zf:
+        assert "tmp/slug/chats/s.jsonl" in zf.namelist()

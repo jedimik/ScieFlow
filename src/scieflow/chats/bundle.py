@@ -184,8 +184,12 @@ def write(stage_dir: Path, out_path: Path) -> Path:
     archive = _archive()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        archive.ensure_space(stage_dir, out_path.parent)
-        archive.build_zip(stage_dir, out_path, compression=zipfile.ZIP_DEFLATED)
+        # A bundle is already exactly what the user picked: no skip rules
+        # (Gemini keeps chats under tmp/, which runs treat as scratch).
+        archive.ensure_space(stage_dir, out_path.parent, skip_rebuildable=False)
+        archive.build_zip(
+            stage_dir, out_path, compression=zipfile.ZIP_DEFLATED, skip_rebuildable=False
+        )
         archive.verify_zip(out_path)
     except archive.ArchiveError as e:
         raise BundleError(str(e)) from e

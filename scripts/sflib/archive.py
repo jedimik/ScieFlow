@@ -60,11 +60,15 @@ def _skip_dir(path: Path, src_dir: Path) -> bool:
     return any(rel == s or rel.endswith("/" + s) for s in _SKIP_DIR_SUFFIXES)
 
 
-def _collect(src_dir: Path) -> tuple[list[Path], list[Path], list[Path]]:
+def _collect(
+    src_dir: Path, skip_rebuildable: bool = True
+) -> tuple[list[Path], list[Path], list[Path]]:
     """Directories, files and symlinks to archive, in deterministic order.
 
     Symlinks are returned separately and stored as link entries — never
     followed, since one pointing into a data mount could multiply the run.
+    `skip_rebuildable` applies the workspace-run skip rules; callers packing
+    other trees (chat bundles keep Gemini chats under `tmp/`) turn it off.
     """
     dirs: list[Path] = []
     files: list[Path] = []
@@ -74,7 +78,7 @@ def _collect(src_dir: Path) -> tuple[list[Path], list[Path], list[Path]]:
         kept = []
         for name in sorted(dirnames):
             path = base / name
-            if _skip_dir(path, src_dir):
+            if skip_rebuildable and _skip_dir(path, src_dir):
                 continue
             if path.is_symlink():
                 links.append(path)
@@ -91,14 +95,17 @@ def _collect(src_dir: Path) -> tuple[list[Path], list[Path], list[Path]]:
     return dirs, files, links
 
 
-def workspace_size(src_dir: Path) -> int:
+def workspace_size(src_dir: Path, skip_rebuildable: bool = True) -> int:
     """Bytes that build_zip would store for src_dir."""
-    _, files, _ = _collect(Path(src_dir))
+    _, files, _ = _collect(Path(src_dir), skip_rebuildable)
     return sum(f.stat().st_size for f in files)
 
 
 def build_zip(
-    src_dir: Path, dest_zip: Path, compression: int = zipfile.ZIP_STORED
+    src_dir: Path,
+    dest_zip: Path,
+    compression: int = zipfile.ZIP_STORED,
+    skip_rebuildable: bool = True,
 ) -> None:
     """Pack src_dir into dest_zip (Zip64, stored by default), atomically.
 
@@ -106,7 +113,7 @@ def build_zip(
     text (chat transcripts) pass ZIP_DEFLATED instead.
     """
     src_dir, dest_zip = Path(src_dir), Path(dest_zip)
-    dirs, files, links = _collect(src_dir)
+    dirs, files, links = _collect(src_dir, skip_rebuildable)
     dest_zip.parent.mkdir(parents=True, exist_ok=True)
     partial = dest_zip.with_name(dest_zip.name + ".partial")
     try:
@@ -145,9 +152,11 @@ def _gib(n: float) -> str:
     return f"{n / 1024**3:.1f}G"
 
 
-def ensure_space(src_dir: Path, dest_dir: Path, headroom: float = 1.05) -> None:
+def ensure_space(
+    src_dir: Path, dest_dir: Path, headroom: float = 1.05, skip_rebuildable: bool = True
+) -> None:
     """Raise ArchiveError unless dest_dir's filesystem can hold the archive."""
-    needed = workspace_size(src_dir) * headroom
+    needed = workspace_size(src_dir, skip_rebuildable) * headroom
     probe = Path(dest_dir)
     while not probe.exists():
         probe = probe.parent

@@ -234,7 +234,7 @@ def test_push_archive_upload_failure_keeps_zip(repo, monkeypatch):
 def test_push_archive_disk_preflight_refuses(repo, calls, monkeypatch, capsys):
     root, ws = repo
     make_ws(ws, "run-01")
-    monkeypatch.setattr(archive, "workspace_size", lambda _src: 254 * 1024**3)
+    monkeypatch.setattr(archive, "workspace_size", lambda _src, *_a, **_k: 254 * 1024**3)
     monkeypatch.setattr(archive.shutil, "disk_usage", lambda _p: SimpleNamespace(free=100 * 1024**3))
 
     assert dvc_sync.cmd_push(["run-01"], root, ws, archive_flag=True) == 1
