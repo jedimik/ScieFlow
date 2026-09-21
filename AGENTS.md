@@ -121,6 +121,7 @@ when to stop.
 
 | Task | Skill file |
 |---|---|
+| Show options / let the user choose what to do or change agent settings | `skills/scieflow-menu/SKILL.md` |
 | Run / resume the research loop | `skills/research-loop/SKILL.md` |
 | Delegate an experiment campaign | `skills/experiment-cycle/SKILL.md` |
 | Ground results in literature | `skills/literature-cycle/SKILL.md` |
@@ -146,5 +147,10 @@ when to stop.
     (extra: `chats`). User-invoked; not part of the research loop.
 - Agent configuration: `scieflow agent show` / `scieflow agent configure`
   (rule 13; guide in `docs/agents.md`).
+- The user's own entry point is the interactive menu, bare `uv run scieflow`
+  (`docs/menu.md`); agents get the same tree from `scieflow menu --json`.
+- Runs: `scieflow workspace list | doctor <slug>`. Commands from before the
+  module merge (`scripts/agent_run.py`, `expx`, `whatsnew`, …) still work and
+  print their new name — use the new one (`docs/MIGRATION.md`).
 - **Sub-agents: read only the module AGENTS.md your prompt names**, not this
   file — it keeps a single-module task's context small.
