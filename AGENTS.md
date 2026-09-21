@@ -21,6 +21,10 @@ when to stop.
 1. All run artifacts live in `workspace/<slug>/` — including experiment
    campaign runs (`workspace/<slug>/experiments/`). Never write run artifacts
    anywhere else. A run never modifies module code under `src/scieflow/`.
+   Inside a run: scripts you write go in `tools/`; test output, pytest temp
+   dirs, conda/uv envs, repository clones and caches go in `scratch/` (left
+   out of archives). `logs/` holds prompts and transcripts only. Never rename
+   or move a run directory — old chats and in-run links cite its path.
 2. Inter-agent communication is file-based only: write a prompt file to
    `workspace/<slug>/logs/`, then run
    `uv run scieflow agent run <agent> <prompt> <transcript>` (sub-agents run

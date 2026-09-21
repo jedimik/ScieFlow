@@ -7,6 +7,7 @@ import fnmatch
 import os
 import re
 import shutil
+import stat
 import tempfile
 import zipfile
 from pathlib import Path
@@ -15,10 +16,18 @@ import yaml
 
 ARCHIVE_DIR = "_archives"
 
-# Cache noise mirrored from .dvcignore. Logs are deliberately NOT skipped:
+# Rebuildable noise, never results. Logs are deliberately NOT skipped:
 # workspace/<slug>/logs/ holds agent prompts and transcripts (AGENTS.md rule 2).
-_SKIP_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".venv"}
+# `scratch/` is where runs are told to keep tests, envs, clones and caches.
+_SKIP_DIRS = {
+    "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".venv",
+    ".snakemake", ".cache", ".uv-cache", "uv-cache", "mpl-cache", "tmp", "scratch",
+}
+_SKIP_DIR_PATTERNS = ("pytest-*",)
+# Relative-path suffixes: conda prefixes unpacked into a run (`runtime/host`).
+_SKIP_DIR_SUFFIXES = ("runtime/host",)
 _SKIP_FILES = ("*.pyc",)
+_LINK_MODE = (stat.S_IFLNK | 0o777) << 16
 _DRIVE = re.compile(r"^[A-Za-z]:")
 
 
@@ -43,41 +52,48 @@ def archived_slugs(workspace_root: Path) -> list[str]:
     return sorted(p.name[: -len(".zip.dvc")] for p in archive_dir.glob("*.zip.dvc"))
 
 
-def _collect(src_dir: Path) -> tuple[list[Path], list[Path]]:
-    """Directories and files to archive, in deterministic order.
+def _skip_dir(path: Path, src_dir: Path) -> bool:
+    name = path.name
+    if name in _SKIP_DIRS or any(fnmatch.fnmatch(name, p) for p in _SKIP_DIR_PATTERNS):
+        return True
+    rel = path.relative_to(src_dir).as_posix()
+    return any(rel == s or rel.endswith("/" + s) for s in _SKIP_DIR_SUFFIXES)
 
-    Raises ArchiveError listing every symlink: ZIP cannot store them, and
-    dereferencing one that points into a data mount could multiply the run.
+
+def _collect(src_dir: Path) -> tuple[list[Path], list[Path], list[Path]]:
+    """Directories, files and symlinks to archive, in deterministic order.
+
+    Symlinks are returned separately and stored as link entries — never
+    followed, since one pointing into a data mount could multiply the run.
     """
     dirs: list[Path] = []
     files: list[Path] = []
-    symlinks: list[Path] = []
+    links: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(src_dir):
         base = Path(dirpath)
         kept = []
         for name in sorted(dirnames):
             path = base / name
+            if _skip_dir(path, src_dir):
+                continue
             if path.is_symlink():
-                symlinks.append(path)
-            elif name not in _SKIP_DIRS:
+                links.append(path)
+            else:
                 kept.append(name)
                 dirs.append(path)
         dirnames[:] = kept
         for name in sorted(filenames):
             path = base / name
             if path.is_symlink():
-                symlinks.append(path)
+                links.append(path)
             elif not any(fnmatch.fnmatch(name, pat) for pat in _SKIP_FILES):
                 files.append(path)
-    if symlinks:
-        listed = ", ".join(str(p) for p in symlinks)
-        raise ArchiveError(f"symlinks cannot be archived: {listed}")
-    return dirs, files
+    return dirs, files, links
 
 
 def workspace_size(src_dir: Path) -> int:
     """Bytes that build_zip would store for src_dir."""
-    _, files = _collect(Path(src_dir))
+    _, files, _ = _collect(Path(src_dir))
     return sum(f.stat().st_size for f in files)
 
 
@@ -90,7 +106,7 @@ def build_zip(
     text (chat transcripts) pass ZIP_DEFLATED instead.
     """
     src_dir, dest_zip = Path(src_dir), Path(dest_zip)
-    dirs, files = _collect(src_dir)
+    dirs, files, links = _collect(src_dir)
     dest_zip.parent.mkdir(parents=True, exist_ok=True)
     partial = dest_zip.with_name(dest_zip.name + ".partial")
     try:
@@ -101,6 +117,11 @@ def build_zip(
                 zf.write(d, d.relative_to(src_dir).as_posix() + "/")
             for f in files:
                 zf.write(f, f.relative_to(src_dir).as_posix())
+            for link in links:
+                info = zipfile.ZipInfo(link.relative_to(src_dir).as_posix())
+                info.create_system = 3  # unix, so external_attr carries the mode
+                info.external_attr = _LINK_MODE
+                zf.writestr(info, os.readlink(link))
         partial.replace(dest_zip)
     except BaseException:
         partial.unlink(missing_ok=True)
@@ -143,6 +164,26 @@ def _check_members(zf: zipfile.ZipFile, dest: Path) -> None:
             raise ArchiveError(f"unsafe member path in archive: {name!r}")
 
 
+def _is_link(info: zipfile.ZipInfo) -> bool:
+    return stat.S_ISLNK(info.external_attr >> 16)
+
+
+def _restore_link(zf: zipfile.ZipFile, info: zipfile.ZipInfo, root: Path) -> None:
+    """Recreate a stored symlink.
+
+    Absolute targets are restored verbatim — they are records of where data
+    lived. A relative target must stay inside the extracted tree.
+    """
+    target = zf.read(info).decode()
+    path = root / info.filename.rstrip("/")
+    if not os.path.isabs(target):
+        resolved = (path.parent / target).resolve()
+        if not resolved.is_relative_to(root.resolve()):
+            raise ArchiveError(f"symlink escapes the archive: {info.filename} -> {target}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(target, path)
+
+
 def extract_zip(zip_path: Path, dest: Path, *, force: bool = False) -> None:
     """Extract zip_path into dest via a staging dir; refuse non-empty dest unless force."""
     zip_path, dest = Path(zip_path), Path(dest)
@@ -153,7 +194,10 @@ def extract_zip(zip_path: Path, dest: Path, *, force: bool = False) -> None:
     try:
         with zipfile.ZipFile(zip_path) as zf:
             _check_members(zf, staging)
-            zf.extractall(staging)
+            links = [i for i in zf.infolist() if _is_link(i)]
+            zf.extractall(staging, members=[i for i in zf.infolist() if not _is_link(i)])
+            for info in links:
+                _restore_link(zf, info, staging)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise

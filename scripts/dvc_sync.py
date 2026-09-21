@@ -54,8 +54,11 @@ def find_workspaces(workspace_root: Path) -> list[str]:
         return []
     slugs = []
     for item in sorted(workspace_root.iterdir()):
-        if item.is_dir() and not item.name.startswith(".") and item.name != archive.ARCHIVE_DIR:
-            slugs.append(item.name)
+        # `_*` are not runs (_archives, _misc); symlinks are aliases of a run
+        # that is listed under its real name, so pushing them would duplicate it.
+        if item.is_symlink() or item.name.startswith((".", "_")) or not item.is_dir():
+            continue
+        slugs.append(item.name)
     return slugs
 
 

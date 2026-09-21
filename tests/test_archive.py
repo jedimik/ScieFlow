@@ -79,12 +79,56 @@ def test_build_zip_is_deterministic(tmp_path):
     assert (tmp_path / "a.zip").read_bytes() == (tmp_path / "b.zip").read_bytes()
 
 
-def test_build_zip_refuses_symlinks_and_names_them(tmp_path):
+def test_symlinks_are_stored_as_links_never_followed(tmp_path):
     run = make_run(tmp_path)
-    (run / "link-to-data").symlink_to(tmp_path)
-    with pytest.raises(archive.ArchiveError, match="link-to-data"):
-        archive.build_zip(run, tmp_path / "run-01.zip")
-    assert not (tmp_path / "run-01.zip").exists()
+    data = tmp_path / "big-data"
+    data.mkdir()
+    (data / "huge.bin").write_bytes(b"x" * 1000)
+    (run / "Data").symlink_to(data)                    # absolute, outside the run
+    (run / "latest").symlink_to("results")             # relative, inside the run
+    (run / "results").mkdir(exist_ok=True)
+    dest = tmp_path / "run-01.zip"
+    archive.build_zip(run, dest)
+    with zipfile.ZipFile(dest) as zf:
+        names = zf.namelist()
+        assert "Data" in names and not any(n.startswith("Data/") for n in names)
+        assert zf.read("Data").decode() == str(data)
+
+    out = tmp_path / "out"
+    archive.extract_zip(dest, out)
+    assert os.readlink(out / "Data") == str(data)      # absolute kept verbatim
+    assert os.readlink(out / "latest") == "results"
+
+
+def test_relative_link_escaping_the_archive_is_refused(tmp_path):
+    evil = tmp_path / "evil.zip"
+    with zipfile.ZipFile(evil, "w") as zf:
+        info = zipfile.ZipInfo("escape")
+        info.create_system = 3
+        info.external_attr = archive._LINK_MODE
+        zf.writestr(info, "../../etc")
+    with pytest.raises(archive.ArchiveError, match="escapes the archive"):
+        archive.extract_zip(evil, tmp_path / "out")
+
+
+@pytest.mark.parametrize(
+    "junk",
+    ["tmp/a.txt", ".snakemake/log", "pytest-01/t.py", "runtime/host/bin/python",
+     "scratch/clone/x", "sub/.uv-cache/x", "mpl-cache/f"],
+)
+def test_rebuildable_dirs_are_skipped(tmp_path, junk):
+    run = make_run(tmp_path)
+    path = run / junk
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("junk")
+    (run / "runtime" / "keep.txt").parent.mkdir(parents=True, exist_ok=True)
+    (run / "runtime" / "keep.txt").write_text("kept")
+    dest = tmp_path / "run-01.zip"
+    archive.build_zip(run, dest)
+    with zipfile.ZipFile(dest) as zf:
+        names = zf.namelist()
+    assert junk not in names
+    assert "runtime/keep.txt" in names   # only runtime/host is a conda prefix
 
 
 def test_build_zip_failure_leaves_no_zip_and_no_partial(tmp_path, monkeypatch):

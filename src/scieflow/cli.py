@@ -30,6 +30,12 @@ GROUPS = {
         "news",
         "Track what changed in the tools and topics you follow.",
     ),
+    "workspace": (
+        "scieflow.core.workspace",
+        "workspace",
+        None,
+        "Research runs under workspace/: list, index, doctor.",
+    ),
     "chats": (
         "scieflow.chats.cli",
         "chats",

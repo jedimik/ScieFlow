@@ -158,3 +158,10 @@ phases:
 
 A run is resumable: on entry, read `status.yml` and continue from the first
 phase that is not `done`.
+
+## Run directory hygiene
+
+Scripts you write go in `workspace/<slug>/tools/`; tests, temp dirs, envs,
+clones and caches go in `workspace/<slug>/scratch/` (excluded from archives).
+Keep `logs/` for prompts and transcripts. Never rename or move a run
+directory.

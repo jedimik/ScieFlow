@@ -337,3 +337,13 @@ def test_push_and_pull_require_explicit_slugs():
         with pytest.raises(SystemExit):
             parser.parse_args([command, "--all"])
     assert parser.parse_args(["track", "--all"]).all is True
+
+
+def test_find_workspaces_skips_aliases_and_underscore_dirs(tmp_path):
+    ws = tmp_path / "workspace"
+    (ws / "2026-01-real").mkdir(parents=True)
+    (ws / "_misc" / "notes").mkdir(parents=True)
+    (ws / "_archives").mkdir()
+    (ws / "2026-01-real-research").symlink_to("2026-01-real")
+    (ws / "README.md").write_text("x")
+    assert dvc_sync.find_workspaces(ws) == ["2026-01-real"]

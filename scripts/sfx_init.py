@@ -26,6 +26,10 @@ def init_workspace(slug: str, goal_file: Path, workspace_root: Path,
     try:
         (ws / "iterations").mkdir(parents=True)
         (ws / "logs").mkdir()
+        # tools/: scripts the run writes. scratch/: tests, envs, clones and
+        # caches — left out of archives and DVC (workspace/README.md).
+        (ws / "tools").mkdir()
+        (ws / "scratch").mkdir()
         shutil.copy(goal_file, ws / "goal.md")
         (ws / "config.yml").write_text(yaml.safe_dump(cfg, sort_keys=False))
         status_mod.write_status(ws, status_mod.new_status(slug, cfg["approval"]))

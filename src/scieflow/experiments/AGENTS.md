@@ -47,3 +47,10 @@ which is your working directory.
 - Model economy: match the model tier to the phase
   (`src/scieflow/experiments/model-routing.yaml`) — judgment on high-quality
   models, mechanical work on the cheapest. See the model-routing skill.
+
+## Run directory hygiene
+
+Scripts you write go in `workspace/<slug>/tools/`; tests, temp dirs, envs,
+clones and caches go in `workspace/<slug>/scratch/` (excluded from archives).
+Keep `logs/` for prompts and transcripts. Never rename or move a run
+directory.
