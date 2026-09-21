@@ -325,6 +325,66 @@ def cmd_verify_posthoc_deployment(remote, t, remote_dir: str, control_dir: str,
     return 0
 
 
+def cmd_verify_thalamus_deployment(remote, t, remote_dir: str, control_dir: str,
+                                  commit: str, request_sha256: str, *, progress: bool = False) -> int:
+    """Invoke only the frozen thalamus controller's read-only validation path."""
+    policy.check_op(remote, "bash")
+    policy.check_op(remote, "git-status")
+    directory = policy.check_dir(remote, remote_dir)
+    control = policy.check_dir(remote, control_dir)
+    if not re.fullmatch(r"[0-9a-f]{40}", commit) or not re.fullmatch(r"[0-9a-f]{64}", request_sha256):
+        raise policy.PolicyError("deployment verification requires full Git and request digests")
+    interpreter = control + "/runtime/host/bin/python"
+    module = directory + "/research/job1-thalamus-followup"
+    request_path = control + "/deployment/thalamus-01/execution-request.json"
+    probe = (
+        "import json,sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); "
+        "import controller; "
+        "request=controller.read_request(Path(sys.argv[2]),sys.argv[3]); "
+        "plan,source=controller.validate(request,sys.argv[3],'dry-run',allocation=False); "
+        "print(json.dumps({'schema':'scieflow.thalamus-readonly-deployment.v1',"
+        "'status':'success','request_sha256':sys.argv[3],'git':request['git'],"
+        "'plan':request['plan'],'inherited_manifest_pins':len(request['inherited']),"
+        "'selections':len(plan['selections']),'frontend_only':True,"
+        "'participant_execution':False,'remaining_gate':'PBS allocation compatibility and exact DAG'},"
+        "sort_keys=True,indent=2))"
+    )
+    if progress:
+        # Inspect only this user's exact pinned verifier invocation. Never
+        # print unrelated argv, environment contents, descriptors or filenames.
+        probe = (
+            "import json,os,sys; from pathlib import Path; rows=[]\n"
+            "for p in Path('/proc').iterdir():\n"
+            " if not p.name.isdecimal(): continue\n"
+            " try:\n"
+            "  if p.stat().st_uid != os.getuid(): continue\n"
+            "  argv=(p/'cmdline').read_bytes().decode().rstrip('\\0').split('\\0')\n"
+            "  if len(argv)!=8 or argv[1:4]!=['-B','-I','-c'] or argv[5:]!=sys.argv[1:]: continue\n"
+            "  if not argv[4].startswith('import json,sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); import controller; '): continue\n"
+            "  status=dict(line.split(':',1) for line in (p/'status').read_text().splitlines() if ':' in line)\n"
+            "  io=dict(line.split(':',1) for line in (p/'io').read_text().splitlines())\n"
+            "  rows.append({'pid':int(p.name),'state':status['State'].strip(),'rss':status.get('VmRSS','').strip(),"
+            "'rchar':int(io['rchar']),'syscr':int(io['syscr']),'read_bytes':int(io['read_bytes'])})\n"
+            " except (FileNotFoundError,ProcessLookupError,PermissionError): continue\n"
+            "print(json.dumps({'read_only_progress':True,'matching_verifiers':rows},sort_keys=True))\n"
+        )
+    result = t.ssh(
+        f"cd {shlex.quote(directory)} && "
+        f'test "$(git rev-parse HEAD)" = {commit} && '
+        'test -z "$(git status --porcelain=v1 --untracked-files=all)" && '
+        f"{shlex.quote(interpreter)} -B -I -c {shlex.quote(probe)} "
+        f"{shlex.quote(module)} {shlex.quote(request_path)} {request_sha256}"
+    )
+    print(result.stdout, end="")
+    if _remote_credentials_failed(result.stderr):
+        return _report_remote_credentials()
+    if result.returncode:
+        print("THALAMUS_DEPLOYMENT_VERIFY_FAILED", file=sys.stderr)
+        print(result.stderr.strip(), file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
                task: str, walltime: str, cpus: int, mem_gb: int, gpus: int,
                queue: str, name: str | None, scratch_type: str = "none",
@@ -557,7 +617,7 @@ def main(argv=None) -> int:
     for name in (
         "check", "pull", "repo-status", "move", "mkdir", "submit", "status", "logs",
         "fetch", "push", "git-push", "storage-status", "path-info", "verify-sampling-stage",
-        "verify-posthoc-deployment", "runtime-info"
+        "verify-posthoc-deployment", "verify-thalamus-deployment", "runtime-info"
     ):
         p = sub.add_parser(name)
         p.add_argument("remote")
@@ -579,11 +639,14 @@ def main(argv=None) -> int:
             p.add_argument("dir")
         if name == "mkdir":
             p.add_argument("dir")
-        if name == "verify-posthoc-deployment":
+        if name in ("verify-posthoc-deployment", "verify-thalamus-deployment"):
             p.add_argument("dir")
             p.add_argument("control_dir")
             p.add_argument("--commit", required=True)
             p.add_argument("--request-sha256", required=True)
+            if name == "verify-thalamus-deployment":
+                p.add_argument("--progress", action="store_true",
+                               help="read only the exact matching verifier's process/I/O counters")
         if name == "storage-status":
             p.add_argument("dir")
             p.add_argument("--ceph", action="store_true",
@@ -666,6 +729,10 @@ def main(argv=None) -> int:
         if args.cmd == "verify-posthoc-deployment":
             return cmd_verify_posthoc_deployment(remote, t, args.dir, args.control_dir,
                                                 args.commit, args.request_sha256)
+        if args.cmd == "verify-thalamus-deployment":
+            return cmd_verify_thalamus_deployment(remote, t, args.dir, args.control_dir,
+                                                 args.commit, args.request_sha256,
+                                                 progress=args.progress)
         if args.cmd == "verify-sampling-stage":
             return cmd_verify_sampling_stage(remote, t, args.dir, args.subject_root, args.commit)
         if args.cmd == "submit":

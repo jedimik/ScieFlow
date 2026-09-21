@@ -100,7 +100,7 @@ def test_real_registry_declares_tiers():
     agents = config.load_agents(REPO)
     assert agents["claude"]["tier"] == "primary"
     assert agents["codex"]["tier"] == "primary"
-    assert agents["codex"]["model"] == "gpt-5.6-sol"
+    assert agents["codex"]["model"] in agents["codex"]["menu"]["models"]
     assert "--model {model}" in agents["codex"]["cmd"]
     assert agents["agy"]["tier"] == "support"
     assert agents["agy"]["capabilities"] == ["web-search", "large-context"]

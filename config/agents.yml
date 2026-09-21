@@ -35,20 +35,49 @@ agents:
           --dangerously-skip-permissions --model {model} {prompt}'
   codex:
     cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
-    model: gpt-5.6-sol
-    reasoning: medium
+    model: gpt-6-astra
+    reasoning: high
     tier: primary
     timeout_min: 180
     enabled: true
     menu:
       provider: "OpenAI — Codex CLI"
       models:
-        - gpt-5.6-sol           # recommended default (registry-pinned)
+        - gpt-6-astra           # user-selected default
+        - gpt-5.6-sol
       models_note: >-
         Other models depend on the user's Codex account — ask them; set
         `model:` in agent_overrides to switch.
       reasoning:
-        levels: [minimal, low, medium, high]   # medium = default
+        levels: [low, medium, high, xhigh, max]   # Astra: high = default
+        how: "set `reasoning: <level>` in agent_overrides (fills {reasoning})"
+  # User-approved separate profiles: role-specific effort without changing
+  # ordinary Codex work. Separate sessions, not independent model families.
+  codex-paper:
+    cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
+    model: gpt-6-astra
+    reasoning: xhigh
+    tier: primary
+    timeout_min: 180
+    enabled: true
+    menu:
+      provider: "OpenAI — Codex CLI (paper writing)"
+      models: [gpt-6-astra]
+      reasoning:
+        levels: [low, medium, high, xhigh, max]
+        how: "set `reasoning: <level>` in agent_overrides (fills {reasoning})"
+  codex-review:
+    cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
+    model: gpt-6-astra
+    reasoning: xhigh
+    tier: primary
+    timeout_min: 180
+    enabled: true
+    menu:
+      provider: "OpenAI — Codex CLI (review)"
+      models: [gpt-6-astra]
+      reasoning:
+        levels: [low, medium, high, xhigh, max]
         how: "set `reasoning: <level>` in agent_overrides (fills {reasoning})"
   agy:
     cmd: "agy --print {prompt} --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions"

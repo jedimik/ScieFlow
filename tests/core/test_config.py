@@ -17,12 +17,16 @@ def test_repo_root_raises_outside_repo(tmp_path):
         config.repo_root(tmp_path)
 
 
-def test_agents_registry_is_fable_only():
+def test_agents_registry_shape():
     agents = config.load_agents(ROOT)
     assert agents["claude"]["model"] == "claude-fable-5"
     assert agents["claude"]["enabled"] is True
     assert agents["stub"]["enabled"] is False
-    assert set(agents) == {"claude", "codex", "agy", "stub"}
+    assert {"claude", "codex", "agy", "stub"} <= set(agents)
+    # Role profiles (codex-paper, codex-review, …) are codex variants.
+    for name in set(agents) - {"claude", "codex", "agy", "stub"}:
+        assert name.startswith("codex-"), name
+        assert agents[name]["tier"] == "primary"
 
 
 def test_load_run_config_merges_workspace_overrides(tmp_path):
@@ -39,8 +43,16 @@ def test_real_registry_tiers():
     agents = config.load_agents(root)
     assert agents["claude"]["tier"] == "primary"
     assert agents["codex"]["tier"] == "primary"
-    assert agents["codex"]["model"] == "gpt-5.6-sol"
     assert agents["agy"]["tier"] == "support"
+
+
+def test_every_registry_default_model_is_on_its_menu():
+    """The pinned default must be one the menu offers, whatever the user picks."""
+    agents = config.load_agents(config.repo_root())
+    for name, entry in agents.items():
+        menu = entry.get("menu") or {}
+        if menu.get("models") and entry.get("model"):
+            assert entry["model"] in menu["models"], name
 
 
 def test_tier_agents_filters_enabled_only():

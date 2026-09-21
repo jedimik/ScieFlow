@@ -13,6 +13,17 @@ configured in layers; each layer only states what differs from the one below.
 
 ## Roles
 
+The current user-selected OpenAI defaults are `codex` → `gpt-6-astra` with
+`high` reasoning, `codex-paper` → the same model with `xhigh`, and
+`codex-review` → the same model with `xhigh`. Paper drafting, outline and
+revision use `codex-paper`; review, cross-review and consistency use
+`codex-review`. These are separate CLI sessions/profiles, not independent
+model families. `agy` remains a paired support agent for search and journal
+profiling. Claude remains registered but has no default role assignment.
+Existing run overrides still take precedence; use `agent show --workspace`
+to check them. These are ScieFlow defaults, not changes to the user's global
+Codex application settings.
+
 | Role | Takes | Support tier allowed (without an exception) |
 |---|---|---|
 | `loop.experiment` | one agent | no |
