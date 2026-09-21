@@ -23,6 +23,11 @@ news = [
     "tinydb>=4.8",
     "filelock>=3.12",
 ]
+# Chats module (scieflow.chats): selective backup/restore of agent chat stores.
+chats = [
+    "questionary>=2.0",
+    "jsonschema>=4.21",
+]
 # Local web GUI for the news module (`scieflow news gui`).
 news-gui = [
     "tinydb>=4.8",

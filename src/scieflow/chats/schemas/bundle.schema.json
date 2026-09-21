@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ScieFlow chats bundle manifest",
+  "type": "object",
+  "required": ["schema_version", "created", "source", "chats", "members"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"type": "integer", "minimum": 1},
+    "created": {"type": "string"},
+    "source": {
+      "type": "object",
+      "required": ["host", "home"],
+      "properties": {
+        "host": {"type": "string"},
+        "user": {"type": "string"},
+        "home": {"type": "string"},
+        "platform": {"type": "string"}
+      }
+    },
+    "tools": {"type": "array", "items": {"type": "string"}},
+    "path_map": {"type": "array", "items": {"type": "string"}},
+    "chats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "tool", "chat_id"],
+        "properties": {
+          "key": {"type": "string"},
+          "tool": {"type": "string", "enum": ["claude", "codex", "agy", "gemini"]},
+          "chat_id": {"type": "string"},
+          "project": {"type": ["string", "null"]},
+          "title": {"type": "string"},
+          "updated": {"type": ["string", "null"]},
+          "messages": {"type": "integer"},
+          "bytes": {"type": "integer"}
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "name"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["skill", "plugin", "mcp"]},
+          "name": {"type": "string"},
+          "version": {"type": ["string", "null"]},
+          "marketplace": {"type": ["string", "null"]},
+          "confidence": {"type": "string", "enum": ["high", "low"]},
+          "bundled": {"type": "boolean"},
+          "used_by": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "members": {"type": "object", "additionalProperties": {"type": "string"}},
+    "exclusions": {"type": "array", "items": {"type": "string"}},
+    "secret_scan": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {"type": "integer"}
+      }
+    }
+  }
+}

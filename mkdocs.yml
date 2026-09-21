@@ -80,6 +80,12 @@ nav:
   - News:
       - Overview: news/index.md
       - Future ideas: news/future-ideas.md
+  - Chats:
+      - Overview: chats/index.md
+      - Backing up: chats/backup.md
+      - Restoring: chats/restore.md
+      - Remote sync (DVC): chats/remote.md
+      - Security: chats/security.md
   - Agent configuration: agents.md
   - Storage (DVC): DVC_STORAGE.md
   - Migration from separate repos: MIGRATION.md

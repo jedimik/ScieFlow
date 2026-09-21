@@ -30,6 +30,12 @@ GROUPS = {
         "news",
         "Track what changed in the tools and topics you follow.",
     ),
+    "chats": (
+        "scieflow.chats.cli",
+        "chats",
+        "chats",
+        "Back up and restore agent chats, skills, and plugins.",
+    ),
 }
 
 

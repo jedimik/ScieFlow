@@ -1,0 +1,39 @@
+# ScieFlow chat backup — user-owned, deny-by-default.
+# Nothing outside the roots listed here is ever read.
+
+stores:
+  claude:
+    root: ~/.claude
+    enabled: true
+  codex:
+    root: ~/.codex
+    enabled: true
+  agy:                              # Antigravity CLI (lives inside ~/.gemini)
+    root: ~/.gemini/antigravity-cli
+    enabled: true
+  gemini:
+    root: ~/.gemini
+    enabled: true
+
+# Where `scieflow chats backup` writes bundles.
+bundle_dir: ~/scieflow-chat-bundles
+
+encryption:
+  method: age          # age | gpg | none  ('none' also needs --no-encrypt --yes)
+  recipient: null      # age public key; null means passphrase (age -p)
+
+# Extra glob patterns to drop from every bundle, on top of the built-in
+# exclusions (credentials, caches, logs, re-installable payloads).
+exclude_extra: []
+
+# Refuse to pack a selection larger than this, in gigabytes.
+max_bundle_gb: 5
+
+# Optional DVC transport for bundles (`scieflow chats push` / `pull`).
+# Off by default: a bundle is your whole conversation history, so putting it
+# on shared storage is an explicit choice. It moves bundle FILES only — never
+# a workspace or a directory; that stays with scripts/dvc_sync.py.
+remote:
+  enabled: false
+  dvc_remote: null       # null = the repo's DVC core.remote
+  dir: workspace/chats   # where .dvc pointers live inside the repo

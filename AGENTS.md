@@ -100,6 +100,19 @@ when to stop.
     disabled or unknown agent) is a boundary: never add `--promote` to get
     past it unless the user asked for that exception.
 
+14. **Chat backups** (optional, user-invoked). Copying agent chats between
+    machines goes ONLY through `uv run scieflow chats` per
+    `src/scieflow/chats/AGENTS.md`. **Never start a backup or a restore on
+    your own initiative** — a bundle is the user's whole conversation history.
+    `config/chats.yml` (user-owned, deny-by-default) bounds every store root
+    that may be read; credential files are excluded and that exclusion is not
+    overridable. A bundle is never uploaded or transmitted anywhere by you:
+    moving it between machines is the user's own action, including the
+    optional DVC transport (`scieflow chats push` / `pull`, off by default). `restore` is a dry run unless
+    the user asks for `--apply`, and its refusal while a target CLI is running
+    is a hard boundary, not an obstacle to route around. If `config/chats.yml`
+    is absent the module is simply skipped.
+
 ## Skills (read the relevant one before acting)
 
 | Task | Skill file |
@@ -124,6 +137,9 @@ when to stop.
   - news — `src/scieflow/news/AGENTS.md`; tracks what changed in the tools
     and topics in `config/news.yml` via `scieflow news` (extras: `news`,
     `news-gui`). User-invoked; not part of the research loop.
+  - chats — `src/scieflow/chats/AGENTS.md`; selective backup and
+    cross-machine restore of agent chat stores via `scieflow chats`
+    (extra: `chats`). User-invoked; not part of the research loop.
 - Agent configuration: `scieflow agent show` / `scieflow agent configure`
   (rule 13; guide in `docs/agents.md`).
 - **Sub-agents: read only the module AGENTS.md your prompt names**, not this

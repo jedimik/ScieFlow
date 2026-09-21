@@ -5,7 +5,9 @@ module) hand in hand with literature research (the **research** module).
 Each iteration runs hypothesis → experiment → literature grounding →
 synthesis, accumulating a research notebook that can be handed to the
 research module's paper-draft workflow. Either module also works on its own.
-A third module, **news**, keeps you current on the tools and topics you follow.
+A third module, **news**, keeps you current on the tools and topics you follow,
+and a fourth, **chats**, backs up your agent conversations and restores them
+on another machine.
 
 ## Quick start
 
@@ -34,6 +36,8 @@ campaign) or `autonomous` (you approve the goal + scope + budget once).
     (`scieflow research`; own `AGENTS.md` + skills)
   - `news/` — what changed in your tools and topics (`scieflow news`, optional
     web GUI; own `AGENTS.md`)
+  - `chats/` — selective backup and cross-machine restore of agent chats,
+    skills and plugins (`scieflow chats`; own `AGENTS.md`)
 - `scripts/` — research-loop mechanics (workspace init, status, budget,
   validation, checkpoint, DVC sync); optional modules `scripts/remote/`,
   `scripts/nblm/`
@@ -42,8 +46,8 @@ campaign) or `autonomous` (you approve the goal + scope + budget once).
 - `config/` — agent registry (tiered: claude/codex primary, agy support),
   role assignments and loop/research defaults, news interests (`news.yml`),
   cached journal profiles; optional per-module configs you create from the shipped
-  `*.example.yml` (`remotes.yml`, `notebooklm.yml`) and which stay
-  gitignored
+  `*.example.yml` (`remotes.yml`, `notebooklm.yml`, `chats.yml`) and which stay
+  gitignored; `.dvc/config` is gitignored too (machine-local remote)
 - `workspace/` — one folder per research run, plus `workspace/news/`
   (gitignored; synced via DVC)
 
@@ -72,6 +76,30 @@ uv run scieflow news gui                     # local web GUI (extra: news-gui)
 ```
 
 Guide: [`docs/news/index.md`](docs/news/index.md).
+
+## Chat backups (optional, user-invoked)
+
+Agent chats live in per-tool HOME directories keyed by absolute path, so they
+neither survive a machine move nor travel selectively. `scieflow chats` picks
+the conversations you want across Claude Code, Codex CLI, Antigravity (`agy`)
+and Gemini CLI, works out which skills and plugins those chats used, and packs
+them into one encrypted bundle that restores on another PC with the paths
+rewritten.
+
+```bash
+uv run scieflow chats init                   # config/chats.yml (deny-by-default)
+uv run scieflow chats scan                   # read-only inventory
+uv run scieflow chats backup                 # pick chats → encrypted bundle
+uv run scieflow chats inspect BUNDLE         # manifest only, restores nothing
+uv run scieflow chats restore BUNDLE --map /home/you=/home/me   # dry run; --apply to write
+```
+
+Credential files are never bundled, and nothing is transmitted on its own —
+moving a bundle between machines is your action. Optionally, the repo's DVC
+storage can carry encrypted bundles (`scieflow chats push` / `pull`, off until
+you enable `remote` in `config/chats.yml`; bundle files only, never a
+workspace).
+Guide: [`docs/chats/index.md`](docs/chats/index.md).
 
 ## Citation checking (optional, opt-in)
 
