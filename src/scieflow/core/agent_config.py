@@ -60,6 +60,17 @@ LEGACY_ROLE_KEYS = {
     "submitter": "research.submitter",
     "outline_agent": "research.outline",
     "consistency_agent": "research.consistency",
+    "draft_agents": "research.draft-authors",
+    "journal_profile_agents": "research.journal-profile",
+}
+
+#: The pre-merge loop config had one `agent:` for every dispatch
+#: (`main:config/defaults.yml`). Old runs keep the agent they ran with.
+LEGACY_LOOP_AGENT_ROLES = ("loop.experiment", "loop.literature", "loop.paper-draft")
+
+#: Run-local keys with no role equivalent: reported, never silently dropped.
+LEGACY_UNMAPPED_KEYS = {
+    "support_idea_agent": "no matching role; set one with `agent configure --assign`",
 }
 
 DEFAULT = "default"
@@ -138,9 +149,19 @@ def resolve_data(registry: dict, defaults: dict, workspace: dict | None = None) 
                 # that role; leave it at the default instead of emptying it.
                 if narrowed:
                     assignments[role] = Setting(narrowed, LEGACY)
+    legacy_agent = ws.get("agent")
+    if isinstance(legacy_agent, str) and legacy_agent:
+        for role in LEGACY_LOOP_AGENT_ROLES:
+            assignments[role] = Setting(legacy_agent, LEGACY)
     for key, role in LEGACY_ROLE_KEYS.items():
         if key in ws:
             assignments[role] = Setting(ws[key], LEGACY)
+    profiler = ws.get("journal_profiler")
+    if isinstance(profiler, str) and "journal_profile_agents" not in ws:
+        # Old paper-review runs named one profiler plus a primary cross-check.
+        crosscheck = ws.get("primary_profile_crosscheck")
+        team = [profiler] + ([crosscheck] if isinstance(crosscheck, str) else [])
+        assignments["research.journal-profile"] = Setting(team, LEGACY)
     for role, value in (ws.get("assignments") or {}).items():
         assignments[role] = Setting(value, WORKSPACE)
     for name, overrides in (ws.get("agent_overrides") or {}).items():
@@ -161,6 +182,9 @@ def resolve_data(registry: dict, defaults: dict, workspace: dict | None = None) 
     eff = Effective(agents=agents, tiers=tiers, menus=menus, assignments=assignments,
                     support_as_primary=exceptions)
     eff.problems, eff.warnings = validate(eff)
+    for key, why in LEGACY_UNMAPPED_KEYS.items():
+        if key in ws:
+            eff.warnings.append(f"legacy key '{key}' ignored: {why}")
     return eff
 
 
