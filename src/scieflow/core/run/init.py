@@ -35,6 +35,9 @@ def init_workspace(slug: str, goal_file: Path, workspace_root: Path,
         budget_mod.write_budget(ws, budget_mod.new_budget(
             cfg["max_iterations"], cfg["max_experiment_runs"], cfg["max_wall_minutes"]))
         (ws / "notebook.md").write_text(f"# Research notebook — {slug}\n\nGoal: see goal.md\n")
+        from scieflow.core import events
+
+        events.emit(ws, "run.created", "system", approval=cfg["approval"])
     except BaseException:
         shutil.rmtree(ws, ignore_errors=True)
         raise
