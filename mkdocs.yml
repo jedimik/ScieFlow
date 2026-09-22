@@ -86,6 +86,7 @@ nav:
       - Backing up: chats/backup.md
       - Restoring: chats/restore.md
       - Remote sync (DVC): chats/remote.md
+      - Pausing and syncing: chats/sync.md
       - Security: chats/security.md
   - Agent configuration: agents.md
   - Storage (DVC): DVC_STORAGE.md

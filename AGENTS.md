@@ -104,7 +104,19 @@ when to stop.
     disabled or unknown agent) is a boundary: never add `--promote` to get
     past it unless the user asked for that exception.
 
-14. **Chat backups** (optional, user-invoked). Copying agent chats between
+14. **Syncing the project you are working on.** Work that exists only on one
+    machine is lost work. When the user pauses, wraps up, or asks to sync,
+    follow `skills/workspace-sync/SKILL.md`: push **both** the run's data
+    (`uv run scripts/dvc_sync.py push <slug>`, one zip per named run) **and**
+    this project's agent chat (`./scripts/chats-push.sh`, the user runs it —
+    it needs their passphrase). First run `uv run scieflow workspace
+    sync-status <slug>` and report what changed; **ask before uploading**
+    when a file is 1 GB or larger, when there are more than ~500 new files,
+    when the total passes ~5 GB, or when the run has never been synced —
+    offer moving rebuildable output to `scratch/` instead. Never upload
+    anything the user did not agree to, and say afterwards what was left out.
+
+15. **Chat backups** (optional, user-invoked). Copying agent chats between
     machines goes ONLY through `uv run scieflow chats` per
     `src/scieflow/chats/AGENTS.md`. **Never start a backup or a restore on
     your own initiative** — a bundle is the user's whole conversation history.
@@ -122,6 +134,7 @@ when to stop.
 | Task | Skill file |
 |---|---|
 | Show options / let the user choose what to do or change agent settings | `skills/scieflow-menu/SKILL.md` |
+| Pause, wrap up, or sync the project to storage | `skills/workspace-sync/SKILL.md` |
 | Run / resume the research loop | `skills/research-loop/SKILL.md` |
 | Delegate an experiment campaign | `skills/experiment-cycle/SKILL.md` |
 | Ground results in literature | `skills/literature-cycle/SKILL.md` |

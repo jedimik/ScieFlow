@@ -133,6 +133,66 @@ def moved_entries(root: Path | None = None) -> list[tuple[str, str]]:
     return out
 
 
+# -- sync status ----------------------------------------------------------
+GIB = 1024 ** 3
+
+
+def _pointer_for(slug: str, root: Path) -> Path | None:
+    """The DVC pointer of a run's archive, or its legacy per-file pointer."""
+    ws = workspace_root(root)
+    for candidate in (ws / "_archives" / f"{slug}.zip.dvc", ws / f"{slug}.dvc"):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def sync_status(slug: str, root: Path | None = None, big_bytes: int = GIB) -> dict:
+    """What a run would upload: new files since its last sync, and the big ones.
+
+    Rebuildable directories are excluded, exactly as archives exclude them, so
+    the numbers match what a push would actually carry.
+    """
+    root = root or config_mod.repo_root()
+    path = workspace_root(root) / slug
+    if not path.is_dir():
+        raise click.ClickException(f"no run workspace/{slug}")
+    archive = _archive_mod()
+    _, files, links = archive._collect(path)
+    pointer = _pointer_for(slug, root)
+    since = pointer.stat().st_mtime if pointer else None
+
+    total = new_bytes = 0
+    new: list[str] = []
+    big: list[tuple[int, str]] = []
+    for item in files:
+        try:
+            stat = item.stat()
+        except OSError:
+            continue
+        rel = str(item.relative_to(path))
+        total += stat.st_size
+        if since is None or stat.st_mtime > since:
+            new.append(rel)
+            new_bytes += stat.st_size
+        if stat.st_size >= big_bytes:
+            big.append((stat.st_size, rel))
+    return {
+        "slug": slug,
+        "tracked": pointer is not None,
+        "pointer": str(pointer.relative_to(root)) if pointer else None,
+        "last_sync": (datetime.fromtimestamp(since, tz=timezone.utc).isoformat(timespec="seconds")
+                      if since else None),
+        "files": len(files),
+        "bytes": total,
+        "new_files": len(new),
+        "new_bytes": new_bytes,
+        "new_sample": sorted(new)[:10],
+        "big_files": [{"bytes": size, "path": rel}
+                      for size, rel in sorted(big, reverse=True)[:20]],
+        "symlinks": len(links),
+    }
+
+
 # -- doctor ---------------------------------------------------------------
 def _archive_mod():
     try:
@@ -270,6 +330,39 @@ def index():
         lines += [f"- `{old}` → `workspace/{new}`" for old, new in moved]
     (ws / "INDEX.md").write_text("\n".join(lines) + "\n")
     click.echo(f"wrote {ws / 'INDEX.md'} ({len(runs)} runs)")
+
+
+@workspace.command("sync-status")
+@click.argument("slug", required=False)
+@click.option("--big-gb", default=1.0, show_default=True,
+              help="Call a file big at this size, in gigabytes.")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def sync_status_cmd(slug, big_gb, as_json):
+    """What a run would upload: new files since its last sync, and big ones."""
+    big_bytes = int(big_gb * GIB)
+    slugs = [slug.removeprefix("workspace/").rstrip("/")] if slug else [
+        r.slug for r in list_runs()]
+    reports = []
+    for name in slugs:
+        try:
+            reports.append(sync_status(name, big_bytes=big_bytes))
+        except click.ClickException:
+            if slug:
+                raise
+    if as_json:
+        click.echo(json.dumps(reports if not slug else reports[0], indent=2))
+        return
+    if not reports:
+        click.echo("no runs in workspace/ — nothing to sync "
+                   "(pull one with: uv run scripts/dvc_sync.py pull <slug>)")
+        return
+    for report in reports:
+        state = "never synced" if not report["tracked"] else f"synced {report['last_sync'][:10]}"
+        click.echo(f"{report['slug']:<50} {state:<20} "
+                   f"{report['new_files']:>6} new / {report['files']:>6} files  "
+                   f"{_human(report['new_bytes']):>8} new / {_human(report['bytes']):>8}")
+        for entry in report["big_files"][:5]:
+            click.echo(f"    big: {_human(entry['bytes']):>8}  {entry['path']}")
 
 
 @workspace.command("doctor")

@@ -114,6 +114,8 @@ TREE: list[Section] = [
         Item("ws-list", "List runs", "`scieflow workspace list`.", "cli"),
         Item("ws-doctor", "Health report for a run", "`scieflow workspace doctor`.", "cli"),
         Item("ws-index", "Write INDEX.md", "`scieflow workspace index`.", "cli"),
+        Item("ws-sync-status", "What would a sync upload?",
+             "New files since the last sync, and the big ones.", "cli"),
     ]),
     Section("chats", "Chats", "Back up and restore agent chats, skills and plugins.", [
         Item("chats-scan", "Scan", "Read-only inventory.", "cli"),
@@ -746,6 +748,8 @@ def workspace_item(ui: UI, key: str) -> None:
         return run_cli(["workspace", "list"])
     if key == "ws-index":
         return run_cli(["workspace", "index"])
+    if key == "ws-sync-status":
+        return run_cli(["workspace", "sync-status"])
     slug = ui.select("Which run?", [(f"{r.kind:<13} {r.slug}", r.slug) for r in ws.list_runs()])
     if slug is not BACK:
         run_cli(["workspace", "doctor", slug])

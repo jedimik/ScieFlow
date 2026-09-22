@@ -170,7 +170,15 @@ Symlinks inside a workspace are refused, not followed.
 - `.dvcignore` ignores non-essential cache and temporary files (`__pycache__`, `.pytest_cache`, `*.pyc`, `*.tmp`, `*.sif`, `.venv`, `.superpowers`), ensuring DVC does not waste S3 bandwidth or storage on cache.
 
 
-## 5. Chat bundles (separate, optional)
+## 5. Pausing a session
+
+Ask an agent to *pause now*, *sync with dvc* or *finalize the workspace* and it
+follows `skills/workspace-sync/SKILL.md`: it reports what changed with
+`scieflow workspace sync-status <slug>`, asks before anything large goes up,
+then pushes the run and hands you the chat-backup command. See
+[chats/sync.md](chats/sync.md).
+
+## 6. Chat bundles (separate, optional)
 
 `scieflow chats push` / `pull` can move encrypted chat bundles through the same
 remote. It is a different thing from workspace sync: one bundle file at a time,

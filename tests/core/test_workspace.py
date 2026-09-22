@@ -67,3 +67,60 @@ def test_cli_list_json_and_index(ws):
     assert result.exit_code == 0, result.output
     text = (ws / "INDEX.md").read_text()
     assert "## Lineage" in text and "`notes` → `workspace/_misc/notes`" in text
+
+
+# -- sync status ----------------------------------------------------------
+def _run_with_files(ws, slug="2026-01-loop"):
+    run = ws / slug
+    (run / "results").mkdir(parents=True, exist_ok=True)
+    (run / "results" / "small.txt").write_text("x")
+    return run
+
+
+def test_sync_status_counts_everything_when_never_synced(ws):
+    run = _run_with_files(ws)
+    (run / "big.bin").write_bytes(b"0" * 2048)
+    report = wsmod.sync_status("2026-01-loop", big_bytes=1024)
+    assert report["tracked"] is False and report["last_sync"] is None
+    assert report["new_files"] == report["files"] > 0
+    assert [e["path"] for e in report["big_files"]] == ["big.bin"]
+
+
+def test_sync_status_counts_only_files_newer_than_the_pointer(ws, tmp_path):
+    import os
+    import time
+
+    run = _run_with_files(ws)
+    old = run / "results" / "old.txt"
+    old.write_text("old")
+    pointer = ws / "_archives" / "2026-01-loop.zip.dvc"
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text("outs: []\n")
+    stamp = time.time()
+    os.utime(pointer, (stamp, stamp))
+    os.utime(old, (stamp - 100, stamp - 100))
+    fresh = run / "results" / "new.txt"
+    fresh.write_text("new")
+    os.utime(fresh, (stamp + 100, stamp + 100))
+
+    report = wsmod.sync_status("2026-01-loop")
+    assert report["tracked"] is True and report["last_sync"]
+    assert "results/new.txt" in report["new_sample"]
+    assert "results/old.txt" not in report["new_sample"]
+
+
+def test_sync_status_ignores_rebuildable_dirs(ws):
+    run = _run_with_files(ws)
+    (run / "scratch").mkdir(exist_ok=True)
+    (run / "scratch" / "huge.bin").write_bytes(b"0" * 4096)
+    report = wsmod.sync_status("2026-01-loop", big_bytes=1024)
+    assert report["big_files"] == []
+    assert all("scratch" not in p for p in report["new_sample"])
+
+
+def test_sync_status_cli_json_and_missing_run(ws):
+    runner = CliRunner()
+    rows = json.loads(runner.invoke(wsmod.workspace, ["sync-status", "--json"]).output)
+    assert {r["slug"] for r in rows} == {"2026-01-loop", "2026-01-lit"}
+    bad = runner.invoke(wsmod.workspace, ["sync-status", "nope"])
+    assert bad.exit_code != 0 and "no run workspace/nope" in bad.output
