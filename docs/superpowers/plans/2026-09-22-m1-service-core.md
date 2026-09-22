@@ -84,7 +84,7 @@ PBS ledger onto the safe store (Task 3).
   methods `run_dir(slug: str) -> Path`, `agents() -> dict`, `defaults() -> dict`,
   `schema(name: str) -> dict`; exception `ProjectError(ValueError)`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/core/test_project.py
@@ -137,12 +137,12 @@ def test_state_dir_honours_the_environment(tmp_path, monkeypatch):
     assert project.state_dir == project.root / ".scieflow"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/core/test_project.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scieflow.core.project'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # src/scieflow/core/project.py
@@ -218,12 +218,12 @@ def _isolated_state_dir(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("SCIEFLOW_STATE_DIR", str(tmp_path_factory.mktemp("state")))
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/core/test_project.py -v && uv run pytest -q`
 Expected: 7 passed; full suite green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/scieflow/core/project.py tests/core/test_project.py tests/conftest.py
@@ -247,7 +247,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   `update_yaml(path, fn: Callable[[dict], dict]) -> dict`; `append_jsonl(path, record: dict)`;
   `read_jsonl(path) -> list[dict]`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/core/test_store.py
@@ -310,12 +310,12 @@ def test_jsonl_append_and_read_skip_garbage(tmp_path):
     assert store.read_jsonl(tmp_path / "missing.jsonl") == []
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/core/test_store.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scieflow.core.store'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # src/scieflow/core/store.py
@@ -446,12 +446,12 @@ Append to `.gitignore` (`uv.lock` is tracked, so never a bare `*.lock`):
 
 Then `uv lock -q && uv sync --all-extras -q`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/core/test_store.py -v && uv run pytest -q`
 Expected: 5 passed; full suite green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/scieflow/core/store.py tests/core/test_store.py pyproject.toml uv.lock .gitignore
@@ -476,7 +476,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   `scieflow.core.run.init` (`init_workspace(slug, goal_file, workspace_root, overrides, root) -> Path`, `main`).
   `scieflow.core.run.validate` (`validate_status, validate_notebook_entry, validate_manifest, validate_claim_audit, main`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/core/test_run_package.py
@@ -530,12 +530,12 @@ def test_legacy_scripts_still_run_as_commands(tmp_path):
     assert done.returncode == 0 and "--schema" in done.stdout
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/core/test_run_package.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scieflow.core.run'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `src/scieflow/core/run/__init__.py`:
 
@@ -810,12 +810,12 @@ def write(plan: Plan) -> None:
 with `from scieflow.core import store` (and `import os` removed if nothing else uses it).
 `tests/test_remote_*.py` and `tests/core/test_configure*.py` must still pass unchanged.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/core/test_run_package.py tests/test_status.py tests/test_budget.py tests/test_checkpoint.py tests/test_sfx_init.py tests/test_validate.py tests/test_dry_run.py -v && uv run pytest -q && scripts/check_legacy.sh`
 Expected: all pass; full suite green; every legacy check `ok`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/scieflow/core/run scripts/status.py scripts/budget.py scripts/checkpoint.py scripts/sfx_init.py scripts/validate.py scripts/remote/jobs.py src/scieflow/core/agent_configure.py tests/core/test_run_package.py
@@ -853,7 +853,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
     `actions.run_for_path(path: Path) -> Path | None`.
   - CLI: `scieflow run init|show|mark|advance|checkpoint|resume|events|log`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/core/test_events.py
@@ -994,12 +994,12 @@ def test_run_cli_mark_events_and_log(tmp_path, monkeypatch):
     assert cli.invoke(run_group, ["log", "r1", "phase.done"]).exit_code != 0  # agents log notes only
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/core/test_events.py tests/core/test_run_actions.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scieflow.core.events'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # src/scieflow/core/events.py
@@ -1373,12 +1373,12 @@ In `src/scieflow/cli.py` `GROUPS`, add after `"agent"`:
             "A run's state, history and lifecycle."),
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/core/test_events.py tests/core/test_run_actions.py -v && uv run pytest -q`
 Expected: all pass; full suite green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/scieflow/core/events.py src/scieflow/core/run/actions.py src/scieflow/core/run/cli.py src/scieflow/core/run/init.py src/scieflow/cli.py tests/core/test_events.py tests/core/test_run_actions.py
@@ -1402,7 +1402,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   timestamp, UTC). Existing fields (`slug, kind, state, updated, aliases, lineage`) unchanged.
   `validate.validate_status_research(st: dict) -> list[str]`; `--schema status-research`.
 
-- [ ] **Step 1: Write the failing tests** (append to `tests/core/test_workspace.py`)
+- [x] **Step 1: Write the failing tests** (append to `tests/core/test_workspace.py`)
 
 ```python
 def test_describe_gives_structured_fields_for_a_loop_run(ws):
@@ -1429,12 +1429,12 @@ def test_research_status_validation(tmp_path):
     assert validate.validate_status_research({"workflow": "unknown-flow"})
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/core/test_workspace.py -v`
 Expected: FAIL with `AttributeError: 'Run' object has no attribute 'phase'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```yaml
 # schemas/status-research.yml
@@ -1528,12 +1528,12 @@ and inside `describe`, build the extra fields:
     )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/core/test_workspace.py -v && uv run pytest -q`
 Expected: all pass (existing `list --json` tests still see `slug`, `kind`, `aliases`); full suite green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add schemas/status-research.yml src/scieflow/core/workspace.py src/scieflow/core/run/validate.py tests/core/test_workspace.py
@@ -1560,7 +1560,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   `load(path) -> Job`; `list_jobs(project, run_dir=None) -> list[Job]`; `find(project, job_id) -> Job | None`;
   `reconcile(project, run_dir=None) -> list[Job]`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/core/test_jobs.py
@@ -1663,12 +1663,12 @@ def test_reconcile_marks_dead_running_jobs_lost(tmp_path):
     assert jobs.find(project, job.id).state == "lost"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/core/test_jobs.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scieflow.core.jobs'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # src/scieflow/core/jobs.py
@@ -1895,12 +1895,12 @@ def reconcile(project: Project, run_dir: Path | None = None) -> list[Job]:
     return lost
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/core/test_jobs.py -v && uv run pytest -q`
 Expected: 7 passed; full suite green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/scieflow/core/jobs.py tests/core/test_jobs.py
@@ -1925,7 +1925,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   (`role` is accepted and ignored until Task 11); `BUDGET_EXIT = 75`; `main()` keeps its
   contract.
 
-- [ ] **Step 1: Write the failing tests** (append to `tests/core/test_agent_run.py`)
+- [x] **Step 1: Write the failing tests** (append to `tests/core/test_agent_run.py`)
 
 ```python
 def make_loop_workspace(root: Path, wall_cap: int = 60) -> Path:
@@ -2001,13 +2001,13 @@ def test_prepare_is_callable_without_exiting(tmp_path):
 
 (Add `import pytest` at the top of the file if absent.)
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/core/test_agent_run.py -v`
 Expected: the four new tests FAIL (`ImportError: cannot import name 'prepare'`, missing job
 records, exit code 0 instead of 75, transcript without `partial-output`).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 In `src/scieflow/core/agent_run.py` add imports and replace `main()`:
 
@@ -2117,13 +2117,13 @@ def main(argv: list[str] | None = None) -> None:
 
 (`subprocess` stays imported only if still used elsewhere in the module; remove it otherwise.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/core/test_agent_run.py tests/test_dry_run.py tests/core/test_legacy.py -v && uv run pytest -q && scripts/check_legacy.sh`
 Expected: all pass — including the untouched `test_timeout_exits_124`,
 `test_failing_agent_exit_code_and_transcript` (exit 3) and the dry run; full suite green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/scieflow/core/agent_run.py tests/core/test_agent_run.py
@@ -2148,7 +2148,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Consumes: `actions.run_for_path`, `actions.guard_budget`, `actions.record_spend`, `Campaign.expand()`.
 - Produces: `_budget_run(experiments_dir: Path) -> Path | None` helper in `experiments/cli.py`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 The `project` fixture in `tests/experiments/conftest.py` returns the repo root (`tmp_path`)
 holding `pipelines/demo/` with the campaign `pipelines/demo/campaigns/gain-sweep.yaml`
@@ -2204,12 +2204,12 @@ def test_sweep_outside_a_run_is_unaffected(project):
     assert result.exit_code == 0, result.output
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/experiments/test_budget_counting.py -v`
 Expected: FAIL — `experiment_runs` stays 0 and the exhausted sweep still runs.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 In `src/scieflow/experiments/cli.py`:
 
@@ -2249,12 +2249,12 @@ and `_guard(run_dir)`; after the work, record what was spent:
         actions.record_spend(run_dir, experiment_runs=1)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/experiments -v && uv run pytest -q`
 Expected: all pass; full suite green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/scieflow/experiments/cli.py tests/experiments/test_budget_counting.py
@@ -2282,7 +2282,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   Gate record: `{id, kind, question, options, files, in_scope, requires_human, state, opened, opened_by, answer, answered, answered_by, rationale, note}`.
   CLI: `scieflow gate open|list|show|answer|wait`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/core/test_gates.py
@@ -2399,12 +2399,12 @@ def test_cli_open_list_answer(tmp_path, monkeypatch):
     assert "B" in cli.invoke(gate, ["show", "r1", gate_id]).output
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/core/test_gates.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scieflow.core.gates'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```yaml
 # schemas/gates.yml
@@ -2649,12 +2649,12 @@ In `src/scieflow/cli.py` `GROUPS` add:
              "Approvals the protocols require, answered from terminal or browser."),
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/core/test_gates.py -v && uv run pytest -q`
 Expected: all pass; full suite green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add schemas/gates.yml src/scieflow/core/gates.py src/scieflow/cli.py tests/core/test_gates.py
@@ -2685,7 +2685,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   `agent_settings(project, slug=None) -> dict`;
   `ServiceError(Exception)`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/core/test_service.py
@@ -2764,12 +2764,12 @@ def test_unknown_run_is_a_service_error(project):
         service.run_detail(project, "nope")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/core/test_service.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scieflow.core.service'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # src/scieflow/core/service.py
@@ -2921,12 +2921,12 @@ In `src/scieflow/core/menu.py` `menu_json`, replace `"runs": [asdict(r) for r in
 (importing `from scieflow.core import service` and `from scieflow.core.project import Project`
 inside `menu_json`).
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/core/test_service.py tests/core/test_menu.py -v && uv run pytest -q`
 Expected: all pass; full suite green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/scieflow/core/service.py src/scieflow/core/run/cli.py src/scieflow/core/menu.py tests/core/test_service.py
@@ -2953,7 +2953,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `agent_configure.parse_assign` accepts `AGENT@MODEL/EFFORT` tokens (either part optional);
   - `scieflow agent run --role ROLE …` applies the role's override for that agent and refuses an agent not assigned to that role.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/core/test_staffing.py
@@ -3060,12 +3060,12 @@ def test_agent_run_role_applies_override_and_refuses_unassigned(tmp_path):
     assert refused.returncode != 0 and "not assigned" in refused.stderr
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/core/test_staffing.py -v`
 Expected: FAIL (`AttributeError: 'Effective' object has no attribute 'role_overrides'` / `module has no attribute 'EXTENDED_THINKING'`).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 In `src/scieflow/core/agent_config.py`:
 
@@ -3268,12 +3268,12 @@ def test_role_level_model_and_effort(repo):
         "agent": "codex", "model": "sol", "reasoning": "high"}
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/core/test_staffing.py tests/core/test_menu.py tests/core/test_agent_config.py tests/core/test_legacy_keys.py -v && uv run pytest -q`
 Expected: all pass; full suite green; `uv run scieflow agent show` reports no problems on the real config.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/scieflow/core/agent_config.py src/scieflow/core/agent_configure.py src/scieflow/core/agent_run.py src/scieflow/core/menu.py src/scieflow/core/cli.py tests/core/test_staffing.py tests/core/test_menu.py
@@ -3297,7 +3297,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: the whole milestone.
 
-- [ ] **Step 1: Write the end-to-end test**
+- [x] **Step 1: Write the end-to-end test**
 
 ```python
 # tests/test_service_e2e.py
@@ -3358,13 +3358,13 @@ def test_one_iteration_end_to_end(tmp_path):
     assert len(jobs.list_jobs(project, ws)) == 4
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `uv run pytest tests/test_service_e2e.py -v`
 Expected: PASS (all earlier tasks are in place). If it fails, the failure names the missing
 event or state — fix the task that owns it, not the test.
 
-- [ ] **Step 3: Update the protocols and docs**
+- [x] **Step 3: Update the protocols and docs**
 
 `AGENTS.md`:
 
@@ -3403,7 +3403,7 @@ keep output, `service.cancel_job`); gates (kinds table from `schemas/gates.yml`,
 autonomous answering); budgets enforced in code and exit 75; per-role staffing with the
 `AGENT@MODEL/EFFORT` syntax. `README.md`: one paragraph pointing at `docs/runs.md`.
 
-- [ ] **Step 4: Full verification**
+- [x] **Step 4: Full verification**
 
 Run:
 ```bash
@@ -3416,7 +3416,7 @@ uv run scieflow run list
 Expected: suite green (≥ 779 + the new tests); every legacy check `ok`; docs build with 0
 warnings; `agent show` reports no problems; `run list` prints the local runs.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add AGENTS.md skills src/scieflow/research README.md mkdocs.yml docs/runs.md tests/test_service_e2e.py
