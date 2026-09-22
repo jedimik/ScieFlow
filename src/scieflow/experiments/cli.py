@@ -5,6 +5,7 @@ import click
 import yaml
 
 from scieflow.core import config
+from scieflow.core.run import actions
 
 from .campaign import Campaign, RunSpec
 from .compare import compare_campaign
@@ -54,6 +55,22 @@ def parse_params(pairs) -> dict:
     return params
 
 
+def _budget_run(experiments_dir: Path) -> Path | None:
+    """The run whose budget these runs spend, if experiments_dir lives in one."""
+    existing = next(p for p in [Path(experiments_dir), *Path(experiments_dir).parents]
+                    if p.exists())
+    return actions.run_for_path(existing)
+
+
+def _guard(run_dir: Path | None) -> None:
+    if run_dir is None:
+        return
+    try:
+        actions.guard_budget(run_dir, ("experiment_runs",))
+    except actions.BudgetExhausted as e:
+        raise click.ClickException(f"{e} — run checkpointed; raise the budget to continue") from e
+
+
 @click.group()
 def experiment():
     """Computational experiments: campaigns, sweeps, metrics, reports."""
@@ -74,10 +91,14 @@ def run(campaign_path, params, direct, experiments_dir, pipelines_dir):
     p = parse_params(params)
     slug = "_".join(f"{k}-{v}" for k, v in sorted(p.items())) or "default"
     spec = RunSpec(run_id=f"manual_{slug}", params=p)
+    budget_run = _budget_run(experiments_dir)
+    _guard(budget_run)
     run_dir = execute_run(
         campaign, stage, spec, experiments_dir,
         mode="direct" if direct else "apptainer",
     )
+    if budget_run is not None:
+        actions.record_spend(budget_run, experiment_runs=1)
     status = yaml.safe_load((run_dir / "config.yaml").read_text())["status"]
     click.echo(f"status: {status}")
     click.echo(str(run_dir))
@@ -93,9 +114,13 @@ def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
     """Run every parameter combination / scenario in the campaign."""
     campaign = Campaign.load(campaign_path)
     stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
+    budget_run = _budget_run(experiments_dir)
+    _guard(budget_run)
     results_path = run_sweep(
         campaign, stage, experiments_dir, mode="direct" if direct else "apptainer"
     )
+    if budget_run is not None:
+        actions.record_spend(budget_run, experiment_runs=len(campaign.expand()))
     click.echo(str(results_path))
 
 
