@@ -33,3 +33,9 @@ pipelines/*/data/
 pipelines/*/stages/*/env/
 # Editor and tool backups (e.g. .dvc/config.bak while migrating)
 *.bak
+# Runtime state and lock files written by scieflow.core.store / jobs
+.scieflow/
+*.yml.lock
+*.yaml.lock
+*.json.lock
+*.jsonl.lock
