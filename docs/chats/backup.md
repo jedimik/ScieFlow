@@ -3,7 +3,8 @@
 ## The short version
 
 ```bash
-uv run scieflow chats backup
+./scripts/chats-push.sh       # pick agents and projects, then bundle (and upload)
+uv run scieflow chats backup  # the same, one chat at a time
 ```
 
 That walks you through every step below and leaves one encrypted file in

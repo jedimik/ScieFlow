@@ -121,3 +121,18 @@ def test_size_limit_refuses(tmp_path, source_home):
                   "--yes", "--out", str(tmp_path / "y.zip")])
     assert result.exit_code != 0
     assert "max_bundle_gb" in result.output
+
+
+def test_failed_decryption_is_a_clean_error(tmp_path, monkeypatch):
+    from scieflow.chats import bundle as bundle_mod
+    from scieflow.chats import crypto
+
+    encrypted = tmp_path / "b.zip.gpg"
+    encrypted.write_bytes(b"not really gpg")
+
+    def boom(src, dest):
+        raise crypto.CryptoError("gpg failed: 2")
+
+    monkeypatch.setattr(crypto, "decrypt", boom)
+    with pytest.raises(bundle_mod.BundleError, match="needs the passphrase"):
+        bundle_mod.open_bundle(encrypted)

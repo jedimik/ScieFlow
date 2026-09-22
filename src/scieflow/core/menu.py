@@ -120,6 +120,9 @@ TREE: list[Section] = [
         Item("chats-backup", "Back up", "Pick chats → encrypted bundle.", "cli"),
         Item("chats-restore", "Restore (dry run first)", "Restore a bundle on this machine.",
              "cli"),
+        Item("chats-push", "Push to DVC storage", "Pick agents and projects, bundle, upload.",
+             "cli"),
+        Item("chats-pull", "Pull from DVC storage", "Fetch a bundle and restore it.", "cli"),
     ]),
 ]
 
@@ -749,6 +752,12 @@ def workspace_item(ui: UI, key: str) -> None:
 
 
 def chats_item(ui: UI, key: str) -> None:
+    if key in ("chats-push", "chats-pull"):
+        # The wrapper scripts own the agent/project pickers; keep one copy.
+        script = _root() / "scripts" / f"{key.replace('chats-', 'chats-')}.sh"
+        click.echo(click.style(f"$ {script.relative_to(_root())}", dim=True))
+        subprocess.run([str(script)], cwd=_root())
+        return None
     if key == "chats-scan":
         return run_cli(["chats", "scan"])
     if key == "chats-backup":

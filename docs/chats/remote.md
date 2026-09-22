@@ -18,6 +18,35 @@ remote:
   dir: workspace/chats   # where .dvc pointers live inside the repo
 ```
 
+## The short way
+
+Two scripts do the whole round trip, asking which agents and which projects
+you mean:
+
+```bash
+./scripts/chats-push.sh       # pick agents → pick projects → bundle → upload
+./scripts/chats-pull.sh       # pick a bundle → fetch → inspect → restore
+```
+
+Both are also in the menu (`uv run scieflow` → Chats). Everything is ticked by
+default, so enter three times backs up everything. Give flags to skip the
+questions entirely:
+
+```bash
+./scripts/chats-push.sh --tool claude --project SegSnake --yes
+./scripts/chats-push.sh --tool codex --since 2026-09-01 --commit
+./scripts/chats-pull.sh --latest --tool claude
+./scripts/chats-pull.sh --latest --no-restore          # fetch and inspect only
+```
+
+`--commit` git-commits the `.dvc` pointer after a successful upload, so the
+bundle is findable from another machine once you push the branch. `--no-push`
+builds the bundle without uploading. On pull, the restore is a dry run and
+you are asked before anything is written; `--map OLD=NEW` passes through.
+
+The rest of this page is what those scripts call, in case you want the pieces
+separately.
+
 ## Push
 
 ```console

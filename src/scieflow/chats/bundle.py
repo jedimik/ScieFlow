@@ -207,7 +207,13 @@ def open_bundle(path: Path) -> tuple[Path, dict]:
     try:
         if crypto.is_encrypted(path):
             zip_path = work / "bundle.zip"
-            crypto.decrypt(path, zip_path)
+            try:
+                crypto.decrypt(path, zip_path)
+            except crypto.CryptoError as e:
+                raise BundleError(
+                    f"could not decrypt {path.name}: {e}. It needs the passphrase "
+                    "it was written with, typed in a terminal."
+                ) from e
         archive = _archive()
         extracted = work / "bundle"
         archive.extract_zip(zip_path, extracted, force=True)
