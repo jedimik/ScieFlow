@@ -35,6 +35,12 @@ class Run:
     updated: str | None
     aliases: list[str] = field(default_factory=list)
     lineage: str | None = None
+    id: str | None = None
+    phase: str | None = None
+    phase_state: str | None = None
+    iteration: int | None = None
+    stopped_reason: str | None = None
+    updated_at: str | None = None
 
 
 def workspace_root(root: Path | None = None) -> Path:
@@ -80,6 +86,25 @@ def _updated(path: Path) -> str | None:
     return datetime.fromtimestamp(max(stamps), tz=timezone.utc).date().isoformat()
 
 
+def _updated_at(path: Path) -> str | None:
+    stamps = [(path / n).stat().st_mtime for n in
+              ("status.yml", "log.md", "notebook.md", "events.jsonl") if (path / n).exists()]
+    if not stamps:
+        return None
+    return datetime.fromtimestamp(max(stamps), tz=timezone.utc).isoformat(timespec="seconds")
+
+
+def _current_phase(kind: str, status: dict) -> tuple[str | None, str | None]:
+    phases = status.get("phases") or {}
+    if kind == "loop":
+        phase = next((p for p in LOOP_PHASES if (phases.get(p) or "pending") != "done"), None)
+    else:
+        phase = status.get("phase") or next(
+            (p for p, s in phases.items() if isinstance(s, str) and s != "done"), None)
+    state = phases.get(phase) if phase else None
+    return phase, state if isinstance(state, str) else None
+
+
 def describe(path: Path) -> Run:
     status = _load(path / "status.yml")
     if "run" in status:
@@ -89,12 +114,20 @@ def describe(path: Path) -> Run:
     else:
         kind = "none"
     config = _load(path / "config.yml")
+    phase, phase_state = _current_phase(kind, status) if kind != "none" else (None, None)
+    stopped = status.get("stopped")
     return Run(
         slug=path.name,
         kind=kind,
         state=_state(kind, status),
         updated=_updated(path),
         lineage=config.get("lineage") if isinstance(config.get("lineage"), str) else None,
+        id=status.get("id"),
+        phase=phase,
+        phase_state=phase_state,
+        iteration=status.get("iteration") if kind == "loop" else None,
+        stopped_reason=(stopped.get("reason") if isinstance(stopped, dict) else stopped) or None,
+        updated_at=_updated_at(path),
     )
 
 

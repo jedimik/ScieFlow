@@ -1,0 +1,8 @@
+# Research-module runs (status.yml has `workflow:`). Lenient on purpose: phases
+# may hold a state string or a per-agent mapping, and extra keys are allowed.
+workflows:
+  lit-review: [brief, search, cross-review, synthesize, export]
+  gap-discovery: [intake, literature, gap-analysis, debate, synthesize]
+  paper-draft: [intake, outline, draft, cross-review, merge, verify, handoff]
+  paper-review: []          # tracked by `rounds:`, no fixed phases
+states: [pending, running, done, failed, skipped, skipped-quorum, incomplete, not_requested]

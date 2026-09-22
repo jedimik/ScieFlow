@@ -124,3 +124,27 @@ def test_sync_status_cli_json_and_missing_run(ws):
     assert {r["slug"] for r in rows} == {"2026-01-loop", "2026-01-lit"}
     bad = runner.invoke(wsmod.workspace, ["sync-status", "nope"])
     assert bad.exit_code != 0 and "no run workspace/nope" in bad.output
+
+
+def test_describe_gives_structured_fields_for_a_loop_run(ws):
+    run = {r.slug: r for r in wsmod.list_runs()}["2026-01-loop"]
+    assert run.phase == "experiment" and run.phase_state == "running"
+    assert run.iteration == 2 and run.stopped_reason is None
+    assert run.updated_at and "T" in run.updated_at
+
+
+def test_describe_gives_structured_fields_for_a_research_run(ws):
+    run = {r.slug: r for r in wsmod.list_runs()}["2026-01-lit"]
+    assert run.kind == "lit-review" and run.phase == "report"
+
+
+def test_research_status_validation(tmp_path):
+    from scieflow.core.run import validate
+
+    good = {"workflow": "lit-review", "slug": "x", "phase": "search",
+            "phases": {"brief": "done", "search": "running"}}
+    assert validate.validate_status_research(good) == []
+    bad = {"workflow": "lit-review", "phases": {"nonsense": "done", "search": "exploded"}}
+    errors = validate.validate_status_research(bad)
+    assert any("nonsense" in e for e in errors) and any("exploded" in e for e in errors)
+    assert validate.validate_status_research({"workflow": "unknown-flow"})

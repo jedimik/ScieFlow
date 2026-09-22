@@ -36,6 +36,22 @@ def validate_status(st: dict) -> list[str]:
     return errors
 
 
+def validate_status_research(st: dict) -> list[str]:
+    s = _schema("status-research")
+    workflow = st.get("workflow")
+    if workflow not in s["workflows"]:
+        return [f"unknown workflow: {workflow!r} (known: {', '.join(s['workflows'])})"]
+    errors = []
+    declared = s["workflows"][workflow]
+    for phase, state in (st.get("phases") or {}).items():
+        if declared and phase not in declared:
+            errors.append(f"unknown phase for {workflow}: {phase}")
+        if isinstance(state, str) and not any(
+                state == known or state.startswith(f"{known}-") for known in s["states"]):
+            errors.append(f"bad state for {phase}: {state}")
+    return errors
+
+
 def validate_notebook_entry(text: str) -> list[str]:
     s = _schema("notebook-entry")
     errors = []
@@ -75,7 +91,7 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="validate.py")
     ap.add_argument("file", type=Path)
     ap.add_argument("--schema", required=True,
-                    choices=["status", "notebook-entry", "manifest",
+                    choices=["status", "status-research", "notebook-entry", "manifest",
                              "claim-audit"])
     args = ap.parse_args(argv)
     text = args.file.read_text()
@@ -85,6 +101,8 @@ def main(argv=None) -> None:
         errors = validate_claim_audit(text)
     elif args.schema == "status":
         errors = validate_status(yaml.safe_load(text))
+    elif args.schema == "status-research":
+        errors = validate_status_research(yaml.safe_load(text))
     else:
         errors = validate_manifest(yaml.safe_load(text))
     for e in errors:
