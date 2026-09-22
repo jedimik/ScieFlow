@@ -20,6 +20,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from scieflow.core import agent_config as ac
+from scieflow.core import store
 
 NUMBER_FIELDS = {"timeout_min", "timeout"}
 BOOL_FIELDS = {"enabled"}
@@ -259,10 +260,7 @@ def _change(path: Path, before: str, doc, style) -> FileChange | None:
 
 def write(plan: Plan) -> None:
     for change in plan.changes:
-        change.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = change.path.with_name(f".{change.path.name}.tmp-{os.getpid()}")
-        tmp.write_text(change.after)
-        tmp.replace(change.path)
+        store.write_text(change.path, change.after)
 
 
 def _refuse_problems(eff: ac.Effective) -> None:

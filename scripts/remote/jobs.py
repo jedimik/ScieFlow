@@ -9,6 +9,8 @@ from pathlib import Path
 
 import yaml
 
+from scieflow.core import store
+
 STATES = ("queued", "running", "done", "failed")
 
 
@@ -24,9 +26,7 @@ def load_jobs(workspace: Path) -> list:
 
 
 def save_jobs(workspace: Path, jobs: list) -> None:
-    path = _path(workspace)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(jobs, sort_keys=False))
+    store.write_yaml(_path(workspace), jobs)
 
 
 def attempts(jobs: list, task: str) -> int:
