@@ -171,3 +171,18 @@ def log_cmd(slug, type_, message, pairs):
     if message:
         data["message"] = message
     events.emit(_ws(slug), type_, "agent", **data)
+
+
+@run.command("list")
+@click.option("--json", "as_json", is_flag=True)
+def list_cmd(as_json):
+    """Every run with kind, phase and state."""
+    from scieflow.core import service
+
+    runs = service.list_runs(Project.discover())
+    if as_json:
+        click.echo(json.dumps(runs, indent=2, default=str))
+        return
+    for r in runs:
+        phase = f"{r['phase']} ({r['phase_state']})" if r.get("phase") else ""
+        click.echo(f"{(r.get('updated_at') or '')[:16]:<16}  {r['kind']:<13} {r['slug']:<48} {phase}")

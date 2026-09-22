@@ -808,7 +808,9 @@ def menu_json() -> dict:
     from dataclasses import asdict
 
     from scieflow.core import agent_config as ac
+    from scieflow.core import service
     from scieflow.core import workspace as ws
+    from scieflow.core.project import Project
 
     root = _root()
     eff = ac.resolve(root)
@@ -844,7 +846,7 @@ def menu_json() -> dict:
                 "news": "uv run scieflow agent configure --news --set FIELD=VALUE --yes",
             },
         },
-        "runs": [asdict(r) for r in ws.list_runs()],
+        "runs": service.list_runs(Project.discover()),
         "resume_prompt_template": resume_prompt("<slug>", "loop"),
     }
 
