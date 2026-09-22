@@ -51,16 +51,19 @@ research:
     library: user               # or "group:<id>"
 
 assignments:
-  research.search: [claude, codex, agy]
-  research.cross-review: [claude, codex]
-  research.gap-analysis: [claude, codex]
-  research.debate: [claude, codex]
-  research.journal-profile: [agy, claude]
-  research.reviewer: codex
-  research.submitter: claude
-  research.outline: claude
-  research.draft-authors: [claude, codex]
-  research.consistency: codex
+  loop.experiment: codex
+  loop.literature: codex
+  loop.paper-draft: codex-paper
+  research.search: [codex, agy]
+  research.cross-review: [codex-review]
+  research.gap-analysis: [codex]
+  research.debate: [codex]
+  research.journal-profile: [agy, codex]
+  research.reviewer: codex-review
+  research.submitter: codex-paper
+  research.outline: codex-paper
+  research.draft-authors: [codex-paper, claude-paper]
+  research.consistency: codex-review
 ```
 
 ### Agent fields

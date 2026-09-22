@@ -23,9 +23,9 @@ def test_agents_registry_shape():
     assert agents["claude"]["enabled"] is True
     assert agents["stub"]["enabled"] is False
     assert {"claude", "codex", "agy", "stub"} <= set(agents)
-    # Role profiles (codex-paper, codex-review, …) are codex variants.
+    # Role profiles (codex-paper, claude-paper, …) are variants of a base agent.
     for name in set(agents) - {"claude", "codex", "agy", "stub"}:
-        assert name.startswith("codex-"), name
+        assert name.split("-", 1)[0] in {"claude", "codex"}, name
         assert agents[name]["tier"] == "primary"
 
 

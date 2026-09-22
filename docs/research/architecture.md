@@ -23,7 +23,7 @@ ScieFlow/
 │       ├── validate.py                    # `scieflow research validate`
 │       ├── citations.py                   # `scieflow research check-citations`
 │       ├── zotero.py                      # `scieflow research zotero-export`
-│       ├── schemas/                       # findings, review, gaps, manifest schemas
+│       ├── schemas/                       # findings, review, gaps, manifest, manuscript-review
 │       └── templates/                     # brief, report, debate protocol, LaTeX skeleton
 ├── setup/                                 # install.sh, doctor.sh
 └── workspace/                             # one dir per run (gitignored, DVC-synced)

@@ -1,3 +1,4 @@
+import pytest
 import subprocess
 import sys
 from pathlib import Path
@@ -110,3 +111,14 @@ def test_doi_url_prefix_is_normalized_before_comparison(tmp_path):
     )
     proc = run(ws)
     assert proc.returncode == 0, proc.stdout
+
+
+@pytest.mark.parametrize("command", [
+    r"\cite{a}", r"\citep{a}", r"\citet{a}", r"\citealp{a}", r"\parencite{a}",
+    r"\autocite{a}", r"\textcite{a}", r"\cite*{a}", r"\parencite[p.~3]{a}",
+    r"\autocite[see][12]{a}",
+])
+def test_every_cite_command_is_seen(command):
+    from scieflow.research.citations import CITE_RE
+
+    assert CITE_RE.findall(command) == ["a"]

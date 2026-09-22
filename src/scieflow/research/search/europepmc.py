@@ -12,6 +12,7 @@ def norm(res: dict) -> dict:
     for u in (res.get("fullTextUrlList") or {}).get("fullTextUrl", []):
         if u.get("documentStyle") == "pdf":
             pdf = u.get("url")
+            break  # first listed PDF, as scripts/nblm/resolve.py does
     year = res.get("pubYear")
     return papers.record(
         doi=res.get("doi"),

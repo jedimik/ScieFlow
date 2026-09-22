@@ -106,3 +106,41 @@ def test_http_get_429_retries_on_success():
     assert resp.json() == {"data": "success"}
     # Should have made 2 requests: first 429, second 200
     assert len(responses.calls) == 2
+
+
+def test_record_without_signals_keeps_the_old_shape():
+    r = papers.record(title="t", signals={"openalex": {}})
+    assert "signals" not in r
+
+
+def test_norm_keeps_open_access_type_and_authors_as_signals():
+    work = {
+        **OPENALEX_WORK,
+        "type": "article",
+        "open_access": {"is_oa": True, "oa_status": "gold",
+                        "oa_url": "https://example.org/demo.pdf"},
+        "primary_location": {"source": {"display_name": "Demo Journal"},
+                             "license": "cc-by"},
+        "authorships": [{"author": {"display_name": "Ada Lovelace"}},
+                        {"author": {"display_name": "Alan Turing"}}],
+    }
+    r = search_openalex.norm(work)
+    assert r["signals"]["openalex"] == {
+        "is_oa": True, "oa_status": "gold", "license": "cc-by",
+        "type": "article", "authors": ["Ada Lovelace", "Alan Turing"],
+    }
+    assert r["url"] == "https://example.org/demo.pdf"
+
+
+def test_signals_validate_against_the_findings_schema():
+    from pathlib import Path
+
+    import jsonschema
+
+    from scieflow.research import validate as validate_mod
+
+    schema_path = Path(validate_mod.__file__).parent / "schemas" / "findings.schema.json"
+    schema = json.loads(schema_path.read_text())
+    paper = {**search_openalex.norm({**OPENALEX_WORK, "type": "article"}),
+             "relevance": {"score": 4, "why": "on topic"}}
+    jsonschema.validate({"agent": "a", "topic": "t", "papers": [paper]}, schema)

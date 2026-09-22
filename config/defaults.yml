@@ -49,5 +49,5 @@ assignments:
   research.reviewer: codex-review
   research.submitter: codex-paper
   research.outline: codex-paper
-  research.draft-authors: [codex-paper]
+  research.draft-authors: [codex-paper, claude-paper]
   research.consistency: codex-review

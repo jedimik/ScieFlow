@@ -14,12 +14,34 @@ def _abstract(inv: dict | None) -> str | None:
     return " ".join(word for _, word in sorted(positions))
 
 
+def _authors(work: dict) -> list[str]:
+    names = []
+    for entry in work.get("authorships") or []:
+        name = (entry.get("author") or {}).get("display_name")
+        if name:
+            names.append(name)
+    return names
+
+
+def _signals(work: dict, oa: dict, loc: dict) -> dict:
+    """What OpenAlex returns that the core fields have no room for."""
+    fields = {
+        "is_oa": oa.get("is_oa"),
+        "oa_status": oa.get("oa_status"),
+        "license": loc.get("license"),
+        "type": work.get("type"),
+        "authors": _authors(work) or None,
+    }
+    return {k: v for k, v in fields.items() if v is not None}
+
+
 def norm(work: dict) -> dict:
     loc = work.get("primary_location") or {}
     source = loc.get("source") or {}
     oa = work.get("open_access") or {}
     doi = (work.get("doi") or "").replace("https://doi.org/", "") or None
     return papers.record(
+        signals={"openalex": _signals(work, oa, loc)},
         doi=doi,
         title=work.get("display_name"),
         year=work.get("publication_year"),

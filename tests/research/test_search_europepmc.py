@@ -38,3 +38,14 @@ def test_parses_results(capsys):
     assert p["cited_by"] == 9
     assert p["url"] == "https://example.org/e.pdf"
     assert p["source"] == "europepmc"
+
+
+def test_first_listed_pdf_wins():
+    from scieflow.research.search import europepmc
+
+    res = {"title": "T", "fullTextUrlList": {"fullTextUrl": [
+        {"documentStyle": "html", "url": "https://h"},
+        {"documentStyle": "pdf", "url": "https://first.pdf"},
+        {"documentStyle": "pdf", "url": "https://second.pdf"},
+    ]}}
+    assert europepmc.norm(res)["url"] == "https://first.pdf"

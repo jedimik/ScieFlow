@@ -2,37 +2,60 @@
 
 **Protocol file:** `src/scieflow/research/skills/paper-draft/SKILL.md` (the coordinator reads this).
 
-A six-phase pipeline that turns your [data package](../data-packages.md)
-into a compilable LaTeX article draft. Your processing description becomes
-the Methods "Data processing" subsection; every number in Results carries a
-`% source: [data:<id>]` provenance comment; and the draft is verified three
-ways (compile, citation integrity, provenance spot-check) before landing
-exactly where the [paper review](paper-review.md) loop picks it up.
+A seven-phase pipeline that turns your [data package](../data-packages.md)
+into a compilable LaTeX article draft. **Two agents from different model
+families each write a complete, independent draft**, then review each
+other adversarially until both accept or the round cap is hit, and the
+coordinator merges the stronger version of every section. Your processing
+description becomes the Methods "Data processing" subsection; every number
+in Results carries a `% source: [data:<id>]` provenance comment; and the
+draft is verified before landing exactly where the
+[paper review](paper-review.md) loop picks it up.
 
 ## Phase overview
 
 ```mermaid
 flowchart TD
     A[Phase 1: Intake] --> B[Phase 2: Outline + perspective pass]
-    B -->|your approval| C[Phase 3: Draft fan-out by section]
-    C --> D[Phase 4: Assemble + consistency pass]
-    D --> E[Phase 5: Verify]
-    E --> F[Phase 6: Handoff]
+    B -->|your approval| C[Phase 3: Two independent drafts]
+    C --> D[Phase 4: Adversarial cross-review rounds]
+    D -->|both ACCEPT or round cap| E[Phase 5: Merge + consistency pass]
+    E --> F[Phase 6: Verify]
+    F --> G[Phase 7: Handoff]
     A -.-> A1[inputs/manifest.yml + references.bib]
     B -.-> B1[outline/outline.md]
-    C -.->|per section| C1[manuscript/sections/*.tex]
-    E -.-> E1[latexmk + scieflow research check-citations + spot-check]
-    F -.-> F1[manuscript/main.pdf]
+    C -.->|per author| C1[manuscript/drafts/AGENT/*.tex]
+    D -.-> D1[review/draft-round-N/*.json + response letters]
+    E -.-> E1[manuscript/sections/*.tex + report/merge_log.md]
+    F -.-> F1[latexmk + check-citations + provenance + optional claim-check]
 ```
 
 | Phase | Who | Output |
 | --- | --- | --- |
 | 1. Intake | Coordinator (+ you) | `inputs/` data package, `manuscript/references.bib` |
-| 2. Outline | One agent + perspective pass | `outline/outline.md` — **shown to you for approval** |
-| 3. Draft | All agents (fan-out by section) | `manuscript/sections/<section>.tex` |
-| 4. Assemble | Coordinator + one agent | `manuscript/main.tex` from `src/scieflow/research/templates/paper/` |
-| 5. Verify | Coordinator | compile + citation + provenance results |
-| 6. Handoff | Coordinator | PDF/tex locations, evidence map, next steps |
+| 2. Outline | `research.outline` + perspective pass | `outline/outline.md` — **shown to you for approval** |
+| 3. Draft | Both `research.draft-authors`, independently | `manuscript/drafts/<agent>/{abstract,introduction,methods,results,discussion}.tex` |
+| 4. Cross-review | Each author reviews the other | `review/draft-round-<N>/<reviewer>-on-<author>.json` + `response-<author>.md` |
+| 5. Merge | Coordinator, then `research.consistency` | `manuscript/sections/*.tex`, `manuscript/main.tex`, `report/merge_log.md` |
+| 6. Verify | Coordinator | compile, citation, provenance (+ optional claim-check) results |
+| 7. Handoff | Coordinator | PDF/tex locations, merge log, open review points, next steps |
+
+## Who writes the drafts
+
+`research.draft-authors` names the two authors. The default pair is
+**`codex-paper` + `claude-paper`**: two model families, so their
+disagreements in cross-review are informative rather than an echo. Change
+the pair — provider, model, effort — for all projects or for one run:
+
+```bash
+uv run scieflow agent configure --workspace <slug> \
+  --assign research.draft-authors=codex-paper,claude-paper --yes
+```
+
+A support-tier agent (`agy`) can draft only through the explicit per-role
+exception `--promote research.draft-authors`, and only because you asked
+for it. With a single author the cross-review is skipped and the handoff
+says "single-author, not cross-reviewed".
 
 ## Phase 1 — Intake
 
@@ -46,43 +69,63 @@ format from the start.
 
 ## Phase 2 — Outline
 
-One agent outlines every section as claims-with-evidence (each bullet ends
-with `[data:<id>]` or a DOI); two other agents run a one-round
-[perspective pass](../debate.md) over it. Then — unless you set
+`research.outline` outlines every section as claims-with-evidence (each
+bullet ends with `[data:<id>]` or a DOI); the `research.debate` agents run a
+one-round [perspective pass](../debate.md) over it. Then — unless you set
 `auto_approve_outline: true` — the coordinator **shows you the outline and
 waits**. Drafting is the expensive phase; the approval gate is where you
 redirect it cheaply.
 
-## Phase 3 — Draft
+## Phase 3 — Two independent drafts
 
-Sections are split across agents (default: Methods+Results / Introduction /
-Discussion+Abstract). Hard rules in every prompt: numbers only from
-manifest artifacts, each with a `% source: [data:<id>]` comment; Methods
-must contain a "Data processing" subsection written from your
-`processing.md`; citations only from the actual bib keys.
+Each author writes **all five sections** on its own; drafts are never shared
+during this phase. Hard rules in every prompt: numbers only from manifest
+artifacts, each with a `% source: [data:<id>]` comment; Methods must contain
+`\subsection{Data processing}` written from your `processing.md`; `\cite`
+keys only from the actual bib keys. A missing or empty section gets one
+re-dispatch, then the author is marked failed.
 
-## Phase 4 — Assemble
+## Phase 4 — Adversarial cross-review
 
-The coordinator fills `src/scieflow/research/templates/paper/main.tex` (title/authors/date from
-config — it will ask rather than invent an author list) and dispatches one
-agent that did *not* write Results for a cross-section consistency pass
-(minimal diffs; numbers and `% source:` comments untouchable).
+Each author reviews the other's draft with the adversarial reviewer persona
+(`templates/adversarial-review.md`) and writes a `manuscript-review` JSON:
+`ACCEPT`, `MINOR REVISION` or `MAJOR REVISION`, numbered major (`M1…`) and
+minor (`m1…`) points. Each author then revises **its own** draft and answers
+every point — a change or a rebuttal — in a response letter. The coordinator
+checks mechanically that every point id is answered and that the claimed
+edits really happened. Rounds repeat until both accept or
+`max_review_rounds` is reached; open points are carried into the handoff.
 
-## Phase 5 — Verify
+## Phase 5 — Merge
+
+The coordinator picks the stronger revised version of each section (judged
+on `% source:` density and correctness, unresolved review points, clarity,
+outline fidelity), may splice paragraphs, and **copies numbers and
+`% source:` comments exactly** — never blended. Every choice is recorded in
+`report/merge_log.md`. It then fills `templates/paper/main.tex` (it will ask
+rather than invent an author list), and `research.consistency` removes
+cross-section contradictions without touching any number.
+
+## Phase 6 — Verify
 
 1. **Compile**: `latexmk -pdf` with one repair round on failure; skipped
    with a warning if LaTeX isn't installed (`setup/doctor.sh` checks).
-2. **Citations**: `scieflow research check-citations` — every `\cite` resolves,
-   no orphan bib entries, every bib DOI traces to the searched/imported
-   DOI list.
-3. **Provenance spot-check**: the coordinator samples numeric claims from
-   Results and confirms each one actually appears in its cited artifact.
+2. **Citations**: `scieflow research check-citations` — every `\cite`-family
+   command resolves, no orphan bib entries, every bib DOI traces to the
+   searched/imported DOI list.
+3. **Provenance spot-check**: numeric claims from Results are checked against
+   the artifact they cite.
+4. **Cited-source check** (optional, opt-in, advisory): claims and their DOIs
+   go to the claim-check module (`skills/claim-check/SKILL.md`) when
+   you have allowed it for this run.
 
-## Phase 6 — Handoff
+## Phase 7 — Handoff
 
-You get the PDF and sources, a section→agent map, and the evidence backing
-each section. The manuscript sits in `workspace/<slug>/manuscript/` —
-exactly where the [paper review](paper-review.md) loop expects it.
+You get the PDF and sources, `report/merge_log.md`, the review rounds used
+and final recommendations, the evidence behind each section, the verify
+results and any unresolved points. The manuscript sits in
+`workspace/<slug>/manuscript/` — exactly where the
+[paper review](paper-review.md) loop expects it.
 
 ## How to run it properly
 
@@ -111,13 +154,15 @@ authors: "T. Krajca"
 > "Draft the article for hypothesis H1 from my gap-discovery run, config
 > above, same data package."
 
-You'll be shown the outline first; after your approval the agents draft
-sections, then:
+You'll be shown the outline first; after your approval both authors draft,
+review each other, and the merged manuscript lands at:
 
 ```text
-workspace/2026-07-my-study-draft/manuscript/main.pdf   ← compiled draft
+workspace/2026-07-my-study-draft/manuscript/main.pdf        ← compiled draft
 workspace/2026-07-my-study-draft/manuscript/main.tex
-workspace/2026-07-my-study-draft/manuscript/sections/*.tex
+workspace/2026-07-my-study-draft/manuscript/sections/*.tex  ← merged sections
+workspace/2026-07-my-study-draft/manuscript/drafts/         ← both original drafts
+workspace/2026-07-my-study-draft/report/merge_log.md        ← why each section won
 ```
 
 Each Results line carries `% source: [data:<id>]`; the Methods section's

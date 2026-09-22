@@ -14,7 +14,10 @@ import re
 import sys
 from pathlib import Path
 
-CITE_RE = re.compile(r"\\cite[tp]?\*?(?:\[[^\]]*\])*\{([^}]*)\}")
+# The whole \*cite* family — \cite, \citep, \citet, \citealp, \parencite,
+# \autocite, \textcite … — with any optional [..] arguments. Same pattern as
+# scripts/nblm/claims.py so the two checkers see the same citations.
+CITE_RE = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?\s*(?:\[[^\]]*\]\s*)*\{([^}]*)\}")
 BIBKEY_RE = re.compile(r"^@\w+\{([^,\s]+)\s*,", re.M)
 # Unanchored on purpose: an anchored '^\\s*doi' misses the doi field of a
 # single-line BibTeX entry, silently skipping check (c) for that source. The

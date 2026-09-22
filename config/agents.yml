@@ -66,6 +66,28 @@ agents:
       reasoning:
         levels: [low, medium, high, xhigh, max]
         how: "set `reasoning: <level>` in agent_overrides (fills {reasoning})"
+  # Claude's paper-writing profile, paired with codex-paper so the two drafts in
+  # paper-draft come from different model families and cross-review each other.
+  # Extended thinking is on (Claude has no effort flag; the env prefix is how).
+  claude-paper:
+    cmd: "env MAX_THINKING_TOKENS=32000 claude -p --dangerously-skip-permissions --model {model} {prompt}"
+    stdin_cmd: "env MAX_THINKING_TOKENS=32000 claude -p --dangerously-skip-permissions --model {model}"
+    model: claude-fable-5
+    tier: primary
+    timeout_min: 180
+    enabled: true
+    menu:
+      provider: "Anthropic — Claude Code CLI (paper writing)"
+      models:
+        - claude-fable-5        # recommended default
+        - claude-opus-5
+        - claude-sonnet-5
+      reasoning:
+        levels: [default, extended-thinking]
+        how: >-
+          Extended thinking is the default here (MAX_THINKING_TOKENS=32000 in
+          cmd). For default effort, drop the env prefix from cmd in
+          agent_overrides.
   codex-review:
     cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
     model: gpt-6-astra
