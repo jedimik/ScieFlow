@@ -33,6 +33,11 @@ def _ws(project: Project, slug: str) -> Path:
     return ws
 
 
+def run_workspace(project: Project, slug: str) -> Path:
+    """The run's directory, or ServiceError — the public form of `_ws`."""
+    return _ws(project, slug)
+
+
 def list_runs(project: Project) -> list[dict]:
     return [asdict(r) for r in workspace.list_runs(project.root)]
 

@@ -54,6 +54,10 @@ def create_app(project: Project, token: str) -> FastAPI:
         """Liveness only — deliberately says nothing about the project."""
         return {"ok": True}
 
+    from scieflow.web import api
+
+    app.include_router(api.router)
+
     return app
 
 
