@@ -73,6 +73,10 @@ LEGACY_UNMAPPED_KEYS = {
     "support_idea_agent": "no matching role; set one with `agent configure --assign`",
 }
 
+#: Claude has no effort flag: extended thinking is this prefix on its commands.
+EXTENDED_THINKING = "env MAX_THINKING_TOKENS=32000 "
+ROLE_OVERRIDE_FIELDS = ("model", "reasoning")
+
 DEFAULT = "default"
 WORKSPACE = "workspace"
 LEGACY = "workspace (legacy key)"
@@ -91,6 +95,8 @@ class Effective:
     menus: dict[str, dict]
     assignments: dict[str, Setting]
     support_as_primary: dict[str, str] = field(default_factory=dict)   # role -> source
+    #: role -> agent -> Setting({model?, reasoning?}): this role's own staffing
+    role_overrides: dict[str, dict[str, Setting]] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)   # block writes, exit 1
     warnings: list[str] = field(default_factory=list)   # shown, never block
 
@@ -108,6 +114,9 @@ class Effective:
                 for name, fields in self.agents.items()
             },
             "support_as_primary": dict(self.support_as_primary),
+            "role_overrides": {r: {a: {"value": s.value, "source": s.source}
+                                   for a, s in per.items()}
+                               for r, per in self.role_overrides.items()},
             "problems": list(self.problems),
             "warnings": list(self.warnings),
         }
@@ -124,6 +133,25 @@ def _load_yaml(path: Path) -> dict:
 
 def workspace_dir(root: Path, slug: str) -> Path:
     return root / "workspace" / slug
+
+
+def _split_entries(value):
+    """Role entries may be names or {agent, model?, reasoning?}; split them."""
+    def one(entry):
+        if isinstance(entry, dict):
+            return entry.get("agent"), {k: v for k, v in entry.items() if k != "agent"}
+        return entry, {}
+
+    if isinstance(value, list):
+        names, extra = [], {}
+        for entry in value:
+            name, fields = one(entry)
+            names.append(name)
+            if fields and isinstance(name, str):
+                extra[name] = fields
+        return names, extra
+    name, fields = one(value)
+    return name, ({name: fields} if fields and isinstance(name, str) else {})
 
 
 def resolve_data(registry: dict, defaults: dict, workspace: dict | None = None) -> Effective:
@@ -179,8 +207,15 @@ def resolve_data(registry: dict, defaults: dict, workspace: dict | None = None) 
         for role in listed if isinstance(listed, list) else []:
             exceptions.setdefault(str(role), source)
 
+    role_overrides: dict[str, dict[str, Setting]] = {}
+    for role, setting in list(assignments.items()):
+        names, extra = _split_entries(setting.value)
+        assignments[role] = Setting(names, setting.source)
+        if extra:
+            role_overrides[role] = {a: Setting(v, setting.source) for a, v in extra.items()}
+
     eff = Effective(agents=agents, tiers=tiers, menus=menus, assignments=assignments,
-                    support_as_primary=exceptions)
+                    support_as_primary=exceptions, role_overrides=role_overrides)
     eff.problems, eff.warnings = validate(eff)
     for key, why in LEGACY_UNMAPPED_KEYS.items():
         if key in ws:
@@ -193,6 +228,33 @@ def resolve(root: Path, slug: str | None = None) -> Effective:
     defaults = _load_yaml(root / "config" / "defaults.yml")
     ws = _load_yaml(workspace_dir(root, slug) / "config.yml") if slug else None
     return resolve_data(registry, defaults, ws)
+
+
+def resolve_dir(root: Path, run_dir: Path | None) -> Effective:
+    """Resolve with the workspace config read from `run_dir` (any path, not only root/workspace)."""
+    return resolve_data(_load_yaml(root / "config" / "agents.yml"),
+                        _load_yaml(root / "config" / "defaults.yml"),
+                        _load_yaml(run_dir / "config.yml") if run_dir else None)
+
+
+def apply_role_override(agent_cfg: dict, override: dict) -> dict:
+    """Agent config as this role runs it. Claude has no effort flag: extended
+    thinking is the MAX_THINKING_TOKENS prefix on its commands."""
+    cfg = dict(agent_cfg)
+    if override.get("model"):
+        cfg["model"] = override["model"]
+    reasoning = override.get("reasoning")
+    if not reasoning:
+        return cfg
+    if "{reasoning}" in cfg.get("cmd", ""):
+        cfg["reasoning"] = reasoning
+        return cfg
+    for key in ("cmd", "stdin_cmd"):
+        if key not in cfg:
+            continue
+        plain = cfg[key].removeprefix(EXTENDED_THINKING)
+        cfg[key] = EXTENDED_THINKING + plain if reasoning == "extended-thinking" else plain
+    return cfg
 
 
 def validate(eff: Effective) -> tuple[list[str], list[str]]:
@@ -250,6 +312,18 @@ def validate(eff: Effective) -> tuple[list[str], list[str]]:
                 f"role {role}: a support-tier agent must be paired with a primary "
                 "agent (AGENTS.md rule 10)"
             )
+
+    for role, per_agent in eff.role_overrides.items():
+        for name, setting in per_agent.items():
+            bad = sorted(set(setting.value) - set(ROLE_OVERRIDE_FIELDS))
+            if bad:
+                problems.append(f"role {role}: {name}: unknown field(s) {', '.join(bad)} "
+                                f"(allowed: {', '.join(ROLE_OVERRIDE_FIELDS)})")
+            model = setting.value.get("model")
+            models = (eff.menus.get(name) or {}).get("models") or []
+            if model and models and model not in models:
+                warnings.append(f"role {role}: {name}: model {model!r} is not on its menu "
+                                f"({', '.join(map(str, models))})")
 
     for role, source in eff.support_as_primary.items():
         if role not in ROLES:

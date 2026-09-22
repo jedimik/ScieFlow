@@ -75,6 +75,20 @@ def coerce(field_name: str, raw: str):
     return raw
 
 
+def _entry(token: str):
+    """AGENT, AGENT@MODEL, AGENT@MODEL/EFFORT or AGENT@/EFFORT."""
+    agent, sep, rest = token.partition("@")
+    if not sep:
+        return agent
+    model, _, reasoning = rest.partition("/")
+    entry = {"agent": agent}
+    if model:
+        entry["model"] = model
+    if reasoning:
+        entry["reasoning"] = reasoning
+    return entry if len(entry) > 1 else agent
+
+
 def parse_assign(text: str) -> Op:
     role, sep, raw = text.partition("=")
     role = role.strip()
@@ -83,7 +97,7 @@ def parse_assign(text: str) -> Op:
     spec = ac.ROLES.get(role)
     if spec is None:
         raise ConfigureError(f"unknown role {role!r} (known: {', '.join(ac.ROLES)})")
-    names = [n.strip() for n in raw.split(",") if n.strip()]
+    names = [_entry(n.strip()) for n in raw.split(",") if n.strip()]
     if spec.many:
         return Op("assign", role, names)
     if len(names) != 1:

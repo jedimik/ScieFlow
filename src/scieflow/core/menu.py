@@ -26,7 +26,7 @@ from scieflow.core import config as config_mod
 
 BACK = object()
 COORDINATORS = ("claude", "codex")  # primary tier; agy is support-only (rule 10)
-EXTENDED_THINKING = "env MAX_THINKING_TOKENS=32000 "
+from scieflow.core.agent_config import EXTENDED_THINKING  # noqa: F401 (re-exported)
 
 
 # -- option tree (single source for the TUI and `--json`) --------------------
@@ -493,6 +493,29 @@ def agent_settings(ui: UI, scope: str | None = None, slug: str | None = None) ->
                 return
 
 
+def _role_entries(ui: UI, eff, role: str, names: list[str]):
+    """Optionally give each agent its own model/effort for this role only."""
+    entries = []
+    for name in names:
+        if not ui.confirm(f"  Set model/effort for {name} in {role} only?", default=False):
+            entries.append(name)
+            continue
+        models = [str(m) for m in (eff.menus.get(name) or {}).get("models") or []]
+        model = ui.select(f"  {name} model for {role}",
+                          [(m, m) for m in models] + [("keep the agent's default", "")])
+        if model is BACK:
+            return None
+        level = ui.select(f"  {name} effort for {role}",
+                          [(lv, lv) for lv in effort_levels(eff, name)]
+                          + [("keep the agent's default", "")])
+        if level is BACK:
+            return None
+        entry = {"agent": name, **({"model": model} if model else {}),
+                 **({"reasoning": level} if level else {})}
+        entries.append(entry if len(entry) > 1 else name)
+    return entries
+
+
 def _pick_role(ui: UI, eff, attempt) -> None:
     from scieflow.core import agent_config as ac
     from scieflow.core import agent_configure as acf
@@ -512,12 +535,18 @@ def _pick_role(ui: UI, eff, attempt) -> None:
                              checked=current if isinstance(current, list) else [current])
         if not picked:
             return
-        attempt([acf.Op("assign", role, picked)])
+        entries = _role_entries(ui, eff, role, picked)
+        if entries is None:
+            return
+        attempt([acf.Op("assign", role, entries)])
     else:
         picked = ui.select(f"{role}: agent", [(_agent_label(n, eff), n) for n in enabled])
         if picked is BACK:
             return
-        attempt([acf.Op("assign", role, picked)])
+        entries = _role_entries(ui, eff, role, [picked])
+        if entries is None:
+            return
+        attempt([acf.Op("assign", role, entries[0])])
 
 
 def _pick_model(ui: UI, eff, name: str, attempt) -> None:

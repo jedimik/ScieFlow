@@ -53,14 +53,14 @@ def _snapshot(repo):
 
 def test_cancel_writes_nothing(repo):
     before = _snapshot(repo)
-    ui = ScriptedUI(["default", "role", "research.outline", "codex", "save", False,
+    ui = ScriptedUI(["default", "role", "research.outline", "codex", False, "save", False,
                      "BACK", True])  # back out, confirm discarding the queued change
     menu.agent_settings(ui)
     assert _snapshot(repo) == before
 
 
 def test_role_change_for_all_projects(repo):
-    ui = ScriptedUI(["default", "role", "research.outline", "codex", "save", True])
+    ui = ScriptedUI(["default", "role", "research.outline", "codex", False, "save", True])
     menu.agent_settings(ui)
     doc = yaml.safe_load((repo / "config" / "defaults.yml").read_text())
     assert doc["assignments"]["research.outline"] == "codex"
@@ -69,7 +69,7 @@ def test_role_change_for_all_projects(repo):
 def test_invalid_combination_is_refused_before_queueing(repo, capsys):
     before = _snapshot(repo)
     # reviewer == submitter is invalid; nothing is queued, so save has nothing
-    ui = ScriptedUI(["default", "role", "research.reviewer", "claude", "save", "BACK"])
+    ui = ScriptedUI(["default", "role", "research.reviewer", "claude", False, "save", "BACK"])
     menu.agent_settings(ui)
     assert "must be different agents" in capsys.readouterr().out
     assert _snapshot(repo) == before
@@ -94,7 +94,7 @@ def test_claude_extended_thinking_prefixes_cmd(repo):
 def test_support_agent_on_primary_role_needs_explicit_exception(repo):
     before = _snapshot(repo)
     # decline the exception -> nothing queued -> save says nothing queued -> back out
-    ui = ScriptedUI(["default", "role", "research.reviewer", "agy", False, "save", "BACK"])
+    ui = ScriptedUI(["default", "role", "research.reviewer", "agy", False, False, "save", "BACK"])
     menu.agent_settings(ui)
     assert _snapshot(repo) == before
 
@@ -149,3 +149,12 @@ def test_bare_scieflow_without_tty_prints_help():
     result = CliRunner().invoke(main, [])
     assert result.exit_code == 0
     assert "Run with no command in a terminal" in result.output
+
+
+def test_role_level_model_and_effort(repo):
+    ui = ScriptedUI(["default", "role", "research.outline", "codex", True, "sol", "high",
+                     "save", True])
+    menu.agent_settings(ui)
+    doc = yaml.safe_load((repo / "config" / "defaults.yml").read_text())
+    assert doc["assignments"]["research.outline"] == {
+        "agent": "codex", "model": "sol", "reasoning": "high"}

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import yaml
 
+from scieflow.core import agent_config
 from scieflow.core import config
 from scieflow.core import jobs
 from scieflow.core import legacy
@@ -131,6 +132,16 @@ def prepare(project: Project, agent: str, prompt_file: Path,
         raise DispatchError(f"invalid owning run configuration: {exc}") from exc
     if override:
         agent_cfg = {**agent_cfg, **override}
+    if role:
+        eff = agent_config.resolve_dir(root, run_dir)
+        assigned = eff.value(role)
+        names = assigned if isinstance(assigned, list) else [assigned]
+        if agent not in names:
+            raise DispatchError(f"{agent} is not assigned to {role} "
+                                f"(assigned: {', '.join(map(str, names))})")
+        override_setting = eff.role_overrides.get(role, {}).get(agent)
+        if override_setting:
+            agent_cfg = agent_config.apply_role_override(agent_cfg, override_setting.value)
     cwd = cwd or root
     if not cwd.is_absolute():
         cwd = root / cwd
@@ -159,11 +170,14 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("transcript_file", type=Path)
     ap.add_argument("--cwd", type=Path, default=None,
                     help="working directory for the agent (default: repo root)")
+    ap.add_argument("--role", default=None,
+                    help="the role this dispatch performs; applies that role's model/effort "
+                         "for the agent")
     args = ap.parse_args(argv)
 
     project = Project.discover()
     try:
-        d = prepare(project, args.agent, args.prompt_file, args.cwd)
+        d = prepare(project, args.agent, args.prompt_file, args.cwd, args.role)
     except DispatchError as e:
         sys.exit(str(e))
 

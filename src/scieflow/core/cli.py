@@ -212,8 +212,10 @@ def _news_wizard_ops(root) -> list:
 @click.option("--workspace", "slug", help="Change workspace/<SLUG> only (stores differences from the defaults).")
 @click.option("--news", "news", is_flag=True,
               help="Change the news module's agent settings (--set agent|model|reasoning|timeout=VALUE).")
-@click.option("--assign", "assigns", multiple=True, metavar="ROLE=AGENT[,AGENT]",
-              help="Assign agent(s) to a role (repeatable).")
+@click.option("--assign", "assigns", multiple=True, metavar="ROLE=AGENT[@MODEL][/EFFORT][,…]",
+              help="ROLE=AGENT[@MODEL][/EFFORT][,…] — e.g. "
+                   "research.draft-authors=codex-paper,claude@claude-opus-5/extended-thinking "
+                   "(repeatable).")
 @click.option("--set", "sets", multiple=True, metavar="AGENT.FIELD=VALUE",
               help="Set model, reasoning, timeout_min, cmd, stdin_cmd or enabled (repeatable).")
 @click.option("--promote", "promotes", multiple=True, metavar="ROLE",
