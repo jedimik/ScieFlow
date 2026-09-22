@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}ScieFlow — not signed in{% endblock %}
+{% block content %}
+<h1>Not signed in</h1>
+<p>This app is reachable only from this machine, and only with the session
+key printed when you started it.</p>
+<p>Open the URL that <code>scieflow serve</code> printed in your terminal — it
+carries a one-time token that becomes a cookie. If you have lost it, stop the
+server and start it again.</p>
+{% endblock %}

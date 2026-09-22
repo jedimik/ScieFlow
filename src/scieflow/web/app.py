@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import HTTPException as FastAPIHTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -38,6 +39,15 @@ def create_app(project: Project, token: str) -> FastAPI:
     @app.exception_handler(ServiceError)
     async def _service_error(request: Request, exc: ServiceError) -> JSONResponse:
         return JSONResponse({"error": str(exc)}, status_code=404)
+
+    @app.exception_handler(FastAPIHTTPException)
+    async def _http_error(request: Request, exc: FastAPIHTTPException):
+        wants_html = ("text/html" in request.headers.get("accept", "")
+                      and not request.url.path.startswith("/api/"))
+        if exc.status_code == 401 and wants_html:
+            return TEMPLATES.TemplateResponse(
+                request, "unauthorized.html", status_code=401)
+        return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict:
