@@ -15,6 +15,8 @@ GROUPS = {
     "menu": ("scieflow.core.menu", "menu", None,
              "Interactive menu (also what bare `scieflow` opens)."),
     "agent": ("scieflow.core.cli", "agent", None, "Dispatch headless agents."),
+    "gate": ("scieflow.core.gates", "gate", None,
+             "Approvals the protocols require, answered from terminal or browser."),
     "run": ("scieflow.core.run.cli", "run", None,
             "A run's state, history and lifecycle."),
     "experiment": (

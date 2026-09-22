@@ -1,0 +1,15 @@
+# Decisions the protocols require. `requires_human: true` blocks in every mode —
+# in an autonomous run the coordinator may answer only the others, only when it
+# opened them as in-scope, and only with a recorded rationale.
+kinds:
+  campaign-approval:   {requires_human: false, help: "Run a proposed experiment campaign"}
+  outline-approval:    {requires_human: false, help: "Draft from this paper outline"}
+  staffing:            {requires_human: false, help: "Which agents do which roles for this run"}
+  question:            {requires_human: false, help: "A clarifying question with no side effects"}
+  claim-check-consent: {requires_human: true,  help: "Spend the user's NotebookLM quota on a claim audit"}
+  upload:              {requires_human: true,  help: "Push data or chats to remote storage"}
+  external-sharing:    {requires_human: true,  help: "Send content to an external service"}
+  tier-promotion:      {requires_human: true,  help: "Let a support agent act as primary for a role"}
+  scope-change:        {requires_human: true,  help: "Leave the approved question, scope or bounds"}
+  budget-extension:    {requires_human: true,  help: "Raise a budget limit"}
+states: [open, answered, withdrawn]
