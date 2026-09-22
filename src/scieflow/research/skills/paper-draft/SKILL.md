@@ -84,8 +84,11 @@ its evidence ref in square brackets. Methods MUST include a
    author (fall back to one if only one remains), evidence
    bundle = the outline + manifest summary. Merge accepted critique into
    `outline/outline.md` yourself; log dissent in `outline/dissent.md`.
-3. Unless `auto_approve_outline: true`, SHOW the outline to the user and
-   wait for approval before drafting (drafting is the expensive phase).
+3. Unless `auto_approve_outline: true`, open an `outline-approval` gate and
+   wait before drafting (drafting is the expensive phase):
+   `uv run scieflow gate open <slug> --kind outline-approval --question
+   "Draft from this outline?" --option approve --option revise
+   --file outline/outline.md`, then `uv run scieflow gate wait <slug> <id>`.
 
 ## Phase 3 — draft (two full independent drafts)
 

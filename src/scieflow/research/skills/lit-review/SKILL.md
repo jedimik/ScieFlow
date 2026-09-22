@@ -71,7 +71,7 @@ Do your **own** search too, following the same steps, writing
 `findings/<you>.json`.
 
 Dispatch each sub-agent:
-`uv run scieflow agent run <agent> workspace/<slug>/prompts/search-<agent>.md workspace/<slug>/logs/search-<agent>.log`
+`uv run scieflow agent run --role research.search <agent> workspace/<slug>/prompts/search-<agent>.md workspace/<slug>/logs/search-<agent>.log`
 Dispatches are independent — run them in parallel if your harness allows.
 
 Then validate every findings file. On INVALID: append the INVALID lines to

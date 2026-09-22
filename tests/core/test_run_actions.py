@@ -85,3 +85,22 @@ def test_run_cli_mark_events_and_log(tmp_path, monkeypatch):
     assert out.exit_code == 0, out.output
     assert '"note.idea"' in out.output and '"phase.started"' in out.output
     assert cli.invoke(run_group, ["log", "r1", "phase.done"]).exit_code != 0  # agents log notes only
+
+
+def test_run_cli_spend_records_what_the_runner_cannot_see(tmp_path, monkeypatch):
+    from scieflow.core.run.cli import run as run_group
+
+    ws = make_loop_run(tmp_path)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agents.yml").write_text("agents: {}\n")
+    (tmp_path / "schemas").mkdir()
+    real = Path(__file__).resolve().parents[2] / "schemas" / "status.yml"
+    (tmp_path / "schemas" / "status.yml").write_text(real.read_text())
+    monkeypatch.chdir(tmp_path)
+    cli = CliRunner()
+    done = cli.invoke(run_group, ["spend", "r1", "--experiment-runs", "3", "--as-agent"])
+    assert done.exit_code == 0, done.output
+    assert budget.read_budget(ws)["spent"]["experiment_runs"] == 3
+    assert "budget.recorded" in [e["type"] for e in events.read(ws)]
+    empty = cli.invoke(run_group, ["spend", "r1"])
+    assert empty.exit_code != 0 and "nothing to record" in empty.output

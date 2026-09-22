@@ -27,15 +27,24 @@ as one experiment run.
    then: `uv run scieflow agent run <agent> <prompt> <transcript>`, where
    `<agent>` is the agent assigned to `loop.experiment` (`uv run scieflow agent show --workspace <slug> --json`, AGENTS.md rule 13).
    The sub-agent writes the proposed campaign YAML + rationale to the path
-   you gave it. Present both to the user.
-2. **Run.** Only after explicit user approval, dispatch again with
+   you gave it. Present both to the user by opening a gate:
+   `uv run scieflow gate open <slug> --kind campaign-approval --question
+   "Run <campaign> (<N> runs)?" --option approve --option reject
+   --file <campaign.yaml> --file <rationale>`, then block on
+   `uv run scieflow gate wait <slug> <id>`.
+2. **Run.** Only after the gate is answered `approve`, dispatch again with
    `MODE: run-approved` naming the approved campaign file.
 
 ## Autonomous mode (one dispatch)
 
 Single dispatch with `MODE: design-and-run` — include the goal.md scope
 bounds verbatim in the prompt; the sub-agent designs within them and runs
-without further approval (delegation per ScieFlow AGENTS.md rule 3).
+without further approval (delegation per ScieFlow AGENTS.md rule 3). Still
+open the `campaign-approval` gate with `--in-scope` and answer it yourself
+(`gate answer <slug> <id> approve --as-agent --rationale "…"`), so the
+campaign and the reason it stayed inside the bounds are on the timeline.
+A campaign that leaves the bounds needs a `scope-change` gate, which always
+waits for the user.
 
 ## Prompt template
 

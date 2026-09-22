@@ -34,14 +34,22 @@ when to stop.
    `autonomous`: the user's approval of `goal.md` (question, scope bounds,
    budget) delegates campaign approval to you — but only inside those
    bounds. Leaving the approved scope requires stopping and asking.
-4. Track state only through the scripts: `status.py` transitions,
-   `budget.py` after every phase, `checkpoint.py` for stops. On entry to a
-   run, read `status.yml` and continue from the first phase not `done`.
+4. Track state only through `uv run scieflow run mark|advance|checkpoint|resume
+   <slug> … --as-agent` (the older `scripts/status.py`, `budget.py` and
+   `checkpoint.py` still work but record no events). On entry to a run,
+   `uv run scieflow run show <slug>` and continue from the first phase not
+   `done`. Log notable moments with `uv run scieflow run log <slug>
+   note.<name> --message …` alongside `log.md`.
 5. **Stop criteria** (all active in autonomous mode): max iterations;
    convergence (no improvement for `convergence_window` iterations);
    anomaly (failed runs, metric collapse — report honestly, never
    rerun-until-green); low budget (any dimension ≤ 10% remaining → finish
-   the current phase only, then `checkpoint.py --reason low-budget`).
+   the current phase only, then `uv run scieflow run checkpoint <slug>
+   --reason low-budget`). Budgets are enforced in code: an exhausted
+   `wall_minutes` refuses the next dispatch (exit 75), exhausted
+   `experiment_runs` refuses the next sweep, and `run advance` refuses a new
+   iteration once `iterations` is spent — each refusal checkpoints the run.
+   Never edit `budget.yml` to get past one; ask the user.
 6. Literature comes only from the research module's search commands
    (`scieflow research search <source>`) via the literature-cycle skill.
    Never invent papers, DOIs, or citation counts. Instruct experiments-module
@@ -102,9 +110,22 @@ when to stop.
     agent YAML. Change the defaults only when the user says so; a run-specific
     choice goes to `--workspace`. A refusal from `configure` (tier rule 10,
     disabled or unknown agent) is a boundary: never add `--promote` to get
-    past it unless the user asked for that exception.
+    past it unless the user asked for that exception. Dispatch with
+    `--role <role>` (`uv run scieflow agent run --role research.draft-authors
+    codex-paper <prompt> <transcript>`) so the role's own model and effort
+    choice applies, and so a wrong agent for that role is refused.
 
-14. **Syncing the project you are working on.** Work that exists only on one
+14. **Approvals are gates.** Every approval a protocol requires (campaign,
+    outline, staffing, claim-check consent, uploads, external sharing,
+    promotions, scope or budget changes) is opened with `uv run scieflow gate
+    open <slug> --kind <kind> --question …` and waited on with `uv run
+    scieflow gate wait <slug> <id>`. The user answers in the terminal
+    (`scieflow gate answer`) or the browser. Only in an `autonomous` run may
+    you answer — with `--as-agent --rationale …`, only a kind that does not
+    require a human (`schemas/gates.yml`), and only a gate you opened with
+    `--in-scope`. Never answer as the user.
+
+15. **Syncing the project you are working on.** Work that exists only on one
     machine is lost work. When the user pauses, wraps up, or asks to sync,
     follow `skills/workspace-sync/SKILL.md`: push **both** the run's data
     (`uv run scripts/dvc_sync.py push <slug>`, one zip per named run) **and**
@@ -116,7 +137,7 @@ when to stop.
     offer moving rebuildable output to `scratch/` instead. Never upload
     anything the user did not agree to, and say afterwards what was left out.
 
-15. **Chat backups** (optional, user-invoked). Copying agent chats between
+16. **Chat backups** (optional, user-invoked). Copying agent chats between
     machines goes ONLY through `uv run scieflow chats` per
     `src/scieflow/chats/AGENTS.md`. **Never start a backup or a restore on
     your own initiative** — a bundle is the user's whole conversation history.

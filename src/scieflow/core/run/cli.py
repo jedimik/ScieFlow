@@ -99,6 +99,30 @@ def mark(slug, phase, state, as_agent):
 
 @run.command()
 @click.argument("slug")
+@click.option("--experiment-runs", type=int, default=0, help="Runs this run has spent.")
+@click.option("--wall-minutes", type=float, default=0.0,
+              help="Wall time no job runner could measure (remote or manual work).")
+@click.option("--iterations", type=int, default=0, help="Iterations, when not using `run advance`.")
+@AGENT_FLAG
+def spend(slug, experiment_runs, wall_minutes, iterations, as_agent):
+    """Record spend the runner cannot see (remote jobs, manual work).
+
+    Dispatch wall time and `scieflow experiment` runs are recorded already;
+    this is for everything else. Never hand-edit budget.yml.
+    """
+    spent = {k: v for k, v in (("experiment_runs", experiment_runs),
+                               ("wall_minutes", wall_minutes),
+                               ("iterations", iterations)) if v}
+    if not spent:
+        raise click.ClickException("nothing to record; pass at least one dimension")
+    b = actions.record_spend(_ws(slug), _actor(as_agent), **spent)
+    if b is None:
+        raise click.ClickException(f"run {slug} has no budget.yml")
+    click.echo(json.dumps(b["spent"], indent=2, default=str))
+
+
+@run.command()
+@click.argument("slug")
 @AGENT_FLAG
 def advance(slug, as_agent):
     """Start the next iteration (refused when the iteration budget is spent)."""

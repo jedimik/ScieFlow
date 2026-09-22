@@ -108,7 +108,7 @@ Apply the adversarial persona above: hunt mistakes and demand explanation;
 ACCEPT only when you genuinely cannot find a substantive problem.
 ```
 
-2. Dispatch the reviewer via `scieflow agent run`. Parse the `## Recommendation`
+2. Dispatch the reviewer via `scieflow agent run --role research.reviewer`. Parse the `## Recommendation`
    line. If `ACCEPT` → record in `status.yml`, stop, report to user.
 3. Otherwise write `prompts/respond-round-<N>.md` for the submitter:
 

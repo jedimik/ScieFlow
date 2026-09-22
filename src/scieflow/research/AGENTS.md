@@ -33,10 +33,17 @@ run:
    Assignments must respect tier routing (hard rule 9) — never offer a
    support agent for a primary-only role.
 3. Then ASK the user to confirm or adjust: parts → agents, model per agent,
-   reasoning per agent. Never proceed on the recommendation alone.
+   reasoning per agent. Ask through a gate (root AGENTS.md rule 14):
+   `uv run scieflow gate open <slug> --kind staffing --question "…"
+   --option "<recommendation>" --option "adjust"`, then
+   `uv run scieflow gate wait <slug> <id>`. Never proceed on the
+   recommendation alone.
 4. Persist the selection — never by editing YAML — with
    `uv run scieflow agent configure --workspace <slug> --assign ROLE=AGENT[,AGENT]
    --set AGENT.model=... --set AGENT.reasoning=... --yes`
+   (a model/effort choice for one role only is
+   `--assign ROLE=AGENT@MODEL/EFFORT`, applied when the dispatch passes
+   `--role ROLE`)
    (root AGENTS.md rule 13). It validates tier routing and writes only the
    differences from the defaults into `workspace/<slug>/config.yml`:
    - `assignments:` — the workflow's `research.*` roles as its SKILL.md names
@@ -62,6 +69,9 @@ gate is coordinator-only: sub-agents never ask.
 Dispatching Claude or agy/Gemini can send workspace material (including a
 manuscript, reviews, and evidence packages) to an external model provider.
 
+- Ask with an `external-sharing` gate (`uv run scieflow gate open <slug>
+  --kind external-sharing --question "…"`); it requires a human answer in
+  every mode, including autonomous runs.
 - When the user explicitly approves the provider and sharing scope, record that
   approval in the run's `workspace/<slug>/config.yml` and proceed with the
   planned dispatches within that scope.
@@ -79,7 +89,9 @@ manuscript, reviews, and evidence packages) to an external model provider.
    `config/journals/`).
 2. Inter-agent communication is file-based only. To give work to another
    agent: write a prompt file to `workspace/<slug>/prompts/`, then run
-   `uv run scieflow agent run <agent> <prompt_file> <transcript_file>`.
+   `uv run scieflow agent run --role <role> <agent> <prompt_file> <transcript_file>`,
+   naming the role that step performs so its model/effort choice applies (a
+   dispatch of an agent not assigned to that role is refused).
    Transcripts go to `workspace/<slug>/logs/`. A research run is its own
    `workspace/<slug>/`; its `status.yml` carries `workflow:` (a research-loop
    run's carries `run:`).

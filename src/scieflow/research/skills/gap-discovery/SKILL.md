@@ -118,7 +118,7 @@ Steps:
 ```
 
 Dispatch via
-`uv run scieflow agent run <agent> workspace/<slug>/prompts/gaps-<agent>.md workspace/<slug>/logs/gaps-<agent>.log`
+`uv run scieflow agent run --role research.gap-analysis <agent> workspace/<slug>/prompts/gaps-<agent>.md workspace/<slug>/logs/gaps-<agent>.log`
 (parallel ok). Validate every output; INVALID → append the INVALID lines
 under `PREVIOUS ATTEMPT FAILED VALIDATION:` and re-dispatch once; second
 failure → mark failed in `status.yml`, log, continue.

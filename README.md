@@ -63,6 +63,18 @@ campaign) or `autonomous` (you approve the goal + scope + budget once).
 - `workspace/` — one folder per research run, plus `workspace/news/`
   (gitignored; synced via DVC)
 
+## Runs, jobs and gates
+
+Work happens in **runs** under `workspace/<slug>/`: each has a status, a budget,
+an append-only `events.jsonl` history, its jobs (streamed output, real cancel,
+timeouts that keep what was written) and its gates — the approvals a protocol
+requires, stored as files you answer from the terminal instead of sentences in a
+chat window. Budgets are enforced in the code that spends them, so a headless or
+autonomous run stops itself instead of overrunning. `uv run scieflow run list`,
+`run show <slug>`, `run events <slug> --follow` and `gate list <slug> --open` are
+the way in; [docs/runs.md](docs/runs.md) explains the whole model, including
+choosing provider, model and effort per role.
+
 ## Agents: who does what
 
 Each role (`loop.experiment`, `research.reviewer`, …) is assigned an agent in
