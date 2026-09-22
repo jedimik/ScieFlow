@@ -2575,9 +2575,15 @@ research = [
     { name = "jsonschema" },
     { name = "requests" },
 ]
+web = [
+    { name = "fastapi" },
+    { name = "jinja2" },
+    { name = "uvicorn" },
+]
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "responses" },
@@ -2592,10 +2598,12 @@ notebooklm = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
+    { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.110" },
     { name = "filelock", specifier = ">=3.12" },
     { name = "filelock", marker = "extra == 'news'", specifier = ">=3.12" },
     { name = "filelock", marker = "extra == 'news-gui'", specifier = ">=3.12" },
     { name = "imageio", marker = "extra == 'experiments'", specifier = ">=2.34" },
+    { name = "jinja2", marker = "extra == 'web'", specifier = ">=3.1" },
     { name = "jsonschema", marker = "extra == 'chats'", specifier = ">=4.21" },
     { name = "jsonschema", marker = "extra == 'research'", specifier = ">=4.21" },
     { name = "matplotlib", marker = "extra == 'experiments'", specifier = ">=3.8" },
@@ -2608,11 +2616,13 @@ requires-dist = [
     { name = "scikit-image", marker = "extra == 'experiments'", specifier = ">=0.22" },
     { name = "tinydb", marker = "extra == 'news'", specifier = ">=4.8" },
     { name = "tinydb", marker = "extra == 'news-gui'", specifier = ">=4.8" },
+    { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.27" },
 ]
-provides-extras = ["experiments", "research", "news", "chats", "news-gui"]
+provides-extras = ["experiments", "research", "news", "chats", "web", "news-gui"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "responses", specifier = ">=0.25" },
