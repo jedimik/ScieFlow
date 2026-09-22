@@ -48,7 +48,9 @@ def test_good_token_redirects_without_the_token_and_sets_cookies(app):
         assert "token" not in response.headers["location"]
         cookies = response.headers.get_list("set-cookie")
         session_cookie = next(c for c in cookies if c.startswith(auth.SESSION_COOKIE))
+        csrf_cookie = next(c for c in cookies if c.startswith(auth.CSRF_COOKIE))
         assert "HttpOnly" in session_cookie and "SameSite=strict" in session_cookie
+        assert "SameSite=strict" in csrf_cookie
         # the cookie now stands in for the token
         assert client.get("/guarded").json() == {"seen": True}
 
@@ -84,5 +86,7 @@ def test_unauthorized_html_explains_how_to_get_in(app):
     with TestClient(app) as client:
         response = client.get("/guarded", headers={"Accept": "text/html"})
         assert response.status_code == 401
+        assert response.headers["content-type"].startswith("text/html")
+        assert "<h1>Not signed in</h1>" in response.text  # HTML branch marker
         assert "scieflow serve" in response.text
         assert TOKEN not in response.text          # never echo the secret
