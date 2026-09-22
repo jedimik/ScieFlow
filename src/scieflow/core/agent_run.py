@@ -11,18 +11,37 @@ registry entry. Exit codes: 0 ok, 124 timeout, otherwise the agent's exit code.
 import argparse
 import os
 import shlex
-import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
 from scieflow.core import config
+from scieflow.core import jobs
 from scieflow.core import legacy
+from scieflow.core.project import Project
+from scieflow.core.run import actions
 
 # Linux caps a single argv string around 128 KiB; above this size the prompt
 # goes to the agent via stdin (using stdin_cmd when defined) instead of argv.
 PROMPT_ARGV_LIMIT = int(legacy.env("SCIEFLOW_PROMPT_ARGV_LIMIT", "100000"))
+
+BUDGET_EXIT = 75   # EX_TEMPFAIL: refused, not failed — never an agent's own code
+
+
+class DispatchError(Exception):
+    """A dispatch that cannot be prepared (unknown agent, bad run config)."""
+
+
+@dataclass
+class Dispatch:
+    agent: str
+    argv: list[str]
+    cwd: Path
+    stdin_text: str | None
+    timeout_s: float
+    run_dir: Path | None
 
 
 def build_argv(agent_cfg: dict, prompt: str, root: Path,
@@ -98,6 +117,41 @@ def load_prompt_override(prompt_file: Path, agent: str) -> dict:
     return override
 
 
+def prepare(project: Project, agent: str, prompt_file: Path,
+            cwd: Path | None = None, role: str | None = None) -> Dispatch:
+    root = project.root
+    agents = config.load_agents(root)
+    if agent not in agents:
+        raise DispatchError(f"unknown agent: {agent} (known: {', '.join(agents)})")
+    agent_cfg = agents[agent]
+    try:
+        override = load_prompt_override(prompt_file, agent)
+        run_dir = owning_run_workspace(prompt_file)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise DispatchError(f"invalid owning run configuration: {exc}") from exc
+    if override:
+        agent_cfg = {**agent_cfg, **override}
+    cwd = cwd or root
+    if not cwd.is_absolute():
+        cwd = root / cwd
+    prompt = prompt_file.read_text()
+    use_stdin = len(prompt.encode()) > PROMPT_ARGV_LIMIT
+    if use_stdin and "stdin_cmd" in agent_cfg:
+        argv = build_argv(agent_cfg, prompt, root, include_prompt=False,
+                          template=agent_cfg["stdin_cmd"])
+    else:
+        argv = build_argv(agent_cfg, prompt, root, include_prompt=not use_stdin)
+    return Dispatch(agent=agent, argv=argv, cwd=cwd,
+                    stdin_text=prompt if use_stdin else None,
+                    timeout_s=float(agent_cfg.get("timeout_min", 10)) * 60,
+                    run_dir=run_dir)
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="scieflow agent run")
     ap.add_argument("agent")
@@ -107,48 +161,40 @@ def main(argv: list[str] | None = None) -> None:
                     help="working directory for the agent (default: repo root)")
     args = ap.parse_args(argv)
 
-    root = config.repo_root()
-    agents = config.load_agents(root)
-    if args.agent not in agents:
-        sys.exit(f"unknown agent: {args.agent} (known: {', '.join(agents)})")
-    agent_cfg = agents[args.agent]
+    project = Project.discover()
     try:
-        override = load_prompt_override(args.prompt_file, args.agent)
-    except (OSError, ValueError, yaml.YAMLError) as exc:
-        sys.exit(f"invalid owning run configuration: {exc}")
-    if override:
-        agent_cfg = {**agent_cfg, **override}
-    cwd = args.cwd or root
-    if not cwd.is_absolute():
-        cwd = root / cwd
+        d = prepare(project, args.agent, args.prompt_file, args.cwd)
+    except DispatchError as e:
+        sys.exit(str(e))
 
-    prompt = args.prompt_file.read_text()
-    use_stdin = len(prompt.encode()) > PROMPT_ARGV_LIMIT
-    if use_stdin and "stdin_cmd" in agent_cfg:
-        argv = build_argv(agent_cfg, prompt, root, include_prompt=False,
-                          template=agent_cfg["stdin_cmd"])
-    else:
-        argv = build_argv(agent_cfg, prompt, root, include_prompt=not use_stdin)
-    timeout = float(agent_cfg.get("timeout_min", 10)) * 60
+    if d.run_dir is not None:
+        try:
+            actions.guard_budget(d.run_dir, ("wall_minutes",))
+        except actions.BudgetExhausted as e:
+            _write(args.transcript_file,
+                   f"{d.agent}: refused, {e} (run checkpointed; resume after raising the budget)\n")
+            sys.exit(BUDGET_EXIT)
 
     try:
-        proc = subprocess.run(argv, input=prompt if use_stdin else None,
-                              capture_output=True, text=True, timeout=timeout, cwd=cwd)
-    except subprocess.TimeoutExpired:
-        args.transcript_file.parent.mkdir(parents=True, exist_ok=True)
-        args.transcript_file.write_text(f"{args.agent}: timed out after {timeout:.0f}s\n")
-        sys.exit(124)
+        job = jobs.run_blocking(project, d.argv, kind="agent", cwd=d.cwd, run_dir=d.run_dir,
+                                label=d.agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text)
     except OSError as e:
-        args.transcript_file.parent.mkdir(parents=True, exist_ok=True)
-        args.transcript_file.write_text(f"{args.agent}: failed to launch subprocess: {e}\n")
-        sys.exit(f"{args.agent}: failed to launch subprocess: {e}")
+        _write(args.transcript_file, f"{d.agent}: failed to launch subprocess: {e}\n")
+        sys.exit(f"{d.agent}: failed to launch subprocess: {e}")
 
-    args.transcript_file.parent.mkdir(parents=True, exist_ok=True)
-    args.transcript_file.write_text(proc.stdout)
-    if proc.returncode != 0:
-        sys.stderr.write(proc.stderr)
-        sys.exit(proc.returncode)
-    print(f"{args.agent}: done, transcript at {args.transcript_file}")
+    if d.run_dir is not None and job.duration_s is not None:
+        actions.record_spend(d.run_dir, wall_minutes=round(job.duration_s / 60, 3))
+
+    output = Path(job.log).read_text()
+    if job.state == "timeout":
+        _write(args.transcript_file,
+               output + f"\n{d.agent}: timed out after {d.timeout_s:.0f}s\n")
+        sys.exit(124)
+    _write(args.transcript_file, output)
+    if job.exit_code != 0:
+        sys.stderr.write(Path(job.err).read_text())
+        sys.exit(job.exit_code)
+    print(f"{d.agent}: done, transcript at {args.transcript_file}")
 
 
 if __name__ == "__main__":

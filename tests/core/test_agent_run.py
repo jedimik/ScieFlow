@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -308,3 +309,76 @@ def test_agent_run_reachable_from_root_cli(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     assert out.exists()
+
+
+def make_loop_workspace(root: Path, wall_cap: int = 60) -> Path:
+    from scieflow.core.run import budget, status
+
+    # The dispatch subprocess runs in this repo; a refusal checkpoints the run,
+    # which needs the status vocabulary.
+    (root / "schemas").mkdir(exist_ok=True)
+    (root / "schemas" / "status.yml").write_text((ROOT / "schemas" / "status.yml").read_text())
+    ws = root / "workspace" / "r1"
+    (ws / "logs").mkdir(parents=True)
+    # A real run always carries config.yml beside status.yml (run/init.py).
+    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
+    status.write_status(ws, {**status.new_status("r1", "autonomous")})
+    budget.write_budget(ws, budget.new_budget(3, 10, wall_cap))
+    return ws
+
+
+def dispatch_in_ws(root: Path, ws: Path, agent: str, prompt: str):
+    (ws / "logs" / "p.md").write_text(prompt)
+    return subprocess.run(
+        [*AGENT_RUN, agent, str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        capture_output=True, text=True, cwd=root,
+    )
+
+
+def test_timeout_transcript_keeps_partial_output(tmp_path):
+    root = make_repo(tmp_path, stub_cmd=STUB_CMD)
+    (root / "config" / "agents.yml").write_text(
+        "agents:\n"
+        "  talky: {cmd: \"sh -c 'echo partial-output; sleep 300'\", enabled: true, timeout_min: 0.02}\n")
+    proc = run_in_repo(root, "talky", "hi")
+    assert proc.returncode == 124
+    transcript = (root / "out.log").read_text()
+    assert "partial-output" in transcript and "timed out" in transcript
+
+
+def test_dispatch_inside_a_run_is_a_recorded_job_with_events(tmp_path):
+    from scieflow.core import events
+
+    root = make_repo(tmp_path)
+    ws = make_loop_workspace(root)
+    out = ws / "iterations" / "h.md"
+    proc = dispatch_in_ws(root, ws, "stub", f"output: {out}\nkind: hypothesis\n")
+    assert proc.returncode == 0, proc.stderr
+    assert list((ws / "jobs").glob("*.json"))
+    types = [e["type"] for e in events.read(ws)]
+    assert types[:3] == ["job.queued", "job.started", "job.finished"]
+    assert "budget.recorded" in types        # wall time accumulated by the runner
+
+
+def test_dispatch_refused_when_wall_time_is_spent(tmp_path):
+    from scieflow.core.run import actions, status
+
+    root = make_repo(tmp_path)
+    ws = make_loop_workspace(root, wall_cap=1)
+    actions.record_spend(ws, wall_minutes=2)
+    proc = dispatch_in_ws(root, ws, "stub", "output: x.md\nkind: hypothesis\n")
+    assert proc.returncode == 75
+    assert "budget exhausted" in (ws / "logs" / "t.md").read_text()
+    assert status.read_status(ws)["stopped"]["reason"] == "low-budget"
+
+
+def test_prepare_is_callable_without_exiting(tmp_path):
+    from scieflow.core.agent_run import DispatchError, prepare
+    from scieflow.core.project import Project
+
+    root = make_repo(tmp_path)
+    (root / "p.md").write_text("hello")
+    d = prepare(Project(root), "stub", root / "p.md")
+    assert d.agent == "stub" and d.run_dir is None and d.timeout_s == 60
+    with pytest.raises(DispatchError):
+        prepare(Project(root), "nope", root / "p.md")
