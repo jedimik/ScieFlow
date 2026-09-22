@@ -69,6 +69,69 @@ exception whose role has no support agent assigned. Coordinator agents never
 promote a role unless you ask for it (AGENTS.md rules 10 and 13). The
 interactive wizard asks before adding the exception.
 
+## Per-role model and effort
+
+A role's assignment can be more than an agent name: an entry may be
+`{agent, model, reasoning}`, pinning that agent's model and effort **for
+that role only** — every other role the agent performs keeps its own
+setting (`config/agents.yml`, or its own role override):
+
+```yaml
+assignments:
+  research.draft-authors:
+    - {agent: codex, model: gpt-6-astra, reasoning: xhigh}
+    - {agent: claude, model: claude-opus-5, reasoning: extended-thinking}
+  research.reviewer: codex-review          # a plain string still works
+```
+
+This goes in `config/defaults.yml` for every run, or in a run's
+`workspace/<slug>/config.yml` for that run only, under the same
+`assignments:` key `--assign` already writes.
+
+From the command line the same thing is the `--assign` shorthand
+`ROLE=AGENT[@MODEL][/EFFORT][,…]` — model and effort are both optional, and
+the option is repeatable for several roles at once:
+
+```bash
+uv run scieflow agent configure --assign \
+  research.draft-authors=codex@gpt-6-astra/xhigh,claude@claude-opus-5/extended-thinking --yes
+```
+
+Dispatching for a role goes through `--role`, not a hard-coded agent name:
+
+```bash
+uv run scieflow agent run --role research.draft-authors codex-paper <prompt> <transcript>
+```
+
+`--role` looks up the role's assignment and applies its model/effort
+override to that dispatch. If the named agent is **not** assigned to that
+role, the dispatch is refused before anything runs — dispatching with
+`--role` is how a wrong agent for a role gets caught, rather than silently
+running under someone else's settings. Tier routing (rule 10) still applies
+on top: a support agent on a primary-only role still needs the `--promote`
+exception described above.
+
+### Effort per provider
+
+A role override's `reasoning` field means different things depending on
+the agent's `cmd` template (`apply_role_override` in
+`src/scieflow/core/agent_config.py`):
+
+- **Codex** (`cmd` contains a `{reasoning}` placeholder): the value is
+  substituted straight into the command line, e.g. `xhigh`.
+- **Claude** (no `{reasoning}` placeholder — Claude has no effort flag):
+  `reasoning: extended-thinking` prefixes the command with
+  `env MAX_THINKING_TOKENS=32000 `; any other value (`default`, say)
+  removes that prefix if it was there. `extended-thinking` is the only
+  value that turns anything *on* for Claude — the effort levels a provider
+  understands are listed per agent under `menu.reasoning` in
+  `config/agents.yml`.
+
+`model`, when set, always replaces the agent's configured model for that
+role's dispatch. `agent show [--workspace <slug>] --json` includes
+`role_overrides` in its output, so a coordinator agent can check what a
+role will actually run before dispatching.
+
 ## See what is in effect
 
 ```bash

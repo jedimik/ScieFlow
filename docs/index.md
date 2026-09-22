@@ -18,6 +18,12 @@ each role, and with which model, is layered defaults → per-run overrides; see
 [Agent configuration](agents.md) (`scieflow agent show` / `scieflow agent configure`). Run data lives in `workspace/<slug>/` and is synced with
 DVC ([Storage](DVC_STORAGE.md)).
 
+Every run has its own status, budget, event history, jobs and approval
+gates, all through one service layer — see
+[Runs, jobs and gates](runs.md) for the concepts and
+[Architecture](architecture.md) for how it's built. For every command and
+flag, see the [CLI reference](cli.md).
+
 Start with the interactive menu — arrow keys, space and enter — to pick a
 workflow, continue a run or change agent settings ([guide](menu.md)):
 
