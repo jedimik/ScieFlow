@@ -11,7 +11,7 @@ import threading
 from dataclasses import asdict
 from pathlib import Path
 
-from scieflow.core import agent_config, events, gates, jobs, workspace
+from scieflow.core import agent_config, events, gates, jobs, sandbox, workspace
 from scieflow.core.project import Project, ProjectError
 from scieflow.core.run import budget, status
 
@@ -75,15 +75,21 @@ def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: 
 
     try:
         d = prepare(project, agent, Path(prompt_file), cwd, role)
-    except DispatchError as e:
+    except (DispatchError, sandbox.SandboxError) as e:
         raise ServiceError(str(e)) from e
     if d.run_dir is not None:
         try:
             actions.guard_budget(d.run_dir, ("wall_minutes",))
         except actions.BudgetExhausted as e:
             raise ServiceError(f"{e} — run checkpointed") from e
+    if d.writable is not None:
+        try:
+            sandbox.verify(d.writable, d.cwd)
+        except sandbox.SandboxError as exc:
+            raise ServiceError(str(exc)) from exc
     job, proc = jobs.start(project, d.argv, kind="agent", cwd=d.cwd, run_dir=d.run_dir,
-                           label=agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text)
+                           label=agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text,
+                           sandbox_writable=d.writable)
 
     def finish() -> jobs.Job:
         done = jobs.wait(job, proc)

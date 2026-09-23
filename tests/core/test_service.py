@@ -73,3 +73,32 @@ def test_gates_across_runs(project):
 def test_unknown_run_is_a_service_error(project):
     with pytest.raises(service.ServiceError):
         service.run_detail(project, "nope")
+
+
+def test_dispatch_through_the_service_is_sandboxed(project, monkeypatch):
+    """The web app must inherit the boundary without knowing it exists."""
+    seen = {}
+    real_start = service.jobs.start
+
+    def spy(project_, argv, **kw):
+        seen.update(kw)
+        return real_start(project_, argv, **kw)
+
+    monkeypatch.setattr(service.jobs, "start", spy)
+    ws = project.run_dir("r1")
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text(f"output: {ws / 'out.md'}\nkind: hypothesis\n")
+    service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    assert seen["sandbox_writable"] is not None
+    assert ws in seen["sandbox_writable"]
+
+
+def test_service_dispatch_refuses_without_a_sandbox(project, monkeypatch):
+    from scieflow.core import sandbox
+
+    monkeypatch.setattr(sandbox, "available", lambda: False)
+    ws = project.run_dir("r1")
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text("go\n")
+    with pytest.raises(service.ServiceError, match="bubblewrap"):
+        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")

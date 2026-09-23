@@ -60,7 +60,9 @@
   <tr>
     <td class="dim">{{ (job.started or job.queued or "")[11:19] }}</td>
     <td>{{ job.label or job.kind }}</td>
-    <td class="state-{{ job.state }}">{{ job.state }}</td>
+    <td class="state-{{ job.state }}">
+      {{ job.state }}{% if not job.sandboxed %} <span class="dim">· unsandboxed</span>{% endif %}
+    </td>
     <td class="dim">{{ "%.1f"|format(job.duration_s) if job.duration_s else "—" }}</td>
     <td><a href="/runs/{{ slug }}/jobs/{{ job.id }}">output</a></td>
   </tr>
