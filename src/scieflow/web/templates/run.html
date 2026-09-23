@@ -80,7 +80,7 @@
 </table>
 <script>
   const timeline = document.getElementById("timeline");
-  const stream = new EventSource("/api/v1/runs/{{ slug }}/events/stream");
+  const stream = new EventSource("/api/v1/runs/" + {{ slug|tojson }} + "/events/stream");
   stream.addEventListener("run", (message) => {
     const event = JSON.parse(message.data);
     const row = timeline.insertRow(0);

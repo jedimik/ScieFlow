@@ -70,3 +70,40 @@ def test_job_log_page_shows_the_output(client, project):
     job = jobs.list_jobs(project, project.run_dir("r1"))[0]
     body = client.get(f"/runs/r1/jobs/{job.id}").text
     assert "hello from the job" in body
+
+
+def test_job_page_is_404_for_a_job_from_another_run(client, project):
+    """The URL's slug must scope the job — jobs.find() alone matches by id
+    across every run's jobs/ directory, so the route must check run_dir."""
+    import sys
+
+    from scieflow.core import jobs
+
+    other_ws = project.workspace_root / "r2"
+    other_job = jobs.run_blocking(
+        project, [sys.executable, "-c", "print('other run')"],
+        kind="agent", cwd=project.root, run_dir=other_ws, label="other",
+    )
+    assert client.get(f"/runs/r1/jobs/{other_job.id}").status_code == 404
+
+
+def test_run_page_shows_the_finished_job_duration(client, project):
+    """Pins service.job_json: asdict(job) drops duration_s (a @property, not
+    a field), and Jinja would silently fall back to "—" with no exception.
+    Matches the exact table cell so a coincidental "0.0" substring elsewhere
+    on the page (e.g. inside a logged event's raw data) cannot fake a pass."""
+    from scieflow.core import jobs
+
+    job = jobs.list_jobs(project, project.run_dir("r1"))[0]
+    assert job.duration_s is not None and job.duration_s > 0
+    body = client.get("/runs/r1").text
+    assert f'<td class="dim">{job.duration_s:.1f}</td>' in body
+
+
+def test_job_page_shows_the_finished_job_duration(client, project):
+    from scieflow.core import jobs
+
+    job = jobs.list_jobs(project, project.run_dir("r1"))[0]
+    assert job.duration_s is not None and job.duration_s > 0
+    body = client.get(f"/runs/r1/jobs/{job.id}").text
+    assert f"· {job.duration_s:.1f}s" in body

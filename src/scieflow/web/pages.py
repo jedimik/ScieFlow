@@ -72,10 +72,10 @@ async def run_page(request: Request, slug: str) -> HTMLResponse:
 @router.get("/runs/{slug}/jobs/{job_id}", response_class=HTMLResponse)
 async def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
     project = _project(request)
-    service.run_workspace(project, slug)                # validates the slug
+    ws = service.run_workspace(project, slug)           # validates the slug
     job = jobs_mod.find(project, job_id)
-    if job is None:
-        raise service.ServiceError(f"no job {job_id}")
+    if job is None or job.run_dir is None or Path(job.run_dir).resolve() != ws.resolve():
+        raise service.ServiceError(f"no job {job_id} in {slug}")
 
     def _read(path: str) -> str:
         try:

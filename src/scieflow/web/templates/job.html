@@ -16,7 +16,7 @@
 {% if live %}
 <script>
   const out = document.getElementById("out");
-  const stream = new EventSource("/api/v1/jobs/{{ job.id }}/log/stream");
+  const stream = new EventSource("/api/v1/jobs/" + {{ job.id|tojson }} + "/log/stream");
   stream.onmessage = (message) => {
     out.textContent += message.data + "\n";
     out.scrollTop = out.scrollHeight;
