@@ -149,19 +149,19 @@ def start(project: Project, argv: list[str], *, kind: str, cwd: Path,
               run_dir=str(run_dir) if run_dir else None, queued=_now(), timeout_s=timeout_s,
               log=str(directory / f"{job_id}.log"), err=str(directory / f"{job_id}.err"),
               sandboxed=sandbox_writable is not None)
-    # The job records the command that was asked for; the wrapper is plumbing.
-    launch = (sandbox.wrap(argv, writable=sandbox_writable, cwd=cwd)
-              if sandbox_writable is not None else list(argv))
     save(job)
     _emit(job, "job.queued")
     with open(job.log, "w") as out, open(job.err, "w") as err:
         try:
+            # The job records the command that was asked for; the wrapper is plumbing.
+            launch = (sandbox.wrap(argv, writable=sandbox_writable, cwd=cwd)
+                      if sandbox_writable is not None else list(argv))
             proc = subprocess.Popen(
                 launch, cwd=cwd, stdout=out, stderr=err, text=True, env=env,
                 stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
                 start_new_session=True,
             )
-        except OSError as exc:
+        except (OSError, sandbox.SandboxError) as exc:
             err.write(f"failed to launch: {exc}\n")
             job.state, job.finished = "failed", _now()
             save(job)
