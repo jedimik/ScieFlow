@@ -81,6 +81,27 @@ def _reload(job: Job) -> Job:
         return job
 
 
+def peek_state(log: Path) -> str | None:
+    """Read a single job's current state directly from its record file.
+
+    `log` is a job's log path (e.g. `Job.log`); the record lives beside it at
+    the same path with a `.json` suffix, per `_record_path`. This is O(1) in
+    the number of jobs -- unlike `find`/`list_jobs`, it never globs or loads
+    any other job's record -- for callers on a hot path (a poll loop) that
+    only need to know whether *this* job has reached a final state.
+
+    Records are written atomically via `os.replace`, so a torn read should
+    not normally happen, but any failure to read or parse -- file missing,
+    unreadable, malformed -- is treated as "state unknown" (returns `None`)
+    rather than raised, so a caller polling in a loop can simply keep
+    polling instead of crashing on a transient hiccup.
+    """
+    try:
+        return json.loads(Path(log).with_suffix(".json").read_text())["state"]
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
 def list_jobs(project: Project, run_dir: Path | None = None) -> list[Job]:
     dirs = ([jobs_dir(project, run_dir)] if run_dir else
             [project.state_dir / "jobs", *sorted(project.workspace_root.glob("*/jobs"))])

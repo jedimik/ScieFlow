@@ -16,7 +16,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from scieflow.core import jobs, service
-from scieflow.core.project import Project
 from scieflow.web import auth
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(auth.require_session)])
@@ -42,7 +41,7 @@ async def _events(request: Request, slug: str, since: str | None):
         await asyncio.sleep(POLL_S)
 
 
-async def _log(request: Request, project: Project, job_id: str, path: Path):
+async def _log(request: Request, path: Path):
     """One frame per completed line, holding back a trailing partial line.
 
     A subprocess's write and our poll are not aligned, so a read can land
@@ -54,6 +53,16 @@ async def _log(request: Request, project: Project, job_id: str, path: Path):
     reached a final state (`jobs.FINAL`), in which case no more output is
     ever coming and the held-back remainder (which may never gain a
     trailing newline, e.g. the process's very last write) is flushed as-is.
+
+    The final-state check reads only this job's own record file
+    (`jobs.peek_state`), not every job in the project. `jobs.find` would
+    glob and JSON-parse every job record under every run each time it is
+    called; since this branch runs on essentially every poll for a job
+    that is actively writing output (not just once at the end of the
+    stream), that cost is O(n) in the number of jobs ever run, on a hot
+    path hit roughly every `POLL_S` for the life of the stream. A record
+    that can't be read yet (missing, unreadable, mid-write) reads as "not
+    final" and the loop just polls again.
     """
     offset = 0
     idle = 0
@@ -72,11 +81,9 @@ async def _log(request: Request, project: Project, job_id: str, path: Path):
         pending = lines.pop()      # remainder after the last newline seen so far
         for line in lines:
             yield f"data: {line}\n\n"
-        if pending:
-            job = jobs.find(project, job_id)
-            if job is None or job.state in jobs.FINAL:
-                yield f"data: {pending}\n\n"
-                pending = ""
+        if pending and jobs.peek_state(path) in jobs.FINAL:
+            yield f"data: {pending}\n\n"
+            pending = ""
         idle = 0 if (chunk or lines) else idle + 1
         if idle and idle % HEARTBEAT_EVERY == 0:
             yield ": ping\n\n"
@@ -97,9 +104,8 @@ async def event_stream(request: Request, slug: str,
 @router.get("/jobs/{job_id}/log/stream", tags=["jobs"])
 async def log_stream(request: Request, job_id: str) -> StreamingResponse:
     """One frame per line of a job's stdout, as it is written."""
-    project = request.app.state.project
-    job = jobs.find(project, job_id)
+    job = jobs.find(request.app.state.project, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"no job {job_id}")
-    return StreamingResponse(_log(request, project, job_id, Path(job.log)),
+    return StreamingResponse(_log(request, Path(job.log)),
                              media_type="text/event-stream", headers=SSE_HEADERS)
