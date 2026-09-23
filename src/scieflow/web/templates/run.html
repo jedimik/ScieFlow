@@ -3,6 +3,7 @@
 {% block nav %}<a href="/">← all runs</a>{% endblock %}
 {% block content %}
 <h1>{{ slug }}</h1>
+<p><a href="/runs/{{ slug }}/files">browse this run's files →</a></p>
 <p class="dim">
   id {{ (detail.status or {}).get("id", "—") }} ·
   iteration {{ (detail.status or {}).get("iteration", "—") }} ·

@@ -90,3 +90,44 @@ async def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
         "err": _read(job.err),
         "live": job.state == "running",
     })
+
+
+@router.get("/runs/{slug}/files", response_class=HTMLResponse)
+async def files_page(request: Request, slug: str, path: str = "") -> HTMLResponse:
+    from fastapi import HTTPException
+
+    from scieflow.web import files as files_mod
+
+    ws = service.run_workspace(_project(request), slug)
+    try:
+        entries = files_mod.listing(ws, path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return TEMPLATES.TemplateResponse(request, "files.html",
+                                      {"slug": slug, "path": path, "entries": entries})
+
+
+@router.get("/runs/{slug}/file")
+async def file_view(request: Request, slug: str, path: str):
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+
+    from scieflow.web import files as files_mod
+
+    ws = service.run_workspace(_project(request), slug)
+    try:
+        target = files_mod.resolve(ws, path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"no such file: {path}") from exc
+    if target.is_dir():
+        raise HTTPException(status_code=400, detail="that is a directory")
+    if files_mod.is_text(target) and target.stat().st_size <= files_mod.MAX_INLINE:
+        return TEMPLATES.TemplateResponse(request, "file.html", {
+            "slug": slug, "path": path,
+            "text": target.read_text(errors="replace"),
+        })
+    return FileResponse(target, media_type=files_mod.media_type(target))

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}{{ path }} — {{ slug }}{% endblock %}
+{% block nav %}<a href="/runs/{{ slug }}/files">← files</a>{% endblock %}
+{% block content %}
+<h1>{{ path }}</h1>
+<pre class="log">{{ text }}</pre>
+{% endblock %}

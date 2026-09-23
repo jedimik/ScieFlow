@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ slug }} files{% endblock %}
+{% block nav %}<a href="/runs/{{ slug }}">← {{ slug }}</a>{% endblock %}
+{% block content %}
+<h1>{{ slug }}/{{ path }}</h1>
+<table>
+  {% for entry in entries %}
+  <tr>
+    <td>
+      {% if entry.is_dir %}
+        <a href="/runs/{{ slug }}/files?path={{ entry.path }}">{{ entry.name }}/</a>
+      {% else %}
+        <a href="/runs/{{ slug }}/file?path={{ entry.path }}">{{ entry.name }}</a>
+      {% endif %}
+    </td>
+    <td class="dim">{{ entry.size if not entry.is_dir else "" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
