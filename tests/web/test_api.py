@@ -74,3 +74,26 @@ def test_api_requires_a_session(project):
 def test_openapi_schema_is_served(client):
     schema = client.get("/api/v1/openapi.json").json()
     assert "/api/v1/runs/{slug}" in schema["paths"]
+
+
+def test_openapi_and_docs_need_a_session(project):
+    """The schema and the interactive docs are the whole route map and a
+    UI that can drive it -- they must be behind the same session gate as
+    every other /api/v1 route, not exempted by FastAPI's own defaults."""
+    from fastapi.testclient import TestClient
+
+    from scieflow.web.app import create_app
+
+    with TestClient(create_app(project, "tok")) as anonymous:
+        assert anonymous.get("/api/v1/openapi.json").status_code == 401
+        assert anonymous.get("/api/v1/docs").status_code == 401
+
+
+def test_openapi_and_docs_are_served_once_signed_in(client):
+    schema = client.get("/api/v1/openapi.json")
+    assert schema.status_code == 200
+    assert "/api/v1/runs/{slug}" in schema.json()["paths"]
+
+    docs = client.get("/api/v1/docs")
+    assert docs.status_code == 200
+    assert "text/html" in docs.headers["content-type"]

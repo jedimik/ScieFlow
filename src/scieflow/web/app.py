@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import HTTPException as FastAPIHTTPException
-from fastapi.responses import JSONResponse
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -27,8 +28,14 @@ def create_app(project: Project, token: str) -> FastAPI:
     app = FastAPI(
         title="ScieFlow",
         summary="Local control surface for agent-driven research runs.",
-        docs_url="/api/v1/docs",
-        openapi_url="/api/v1/openapi.json",
+        # FastAPI's automatic schema/docs routes take no dependencies, so
+        # registering them at these paths directly would make the route map
+        # and interactive UI reachable by anything that can open the port,
+        # without ever seeing the printed token. Disable the automatic ones
+        # and re-register both below, behind the same session requirement
+        # as every other /api/v1 route.
+        docs_url=None,
+        openapi_url=None,
     )
     app.state.project = project
     app.state.token = token
@@ -53,6 +60,17 @@ def create_app(project: Project, token: str) -> FastAPI:
     async def healthz() -> dict:
         """Liveness only — deliberately says nothing about the project."""
         return {"ok": True}
+
+    @app.get("/api/v1/openapi.json", include_in_schema=False,
+             dependencies=[Depends(auth.require_session)])
+    async def openapi_schema() -> dict:
+        return app.openapi()
+
+    @app.get("/api/v1/docs", include_in_schema=False,
+             dependencies=[Depends(auth.require_session)])
+    async def swagger_docs() -> HTMLResponse:
+        return get_swagger_ui_html(openapi_url="/api/v1/openapi.json",
+                                   title=f"{app.title} — Swagger UI")
 
     from scieflow.web import api, pages, sse
 

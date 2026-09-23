@@ -53,9 +53,11 @@ tests and library callers build one directly with `Project(root)`:
 | `agents()` / `defaults()` | parsed `config/agents.yml` / `config/defaults.yml` |
 | `schema(name)` | a parsed file from `schemas/<name>.yml` |
 
-A `Project` is immutable and cheap to construct — `scieflow.web` builds one
-per request (`request.app.state.project`) rather than relying on a
-process-wide current directory.
+A `Project` is immutable and cheap to construct. `scieflow serve` builds one
+with `Project.discover()` at startup and `create_app` stores that single
+instance on `app.state.project`; every request reads the same instance
+(`request.app.state.project`) rather than depending on a process-wide
+current directory, which is safe precisely because the object is immutable.
 
 ## Where state lives on disk
 

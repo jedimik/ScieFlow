@@ -6,8 +6,11 @@ jobs it started, the approvals it asked for, and everything it produced. The
 research loop, a paper draft and a literature review are all runs.
 
 Everything on this page is a thin caller of one service layer
-(`scieflow.core.service`), so the CLI, the coordinator agent and the coming
-local web app act on runs the same way and see the same state.
+(`scieflow.core.service`), so the CLI, the coordinator agent and the local
+web app (`scieflow serve`, see [The local web app](web.md)) all read the
+same state through it. The web app is read-only in this milestone —
+changing a run (marking a phase, advancing, answering a gate) is still
+terminal-only.
 
 ## The state of a run
 
