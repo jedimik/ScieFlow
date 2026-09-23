@@ -8,9 +8,9 @@
   <tr>
     <td>
       {% if entry.is_dir %}
-        <a href="/runs/{{ slug }}/files?path={{ entry.path }}">{{ entry.name }}/</a>
+        <a href="/runs/{{ slug }}/files?path={{ entry.path | urlencode }}">{{ entry.name }}/</a>
       {% else %}
-        <a href="/runs/{{ slug }}/file?path={{ entry.path }}">{{ entry.name }}</a>
+        <a href="/runs/{{ slug }}/file?path={{ entry.path | urlencode }}">{{ entry.name }}</a>
       {% endif %}
     </td>
     <td class="dim">{{ entry.size if not entry.is_dir else "" }}</td>

@@ -125,9 +125,23 @@ async def file_view(request: Request, slug: str, path: str):
         raise HTTPException(status_code=404, detail=f"no such file: {path}") from exc
     if target.is_dir():
         raise HTTPException(status_code=400, detail="that is a directory")
-    if files_mod.is_text(target) and target.stat().st_size <= files_mod.MAX_INLINE:
-        return TEMPLATES.TemplateResponse(request, "file.html", {
-            "slug": slug, "path": path,
-            "text": target.read_text(errors="replace"),
-        })
-    return FileResponse(target, media_type=files_mod.media_type(target))
+    try:
+        if files_mod.is_text(target) and target.stat().st_size <= files_mod.MAX_INLINE:
+            return TEMPLATES.TemplateResponse(request, "file.html", {
+                "slug": slug, "path": path,
+                "text": target.read_text(errors="replace"),
+            })
+    except OSError as exc:
+        # Gone (or unreadable) between resolve() and here — e.g. an agent
+        # deleted it. Not a security escape, just no longer there.
+        raise HTTPException(status_code=404, detail=f"no such file: {path}") from exc
+    media_type, download = files_mod.download_type(target)
+    return FileResponse(
+        target,
+        media_type=media_type,
+        headers={"X-Content-Type-Options": "nosniff"},
+        # Only the inline-safe allowlist skips a forced download; everything
+        # else — HTML, JS, SVG, anything unrecognised — is served as an
+        # attachment so it can never execute in this app's origin.
+        filename=target.name if download else None,
+    )
