@@ -1,23 +1,27 @@
 # Architecture
 
-This page is for extending ScieFlow's core, or building the planned local web
-app against it. For the concepts a run, its event log, jobs and gates
-represent, read [Runs, jobs and gates](runs.md) first — this page is about how
-the pieces are built and fit together, not what they mean.
+This page is for extending ScieFlow's core, or building against
+`scieflow.web`, the local web app. For the concepts a run, its event log,
+jobs and gates represent, read [Runs, jobs and gates](runs.md) first — this
+page is about how the pieces are built and fit together, not what they
+mean.
 
 ## Layering
 
 Every caller — the CLI, the interactive menu, the coordinator agent's skill
-JSON, and (M2) the local web app — goes through one service layer,
-`scieflow.core.service`. Nothing below that layer knows or cares who called
-it:
+JSON, and the local web app (`scieflow serve`, see [The local web
+app](web.md)) — goes through one service layer, `scieflow.core.service`.
+Nothing below that layer knows or cares who called it. `scieflow.web`'s
+routes (`app.py`, `pages.py`, `api.py`, `sse.py`) are thin callers exactly
+like the CLI's commands: they translate HTTP into a service call and back
+and hold no logic of their own.
 
 ```mermaid
 flowchart TD
     CLI[CLI: scieflow run / gate / agent] --> SVC[scieflow.core.service]
     MENU[Interactive menu] --> SVC
     SKILL[Coordinator agent skill JSON] --> SVC
-    WEB[Local web app, M2] --> SVC
+    WEB[Local web app: scieflow.web] --> SVC
     SVC --> PROJ[Project: root, workspace_root, state_dir]
     SVC --> RUN[Run state: status.yml, budget.yml + events.jsonl]
     SVC --> JOBS[Job runner: jobs.py]
@@ -49,8 +53,9 @@ tests and library callers build one directly with `Project(root)`:
 | `agents()` / `defaults()` | parsed `config/agents.yml` / `config/defaults.yml` |
 | `schema(name)` | a parsed file from `schemas/<name>.yml` |
 
-A `Project` is immutable and cheap to construct — build one per request in a
-future web app rather than relying on a process-wide current directory.
+A `Project` is immutable and cheap to construct — `scieflow.web` builds one
+per request (`request.app.state.project`) rather than relying on a
+process-wide current directory.
 
 ## Where state lives on disk
 
@@ -74,10 +79,10 @@ project-wide job view see everything.
 
 ## The service rule: every action exists once
 
-The reason the CLI, the menu, agent skills and the coming web app agree on
-what a run looks like is structural, not a convention someone has to
-remember: **an action is written once, as a function in
-`scieflow.core.service`, and every caller is a thin wrapper around it.**
+The reason the CLI, the menu, agent skills and the web app agree on what a
+run looks like is structural, not a convention someone has to remember:
+**an action is written once, as a function in `scieflow.core.service`, and
+every caller is a thin wrapper around it.**
 
 Concretely, `scieflow/core/run/cli.py`'s `list` command is:
 
@@ -87,12 +92,19 @@ def list_cmd(as_json):
     ...
 ```
 
-A future HTTP handler for the same endpoint would call
-`service.list_runs(project)` too — parsing only its own transport (query
-params in, JSON out), never re-implementing what a run listing means. When
-you add a new capability, decide first whether it is a new service function
-or a variation of an existing one; only after that write the CLI command (or
-HTTP route) that calls it.
+and `scieflow.web.api`'s HTTP handler for the same thing is:
+
+```python
+@router.get("/runs")
+async def list_runs(request: Request) -> list[dict]:
+    return service.list_runs(_project(request))
+```
+
+Both parse only their own transport (Click options and stdout for one,
+query params and JSON for the other) and never re-implement what a run
+listing means. When you add a new capability, decide first whether it is a
+new service function or a variation of an existing one; only after that
+write the CLI command (or HTTP route) that calls it.
 
 Some actions bypass `service.py` and call the lower `run.actions` /
 `gates` / `jobs` modules directly from the CLI (for example `run mark`,
@@ -102,8 +114,9 @@ than duplicating its logic there.
 
 ## Concurrency and safety
 
-Multiple processes — a terminal, an agent dispatch, and eventually a browser
-tab — can touch the same run at once. Three primitives make that safe:
+Multiple processes — a terminal, an agent dispatch, and a browser tab open
+on `scieflow serve` — can touch the same run at once. Three primitives make
+that safe:
 
 - **File locks + atomic replace** (`scieflow.core.store`). Every YAML write
   goes through `store.write_yaml` / `store.update_yaml`, which take a
@@ -164,5 +177,6 @@ change when a second caller arrives.
 
 - [Runs, jobs and gates](runs.md) — the concepts these mechanics implement.
 - [CLI reference](cli.md) — every command that calls into this layer today.
+- [The local web app](web.md) — the other caller, and its security model.
 - [Agent configuration](agents.md) — how role assignments and per-role
   model/effort overrides are resolved (`scieflow.core.agent_config`).

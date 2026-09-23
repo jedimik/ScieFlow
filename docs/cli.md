@@ -181,6 +181,29 @@ uv run scieflow workspace sync-status [SLUG] [--big-gb N] [--json]
 What a run would upload: new files since its last sync, and files at or
 above `--big-gb` (default `1.0`).
 
+## `scieflow serve`
+
+The local web app: a read-only browser view over the same service layer as
+everything above. Needs the `web` extra (`uv sync --extra web`). See
+[The local web app](web.md) for the pages, the API and the security model.
+
+```bash
+uv run scieflow serve [--port N] [--host HOST] [--no-browser]
+```
+
+- `--port` — port to listen on (default `8765`).
+- `--host` — the address to bind. Only loopback addresses (`127.0.0.1`,
+  `localhost`, `::1`) are accepted; anything else is refused before uvicorn
+  starts, with a message pointing at an SSH tunnel or Tailscale instead.
+  Reach the app from another machine by forwarding the port
+  (`ssh -L 8765:127.0.0.1:8765 host`), never by widening this.
+- `--no-browser` — print the URL and open nothing (the default opens it for
+  you).
+
+The printed URL carries a one-time token that becomes a session cookie on
+first open; it is generated fresh each time you run `serve` and stops being
+valid when that process exits.
+
 ## Module CLIs
 
 Each module has its own command group and its own CLI reference:

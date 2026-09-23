@@ -55,6 +55,7 @@ nav:
   - Home: index.md
   - Menu: menu.md
   - Runs, jobs and gates: runs.md
+  - Web app: web.md
   - Architecture: architecture.md
   - CLI reference: cli.md
   - Experiments:

@@ -75,6 +75,14 @@ autonomous run stops itself instead of overrunning. `uv run scieflow run list`,
 the way in; [docs/runs.md](docs/runs.md) explains the whole model, including
 choosing provider, model and effort per role.
 
+## The local web app
+
+`uv run scieflow serve` opens a browser view of every run — status, budget,
+timeline, live job output, open gates and artifacts — on `127.0.0.1` only,
+behind a one-time token printed in your terminal. It reads through the same
+service layer as the CLI, so it can never show you a different truth. See
+[docs/web.md](docs/web.md).
+
 ## Agents: who does what
 
 Each role (`loop.experiment`, `research.reviewer`, …) is assigned an agent in
