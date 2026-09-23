@@ -65,6 +65,8 @@ restrictions, not because the network happens to be trusted:
 - **No CORS.** The app sends no `Access-Control-Allow-Origin` header at
   all, so no other origin's page can read a response from it, cross-site
   request or not.
+- **Every agent dispatch the service layer starts is sandboxed**, under the
+  same guarantee documented in [the sandbox reference](sandbox.md).
 - **The artifact browser cannot leave the run directory.** Every path a
   request names is resolved to an absolute path and checked to be a strict
   descendant of that run's workspace directory (`scieflow.web.files.resolve`)

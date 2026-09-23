@@ -24,6 +24,11 @@ whatever the [allowlist](#the-allowlist) grants:
 | Sub-agent | its own `workspace/<slug>/` — nothing wider |
 | Coordinator | the whole `workspace/` tree |
 
+The coordinator row exists for a coordinator launcher that a later milestone
+will add. Today, `src/scieflow/core/agent_run.py` is the only production
+call site for `sandbox.writable_for()`, and it hardcodes
+`coordinator=False`: every dispatch shipped today takes the sub-agent path.
+
 Both also get:
 
 - a private `/tmp` (`--tmpfs /tmp`, invisible to the host and to other jobs);
@@ -82,9 +87,14 @@ refuses the dispatch rather than run it unconfined:
 
 - exit code **77**, alongside the existing **75** (a spent `wall_minutes`
   budget) and **124** (timeout);
-- a `job.refused` event is written to the run's timeline with
-  `reason: sandbox` and a `detail` describing what went wrong;
+- when the dispatch belongs to a run, a `job.refused` event is written to
+  that run's timeline with `reason: sandbox` and a `detail` describing what
+  went wrong;
 - the transcript file and stderr both carry the same message.
+
+A dispatch with no owning run has no timeline to write to, so for that cause
+(below) there is no `job.refused` event — the refusal is reported only
+through the exit code and the transcript/stderr message.
 
 The causes are:
 
@@ -95,8 +105,10 @@ The causes are:
   disabling the confinement bubblewrap normally provides.
 - **the dispatch's prompt belongs to no run** — a sandboxed dispatch must
   name the run it writes into; a one-off dispatch with no owning run has
-  nothing to be confined to. Use the [escape hatch](#the-escape-hatch)
-  deliberately for that case.
+  nothing to be confined to. This is raised before any run is known, so no
+  `job.refused` event is emitted for it; the exit code and stderr are the
+  only record. Use the [escape hatch](#the-escape-hatch) deliberately for
+  that case.
 
 Two fixes: install (or fix) bubblewrap, or opt out on purpose with the
 escape hatch below — never edit around the refusal.
