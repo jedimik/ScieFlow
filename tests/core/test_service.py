@@ -127,15 +127,30 @@ def test_service_escape_hatch_leaves_a_sandbox_disabled_event(project):
     from scieflow.core import events
 
     ws = project.run_dir("r1")
-    config_path = ws / "config.yml"
-    config_path.write_text(config_path.read_text() + "sandbox: off\n")
+    (project.root / "config" / "sandbox.yml").write_text(
+        "unsandboxed_runs:\n  - slug: r1\n    reason: a human decided\n")
     prompt = ws / "logs" / "p.md"
     prompt.write_text(f"output: {ws / 'out.md'}\nkind: hypothesis\n")
     job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
     assert job["state"] == "done"
     disabled = [e for e in events.read(ws) if e["type"] == "sandbox.disabled"]
     assert len(disabled) == 1
-    assert disabled[0]["data"]["why"] == "config.yml sandbox: off"
+    assert disabled[0]["data"]["why"] == "config/sandbox.yml unsandboxed_runs"
+
+
+def test_service_ignores_a_run_config_that_tries_to_disable_the_sandbox(project):
+    """The same escape as on the CLI path, through the web app: an agent that
+    appends `sandbox: off` to its own run config must not get an unconfined
+    dispatch out of the service layer either."""
+    ws = project.run_dir("r1")
+    config_path = ws / "config.yml"
+    config_path.write_text(config_path.read_text() + "sandbox: off\n")
+    out = ws / "out.md"
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text(f"output: {out}\nkind: hypothesis\n")
+    with pytest.raises(service.ServiceError, match="config/sandbox.yml"):
+        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    assert not out.exists()
 
 
 def test_normal_sandboxed_dispatch_leaves_neither_event(project):

@@ -47,6 +47,7 @@ class Dispatch:
     timeout_s: float
     run_dir: Path | None
     writable: list[Path] | None = None    # None means this dispatch is unsandboxed
+    env: dict | None = None               # None means inherit this process's
 
 
 def build_argv(agent_cfg: dict, prompt: str, root: Path,
@@ -122,19 +123,33 @@ def load_prompt_override(prompt_file: Path, agent: str) -> dict:
     return override
 
 
-def sandbox_disabled_in_run(run_dir: Path | None) -> bool:
-    """True when a run's config.yml opts out with `sandbox: off`."""
+HATCH_MOVED = (
+    "the per-run sandbox opt-out moved out of the run's own config.yml, which a "
+    f"sandboxed agent can write, into {sandbox.ALLOWLIST_FILE}, which it cannot. "
+    "Remove the `sandbox:` key from this run's config.yml; to keep the opt-out, "
+    f"add the run's slug under `unsandboxed_runs:` in {sandbox.ALLOWLIST_FILE} "
+    "with a reason, or pass --no-sandbox for a one-off dispatch")
+
+
+def sandbox_disabled_in_run(project: Project, run_dir: Path | None) -> bool:
+    """True when config/sandbox.yml lets this run dispatch unsandboxed.
+
+    A `sandbox:` key inside the run's own config.yml is never honoured — that
+    file lives in the dispatch's writable bind, so honouring it would let an
+    agent switch off its own confinement. A stale one would be silently
+    misleading, so it refuses the dispatch instead of being ignored quietly.
+    """
     if run_dir is None:
         return False
     path = Path(run_dir) / "config.yml"
-    if not path.is_file():
-        return False
-    try:
-        data = yaml.safe_load(path.read_text()) or {}
-    except yaml.YAMLError:
-        return False
-    value = data.get("sandbox")
-    return value is False or str(value).lower() in {"off", "false", "no"}
+    if path.is_file():
+        try:
+            data = yaml.safe_load(path.read_text()) or {}
+        except (OSError, yaml.YAMLError):
+            data = {}          # malformed or unreadable: the loader reports it
+        if isinstance(data, dict) and "sandbox" in data:
+            raise sandbox.SandboxError(f"{path}: {HATCH_MOVED}")
+    return Path(run_dir).name in sandbox.unsandboxed_runs(project)
 
 
 def prepare(project: Project, agent: str, prompt_file: Path,
@@ -172,13 +187,17 @@ def prepare(project: Project, agent: str, prompt_file: Path,
                           template=agent_cfg["stdin_cmd"])
     else:
         argv = build_argv(agent_cfg, prompt, root, include_prompt=not use_stdin)
-    use_sandbox = sandbox_enabled and not sandbox_disabled_in_run(run_dir)
+    disabled = sandbox_disabled_in_run(project, run_dir)
+    use_sandbox = sandbox_enabled and not disabled
     writable = (sandbox.writable_for(project, run_dir=run_dir, coordinator=False)
                 if use_sandbox else None)
+    # A sandboxed dispatch gets its own uv cache, inside the run it may write;
+    # sharing the host's would let it hardlink into the host virtualenv.
+    env = sandbox.environment(writable[0]) if writable is not None else None
     return Dispatch(agent=agent, argv=argv, cwd=cwd,
                     stdin_text=prompt if use_stdin else None,
                     timeout_s=float(agent_cfg.get("timeout_min", 10)) * 60,
-                    run_dir=run_dir, writable=writable)
+                    run_dir=run_dir, writable=writable, env=env)
 
 
 def _write(path: Path, text: str) -> None:
@@ -220,11 +239,12 @@ def main(argv: list[str] | None = None) -> None:
     if d.writable is None:
         if d.run_dir is not None:
             events.emit(d.run_dir, "sandbox.disabled", "human", agent=d.agent,
-                        why="--no-sandbox" if args.no_sandbox else "config.yml sandbox: off")
+                        why="--no-sandbox" if args.no_sandbox
+                            else f"{sandbox.ALLOWLIST_FILE} unsandboxed_runs")
     else:
         try:
             sandbox.verify(d.writable, d.cwd)
-        except sandbox.SandboxUnavailable as e:
+        except sandbox.SandboxError as e:
             _refuse(args.transcript_file, f"{d.agent}: sandbox refused, {e}\n")
             if d.run_dir is not None:
                 events.emit(d.run_dir, "job.refused", "system", reason="sandbox",
@@ -242,7 +262,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         job = jobs.run_blocking(project, d.argv, kind="agent", cwd=d.cwd, run_dir=d.run_dir,
                                 label=d.agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text,
-                                sandbox_writable=d.writable)
+                                sandbox_writable=d.writable, env=d.env)
     except OSError as e:
         _write(args.transcript_file, f"{d.agent}: failed to launch subprocess: {e}\n")
         sys.exit(f"{d.agent}: failed to launch subprocess: {e}")

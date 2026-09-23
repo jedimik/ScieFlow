@@ -1,8 +1,9 @@
 """Filesystem confinement for agent dispatches — the only bubblewrap-aware module.
 
-A sandboxed process may write inside the run it was given, plus a private /tmp,
-the tool cache and whatever the allowlist grants. It may read the repository,
-because agents read their own protocols, skills and schemas.
+A sandboxed process may write inside the run it was given, plus a private /tmp
+and whatever the allowlist grants; its uv cache lives inside that same run. It
+may read the repository, because agents read their own protocols, skills and
+schemas.
 
 What this deliberately does NOT do: restrict the network, or hide credentials.
 Agents need both to reach their model API, so a hostile agent can still send
@@ -16,6 +17,7 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
 import yaml
 
@@ -55,10 +57,10 @@ def wrap(argv: list[str], *, writable: list[Path], cwd: Path) -> list[str]:
     """`argv` rewritten to run under bubblewrap, writable only where granted.
 
     As a side effect, creates any missing writable directories on the host:
-    bubblewrap refuses to bind a source that does not exist, and on a fresh
-    machine the tool cache has not been created yet — which would otherwise
-    surface as a cryptic bwrap error. This is part of the contract and every
-    caller depends on it.
+    bubblewrap refuses to bind a source that does not exist, and an allowlisted
+    path or a brand-new run may not have been created yet — which would
+    otherwise surface as a cryptic bwrap error. This is part of the contract and
+    every caller depends on it.
     """
     _validate_writable(writable)
     if not available():
@@ -74,14 +76,56 @@ def wrap(argv: list[str], *, writable: list[Path], cwd: Path) -> list[str]:
     return out + list(argv)
 
 
+def probe_dir(writable: list[Path]) -> Path:
+    """A host directory that is writable here but granted to nobody inside.
+
+    The negative control has to live somewhere the sandboxed process must not
+    be able to write, and that this process *can* write — otherwise the probe's
+    later absence proves nothing. `$HOME` is the natural first choice, but a
+    coordinator that is itself sandboxed sees a read-only `$HOME`, so the
+    location is derived rather than hardcoded: the first candidate that is a
+    writable directory and lies outside every writable grant wins. A parent of
+    a grant qualifies — binding `workspace/<slug>` does not make `workspace/`
+    writable — which is what lets a sandboxed coordinator dispatch at all.
+    """
+    grants = [Path(entry).resolve() for entry in writable]
+
+    def inside_a_grant(candidate: Path) -> bool:
+        return any(candidate == grant or grant in candidate.parents for grant in grants)
+
+    candidates: list[Path] = [Path.home().resolve()]
+    for grant in grants:
+        candidates.extend(grant.parents)
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if inside_a_grant(candidate):
+            continue
+        if candidate.is_dir() and os.access(candidate, os.W_OK):
+            return candidate
+
+    raise SandboxError(
+        "confinement cannot be verified: no writable directory outside the "
+        f"sandbox's writable set ({', '.join(str(g) for g in grants)}) could be "
+        "found to host the probe")
+
+
 def verify(writable: list[Path], cwd: Path) -> None:
     """Prove the sandbox confines before trusting it; raise if it does not.
 
-    Runs a throwaway process inside the sandbox that tries to write into $HOME,
-    which is never in any writable set. Proves three things: the probe location
-    is actually writable on the host (so absence means confinement, not just
-    permission denied); the sandboxed command ran (with a sentinel file in a
-    granted path); and the forbidden write was blocked. Raises if any check fails.
+    Runs a throwaway process inside the sandbox that tries to write into a
+    directory outside every grant (see `probe_dir`). Proves three things: the
+    probe location is actually writable on the host (so absence means
+    confinement, not just permission denied); the sandboxed command ran (with a
+    sentinel file in a granted path); and the forbidden write was blocked.
+    Raises if any check fails.
+
+    Both control files carry a per-call unique name: several verify() calls can
+    run concurrently in one process, and a name keyed on the pid would let them
+    clobber each other into false passes and false refusals alike.
 
     Requires at least one writable path to host a control file.
     """
@@ -90,14 +134,15 @@ def verify(writable: list[Path], cwd: Path) -> None:
 
     _validate_writable(writable)
 
-    probe = Path.home() / f".scieflow-sandbox-probe-{os.getpid()}"
-    sentinel = Path(writable[0]).resolve() / f".scieflow-verify-sentinel-{os.getpid()}"
+    tag = uuid4().hex
+    probe = probe_dir(writable) / f".scieflow-sandbox-probe-{tag}"
+    sentinel = Path(writable[0]).resolve() / f".scieflow-verify-sentinel-{tag}"
 
     try:
         # Positive control 1: prove the probe location is writable on the host.
         # If this fails, we cannot draw any conclusion from its later absence.
-        probe.unlink(missing_ok=True)
         try:
+            probe.unlink(missing_ok=True)
             probe.touch()
             probe.unlink()
         except OSError as exc:
@@ -125,7 +170,8 @@ def verify(writable: list[Path], cwd: Path) -> None:
         # Positive control 3: was the forbidden write blocked?
         if probe.exists():
             raise SandboxUnavailable(
-                "the sandbox did not block a write to $HOME — refusing to dispatch")
+                f"the sandbox did not block a write to {probe.parent} — "
+                "refusing to dispatch")
     finally:
         # Clean up on every path through this function, defensively.
         try:
@@ -141,37 +187,101 @@ def verify(writable: list[Path], cwd: Path) -> None:
 ALLOWLIST_FILE = "config/sandbox.yml"
 
 
-def tool_cache() -> Path:
-    """Where uv keeps its cache. Writable in every sandbox: `uv run` fails
-    outright without it, so every agent that runs a scieflow command needs it."""
-    override = os.environ.get("UV_CACHE_DIR")
-    return Path(override) if override else Path.home() / ".cache" / "uv"
+CACHE_DIRNAME = ".uv-cache"
 
 
-def allowlist_paths(project: Project) -> list[Path]:
-    """Extra writable paths from config/sandbox.yml, deny-by-default.
+def cache_dir(base: Path) -> Path:
+    """This dispatch's own uv cache, inside the area it may already write.
+
+    `uv run` fails outright without a writable cache, so every agent that runs
+    a `scieflow` command needs one — but the shared host cache cannot be it.
+    uv hardlinks cache files into `.venv`, so a dispatch that could write the
+    shared cache would mutate the host virtualenv in place, and the next
+    `uv run` on the host would execute whatever the agent put there. A cache
+    per dispatch costs a few tens of kilobytes and closes that path.
+    """
+    return Path(base).resolve() / CACHE_DIRNAME
+
+
+def environment(base: Path, env: dict | None = None) -> dict:
+    """`env` (default: this process's) with uv pointed at the dispatch's cache."""
+    out = dict(os.environ if env is None else env)
+    out["UV_CACHE_DIR"] = str(cache_dir(base))
+    return out
+
+
+def _load_allowlist(project: Project) -> dict:
+    """config/sandbox.yml as a mapping, or {} when it is absent or empty.
 
     The file lives in config/, which is never writable inside a sandbox, so an
-    agent cannot extend its own permissions — adding an entry is a human edit.
+    agent cannot extend its own permissions — every entry is a human edit.
     """
     path = project.root / ALLOWLIST_FILE
     if not path.exists():
-        return []
+        return {}
 
     try:
         data = yaml.safe_load(path.read_text())
-    except yaml.YAMLError as exc:
+    except (OSError, yaml.YAMLError) as exc:
         raise SandboxError(
             f"allowlist file is malformed YAML: {path}\n{exc}") from exc
 
     if data is None:
-        return []
+        return {}
 
     if not isinstance(data, dict):
         raise SandboxError(
             f"allowlist file must be a mapping, not {type(data).__name__}: {path}")
 
-    writable = data.get("writable")
+    return data
+
+
+def unsandboxed_runs(project: Project) -> set[str]:
+    """Run slugs config/sandbox.yml permits to dispatch unsandboxed.
+
+    The per-run escape hatch lives here rather than in the run's own
+    `config.yml`, because that file is inside the dispatch's writable bind: an
+    agent could append `sandbox: off` and, with `agent_overrides:` in the same
+    file, choose what the next unconfined dispatch runs. Here it is a human
+    decision made outside every run, which is what makes the `sandbox.disabled`
+    event's `actor: human` true.
+    """
+    path = project.root / ALLOWLIST_FILE
+    entries = _load_allowlist(project).get("unsandboxed_runs")
+    if entries is None:
+        return set()
+
+    if not isinstance(entries, list):
+        raise SandboxError(
+            f"allowlist 'unsandboxed_runs:' must be a list, not "
+            f"{type(entries).__name__}: {path}")
+
+    out: set[str] = set()
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise SandboxError(
+                f"unsandboxed_runs entry {i} must be a mapping with a 'slug:' key, "
+                f"not {type(entry).__name__}: {path}")
+        raw = entry.get("slug")
+        if not raw or not isinstance(raw, str):
+            raise SandboxError(
+                f"unsandboxed_runs entry {i} has no 'slug:' or an empty slug: {path}")
+        if "/" in raw or raw in {".", ".."}:
+            raise SandboxError(
+                f"unsandboxed_runs entry {raw!r} must name one run slug, not a path: {path}")
+        if not entry.get("reason"):
+            raise SandboxError(
+                f"unsandboxed_runs entry {raw!r} needs a 'reason:' saying why this "
+                f"run may run unconfined: {path}")
+        out.add(raw)
+
+    return out
+
+
+def allowlist_paths(project: Project) -> list[Path]:
+    """Extra writable paths from config/sandbox.yml, deny-by-default."""
+    path = project.root / ALLOWLIST_FILE
+    writable = _load_allowlist(project).get("writable")
     if writable is None:
         return []
 
@@ -180,7 +290,7 @@ def allowlist_paths(project: Project) -> list[Path]:
             f"allowlist 'writable:' must be a list, not {type(writable).__name__}: {path}")
 
     root = project.root.resolve()
-    forbidden = {root, (root / "config").resolve()}
+    forbidden = {root, (root / "config").resolve(), (root / "src").resolve()}
     out: list[Path] = []
 
     for i, entry in enumerate(writable):
@@ -196,8 +306,8 @@ def allowlist_paths(project: Project) -> list[Path]:
         candidate = (root / str(raw)).resolve()
         if candidate in forbidden:
             raise SandboxError(
-                f"allowlist entry {raw!r} would grant the whole repository or all of "
-                "config/; grant the specific directory instead")
+                f"allowlist entry {raw!r} would grant the whole repository, all of "
+                "config/ or all of src/; grant the specific directory instead")
         if root not in candidate.parents:
             raise SandboxError(f"allowlist entry {raw!r} escapes the repository")
         if candidate == (root / ALLOWLIST_FILE).resolve():
@@ -219,4 +329,4 @@ def writable_for(project: Project, *, run_dir: Path | None,
             "use --no-sandbox for a one-off dispatch outside a run")
     else:
         base = [Path(run_dir)]
-    return [*base, tool_cache(), *allowlist_paths(project)]
+    return [*base, *allowlist_paths(project)]

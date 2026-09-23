@@ -101,16 +101,16 @@ def test_verify_raises_when_sandboxed_command_never_runs(monkeypatch, tmp_path):
 
 
 def test_verify_raises_when_probe_location_is_not_writable(monkeypatch, tmp_path):
-    """If $HOME is not writable (mode 0500, full disk, read-only mount), we cannot
-    verify confinement. The absence of the probe file is ambiguous and must not be
-    treated as proof. This test catches the false pass: writable but inaccessible home."""
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    """If the probe location turns out not to be writable (full disk, a mode
+    change between choosing it and using it), we cannot verify confinement. The
+    absence of the probe file is ambiguous and must not be treated as proof.
+    This test catches the false pass: chosen but inaccessible probe location."""
     home = tmp_path / "home"
     home.mkdir()
     writable = tmp_path / "writable"
     writable.mkdir()
+    monkeypatch.setattr(sandbox, "probe_dir", lambda w: home)
 
-    # Make home unwritable
     home.chmod(0o500)
     try:
         with pytest.raises(sandbox.SandboxUnavailable, match="not writable"):
@@ -118,6 +118,98 @@ def test_verify_raises_when_probe_location_is_not_writable(monkeypatch, tmp_path
     finally:
         # Restore permissions so cleanup can happen
         home.chmod(0o755)
+
+
+def test_probe_dir_prefers_home_when_it_qualifies(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    run = tmp_path / "workspace" / "r1"
+    run.mkdir(parents=True)
+    assert sandbox.probe_dir([run]) == home.resolve()
+
+
+def test_probe_dir_skips_a_home_that_is_not_writable(monkeypatch, tmp_path):
+    """A coordinator that is itself sandboxed sees a read-only $HOME. Hardcoding
+    $HOME would kill every nested dispatch; a parent of the grant still proves
+    confinement, because binding workspace/<slug> never makes workspace/ writable."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    run = tmp_path / "workspace" / "r1"
+    run.mkdir(parents=True)
+    home.chmod(0o500)
+    try:
+        assert sandbox.probe_dir([run]) == (tmp_path / "workspace").resolve()
+    finally:
+        home.chmod(0o755)
+
+
+def test_probe_dir_never_picks_a_location_inside_a_grant(monkeypatch, tmp_path):
+    """$HOME inside the writable set would be writable in the sandbox too, so
+    its probe could never prove anything; a location outside is chosen instead."""
+    home = tmp_path / "workspace" / "home"
+    home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    chosen = sandbox.probe_dir([tmp_path / "workspace"])
+    assert chosen == tmp_path.resolve()
+
+
+def test_verify_refuses_when_no_probe_location_exists(monkeypatch, tmp_path):
+    """Everything is granted, so no write anywhere could prove confinement.
+    Refuse rather than run a control that cannot fail."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with pytest.raises(sandbox.SandboxError, match="no writable directory outside"):
+        sandbox.verify([Path(tmp_path.anchor)], cwd=tmp_path)
+
+
+@needs_bwrap
+def test_concurrent_verifies_do_not_clobber_each_other(tmp_path, monkeypatch):
+    """The control files are named per call, not per process. With a pid-keyed
+    name, threads delete each other's probe (a false pass with no confinement)
+    and each other's sentinel (a false refusal with a real sandbox)."""
+    import threading
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    threads, results = [], {}
+
+    def attempt(i: int) -> None:
+        run = tmp_path / f"run{i}"
+        run.mkdir()
+        try:
+            sandbox.verify([run], cwd=run)
+            results[i] = "passed"
+        except sandbox.SandboxError as exc:
+            results[i] = f"refused: {exc}"
+
+    # Half the threads run against a real sandbox; the other half against a
+    # wrapper that confines nothing, which must never be reported as a pass.
+    real_wrap = sandbox.wrap
+
+    def dispatching_wrap(argv, *, writable, cwd):
+        if getattr(threading.current_thread(), "defeat", False):
+            return ["/bin/sh", "-c", argv[-1]]
+        return real_wrap(argv, writable=writable, cwd=cwd)
+
+    monkeypatch.setattr(sandbox, "wrap", dispatching_wrap)
+
+    for i in range(16):
+        t = threading.Thread(target=attempt, args=(i,))
+        t.defeat = i % 2 == 1
+        threads.append(t)
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    for i, outcome in sorted(results.items()):
+        if i % 2 == 1:
+            assert outcome.startswith("refused"), f"thread {i} falsely passed: {outcome}"
+            assert "did not block" in outcome, f"thread {i} refused for the wrong reason"
+        else:
+            assert outcome == "passed", f"thread {i} falsely refused: {outcome}"
 
 
 def test_verify_raises_sandboxerror_for_file_writable(monkeypatch, tmp_path):
@@ -161,19 +253,23 @@ def make_project(tmp_path) -> Project:
     return Project(tmp_path)
 
 
-def test_tool_cache_honours_the_environment(monkeypatch, tmp_path):
-    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "custom"))
-    assert sandbox.tool_cache() == tmp_path / "custom"
-    monkeypatch.delenv("UV_CACHE_DIR")
-    assert sandbox.tool_cache() == Path.home() / ".cache" / "uv"
+def test_the_uv_cache_lives_inside_the_dispatch_area(monkeypatch, tmp_path):
+    """Never the shared host cache: uv hardlinks cache files into .venv, so a
+    writable shared cache is a writable host virtualenv."""
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "shared"))
+    run = tmp_path / "workspace" / "r1"
+    assert sandbox.cache_dir(run) == run.resolve() / ".uv-cache"
+    env = sandbox.environment(run)
+    assert env["UV_CACHE_DIR"] == str(run.resolve() / ".uv-cache")
+    assert str(Path.home() / ".cache" / "uv") != env["UV_CACHE_DIR"]
 
 
-def test_sub_agent_gets_its_own_run_and_nothing_wider(tmp_path):
+def test_sub_agent_gets_its_own_run_and_nothing_wider(monkeypatch, tmp_path):
     project = make_project(tmp_path)
     run = project.run_dir("r1")
     writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
     assert run in writable
-    assert sandbox.tool_cache() in writable
+    assert (Path.home() / ".cache" / "uv") not in writable   # never the shared cache
     assert project.workspace_root not in writable      # not the whole tree
     assert project.root not in writable                # and certainly not the repo
 
@@ -220,6 +316,7 @@ def test_allowlist_grants_a_listed_path(tmp_path):
     ("/etc", "escapes the repository"),
     (".", "the whole repository"),
     ("config", "the whole repository"),          # would include sandbox.yml itself
+    ("src", "the whole repository"),             # module code is never an agent's to write
     ("config/sandbox.yml", "cannot grant write access to itself"),
 ])
 def test_allowlist_rejects_dangerous_entries(tmp_path, entry, match):
@@ -289,3 +386,48 @@ def test_bare_string_entry_raises_sandboxerror(tmp_path):
         "writable:\n  - config/journals\n")
     with pytest.raises(sandbox.SandboxError, match="must be a mapping"):
         sandbox.allowlist_paths(project)
+
+
+# -- the per-run escape hatch, which lives outside every run ----------------
+
+def test_no_unsandboxed_runs_by_default(tmp_path):
+    project = make_project(tmp_path)
+    assert sandbox.unsandboxed_runs(project) == set()
+    (tmp_path / "config" / "sandbox.yml").write_text(
+        "writable:\n  - path: config/journals\n    reason: journal cache\n")
+    assert sandbox.unsandboxed_runs(project) == set()
+
+
+def test_a_listed_slug_may_dispatch_unsandboxed(tmp_path):
+    project = make_project(tmp_path)
+    (tmp_path / "config" / "sandbox.yml").write_text(
+        "unsandboxed_runs:\n  - slug: r1\n    reason: needs docker\n")
+    assert sandbox.unsandboxed_runs(project) == {"r1"}
+
+
+@pytest.mark.parametrize("body, match", [
+    ("unsandboxed_runs: r1\n", "must be a list"),
+    ("unsandboxed_runs:\n  - r1\n", "must be a mapping"),
+    ("unsandboxed_runs:\n  - reason: no slug\n", "no 'slug:'"),
+    ("unsandboxed_runs:\n  - slug: \"\"\n    reason: empty\n", "no 'slug:'"),
+    ("unsandboxed_runs:\n  - slug: r1\n", "needs a 'reason:'"),
+    ("unsandboxed_runs:\n  - slug: ../elsewhere\n    reason: nope\n", "not a path"),
+])
+def test_unsandboxed_runs_rejects_malformed_entries(tmp_path, body, match):
+    project = make_project(tmp_path)
+    (tmp_path / "config" / "sandbox.yml").write_text(body)
+    with pytest.raises(sandbox.SandboxError, match=match):
+        sandbox.unsandboxed_runs(project)
+
+
+def test_an_unreadable_allowlist_raises_sandboxerror(tmp_path):
+    """An unreadable config/sandbox.yml is a refusal, not a raw OSError."""
+    project = make_project(tmp_path)
+    path = tmp_path / "config" / "sandbox.yml"
+    path.write_text("writable: []\n")
+    path.chmod(0o000)
+    try:
+        with pytest.raises(sandbox.SandboxError):
+            sandbox.allowlist_paths(project)
+    finally:
+        path.chmod(0o644)
