@@ -1,0 +1,11 @@
+# Paths a sandboxed agent may write in addition to its own run.
+#
+# Deny-by-default: delete an entry and that path becomes read-only for agents.
+# Agents cannot edit this file — config/ is never writable inside the sandbox —
+# so extending this list is always a human decision. Every entry needs a reason.
+writable:
+  - path: config/journals
+    reason: >-
+      paper-review and paper-draft cache journal profiles here, the one
+      documented exception to AGENTS.md rule 1
+      (src/scieflow/research/AGENTS.md).

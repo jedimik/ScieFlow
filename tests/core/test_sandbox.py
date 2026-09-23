@@ -149,3 +149,82 @@ def test_writable_file_error_message_names_path(monkeypatch, tmp_path):
 
     with pytest.raises(sandbox.SandboxError, match=str(writable_file)):
         sandbox.wrap(["echo", "hi"], writable=[writable_file], cwd=tmp_path)
+
+
+from scieflow.core.project import Project
+
+
+def make_project(tmp_path) -> Project:
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agents.yml").write_text("agents: {}\n")
+    (tmp_path / "workspace" / "r1").mkdir(parents=True)
+    return Project(tmp_path)
+
+
+def test_tool_cache_honours_the_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "custom"))
+    assert sandbox.tool_cache() == tmp_path / "custom"
+    monkeypatch.delenv("UV_CACHE_DIR")
+    assert sandbox.tool_cache() == Path.home() / ".cache" / "uv"
+
+
+def test_sub_agent_gets_its_own_run_and_nothing_wider(tmp_path):
+    project = make_project(tmp_path)
+    run = project.run_dir("r1")
+    writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
+    assert run in writable
+    assert sandbox.tool_cache() in writable
+    assert project.workspace_root not in writable      # not the whole tree
+    assert project.root not in writable                # and certainly not the repo
+
+
+def test_coordinator_gets_the_workspace_tree(tmp_path):
+    project = make_project(tmp_path)
+    writable = sandbox.writable_for(project, run_dir=None, coordinator=True)
+    assert project.workspace_root in writable
+    assert project.root not in writable
+
+
+def test_a_sub_agent_without_a_run_is_refused_not_promoted(tmp_path):
+    project = make_project(tmp_path)
+    with pytest.raises(sandbox.SandboxError, match="must name the run"):
+        sandbox.writable_for(project, run_dir=None, coordinator=False)
+
+
+def test_a_slug_with_spaces_still_works(tmp_path):
+    """Project.SLUG_RE permits spaces, so `workspace/my run/` is a legal run."""
+    project = make_project(tmp_path)
+    run = project.run_dir("my run")
+    run.mkdir(parents=True)
+    writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
+    assert run in writable
+    argv = sandbox.wrap(["echo"], writable=writable, cwd=run)
+    assert str(run) in argv            # one argv element, never word-split
+    assert argv[argv.index("--chdir") + 1] == str(run)
+
+
+def test_allowlist_absent_grants_nothing_extra(tmp_path):
+    project = make_project(tmp_path)
+    assert sandbox.allowlist_paths(project) == []
+
+
+def test_allowlist_grants_a_listed_path(tmp_path):
+    project = make_project(tmp_path)
+    (tmp_path / "config" / "sandbox.yml").write_text(
+        "writable:\n  - path: config/journals\n    reason: journal cache\n")
+    assert sandbox.allowlist_paths(project) == [(tmp_path / "config" / "journals").resolve()]
+
+
+@pytest.mark.parametrize("entry, match", [
+    ("../outside", "escapes the repository"),
+    ("/etc", "escapes the repository"),
+    (".", "the whole repository"),
+    ("config", "the whole repository"),          # would include sandbox.yml itself
+    ("config/sandbox.yml", "cannot grant write access to itself"),
+])
+def test_allowlist_rejects_dangerous_entries(tmp_path, entry, match):
+    project = make_project(tmp_path)
+    (tmp_path / "config" / "sandbox.yml").write_text(
+        f"writable:\n  - path: {entry}\n    reason: nope\n")
+    with pytest.raises(sandbox.SandboxError, match=match):
+        sandbox.allowlist_paths(project)

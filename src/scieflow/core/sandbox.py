@@ -17,6 +17,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import yaml
+
+from scieflow.core.project import Project
+
 BWRAP = "bwrap"
 VERIFY_TIMEOUT_S = 30
 INSTALL_HINT = "install it with: sudo apt-get install -y bubblewrap"
@@ -132,3 +136,58 @@ def verify(writable: list[Path], cwd: Path) -> None:
             sentinel.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+ALLOWLIST_FILE = "config/sandbox.yml"
+
+
+def tool_cache() -> Path:
+    """Where uv keeps its cache. Writable in every sandbox: `uv run` fails
+    outright without it, so every agent that runs a scieflow command needs it."""
+    override = os.environ.get("UV_CACHE_DIR")
+    return Path(override) if override else Path.home() / ".cache" / "uv"
+
+
+def allowlist_paths(project: Project) -> list[Path]:
+    """Extra writable paths from config/sandbox.yml, deny-by-default.
+
+    The file lives in config/, which is never writable inside a sandbox, so an
+    agent cannot extend its own permissions — adding an entry is a human edit.
+    """
+    path = project.root / ALLOWLIST_FILE
+    if not path.exists():
+        return []
+    data = yaml.safe_load(path.read_text()) or {}
+    root = project.root.resolve()
+    forbidden = {root, (root / "config").resolve()}
+    out: list[Path] = []
+    for entry in data.get("writable") or []:
+        raw = entry.get("path") if isinstance(entry, dict) else entry
+        if not raw:
+            continue
+        candidate = (root / str(raw)).resolve()
+        if candidate in forbidden:
+            raise SandboxError(
+                f"allowlist entry {raw!r} would grant the whole repository or all of "
+                "config/; grant the specific directory instead")
+        if root not in candidate.parents:
+            raise SandboxError(f"allowlist entry {raw!r} escapes the repository")
+        if candidate == (root / ALLOWLIST_FILE).resolve():
+            raise SandboxError("the allowlist cannot grant write access to itself")
+        out.append(candidate)
+    return out
+
+
+def writable_for(project: Project, *, run_dir: Path | None,
+                 coordinator: bool) -> list[Path]:
+    """What this dispatch may write. The caller declares which kind it is —
+    the sandbox never guesses, because guessing wrong widens the boundary."""
+    if coordinator:
+        base = [project.workspace_root]
+    elif run_dir is None:
+        raise SandboxError(
+            "a sandboxed agent dispatch must name the run it belongs to; "
+            "use --no-sandbox for a one-off dispatch outside a run")
+    else:
+        base = [Path(run_dir)]
+    return [*base, tool_cache(), *allowlist_paths(project)]
