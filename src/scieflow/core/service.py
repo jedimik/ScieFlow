@@ -82,10 +82,17 @@ def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: 
             actions.guard_budget(d.run_dir, ("wall_minutes",))
         except actions.BudgetExhausted as e:
             raise ServiceError(f"{e} — run checkpointed") from e
-    if d.writable is not None:
+    if d.writable is None:
+        if d.run_dir is not None:
+            events.emit(d.run_dir, "sandbox.disabled", "human", agent=d.agent,
+                        why="config.yml sandbox: off")
+    else:
         try:
             sandbox.verify(d.writable, d.cwd)
         except sandbox.SandboxError as exc:
+            if d.run_dir is not None:
+                events.emit(d.run_dir, "job.refused", "system", reason="sandbox",
+                            detail=str(exc))
             raise ServiceError(str(exc)) from exc
     job, proc = jobs.start(project, d.argv, kind="agent", cwd=d.cwd, run_dir=d.run_dir,
                            label=agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text,

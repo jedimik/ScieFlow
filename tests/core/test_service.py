@@ -102,3 +102,51 @@ def test_service_dispatch_refuses_without_a_sandbox(project, monkeypatch):
     prompt.write_text("go\n")
     with pytest.raises(service.ServiceError, match="bubblewrap"):
         service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+
+
+def test_service_refusal_leaves_a_job_refused_event_on_the_timeline(project, monkeypatch):
+    """agent_run.main() emits job.refused on this path; the service must too,
+    or a refusal from the web app leaves nothing on the run's history."""
+    from scieflow.core import events, sandbox
+
+    monkeypatch.setattr(sandbox, "available", lambda: False)
+    ws = project.run_dir("r1")
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text("go\n")
+    with pytest.raises(service.ServiceError):
+        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    refused = [e for e in events.read(ws) if e["type"] == "job.refused"]
+    assert len(refused) == 1
+    assert refused[0]["data"]["reason"] == "sandbox"
+
+
+def test_service_escape_hatch_leaves_a_sandbox_disabled_event(project):
+    """agent_run.main() emits sandbox.disabled on this path; the service must
+    too, so an unsandboxed dispatch from the web app is visible in the run's
+    history and not only via the per-job marker on the page."""
+    from scieflow.core import events
+
+    ws = project.run_dir("r1")
+    config_path = ws / "config.yml"
+    config_path.write_text(config_path.read_text() + "sandbox: off\n")
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text(f"output: {ws / 'out.md'}\nkind: hypothesis\n")
+    job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    assert job["state"] == "done"
+    disabled = [e for e in events.read(ws) if e["type"] == "sandbox.disabled"]
+    assert len(disabled) == 1
+    assert disabled[0]["data"]["why"] == "config.yml sandbox: off"
+
+
+def test_normal_sandboxed_dispatch_leaves_neither_event(project):
+    """The new emissions must not fire on the happy path."""
+    from scieflow.core import events
+
+    ws = project.run_dir("r1")
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text(f"output: {ws / 'out.md'}\nkind: hypothesis\n")
+    job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    assert job["state"] == "done"
+    types = {e["type"] for e in events.read(ws)}
+    assert "job.refused" not in types
+    assert "sandbox.disabled" not in types
