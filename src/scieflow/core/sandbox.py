@@ -157,14 +157,42 @@ def allowlist_paths(project: Project) -> list[Path]:
     path = project.root / ALLOWLIST_FILE
     if not path.exists():
         return []
-    data = yaml.safe_load(path.read_text()) or {}
+
+    try:
+        data = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as exc:
+        raise SandboxError(
+            f"allowlist file is malformed YAML: {path}\n{exc}") from exc
+
+    if data is None:
+        return []
+
+    if not isinstance(data, dict):
+        raise SandboxError(
+            f"allowlist file must be a mapping, not {type(data).__name__}: {path}")
+
+    writable = data.get("writable")
+    if writable is None:
+        return []
+
+    if not isinstance(writable, list):
+        raise SandboxError(
+            f"allowlist 'writable:' must be a list, not {type(writable).__name__}: {path}")
+
     root = project.root.resolve()
     forbidden = {root, (root / "config").resolve()}
     out: list[Path] = []
-    for entry in data.get("writable") or []:
-        raw = entry.get("path") if isinstance(entry, dict) else entry
+
+    for i, entry in enumerate(writable):
+        if not isinstance(entry, dict):
+            raise SandboxError(
+                f"allowlist entry {i} must be a mapping with a 'path:' key, not {type(entry).__name__}: {path}")
+
+        raw = entry.get("path")
         if not raw:
-            continue
+            raise SandboxError(
+                f"allowlist entry {i} has no 'path:' or an empty path: {path}")
+
         candidate = (root / str(raw)).resolve()
         if candidate in forbidden:
             raise SandboxError(
@@ -175,6 +203,7 @@ def allowlist_paths(project: Project) -> list[Path]:
         if candidate == (root / ALLOWLIST_FILE).resolve():
             raise SandboxError("the allowlist cannot grant write access to itself")
         out.append(candidate)
+
     return out
 
 

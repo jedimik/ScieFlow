@@ -228,3 +228,64 @@ def test_allowlist_rejects_dangerous_entries(tmp_path, entry, match):
         f"writable:\n  - path: {entry}\n    reason: nope\n")
     with pytest.raises(sandbox.SandboxError, match=match):
         sandbox.allowlist_paths(project)
+
+
+def test_malformed_yaml_raises_sandboxerror(tmp_path):
+    """Malformed YAML in the allowlist must raise SandboxError, not yaml.YAMLError."""
+    project = make_project(tmp_path)
+    (tmp_path / "config" / "sandbox.yml").write_text("writable: [unclosed bracket")
+    with pytest.raises(sandbox.SandboxError, match="malformed YAML"):
+        sandbox.allowlist_paths(project)
+
+
+def test_top_level_list_raises_sandboxerror(tmp_path):
+    """YAML document that parses to a list must raise SandboxError."""
+    project = make_project(tmp_path)
+    (tmp_path / "config" / "sandbox.yml").write_text("- path: config/journals\n")
+    with pytest.raises(sandbox.SandboxError, match="must be a mapping"):
+        sandbox.allowlist_paths(project)
+
+
+def test_top_level_scalar_raises_sandboxerror(tmp_path):
+    """YAML document that parses to a bare scalar must raise SandboxError."""
+    project = make_project(tmp_path)
+    (tmp_path / "config" / "sandbox.yml").write_text("just a string\n")
+    with pytest.raises(sandbox.SandboxError, match="must be a mapping"):
+        sandbox.allowlist_paths(project)
+
+
+def test_writable_as_string_raises_sandboxerror_and_grants_nothing(tmp_path):
+    """If writable is a string instead of a list, it must raise SandboxError.
+    This is the silent-over-grant case: `writable: config` would iterate over
+    characters and grant bogus single-letter directories. Prove it raises instead."""
+    project = make_project(tmp_path)
+    (tmp_path / "config" / "sandbox.yml").write_text("writable: config\n")
+    with pytest.raises(sandbox.SandboxError, match="must be a list"):
+        sandbox.allowlist_paths(project)
+
+
+def test_entry_with_missing_path_raises_sandboxerror(tmp_path):
+    """An entry without a 'path:' key must raise SandboxError."""
+    project = make_project(tmp_path)
+    (tmp_path / "config" / "sandbox.yml").write_text(
+        "writable:\n  - reason: no path here\n")
+    with pytest.raises(sandbox.SandboxError, match="no 'path:'"):
+        sandbox.allowlist_paths(project)
+
+
+def test_entry_with_empty_path_raises_sandboxerror(tmp_path):
+    """An entry with an empty 'path:' value must raise SandboxError."""
+    project = make_project(tmp_path)
+    (tmp_path / "config" / "sandbox.yml").write_text(
+        "writable:\n  - path: \"\"\n    reason: empty\n")
+    with pytest.raises(sandbox.SandboxError, match="no 'path:'"):
+        sandbox.allowlist_paths(project)
+
+
+def test_bare_string_entry_raises_sandboxerror(tmp_path):
+    """A bare string entry (- config/journals without path: key) must raise SandboxError."""
+    project = make_project(tmp_path)
+    (tmp_path / "config" / "sandbox.yml").write_text(
+        "writable:\n  - config/journals\n")
+    with pytest.raises(sandbox.SandboxError, match="must be a mapping"):
+        sandbox.allowlist_paths(project)
