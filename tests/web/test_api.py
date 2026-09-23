@@ -62,6 +62,21 @@ def test_agents_reports_assignments(client):
     assert body["assignments"]["research.outline"]["value"] == "stub"
 
 
+def test_agents_with_unknown_slug_is_404(client):
+    """Every other slug-taking route 404s for an unknown run; `agent_config
+    .resolve` silently treats a missing workspace config.yml as `{}`, so
+    this route must validate the slug itself rather than return 200
+    defaults for a run that does not exist."""
+    response = client.get("/api/v1/agents", params={"slug": "nope"})
+    assert response.status_code == 404
+    assert "nope" in response.json()["error"]
+
+
+def test_agents_with_known_slug_still_resolves(client):
+    body = client.get("/api/v1/agents", params={"slug": "r1"}).json()
+    assert body["assignments"]["research.outline"]["value"] == "stub"
+
+
 def test_api_requires_a_session(project):
     from fastapi.testclient import TestClient
 

@@ -25,6 +25,13 @@ def app(tmp_path):
     async def guarded_post() -> dict:
         return {"posted": True}
 
+    # No CSRF dependency of its own — only `install_session`'s middleware
+    # stands between this route and an unsafe request.
+    @application.post("/guarded-no-csrf-dependency",
+                      dependencies=[Depends(auth.require_session)])
+    async def guarded_post_no_csrf_dependency() -> dict:
+        return {"posted": True}
+
     return application
 
 
@@ -80,6 +87,22 @@ def test_post_with_the_matching_csrf_header_is_allowed(app):
         csrf = client.cookies[auth.CSRF_COOKIE]
         response = client.post("/guarded", headers={auth.CSRF_HEADER: csrf})
         assert response.status_code == 200 and response.json() == {"posted": True}
+
+
+def test_csrf_is_enforced_centrally_not_just_per_route(app):
+    """A route that never wired up `Depends(csrf_protect)` for itself must
+    still refuse an unsafe request without the header — the middleware
+    registered by `install_session` enforces it for every request, not
+    only the ones whose author remembered the dependency."""
+    with TestClient(app) as client:
+        client.get(f"/guarded?token={TOKEN}")
+        no_header = client.post("/guarded-no-csrf-dependency")
+        assert no_header.status_code == 403
+
+        csrf = client.cookies[auth.CSRF_COOKIE]
+        with_header = client.post("/guarded-no-csrf-dependency",
+                                  headers={auth.CSRF_HEADER: csrf})
+        assert with_header.status_code == 200
 
 
 def test_unauthorized_html_explains_how_to_get_in(app):

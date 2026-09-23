@@ -66,4 +66,7 @@ async def agent_settings(request: Request,
                                                   description="Resolve for this run.")
                          ) -> dict:
     """Effective role assignments and agent settings, with their sources."""
-    return service.agent_settings(_project(request), slug)
+    project = _project(request)
+    if slug is not None:
+        service.run_workspace(project, slug)  # raises ServiceError -> 404
+    return service.agent_settings(project, slug)

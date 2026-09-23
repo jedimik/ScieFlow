@@ -85,9 +85,14 @@
   stream.addEventListener("run", (message) => {
     const event = JSON.parse(message.data);
     const row = timeline.insertRow(0);
-    row.innerHTML = `<td class="dim">${event.ts.slice(11, 19)}</td>` +
-                    `<td>${event.type}</td><td class="dim">${event.actor}</td>` +
-                    `<td class="dim"></td>`;
+    const ts = row.insertCell();
+    ts.className = "dim";
+    ts.textContent = event.ts.slice(11, 19);
+    row.insertCell().textContent = event.type;
+    const actor = row.insertCell();
+    actor.className = "dim";
+    actor.textContent = event.actor;
+    row.insertCell().className = "dim";
   });
 </script>
 {% endblock %}

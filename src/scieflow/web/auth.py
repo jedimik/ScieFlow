@@ -85,4 +85,15 @@ def install_session(app) -> None:
             response = RedirectResponse(clean, status_code=303)
             _issue_session(request.app, response)
             return response
+        if request.method not in SAFE_METHODS:
+            # Central enforcement: every unsafe request needs the
+            # double-submit CSRF header, whether or not the route that
+            # will handle it also declares `Depends(csrf_protect)`. Every
+            # route is a GET today, so this only guards against the next
+            # milestone's first POST forgetting the per-route dependency.
+            cookie = request.cookies.get(CSRF_COOKIE) or ""
+            header = request.headers.get(CSRF_HEADER) or ""
+            if not cookie or not header or not secrets.compare_digest(cookie, header):
+                return JSONResponse({"error": "CSRF token missing or wrong"},
+                                    status_code=403)
         return await call_next(request)
