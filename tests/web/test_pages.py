@@ -11,6 +11,9 @@ def test_dashboard_shows_budget_remaining(client):
     body = client.get("/").text
     # 0 of 3 iterations spent -> a full bar, labelled
     assert "iterations" in body and "100%" in body
+    # Bar markup must be present: class="bar" div containing span with style="width: 100%"
+    assert 'class="bar' in body  # catches both class="bar" and class="bar "
+    assert 'style="width: 100%"' in body
 
 
 def test_dashboard_needs_a_session(project):
