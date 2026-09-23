@@ -37,9 +37,11 @@ def available() -> bool:
 def wrap(argv: list[str], *, writable: list[Path], cwd: Path) -> list[str]:
     """`argv` rewritten to run under bubblewrap, writable only where granted.
 
-    Missing writable directories are created first: bubblewrap refuses to bind a
-    source that does not exist, and on a fresh machine the tool cache has not
-    been created yet — which would otherwise surface as a cryptic bwrap error.
+    As a side effect, creates any missing writable directories on the host:
+    bubblewrap refuses to bind a source that does not exist, and on a fresh
+    machine the tool cache has not been created yet — which would otherwise
+    surface as a cryptic bwrap error. This is part of the contract and every
+    caller depends on it.
     """
     if not available():
         raise SandboxUnavailable(f"bubblewrap is not installed; {INSTALL_HINT}")
@@ -58,20 +60,53 @@ def verify(writable: list[Path], cwd: Path) -> None:
     """Prove the sandbox confines before trusting it; raise if it does not.
 
     Runs a throwaway process inside the sandbox that tries to write into $HOME,
-    which is never in any writable set. If the file appears on the host, the
-    sandbox is not in effect and the caller must refuse to dispatch. This is
-    what separates "we passed the right flags" from "we watched it block a
-    write", and it catches the mechanism changing underneath us.
+    which is never in any writable set. Proves three things: the probe location
+    is actually writable on the host (so absence means confinement, not just
+    permission denied); the sandboxed command ran (with a sentinel file in a
+    granted path); and the forbidden write was blocked. Raises if any check fails.
+
+    Requires at least one writable path to host a control file.
     """
+    if not writable:
+        raise SandboxError("verify() requires at least one writable path for the control")
+
     probe = Path.home() / f".scieflow-sandbox-probe-{os.getpid()}"
-    probe.unlink(missing_ok=True)
-    script = f"touch {shlex.quote(str(probe))} 2>/dev/null; true"
+    sentinel = Path(writable[0]).resolve() / f".scieflow-verify-sentinel-{os.getpid()}"
+
     try:
-        subprocess.run(wrap(["/bin/sh", "-c", script], writable=writable, cwd=cwd),
-                       capture_output=True, timeout=VERIFY_TIMEOUT_S, check=False)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SandboxUnavailable(f"the sandbox probe could not run: {exc}") from exc
-    if probe.exists():
+        # Positive control 1: prove the probe location is writable on the host.
+        # If this fails, we cannot draw any conclusion from its later absence.
         probe.unlink(missing_ok=True)
-        raise SandboxUnavailable(
-            "the sandbox did not block a write to $HOME — refusing to dispatch")
+        try:
+            probe.touch()
+            probe.unlink()
+        except OSError as exc:
+            raise SandboxUnavailable(
+                f"confinement could not be verified because the probe location "
+                f"is not writable: {exc}") from exc
+
+        # Positive control 2: run a command that writes a sentinel into the granted path,
+        # then tries to write to the forbidden path. If the sentinel doesn't appear,
+        # the sandboxed command never ran.
+        sentinel.unlink(missing_ok=True)
+        script = (f"touch {shlex.quote(str(sentinel))} && "
+                  f"touch {shlex.quote(str(probe))} 2>/dev/null; true")
+        try:
+            subprocess.run(wrap(["/bin/sh", "-c", script], writable=writable, cwd=cwd),
+                           capture_output=True, timeout=VERIFY_TIMEOUT_S, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SandboxUnavailable(f"the sandbox probe could not run: {exc}") from exc
+
+        # Check positive control 2: did the sandboxed command actually run?
+        if not sentinel.exists():
+            raise SandboxUnavailable(
+                "the sandbox did not run the probe at all — refusing to dispatch")
+
+        # Positive control 3: was the forbidden write blocked?
+        if probe.exists():
+            raise SandboxUnavailable(
+                "the sandbox did not block a write to $HOME — refusing to dispatch")
+    finally:
+        # Clean up on every path through this function.
+        probe.unlink(missing_ok=True)
+        sentinel.unlink(missing_ok=True)

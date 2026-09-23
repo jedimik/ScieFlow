@@ -48,8 +48,10 @@ def test_wrap_creates_missing_writable_directories(monkeypatch, tmp_path):
 
 
 @needs_bwrap
-def test_verify_passes_with_a_real_sandbox(tmp_path):
-    sandbox.verify([tmp_path], cwd=tmp_path)      # does not raise
+def test_verify_passes_with_a_real_sandbox(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    sandbox.verify([tmp_path / "run"], cwd=tmp_path / "run")      # does not raise
 
 
 @needs_bwrap
@@ -68,6 +70,8 @@ def test_a_sandboxed_process_cannot_write_outside_its_grant(tmp_path):
 def test_verify_refuses_a_wrapper_that_does_not_confine(monkeypatch, tmp_path):
     """The defeat test: hand verify() a wrapper that runs the command unchanged.
     If verify() can be fooled, every other guarantee here is decoration."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
     monkeypatch.setattr(sandbox, "wrap",
                         lambda argv, *, writable, cwd: ["/bin/sh", "-c", argv[-1]])
     with pytest.raises(sandbox.SandboxUnavailable, match="did not block"):
@@ -75,7 +79,42 @@ def test_verify_refuses_a_wrapper_that_does_not_confine(monkeypatch, tmp_path):
 
 
 def test_verify_reports_a_probe_that_cannot_run(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
     monkeypatch.setattr(sandbox, "wrap",
                         lambda argv, *, writable, cwd: ["/nonexistent/binary"])
     with pytest.raises(sandbox.SandboxUnavailable, match="could not run"):
         sandbox.verify([tmp_path], cwd=tmp_path)
+
+
+def test_verify_raises_when_sandboxed_command_never_runs(monkeypatch, tmp_path):
+    """If the wrapper returns a command that fails (e.g., /bin/false), the
+    sentinel never gets written, and verify() must detect this and refuse."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    writable = tmp_path / "writable"
+    writable.mkdir()
+    monkeypatch.setattr(sandbox, "wrap",
+                        lambda argv, *, writable, cwd: ["/bin/false"])
+    with pytest.raises(sandbox.SandboxUnavailable, match="did not run the probe"):
+        sandbox.verify([writable], cwd=writable)
+
+
+def test_verify_raises_when_probe_location_is_not_writable(monkeypatch, tmp_path):
+    """If $HOME is not writable (mode 0500, full disk, read-only mount), we cannot
+    verify confinement. The absence of the probe file is ambiguous and must not be
+    treated as proof. This test catches the false pass: writable but inaccessible home."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    home = tmp_path / "home"
+    home.mkdir()
+    writable = tmp_path / "writable"
+    writable.mkdir()
+
+    # Make home unwritable
+    home.chmod(0o500)
+    try:
+        with pytest.raises(sandbox.SandboxUnavailable, match="not writable"):
+            sandbox.verify([writable], cwd=writable)
+    finally:
+        # Restore permissions so cleanup can happen
+        home.chmod(0o755)
