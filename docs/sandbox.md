@@ -2,9 +2,10 @@
 
 ## What it is
 
-Every agent dispatch — `uv run scieflow agent run …`, whether started from
-the terminal or from the local web app — runs confined to the run it was
-given. `AGENTS.md` rule 1 always said that run artifacts belong under
+Every agent dispatch that goes through `scieflow agent run` — from the
+terminal, or from the local web app, which calls the same service layer —
+runs confined to the run it was given. `AGENTS.md` rule 1 always said that
+run artifacts belong under
 `workspace/<slug>/` and that a run never modifies module code under
 `src/scieflow/`; that used to be a rule an agent had to follow on its own
 word. It is now enforced by the process itself: the dispatch runs inside a
@@ -13,6 +14,13 @@ write anywhere outside what it was granted, and a dispatch whose sandbox
 cannot be proven is refused rather than run unconfined.
 
 The only bubblewrap-aware code is `src/scieflow/core/sandbox.py`.
+
+One dispatch path stays outside this boundary: the news module
+(`src/scieflow/news/agents.py`) calls an agent CLI directly with
+`subprocess.run`, on a prompt of its own making, with no run to confine it
+to. It is narrower than a run dispatch — a fixed prompt, no run directory,
+no `agent_overrides` — but it is not sandboxed, and nothing on this page
+applies to it. Bringing it inside the boundary is future work.
 
 ## What is confined
 
@@ -32,10 +40,20 @@ call site for `sandbox.writable_for()`, and it hardcodes
 Both also get:
 
 - a private `/tmp` (`--tmpfs /tmp`, invisible to the host and to other jobs);
-- the tool cache — `$UV_CACHE_DIR`, or `~/.cache/uv` if that is unset —
-  because `uv run` fails outright without a writable cache, and every agent
-  that runs a `scieflow` command needs one;
 - whatever `config/sandbox.yml` grants (see [the allowlist](#the-allowlist)).
+
+`uv run` fails outright without a writable cache, so every dispatch needs
+one — but it is never the host's. ScieFlow points `UV_CACHE_DIR` at
+`.uv-cache` **inside the dispatch's own writable area** (its run directory;
+`workspace/.uv-cache` for a coordinator). The shared `~/.cache/uv` is not
+granted, because uv hardlinks cache files into `.venv`: a dispatch that
+could write the shared cache would be writing the host virtualenv in place,
+and the next `uv run`, `pytest` or `scieflow serve` on the host would
+execute whatever it put there. A per-run cache costs a few tens of
+kilobytes and about a tenth of a second on its first use; no package is
+re-downloaded, because the existing `.venv` is still read from the
+repository. The run archive already skips `.uv-cache` as rebuildable noise,
+so it never reaches DVC.
 
 Neither can write `src/`, `config/`, another run's directory, or `$HOME`.
 Everything else under the repository stays **readable** — the sandbox binds
@@ -102,7 +120,18 @@ The causes are:
   bubblewrap`) and re-run.
 - **bubblewrap is present but did not confine the proof write** — see
   [Requirements](#requirements); something about the host or container is
-  disabling the confinement bubblewrap normally provides.
+  disabling the confinement bubblewrap normally provides. The proof write
+  targets a directory that is outside every writable grant and writable
+  here: `$HOME` normally, and the nearest enclosing directory that
+  qualifies when `$HOME` does not — which is what lets a coordinator that
+  is itself sandboxed, and so sees a read-only `$HOME`, still dispatch. If
+  no such directory exists, the dispatch is refused too: a control that
+  cannot fail proves nothing.
+- **the run's `config.yml` still carries a `sandbox:` key** — the per-run
+  opt-out moved to `config/sandbox.yml`; see
+  [the escape hatch](#the-escape-hatch).
+- **a `writable:` entry names something that is not a directory** — fix the
+  entry in `config/sandbox.yml`.
 - **the dispatch's prompt belongs to no run** — a sandboxed dispatch must
   name the run it writes into; a one-off dispatch with no owning run has
   nothing to be confined to. This is raised before any run is known, so no
@@ -118,8 +147,32 @@ escape hatch below — never edit around the refusal.
 A dispatch can opt out of the sandbox deliberately, two ways:
 
 - `--no-sandbox` on `scieflow agent run`, for a one-off dispatch;
-- `sandbox: off` in a run's `config.yml`, for every dispatch inside that
-  run.
+- an entry under `unsandboxed_runs:` in `config/sandbox.yml`, for every
+  dispatch inside one named run:
+
+```yaml
+unsandboxed_runs:
+  - slug: 2026-09-23-some-run
+    reason: >-
+      why this run must dispatch without filesystem confinement.
+```
+
+Both the slug and the reason are required, and the slug names one run —
+not a path. The list is validated exactly like
+[`writable:`](#the-allowlist) and lives in the same file, for the same
+reason: `config/` is never writable inside a sandbox.
+
+!!! warning "The per-run hatch used to live in the run's own `config.yml`"
+
+    It does not any more. `workspace/<slug>/config.yml` is *inside* the
+    dispatch's writable bind, so `sandbox: off` there was something a
+    confined agent could write for itself — and, since `agent_overrides:`
+    in that same file can replace an agent's `cmd`, it could then choose
+    what the next unconfined dispatch executed. A `sandbox:` key in a run's
+    config is now never honoured; because a stale one would leave a run
+    looking opted out when it is not, the dispatch is **refused** (exit 77)
+    with a message naming this file. Move the opt-out here and delete the
+    key.
 
 Either way, ScieFlow emits a `sandbox.disabled` event on the run's timeline
 (actor `human`, with `agent` and `why` naming which of the two it was) —
@@ -150,8 +203,9 @@ writes still goes under its own run.
 The loader (`sandbox.allowlist_paths()`) rejects an entry that:
 
 - escapes the repository (`../outside`, an absolute path like `/etc`);
-- names the repository root or `config/` wholesale (`.` or `config` —
-  either would grant the allowlist file itself, defeating the point);
+- names the repository root, `config/` or `src/` wholesale (`.`, `config`
+  or `src` — the first two would grant the allowlist file itself, and
+  `src/` is module code, which is never an agent's to write);
 - names the allowlist file itself (`config/sandbox.yml`);
 - is malformed — not a mapping, missing or empty `path`, `writable:` not a
   list, or the file itself not valid YAML or not a mapping at the top
@@ -159,4 +213,6 @@ The loader (`sandbox.allowlist_paths()`) rejects an entry that:
 
 Agents cannot edit this file to grant themselves more: `config/` is never
 in a sandboxed dispatch's writable set, coordinator or sub-agent alike, so
-extending the allowlist is always a human decision made outside any run.
+extending the allowlist — or [opting a run out](#the-escape-hatch) — is
+always a human decision made outside any run. That is what makes the
+`sandbox.disabled` event's `actor: human` true.
