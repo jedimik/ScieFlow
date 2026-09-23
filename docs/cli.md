@@ -13,6 +13,7 @@ All examples assume you are at the repo root and use `uv run scieflow …`.
 |---|---|---|
 | `0` | success | everywhere |
 | `75` | dispatch refused — the run's `wall_minutes` budget is spent | `scieflow agent run` only (`agent_run.BUDGET_EXIT`); the run is checkpointed automatically |
+| `77` | sandbox could not be established or proven; the dispatch was refused | `scieflow agent run` only (`agent_run.SANDBOX_EXIT`); see [The agent sandbox](sandbox.md) |
 | `124` | the agent process was killed for running past its timeout, with partial output kept | `scieflow agent run`, and any job `jobs.wait` times out on |
 | `2` | `gate wait --timeout` expired without an answer | `scieflow gate wait` |
 | `1` | any other refusal (bad slug, unmet precondition, validation problem) | Click's default for a raised `ClickException`, e.g. `run advance` past `iterations`, `run mark` with a bad phase/state |
@@ -125,12 +126,17 @@ Dispatch headless agent CLIs and manage who performs which role.
 
 ```bash
 uv run scieflow agent run AGENT PROMPT_FILE TRANSCRIPT_FILE [--cwd DIR] [--role ROLE]
+    [--no-sandbox]
 ```
 Run one agent headless. `--cwd` defaults to the repo root. `--role` applies
 that role's assigned model/effort override for `AGENT` (see
 [Agent configuration](agents.md#roles)); if `AGENT` is not assigned to
-`ROLE`, the dispatch is refused before anything runs. Exit codes: `0` ok,
+`ROLE`, the dispatch is refused before anything runs. `--no-sandbox` runs
+without filesystem confinement — a deliberate opt-out, recorded as a
+`sandbox.disabled` event on the run's timeline rather than run silently
+(see [The agent sandbox](sandbox.md)). Exit codes: `0` ok,
 `75` refused on an exhausted `wall_minutes` budget (the run is checkpointed),
+`77` refused because the sandbox could not be established or proven,
 `124` timed out (partial output kept in `TRANSCRIPT_FILE`), otherwise the
 agent's own exit code.
 

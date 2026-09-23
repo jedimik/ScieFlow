@@ -56,6 +56,7 @@ nav:
   - Menu: menu.md
   - Runs, jobs and gates: runs.md
   - Web app: web.md
+  - Sandbox: sandbox.md
   - Architecture: architecture.md
   - CLI reference: cli.md
   - Experiments:

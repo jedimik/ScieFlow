@@ -70,6 +70,10 @@ its output streamed to `<id>.log` and `<id>.err` **while it runs**:
 A dispatch inside a run records its duration against the run's budget
 automatically.
 
+An agent dispatch also runs filesystem-sandboxed by default — confined to
+its own run — and is refused (exit 77) if that confinement cannot be
+proven; see [The agent sandbox](sandbox.md).
+
 ## Gates: approvals as data
 
 Every approval a protocol requires is a file, not a sentence in a chat window
