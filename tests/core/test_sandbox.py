@@ -118,3 +118,34 @@ def test_verify_raises_when_probe_location_is_not_writable(monkeypatch, tmp_path
     finally:
         # Restore permissions so cleanup can happen
         home.chmod(0o755)
+
+
+def test_verify_raises_sandboxerror_for_file_writable(monkeypatch, tmp_path):
+    """verify() must raise SandboxError (not NotADirectoryError) when a writable
+    entry is a file. Callers catch SandboxError, not NotADirectoryError."""
+    writable_file = tmp_path / "writable.txt"
+    writable_file.write_text("test")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.verify([writable_file], cwd=tmp_path)
+
+
+def test_wrap_raises_sandboxerror_for_file_writable(monkeypatch, tmp_path):
+    """wrap() must raise SandboxError (not NotADirectoryError) when a writable
+    entry is a file. Callers catch SandboxError, not NotADirectoryError."""
+    writable_file = tmp_path / "writable.txt"
+    writable_file.write_text("test")
+
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.wrap(["echo", "hi"], writable=[writable_file], cwd=tmp_path)
+
+
+def test_writable_file_error_message_names_path(monkeypatch, tmp_path):
+    """The error message from a file writable grant must name the offending path."""
+    writable_file = tmp_path / "writable.txt"
+    writable_file.write_text("test")
+
+    with pytest.raises(sandbox.SandboxError, match=str(writable_file)):
+        sandbox.wrap(["echo", "hi"], writable=[writable_file], cwd=tmp_path)

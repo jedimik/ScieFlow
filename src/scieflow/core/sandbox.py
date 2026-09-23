@@ -34,6 +34,19 @@ def available() -> bool:
     return shutil.which(BWRAP) is not None
 
 
+def _validate_writable(writable: list[Path]) -> None:
+    """Validate that each writable entry is a directory (or does not exist yet).
+
+    Raises SandboxError if any entry exists and is not a directory, which would
+    cause cryptic errors when trying to create sentinel files or bind mounts.
+    """
+    for entry in writable:
+        path = Path(entry).resolve()
+        if path.exists() and not path.is_dir():
+            raise SandboxError(
+                f"writable grant must be a directory, not a file: {path}")
+
+
 def wrap(argv: list[str], *, writable: list[Path], cwd: Path) -> list[str]:
     """`argv` rewritten to run under bubblewrap, writable only where granted.
 
@@ -43,6 +56,7 @@ def wrap(argv: list[str], *, writable: list[Path], cwd: Path) -> list[str]:
     surface as a cryptic bwrap error. This is part of the contract and every
     caller depends on it.
     """
+    _validate_writable(writable)
     if not available():
         raise SandboxUnavailable(f"bubblewrap is not installed; {INSTALL_HINT}")
     out = [BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
@@ -69,6 +83,8 @@ def verify(writable: list[Path], cwd: Path) -> None:
     """
     if not writable:
         raise SandboxError("verify() requires at least one writable path for the control")
+
+    _validate_writable(writable)
 
     probe = Path.home() / f".scieflow-sandbox-probe-{os.getpid()}"
     sentinel = Path(writable[0]).resolve() / f".scieflow-verify-sentinel-{os.getpid()}"
@@ -107,6 +123,12 @@ def verify(writable: list[Path], cwd: Path) -> None:
             raise SandboxUnavailable(
                 "the sandbox did not block a write to $HOME — refusing to dispatch")
     finally:
-        # Clean up on every path through this function.
-        probe.unlink(missing_ok=True)
-        sentinel.unlink(missing_ok=True)
+        # Clean up on every path through this function, defensively.
+        try:
+            probe.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            sentinel.unlink(missing_ok=True)
+        except Exception:
+            pass
