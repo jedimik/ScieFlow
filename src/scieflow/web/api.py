@@ -8,8 +8,6 @@ is the integration surface other tools use.
 
 from __future__ import annotations
 
-from dataclasses import asdict
-
 from fastapi import APIRouter, Depends, Query, Request
 
 from scieflow.core import jobs, service
@@ -50,10 +48,7 @@ async def run_jobs(request: Request, slug: str) -> list[dict]:
     """Every job this run started, newest last."""
     project = _project(request)
     ws = service.run_workspace(project, slug)  # raises ServiceError -> 404
-    # duration_s is a computed property, not a dataclass field, so plain
-    # asdict() drops it — add it back explicitly.
-    return [{**asdict(job), "duration_s": job.duration_s}
-            for job in jobs.list_jobs(project, ws)]
+    return [service.job_json(job) for job in jobs.list_jobs(project, ws)]
 
 
 @router.get("/gates", tags=["gates"])

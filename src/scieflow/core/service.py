@@ -38,6 +38,11 @@ def run_workspace(project: Project, slug: str) -> Path:
     return _ws(project, slug)
 
 
+def job_json(job: jobs.Job) -> dict:
+    """`asdict(job)` plus `duration_s`, a property `asdict` drops (not a field)."""
+    return {**asdict(job), "duration_s": job.duration_s}
+
+
 def list_runs(project: Project) -> list[dict]:
     return [asdict(r) for r in workspace.list_runs(project.root)]
 
@@ -52,7 +57,7 @@ def run_detail(project: Project, slug: str) -> dict:
         "budget": b,
         "remaining": budget.remaining_fraction(b) if b else None,
         "gates": gates.list_gates(ws, "open"),
-        "jobs": [asdict(j) for j in jobs.list_jobs(project, ws)][-RECENT_JOBS:][::-1],
+        "jobs": [job_json(j) for j in jobs.list_jobs(project, ws)][-RECENT_JOBS:][::-1],
         "events": events.read(ws)[-RECENT_EVENTS:],
     }
 

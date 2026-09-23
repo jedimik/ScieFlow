@@ -38,6 +38,19 @@ def test_jobs_lists_the_finished_job(client):
     assert body[0]["duration_s"] is not None
 
 
+def test_run_detail_and_jobs_agree_on_the_same_job(client):
+    """Regression guard: /runs/{slug} and /runs/{slug}/jobs must serialise
+    the same Job the same way (previously duration_s only showed up on one
+    of the two paths)."""
+    from_detail = client.get("/api/v1/runs/r1").json()["jobs"]
+    from_jobs = client.get("/api/v1/runs/r1/jobs").json()
+    by_id_detail = {j["id"]: j for j in from_detail}
+    by_id_jobs = {j["id"]: j for j in from_jobs}
+    assert by_id_detail.keys() & by_id_jobs.keys()
+    for job_id in by_id_detail.keys() & by_id_jobs.keys():
+        assert by_id_detail[job_id] == by_id_jobs[job_id]
+
+
 def test_open_gates_across_runs(client):
     body = client.get("/api/v1/gates").json()
     assert len(body) == 1
