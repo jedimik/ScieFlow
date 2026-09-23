@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}{{ slug }} — ScieFlow{% endblock %}
+{% block nav %}<a href="/">← all runs</a>{% endblock %}
+{% block content %}
+<h1>{{ slug }}</h1>
+<p class="dim">
+  id {{ (detail.status or {}).get("id", "—") }} ·
+  iteration {{ (detail.status or {}).get("iteration", "—") }} ·
+  approval {{ (detail.status or {}).get("approval", "—") }}
+</p>
+{% if (detail.status or {}).get("stopped") %}
+  <p class="state-failed">stopped: {{ detail.status.stopped.reason }}
+     — {{ detail.status.stopped.get("detail", "") }}</p>
+{% endif %}
+
+<h2>Phases</h2>
+<table>
+  {% for phase, state in phases %}
+  <tr><td>{{ phase }}</td><td class="state-{{ state }}">{{ state }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Budget</h2>
+<table>
+  {% for dim, left in remaining.items() %}
+  <tr>
+    <td>{{ dim }}</td>
+    <td style="width: 60%">
+      <div class="bar {% if left <= 10 %}low{% endif %}"><span style="width: {{ left }}%"></span></div>
+    </td>
+    <td class="dim">{{ left }}% left</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Gates</h2>
+{% if not detail.gates %}
+  <p class="dim">No gate is waiting.</p>
+{% else %}
+  {% for gate in detail.gates %}
+  <div class="gate {% if gate.requires_human %}human{% endif %}">
+    <span class="dim">{{ gate.kind }}{% if gate.requires_human %} · needs you{% endif %}</span>
+    <div>{{ gate.question }}</div>
+    {% if gate.options %}<div class="dim">options: {{ gate.options|join(", ") }}</div>{% endif %}
+    <div class="dim">answer it with
+      <code>uv run scieflow gate answer {{ slug }} {{ gate.id }} &lt;answer&gt;</code>
+      — answering from this page arrives with the control milestone.</div>
+  </div>
+  {% endfor %}
+{% endif %}
+
+<h2>Jobs</h2>
+{% if not jobs %}
+  <p class="dim">This run has started no jobs.</p>
+{% else %}
+<table>
+  <tr><th>started</th><th>what</th><th>state</th><th>seconds</th><th></th></tr>
+  {% for job in jobs %}
+  <tr>
+    <td class="dim">{{ (job.started or job.queued or "")[11:19] }}</td>
+    <td>{{ job.label or job.kind }}</td>
+    <td class="state-{{ job.state }}">{{ job.state }}</td>
+    <td class="dim">{{ "%.1f"|format(job.duration_s) if job.duration_s else "—" }}</td>
+    <td><a href="/runs/{{ slug }}/jobs/{{ job.id }}">output</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Timeline</h2>
+<table id="timeline">
+  {% for event in detail.events|reverse %}
+  <tr>
+    <td class="dim">{{ event.ts[11:19] }}</td>
+    <td>{{ event.type }}</td>
+    <td class="dim">{{ event.actor }}</td>
+    <td class="dim">{{ event.data }}</td>
+  </tr>
+  {% endfor %}
+</table>
+<script>
+  const timeline = document.getElementById("timeline");
+  const stream = new EventSource("/api/v1/runs/{{ slug }}/events/stream");
+  stream.addEventListener("run", (message) => {
+    const event = JSON.parse(message.data);
+    const row = timeline.insertRow(0);
+    row.innerHTML = `<td class="dim">${event.ts.slice(11, 19)}</td>` +
+                    `<td>${event.type}</td><td class="dim">${event.actor}</td>` +
+                    `<td class="dim"></td>`;
+  });
+</script>
+{% endblock %}

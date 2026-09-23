@@ -39,3 +39,34 @@ def test_dashboard_with_no_runs_says_so(tmp_path):
         client.get("/healthz?token=tok")
         body = client.get("/").text
     assert "No runs yet" in body
+
+
+def test_run_page_shows_status_jobs_gates_and_timeline(client):
+    response = client.get("/runs/r1")
+    assert response.status_code == 200
+    body = response.text
+    assert "hypothesize" in body                 # phases table
+    assert "run.created" in body                 # timeline
+    assert "done" in body                        # the finished job
+    assert "Which dataset?" in body              # the open gate
+    assert "answer" in body.lower()              # tells you how to answer it
+
+
+def test_run_page_links_each_job_to_its_log(client, project):
+    from scieflow.core import jobs
+
+    job = jobs.list_jobs(project, project.run_dir("r1"))[0]
+    body = client.get("/runs/r1").text
+    assert f"/runs/r1/jobs/{job.id}" in body
+
+
+def test_unknown_run_page_is_404(client):
+    assert client.get("/runs/nope").status_code == 404
+
+
+def test_job_log_page_shows_the_output(client, project):
+    from scieflow.core import jobs
+
+    job = jobs.list_jobs(project, project.run_dir("r1"))[0]
+    body = client.get(f"/runs/r1/jobs/{job.id}").text
+    assert "hello from the job" in body

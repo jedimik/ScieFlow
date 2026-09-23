@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ job.label or job.kind }} — {{ slug }}{% endblock %}
+{% block nav %}<a href="/runs/{{ slug }}">← {{ slug }}</a>{% endblock %}
+{% block content %}
+<h1>{{ job.label or job.kind }}</h1>
+<p class="dim">
+  {{ job.id }} · <span class="state-{{ job.state }}">{{ job.state }}</span>
+  {% if job.exit_code is not none %} · exit {{ job.exit_code }}{% endif %}
+  {% if job.duration_s %} · {{ "%.1f"|format(job.duration_s) }}s{% endif %}
+</p>
+<p class="dim"><code>{{ job.argv|join(" ") }}</code></p>
+
+<h2>Output</h2>
+<pre class="log" id="out">{{ out }}</pre>
+{% if err %}<h2>Errors</h2><pre class="log">{{ err }}</pre>{% endif %}
+{% if live %}
+<script>
+  const out = document.getElementById("out");
+  const stream = new EventSource("/api/v1/jobs/{{ job.id }}/log/stream");
+  stream.onmessage = (message) => {
+    out.textContent += message.data + "\n";
+    out.scrollTop = out.scrollHeight;
+  };
+</script>
+{% endif %}
+{% endblock %}

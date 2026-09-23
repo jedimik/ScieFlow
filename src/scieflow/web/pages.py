@@ -7,9 +7,12 @@ against the SSE routes; nothing here needs JavaScript to be useful.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
+from scieflow.core import jobs as jobs_mod
 from scieflow.core import service
 from scieflow.web import auth
 from scieflow.web.app import TEMPLATES
@@ -47,4 +50,43 @@ async def dashboard(request: Request) -> HTMLResponse:
         "runs": runs,
         "detail": detail,
         "gates": service.open_gates(project),
+    })
+
+
+@router.get("/runs/{slug}", response_class=HTMLResponse)
+async def run_page(request: Request, slug: str) -> HTMLResponse:
+    project = _project(request)
+    detail = service.run_detail(project, slug)          # ServiceError -> 404
+    ws = service.run_workspace(project, slug)
+    status = detail["status"] or {}
+    return TEMPLATES.TemplateResponse(request, "run.html", {
+        "slug": slug,
+        "detail": detail,
+        "phases": list((status.get("phases") or {}).items()),
+        "remaining": {dim: _percent(value)
+                      for dim, value in (detail["remaining"] or {}).items()},
+        "jobs": [service.job_json(job) for job in reversed(jobs_mod.list_jobs(project, ws))],
+    })
+
+
+@router.get("/runs/{slug}/jobs/{job_id}", response_class=HTMLResponse)
+async def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
+    project = _project(request)
+    service.run_workspace(project, slug)                # validates the slug
+    job = jobs_mod.find(project, job_id)
+    if job is None:
+        raise service.ServiceError(f"no job {job_id}")
+
+    def _read(path: str) -> str:
+        try:
+            return Path(path).read_text(errors="replace")[-200_000:]
+        except OSError:
+            return ""
+
+    return TEMPLATES.TemplateResponse(request, "job.html", {
+        "slug": slug,
+        "job": service.job_json(job),
+        "out": _read(job.log),
+        "err": _read(job.err),
+        "live": job.state == "running",
     })
