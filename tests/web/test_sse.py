@@ -24,6 +24,7 @@ generator and keep using the ordinary `client`/`project` fixtures.
 
 import json
 import socket
+import sys
 import threading
 import time
 
@@ -79,14 +80,38 @@ def read_frames(live, url, want, timeout=10.0):
 
 
 def test_event_stream_replays_then_follows(live, project):
+    """Replays the backlog, then genuinely follows: a new event, emitted
+    while the connection is still open (no reconnect), must arrive on the
+    same stream. Verified by breaking the follow path (making `_events`
+    `return` after its first batch) and watching this fail before
+    restoring it -- see task-7-report.md, "Fix round 1"."""
     from scieflow.core import events
 
     ws = project.run_dir("r1")
-    events.emit(ws, "note.hello", "human", message="from the test")
-    frames = read_frames(live, "/api/v1/runs/r1/events/stream", want=3)
-    types = [json.loads(frame)["type"] for frame in frames]
-    assert types[0] == "run.created"
-    assert "note.hello" in types or len(types) == 3
+    existing = events.read(ws)
+    with live.stream("GET", "/api/v1/runs/r1/events/stream", timeout=10.0) as response:
+        assert response.status_code == 200
+        lines = response.iter_lines()
+
+        # Drain exactly the replayed backlog.
+        frames = []
+        while len(frames) < len(existing):
+            line = next(lines)
+            if line.startswith("data:"):
+                frames.append(line[len("data:"):].strip())
+        types = [json.loads(frame)["type"] for frame in frames]
+        assert types[0] == "run.created"
+
+        # The connection is still open -- emit a new event now, without
+        # reconnecting, and require it to arrive on this same stream.
+        events.emit(ws, "note.hello", "human", message="from the test")
+        followed = None
+        for line in lines:
+            if line.startswith("data:"):
+                followed = json.loads(line[len("data:"):].strip())
+                break
+        assert followed is not None, "no frame arrived for the event emitted mid-stream"
+        assert followed["type"] == "note.hello"
 
 
 def test_event_stream_since_skips_what_you_have(live, project):
@@ -106,6 +131,43 @@ def test_job_log_stream_sends_the_output(live, project):
     job = jobs.list_jobs(project, project.run_dir("r1"))[0]
     frames = read_frames(live, f"/api/v1/jobs/{job.id}/log/stream", want=1)
     assert frames[0] == "hello from the job"
+
+
+def test_job_log_stream_buffers_a_split_line(live, project):
+    """A write that lands mid-line across two polls must arrive as one frame,
+    not two. The subprocess writes 'hello wor', pauses longer than `POLL_S`,
+    then completes the line with 'ld\\n'."""
+    from scieflow.core import jobs
+
+    ws = project.run_dir("r1")
+    script = (
+        "import sys, time\n"
+        "sys.stdout.write('hello wor')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(1.0)\n"
+        "sys.stdout.write('ld\\n')\n"
+    )
+    job, proc = jobs.start(project, [sys.executable, "-c", script], kind="agent",
+                           cwd=project.root, run_dir=ws, label="split-line")
+    try:
+        frames = read_frames(live, f"/api/v1/jobs/{job.id}/log/stream", want=1, timeout=10.0)
+    finally:
+        jobs.wait(job, proc)
+    assert frames == ["hello world"]
+
+
+def test_job_log_stream_flushes_unterminated_final_line(live, project):
+    """A job's last line, with no trailing newline, must still be flushed
+    once the job has reached a final state -- it must not be held back
+    forever waiting for a newline that will never come."""
+    from scieflow.core import jobs
+
+    ws = project.run_dir("r1")
+    job = jobs.run_blocking(
+        project, [sys.executable, "-c", "import sys; sys.stdout.write('no trailing newline')"],
+        kind="agent", cwd=project.root, run_dir=ws, label="no-newline")
+    frames = read_frames(live, f"/api/v1/jobs/{job.id}/log/stream", want=1, timeout=10.0)
+    assert frames == ["no trailing newline"]
 
 
 def test_streams_need_a_session(project):
