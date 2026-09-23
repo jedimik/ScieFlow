@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}ScieFlow — runs{% endblock %}
+{% block content %}
+<h1>Runs</h1>
+{% if not runs %}
+  <p class="dim">No runs yet. Start one with
+    <code>uv run scieflow run init &lt;slug&gt; --goal goal.md</code>.</p>
+{% else %}
+<table>
+  <tr><th>run</th><th>kind</th><th>phase</th><th>budget left</th><th>updated</th></tr>
+  {% for run in runs %}
+  <tr>
+    <td><a href="/runs/{{ run.slug }}">{{ run.slug }}</a></td>
+    <td class="dim">{{ run.kind }}</td>
+    <td class="state-{{ run.phase_state or 'none' }}">
+      {{ run.phase or "—" }}{% if run.phase_state %} ({{ run.phase_state }}){% endif %}
+    </td>
+    <td>
+      {% for dim, left in (detail[run.slug].remaining if run.slug in detail else {}).items() %}
+        <div class="dim">{{ dim }} {{ left }}%</div>
+        <div class="bar {% if left <= 10 %}low{% endif %}"><span style="width: {{ left }}%"></span></div>
+      {% endfor %}
+    </td>
+    <td class="dim">{{ (run.updated_at or "")[:16] }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Open gates</h2>
+{% if not gates %}
+  <p class="dim">Nothing is waiting for you.</p>
+{% else %}
+  {% for gate in gates %}
+  <div class="gate {% if gate.requires_human %}human{% endif %}">
+    <a href="/runs/{{ gate.slug }}">{{ gate.slug }}</a>
+    <span class="dim">{{ gate.kind }}</span>
+    {% if gate.requires_human %}<span class="dim">[needs you]</span>{% endif %}
+    <div>{{ gate.question }}</div>
+  </div>
+  {% endfor %}
+{% endif %}
+{% endblock %}
