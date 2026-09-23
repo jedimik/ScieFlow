@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,7 +34,8 @@ def test_agy_defaults_use_explicit_effort_and_nested_timeouts():
 
 
 def run_dispatch(agent: str, prompt_file: Path, transcript: Path, cwd: Path | None = None):
-    argv = [*AGENT_RUN, agent, str(prompt_file), str(transcript)]
+    # These prompts belong to no run, which the sandbox refuses by design.
+    argv = [*AGENT_RUN, "--no-sandbox", agent, str(prompt_file), str(transcript)]
     if cwd is not None:
         argv += ["--cwd", str(cwd)]
     return subprocess.run(argv, capture_output=True, text=True)
@@ -73,7 +75,8 @@ def test_relative_cwd_resolves_against_repo_root(tmp_path):
     out = tmp_path / "syn.md"
     prompt = tmp_path / "prompt.md"
     prompt.write_text(f"output: {out}\nkind: synthesis\n")
-    argv = [*AGENT_RUN, "stub", str(prompt), str(tmp_path / "t.md"),
+    # This prompt belongs to no run, which the sandbox refuses by design.
+    argv = [*AGENT_RUN, "--no-sandbox", "stub", str(prompt), str(tmp_path / "t.md"),
             "--cwd", "src"]
     proc = subprocess.run(argv, capture_output=True, text=True, cwd=tmp_path)
     assert proc.returncode == 0, proc.stderr
@@ -212,7 +215,7 @@ agents:
 def run_in_repo(root: Path, agent: str, prompt: str, env: dict | None = None):
     (root / "prompt.md").write_text(prompt)
     return subprocess.run(
-        [*AGENT_RUN, agent, str(root / "prompt.md"), str(root / "out.log")],
+        [*AGENT_RUN, "--no-sandbox", agent, str(root / "prompt.md"), str(root / "out.log")],
         capture_output=True, text=True, cwd=root, env=env,
     )
 
@@ -302,9 +305,10 @@ def test_agent_run_reachable_from_root_cli(tmp_path):
     out = tmp_path / "hyp.md"
     prompt = tmp_path / "prompt.md"
     prompt.write_text(f"output: {out}\nkind: hypothesis\n")
+    # This prompt belongs to no run, which the sandbox refuses by design.
     proc = subprocess.run(
-        [sys.executable, "-m", "scieflow.cli", "agent", "run", "stub", str(prompt),
-         str(tmp_path / "t.md")],
+        [sys.executable, "-m", "scieflow.cli", "agent", "run", "--no-sandbox", "stub",
+         str(prompt), str(tmp_path / "t.md")],
         capture_output=True, text=True, cwd=ROOT,
     )
     assert proc.returncode == 0, proc.stderr
@@ -378,7 +382,118 @@ def test_prepare_is_callable_without_exiting(tmp_path):
 
     root = make_repo(tmp_path)
     (root / "p.md").write_text("hello")
-    d = prepare(Project(root), "stub", root / "p.md")
+    # This prompt belongs to no run, which the sandbox refuses by design.
+    d = prepare(Project(root), "stub", root / "p.md", sandbox_enabled=False)
     assert d.agent == "stub" and d.run_dir is None and d.timeout_s == 60
     with pytest.raises(DispatchError):
-        prepare(Project(root), "nope", root / "p.md")
+        prepare(Project(root), "nope", root / "p.md", sandbox_enabled=False)
+
+
+def bwrap_free_env(tmp_path):
+    """A PATH with no bwrap on it, and a throwaway HOME so a probe cannot
+    litter the real one."""
+    empty = tmp_path / "emptybin"
+    empty.mkdir(exist_ok=True)
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    return {**os.environ, "PATH": str(empty), "HOME": str(home)}
+
+
+def fake_bwrap_env(tmp_path):
+    """A `bwrap` that confines nothing: it drops its own options and runs the
+    command. The sandbox looks available but does not work — the case a
+    container without user namespaces produces."""
+    bindir = tmp_path / "fakebin"
+    bindir.mkdir(exist_ok=True)
+    shim = bindir / "bwrap"
+    shim.write_text('#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n')
+    shim.chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    return {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "HOME": str(home)}
+
+
+def test_dispatch_is_refused_when_bubblewrap_is_missing(tmp_path):
+    root = make_repo(tmp_path)
+    ws = make_loop_workspace(root)
+    (ws / "logs" / "p.md").write_text("output: x.md\nkind: hypothesis\n")
+    proc = subprocess.run(
+        [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path))
+    assert proc.returncode == 77
+    assert "bubblewrap" in (proc.stdout + proc.stderr)
+    assert "apt-get install" in (proc.stdout + proc.stderr)
+    assert "sandbox" in (ws / "logs" / "t.md").read_text()
+
+
+def test_dispatch_is_refused_when_the_sandbox_does_not_confine(tmp_path):
+    """bwrap is on PATH but confines nothing. Only the probe catches this."""
+    root = make_repo(tmp_path)
+    ws = make_loop_workspace(root)
+    (ws / "logs" / "p.md").write_text("output: x.md\nkind: hypothesis\n")
+    proc = subprocess.run(
+        [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        capture_output=True, text=True, cwd=root, env=fake_bwrap_env(tmp_path))
+    assert proc.returncode == 77
+    assert "did not block" in (proc.stdout + proc.stderr + (ws / "logs" / "t.md").read_text())
+
+
+def test_no_sandbox_flag_runs_and_records_the_choice(tmp_path):
+    from scieflow.core import events
+
+    root = make_repo(tmp_path)
+    ws = make_loop_workspace(root)
+    out = ws / "iterations" / "h.md"
+    (ws / "logs" / "p.md").write_text(f"output: {out}\nkind: hypothesis\n")
+    proc = subprocess.run(
+        [*AGENT_RUN, "--no-sandbox", "stub",
+         str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path))
+    assert proc.returncode == 0, proc.stderr
+    assert out.exists()
+    assert "sandbox.disabled" in [e["type"] for e in events.read(ws)]
+
+
+def test_run_config_can_disable_the_sandbox(tmp_path):
+    from scieflow.core import events
+
+    root = make_repo(tmp_path)
+    ws = make_loop_workspace(root)
+    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\nsandbox: off\n")
+    out = ws / "iterations" / "h.md"
+    (ws / "logs" / "p.md").write_text(f"output: {out}\nkind: hypothesis\n")
+    proc = subprocess.run(
+        [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path))
+    assert proc.returncode == 0, proc.stderr
+    assert out.exists()
+    assert "sandbox.disabled" in [e["type"] for e in events.read(ws)]
+
+
+def test_a_dispatch_outside_any_run_says_how_to_proceed(tmp_path):
+    """Refused rather than promoted to wider permissions — and the message
+    names the flag that makes an ad-hoc dispatch possible."""
+    root = make_repo(tmp_path)
+    (root / "p.md").write_text("output: out.md\nkind: hypothesis\n")
+    proc = subprocess.run([*AGENT_RUN, "stub", str(root / "p.md"), str(root / "t.md")],
+                          capture_output=True, text=True, cwd=root)
+    assert proc.returncode == 77
+    assert "--no-sandbox" in (proc.stdout + proc.stderr)
+
+
+@pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap not installed")
+def test_a_sandboxed_agent_cannot_write_to_module_code(tmp_path):
+    """The headline guarantee of this milestone. If one assertion survives from
+    this plan, it is this one."""
+    root = make_repo(tmp_path)
+    (root / "src").mkdir()
+    (root / "src" / "untouched.py").write_text("original\n")
+    ws = make_loop_workspace(root)
+    target = root / "src" / "untouched.py"
+    (root / "config" / "agents.yml").write_text(
+        "agents:\n"
+        f'  writer: {{cmd: "sh -c \'echo hacked > {target}\'", enabled: true, timeout_min: 1}}\n')
+    (ws / "logs" / "p.md").write_text("go\n")
+    subprocess.run([*AGENT_RUN, "writer", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+                   capture_output=True, text=True, cwd=root)
+    assert target.read_text() == "original\n"     # the write never landed
