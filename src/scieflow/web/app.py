@@ -41,7 +41,16 @@ def create_app(project: Project, token: str) -> FastAPI:
     app.state.token = token
     app.state.sessions = set()
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
-    auth.install_session(app)
+
+    def _refuse(request: Request, status: int, message: str):
+        wants_html = ("text/html" in request.headers.get("accept", "")
+                      and not request.url.path.startswith("/api/"))
+        if wants_html and status in (401, 403):
+            return TEMPLATES.TemplateResponse(
+                request, "unauthorized.html", status_code=status)
+        return JSONResponse({"error": message}, status_code=status)
+
+    auth.install_session(app, refuse=_refuse)
 
     @app.exception_handler(ServiceError)
     async def _service_error(request: Request, exc: ServiceError) -> JSONResponse:
@@ -49,12 +58,7 @@ def create_app(project: Project, token: str) -> FastAPI:
 
     @app.exception_handler(FastAPIHTTPException)
     async def _http_error(request: Request, exc: FastAPIHTTPException):
-        wants_html = ("text/html" in request.headers.get("accept", "")
-                      and not request.url.path.startswith("/api/"))
-        if exc.status_code == 401 and wants_html:
-            return TEMPLATES.TemplateResponse(
-                request, "unauthorized.html", status_code=401)
-        return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+        return _refuse(request, exc.status_code, exc.detail)
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict:
