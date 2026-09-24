@@ -75,6 +75,24 @@ async def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse
     })
 
 
+def _owning_job(project, slug: str, job_id: str) -> jobs_mod.Job:
+    """The job, if it belongs to this run. Raises `service.ServiceError`
+    (-> 404) otherwise.
+
+    One copy, because this is what stops a request reaching a job in a
+    different run: two copies is how a later fix lands on one and not the
+    other. `ServiceError` — rather than an `HTTPException` here — because
+    the app's exception handler already maps it to the same 404 JSON body
+    for any caller, GET or POST, matching `run_workspace`'s own use of
+    `ServiceError` for "no such run" a line above every call site here.
+    """
+    ws = service.run_workspace(project, slug)            # validates the slug
+    job = jobs_mod.find(project, job_id)
+    if job is None or job.run_dir is None or Path(job.run_dir).resolve() != ws.resolve():
+        raise service.ServiceError(f"no job {job_id} in {slug}")
+    return job
+
+
 def _back(slug: str, error: str = "") -> RedirectResponse:
     """Post/redirect/get: the browser lands on a fresh read of the page, so
     reloading never repeats the action."""
@@ -125,10 +143,7 @@ async def act(request: Request, slug: str, action: str = Form(...),
 @router.post("/runs/{slug}/jobs/{job_id}/cancel", dependencies=MUTATE)
 async def cancel_job(request: Request, slug: str, job_id: str):
     project = _project(request)
-    ws = service.run_workspace(project, slug)
-    job = jobs_mod.find(project, job_id)
-    if job is None or job.run_dir is None or Path(job.run_dir).resolve() != ws.resolve():
-        raise HTTPException(status_code=404, detail=f"no job {job_id} in {slug}")
+    _owning_job(project, slug, job_id)
     try:
         service.cancel_job(project, job_id)
     except service.ServiceError as exc:
@@ -139,10 +154,7 @@ async def cancel_job(request: Request, slug: str, job_id: str):
 @router.get("/runs/{slug}/jobs/{job_id}", response_class=HTMLResponse)
 async def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
     project = _project(request)
-    ws = service.run_workspace(project, slug)           # validates the slug
-    job = jobs_mod.find(project, job_id)
-    if job is None or job.run_dir is None or Path(job.run_dir).resolve() != ws.resolve():
-        raise service.ServiceError(f"no job {job_id} in {slug}")
+    job = _owning_job(project, slug, job_id)
 
     def _read(path: str) -> str:
         try:
