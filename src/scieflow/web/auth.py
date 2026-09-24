@@ -13,6 +13,18 @@ import secrets
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from python_multipart.exceptions import FormParserError
+from starlette.formparsers import MultiPartException
+
+#: What a malformed body actually raises out of `request.form()`: Starlette's
+#: own wrapper (missing boundary, too many fields, a part over its size cap)
+#: or the underlying python-multipart parser's own error (corrupt content
+#: that doesn't match the declared boundary at all — `FormParserError` is the
+#: base of `MultipartParseError`, `DecodeError`, etc.). Anything else —
+#: `starlette.requests.ClientDisconnect`, or a future bug in the body/form
+#: caching dance `_supplied_csrf` relies on — is a real failure, not a
+#: malformed-input case, and must not be swallowed as one.
+BODY_PARSE_ERRORS = (MultiPartException, FormParserError)
 
 SESSION_COOKIE = "scieflow_session"
 CSRF_COOKIE = "scieflow_csrf"
@@ -151,14 +163,17 @@ def install_session(app, refuse=None) -> None:
             # the body — see `csrf_protect`'s docstring for why.
             try:
                 supplied_csrf = await _supplied_csrf(request)
-            except Exception:
+            except BODY_PARSE_ERRORS:
                 # `request.form()` parses the body eagerly; a malformed
                 # multipart payload (bad boundary, truncated body) raises
                 # straight out of this middleware, upstream of every
                 # exception handler (those live in ExceptionMiddleware,
                 # downstream of call_next). Fail closed with a clean 400
                 # instead of leaking a 500 traceback from the one function
-                # that runs before routing decides anything.
+                # that runs before routing decides anything. Only the
+                # parser's own errors are caught here — anything else (a
+                # client disconnect, a future bug) is a real failure and
+                # must surface as one, not be reported as bad input.
                 return refuse(request, 400, "malformed request body")
             if not csrf_ok(request.cookies.get(CSRF_COOKIE) or "", supplied_csrf):
                 return refuse(request, 403, "CSRF token missing or wrong")

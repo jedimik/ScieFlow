@@ -23,13 +23,25 @@ def test_every_mutating_path_has_a_guard_sample():
 
 @pytest.mark.parametrize("template", sorted(MUTATING_PATHS))
 def test_every_mutation_needs_a_session(project, template):
+    """A session-less request must be refused — specifically by
+    `require_session`, not merely by the CSRF middleware that runs first.
+
+    An anonymous client with no cookies at all fails the CSRF double-submit
+    check before routing ever happens, so it never reaches `require_session`
+    — asserting `in (401, 403)` against that client would pass even if the
+    session guard were deleted outright. Give the client a matching CSRF
+    cookie and field so it clears the CSRF layer and the session guard is
+    what actually answers; then the only correct status is 401.
+    """
     from fastapi.testclient import TestClient
 
     from scieflow.web.app import create_app
 
     with TestClient(create_app(project, "tok")) as anonymous:
-        response = anonymous.post(concrete_path(template), data=SAMPLES[template])
-        assert response.status_code in (401, 403)
+        anonymous.cookies.set(auth.CSRF_COOKIE, "x")
+        response = anonymous.post(concrete_path(template),
+                                  data={auth.CSRF_FIELD: "x", **SAMPLES[template]})
+        assert response.status_code == 401
 
 
 @pytest.mark.parametrize("template", sorted(MUTATING_PATHS))
