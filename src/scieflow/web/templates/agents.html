@@ -37,9 +37,6 @@
 <h2>Change an assignment</h2>
 <form method="get" action="/agents" class="actions">
   <input type="hidden" name="slug" value="{{ slug }}">
-  <!-- Unused by this GET, but keeps a CSRF token in the page even before a
-       preview has produced the apply form below. -->
-  <input type="hidden" name="csrf_token" value="{{ csrf }}">
   <!-- One select carrying "role=agent", so the preview needs no JavaScript. -->
   <select name="assign">
     {% for role in roles %}{% for name in settings.agents %}
@@ -53,6 +50,7 @@
     <p class="dim">Already configured that way; nothing to write.</p>
   {% else %}
     <pre class="diff">{{ preview.diff }}</pre>
+    {% for note in preview.notes %}<p class="note">{{ note }}</p>{% endfor %}
     {% for warning in preview.warnings %}<p class="state-failed">{{ warning }}</p>{% endfor %}
     <form method="post" action="/agents">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">

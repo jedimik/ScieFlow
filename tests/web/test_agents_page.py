@@ -16,7 +16,16 @@ def test_the_page_lists_every_role_and_its_agent(client):
     page = client.get("/agents").text
     assert "research.outline" in page
     assert "stub" in page
-    assert 'name="csrf_token"' in page
+    # A bare GET renders no mutating form, so there is nothing yet for a
+    # CSRF token to protect — asserting one on this page would test the
+    # wrong thing. The token belongs on the apply form, which exists once a
+    # preview has something to apply; that page is what earns the check.
+    preview_page = client.get("/agents", params={"assign": "research.outline=stub2"}).text
+    assert 'name="csrf_token"' in preview_page
+    # It must never ride in a query string (history, proxy/access logs, a
+    # same-origin Referer): exactly one occurrence, inside the POST apply
+    # form, never in either of the page's `method="get"` forms.
+    assert preview_page.count("csrf_token") == 1
 
 
 def test_previewing_a_change_shows_a_diff_and_writes_nothing(client, project):
@@ -70,3 +79,15 @@ def test_applying_nothing_says_so(client):
 def test_the_agents_page_needs_csrf(client):
     assert client.post(
         "/agents", data={"assign": "research.outline=stub2"}).status_code == 403
+
+
+def test_a_workspace_note_is_rendered_distinctly_from_a_warning(client, project):
+    """`plan_workspace` notes when a run has no status.yml yet — dispatching
+    would refuse there even though the assignment itself is fine. The page
+    must not drop that note on the floor, and it must not look like the
+    warnings block: a note is information, a warning is a problem."""
+    (project.root / "workspace" / "r2").mkdir()
+    page = client.get("/agents", params={
+        "slug": "r2", "assign": "research.outline=stub2"}).text
+    assert "no status.yml yet" in page
+    assert '<p class="note">' in page
