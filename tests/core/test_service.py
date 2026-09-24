@@ -165,3 +165,60 @@ def test_normal_sandboxed_dispatch_leaves_neither_event(project):
     types = {e["type"] for e in events.read(ws)}
     assert "job.refused" not in types
     assert "sandbox.disabled" not in types
+
+
+def test_mark_phase_through_the_service(project):
+    from scieflow.core.run import status
+
+    service.mark_phase(project, "r1", "hypothesize", "running")
+    assert status.read_status(project.run_dir("r1"))["phases"]["hypothesize"] == "running"
+
+
+def test_service_run_actions_reject_a_bad_slug(project):
+    for call in (
+        lambda: service.mark_phase(project, "nope", "hypothesize", "running"),
+        lambda: service.advance_run(project, "nope"),
+        lambda: service.checkpoint_run(project, "nope", "user"),
+        lambda: service.resume_run(project, "nope"),
+        lambda: service.record_spend(project, "nope", experiment_runs=1),
+    ):
+        with pytest.raises(service.ServiceError):
+            call()
+
+
+def test_mark_phase_rejects_an_invalid_state(project):
+    with pytest.raises(service.ServiceError, match="state"):
+        service.mark_phase(project, "r1", "hypothesize", "banana")
+
+
+def test_checkpoint_then_resume_round_trip(project):
+    from scieflow.core.run import status
+
+    service.checkpoint_run(project, "r1", "user", detail="stepping away")
+    assert status.read_status(project.run_dir("r1"))["stopped"]["reason"] == "user"
+    service.resume_run(project, "r1")
+    assert not status.read_status(project.run_dir("r1")).get("stopped")
+
+
+def test_advance_refused_when_the_iteration_budget_is_spent(project):
+    """A refusal must arrive as ServiceError — and must leave the run
+    checkpointed exactly as the CLI leaves it, not half-changed."""
+    from scieflow.core.run import budget, status
+
+    ws = project.run_dir("r1")
+    budget.write_budget(ws, budget.new_budget(1, 10, 60))
+    service.record_spend(project, "r1", iterations=1)
+    with pytest.raises(service.ServiceError):
+        service.advance_run(project, "r1")
+    assert status.read_status(ws)["stopped"]["reason"] == "low-budget"
+
+
+def test_record_spend_accumulates(project):
+    from scieflow.core.run import budget
+
+    # The fixture's run carries no budget.yml, and record_spend returns None
+    # without one — which the service turns into a ServiceError.
+    budget.write_budget(project.run_dir("r1"), budget.new_budget(3, 10, 60))
+    service.record_spend(project, "r1", experiment_runs=2)
+    service.record_spend(project, "r1", experiment_runs=3)
+    assert budget.read_budget(project.run_dir("r1"))["spent"]["experiment_runs"] == 5

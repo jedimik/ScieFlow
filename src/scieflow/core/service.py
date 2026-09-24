@@ -13,7 +13,7 @@ from pathlib import Path
 
 from scieflow.core import agent_config, events, gates, jobs, sandbox, workspace
 from scieflow.core.project import Project, ProjectError
-from scieflow.core.run import budget, status
+from scieflow.core.run import actions, budget, status
 
 RECENT_JOBS = 20
 RECENT_EVENTS = 50
@@ -71,7 +71,6 @@ def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: 
                    cwd: Path | None = None, role: str | None = None,
                    detach: bool = False) -> dict:
     from scieflow.core.agent_run import DispatchError, prepare
-    from scieflow.core.run import actions
 
     try:
         d = prepare(project, agent, Path(prompt_file), cwd, role)
@@ -140,3 +139,54 @@ def answer_gate(project: Project, slug: str, gate_id: str, answer: str,
 
 def agent_settings(project: Project, slug: str | None = None) -> dict:
     return agent_config.resolve(project.root, slug).to_json()
+
+
+def mark_phase(project: Project, slug: str, phase: str, state: str,
+               actor: str = "human") -> dict:
+    """Set a phase's state. The browser and the CLI share this path."""
+    ws = _ws(project, slug)
+    try:
+        return actions.mark_phase(ws, phase, state, actor)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def advance_run(project: Project, slug: str, actor: str = "human") -> dict:
+    """Start the next iteration; refused (and the run checkpointed) when the
+    iteration budget is spent."""
+    ws = _ws(project, slug)
+    try:
+        return actions.advance_iteration(ws, actor)
+    except (actions.BudgetExhausted, ValueError) as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def checkpoint_run(project: Project, slug: str, reason: str, detail: str = "",
+                   actor: str = "human") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return actions.checkpoint_run(ws, reason, detail, actor)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def resume_run(project: Project, slug: str, actor: str = "human") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return actions.resume(ws, actor)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def record_spend(project: Project, slug: str, actor: str = "human", **spent) -> dict:
+    """Record spend the runner cannot measure (remote jobs, manual work)."""
+    ws = _ws(project, slug)
+    if not spent:
+        raise ServiceError("nothing to record; name at least one budget dimension")
+    try:
+        result = actions.record_spend(ws, actor, **spent)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+    if result is None:
+        raise ServiceError(f"run {slug} has no budget.yml")
+    return result
