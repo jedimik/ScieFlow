@@ -25,6 +25,7 @@ from scieflow.core import legacy
 from scieflow.core import sandbox
 from scieflow.core.project import Project
 from scieflow.core.run import actions
+from scieflow.core.run import charter
 
 # Linux caps a single argv string around 128 KiB; above this size the prompt
 # goes to the agent via stdin (using stdin_cmd when defined) instead of argv.
@@ -67,6 +68,27 @@ def build_argv(agent_cfg: dict, prompt: str, root: Path,
         )
         argv.append(token.replace("{prompt}", prompt))
     return argv
+
+
+CHARTER_HEADER = "## The agreed plan for this run"
+
+
+def compose_prompt(run_dir: Path | None, prompt: str) -> str:
+    """The prompt the agent actually receives.
+
+    The charter goes first, every time. That is the whole point of it: a long
+    conversation drifts, and because ScieFlow composes each turn's prompt, the
+    agent can be handed the goal again each time it speaks rather than being
+    trusted to remember it.
+
+    A run with no charter composes exactly as it did before this existed.
+    """
+    if run_dir is None:
+        return prompt
+    agreed = charter.current_text(run_dir).strip()
+    if not agreed:
+        return prompt
+    return f"{CHARTER_HEADER}\n\n{agreed}\n\n---\n\n{prompt}"
 
 
 def owning_run_workspace(prompt_file: Path) -> Path | None:
@@ -180,13 +202,17 @@ def prepare(project: Project, agent: str, prompt_file: Path,
     cwd = cwd or root
     if not cwd.is_absolute():
         cwd = root / cwd
-    prompt = prompt_file.read_text()
+    prompt = compose_prompt(run_dir, prompt_file.read_text())
     use_stdin = len(prompt.encode()) > PROMPT_ARGV_LIMIT
     if use_stdin and "stdin_cmd" in agent_cfg:
         argv = build_argv(agent_cfg, prompt, root, include_prompt=False,
                           template=agent_cfg["stdin_cmd"])
+    elif use_stdin:
+        # No stdin_cmd: drop the {prompt} token from the normal command and
+        # send the text on stdin instead (stdin_text below carries it).
+        argv = build_argv(agent_cfg, prompt, root, include_prompt=False)
     else:
-        argv = build_argv(agent_cfg, prompt, root, include_prompt=not use_stdin)
+        argv = build_argv(agent_cfg, prompt, root)
     disabled = sandbox_disabled_in_run(project, run_dir)
     use_sandbox = sandbox_enabled and not disabled
     writable = (sandbox.writable_for(project, run_dir=run_dir, coordinator=False)

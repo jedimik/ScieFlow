@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scieflow.core import agent_run
+
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_RUN = [sys.executable, "-m", "scieflow.core.agent_run"]
 
@@ -613,3 +615,85 @@ def test_an_unreadable_run_config_does_not_escape_as_a_traceback(tmp_path):
         assert sandbox_disabled_in_run(Project(root), ws) is False
     finally:
         (ws / "config.yml").chmod(0o644)
+
+
+# --- charter pinning ---
+
+
+@pytest.fixture
+def project_with_run(tmp_path):
+    """A project with a run workspace, and a prompt file that
+    ``agent_run.owning_run_workspace`` resolves to that workspace — so a
+    charter written to it is the one ``prepare`` finds."""
+    from scieflow.core.project import Project
+
+    root = make_repo(tmp_path)
+    ws = make_loop_workspace(root)
+    prompt_file = ws / "logs" / "prompt.md"
+    prompt_file.write_text("output: x.md\nkind: hypothesis\nbody")
+    return Project(root), ws, prompt_file
+
+
+def test_the_charter_is_pinned_to_the_top_of_the_prompt(project_with_run):
+    """Falsification test: this is the requirement most likely to rot
+    silently. Without it the only symptom is an agent losing the goal,
+    months later. Deleting the pinning from compose_prompt must fail here."""
+    from scieflow.core.run import charter
+
+    project, ws, prompt_file = project_with_run
+    charter.set_text(ws, "Goal: find a better catalyst. Do not change it.")
+    prompt_file.write_text("output: x.md\nkind: hypothesis\nNow do the next step.")
+
+    dispatch = agent_run.prepare(project, "stub", prompt_file)
+    sent = dispatch.stdin_text or " ".join(dispatch.argv)
+
+    assert "find a better catalyst" in sent
+    assert sent.index("find a better catalyst") < sent.index("Now do the next step")
+
+
+def test_a_run_without_a_charter_composes_the_prompt_unchanged(project_with_run):
+    """Every run that predates this feature has no charter.yml."""
+    project, ws, prompt_file = project_with_run
+    prompt_file.write_text("output: x.md\nkind: hypothesis\nbody")
+
+    dispatch = agent_run.prepare(project, "stub", prompt_file)
+    sent = dispatch.stdin_text or " ".join(dispatch.argv)
+
+    assert agent_run.CHARTER_HEADER not in sent
+    assert sent.rstrip().endswith("body")
+
+
+def test_charter_braces_reach_the_agent_literally(project_with_run):
+    """build_argv substitutes {model}/{reasoning}/{root}/{python} and THEN
+    {prompt}, so charter text is inserted last and its braces are never
+    interpolated. That safety is real but rests entirely on that ordering —
+    this test is what stops a future reorder turning charter text into
+    command templating."""
+    from scieflow.core.run import charter
+
+    project, ws, prompt_file = project_with_run
+    charter.set_text(ws, "Use {model} and {root}; mind $PATH and `backticks`.")
+    prompt_file.write_text("output: x.md\nkind: hypothesis\nbody")
+
+    dispatch = agent_run.prepare(project, "stub", prompt_file)
+    sent = dispatch.stdin_text or " ".join(dispatch.argv)
+
+    assert "{model}" in sent and "{root}" in sent
+    assert "`backticks`" in sent
+
+
+def test_a_charter_that_pushes_the_prompt_over_the_argv_limit_still_sends_it(
+        project_with_run, monkeypatch):
+    """The charter is what makes prompts grow, so this plan is what makes
+    this path reachable. An agent with no `stdin_cmd` (codex has none) must
+    not end up invoked with no prompt at all."""
+    from scieflow.core.run import charter
+
+    project, ws, prompt_file = project_with_run
+    monkeypatch.setattr(agent_run, "PROMPT_ARGV_LIMIT", 200)
+    charter.set_text(ws, "G" * 500)
+    prompt_file.write_text("output: x.md\nkind: hypothesis\nbody")
+
+    dispatch = agent_run.prepare(project, "stub", prompt_file)
+    sent = dispatch.stdin_text or " ".join(dispatch.argv)
+    assert "G" * 500 in sent, "the prompt was dropped instead of sent on stdin"
