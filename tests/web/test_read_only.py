@@ -9,27 +9,22 @@ unlisted mutation appears.
 
 `app.openapi()["paths"]` is what FastAPI resolves the nested routers down to;
 a shallow walk of `app.routes` sees only the top-level mounts and would pass
-while seeing almost nothing.
+while seeing almost nothing. That said, `openapi()` only sees *documented*
+routes: a route registered with `include_in_schema=False` (this app has two,
+both GET today) or one living under a `Mount` never appears here at all. So
+the guarantee this test actually enforces is narrower than "every mutation
+is guarded" — it is "no documented mutation lands unnoticed."
+
+`MUTATING_PATHS` here is shared with `tests/web/test_mutations.py`
+(`tests/web/mutating_paths.py`), which drives its session/CSRF guard
+parametrization from the same list and asserts the two stay in lockstep —
+so a route added to the inventory forces a guard case, not just a listing.
 """
 
 from scieflow.web.app import create_app
+from tests.web.mutating_paths import MUTATING_PATHS
 
 SAFE_METHODS = {"get", "head", "options"}
-
-#: Every path that may be mutated, and the methods allowed on it.
-MUTATING_PATHS = {
-    "/api/v1/runs/{slug}/phase": {"post"},
-    "/api/v1/runs/{slug}/advance": {"post"},
-    "/api/v1/runs/{slug}/checkpoint": {"post"},
-    "/api/v1/runs/{slug}/resume": {"post"},
-    "/api/v1/runs/{slug}/spend": {"post"},
-    "/api/v1/runs/{slug}/gates/{gate_id}/answer": {"post"},
-    "/api/v1/jobs/{job_id}/cancel": {"post"},
-    "/runs/{slug}/gates/{gate_id}": {"post"},
-    "/runs/{slug}/act": {"post"},
-    "/runs/{slug}/jobs/{job_id}/cancel": {"post"},
-    "/agents": {"post"},
-}
 
 
 def _all_methods(project, token="ro-token") -> dict[str, set[str]]:
@@ -41,6 +36,7 @@ def test_enumeration_actually_sees_the_real_routes(project):
     found = _all_methods(project)
     assert "/api/v1/runs/{slug}" in found
     assert "/runs/{slug}" in found
+    assert "/runs/{slug}/jobs/{job_id}" in found
     assert len(found) > 10
 
 

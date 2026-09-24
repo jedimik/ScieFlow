@@ -115,7 +115,10 @@ def spend(slug, experiment_runs, wall_minutes, iterations, as_agent):
                                ("iterations", iterations)) if v}
     if not spent:
         raise click.ClickException("nothing to record; pass at least one dimension")
-    b = actions.record_spend(_ws(slug), _actor(as_agent), **spent)
+    try:
+        b = actions.record_spend(_ws(slug), _actor(as_agent), **spent)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
     if b is None:
         raise click.ClickException(f"run {slug} has no budget.yml")
     click.echo(json.dumps(b["spent"], indent=2, default=str))

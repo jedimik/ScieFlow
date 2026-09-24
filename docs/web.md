@@ -13,11 +13,17 @@ The app is no longer a viewer. From the browser you can answer a gate, mark
 a phase, advance an iteration, checkpoint and resume a run, record spend,
 cancel a job, and change which agent performs which role. For everything
 except cancelling a job, that is exactly what the matching CLI command
-does, because both call the same function in `scieflow.core.service`: `POST
-/runs/r1/act` with `action=checkpoint` and `scieflow run checkpoint r1` run
-the same `service.checkpoint_run`, write the same `checkpoint` event, and
-leave the run in the same state. There is no separate "web logic" to drift
-out of sync with the terminal.
+does, because both reach the same underlying run action: `POST
+/runs/r1/act` with `action=checkpoint` goes through `service.checkpoint_run`,
+and `scieflow run checkpoint r1` calls `actions.checkpoint_run` directly —
+two callers of the one `checkpoint_run` primitive in
+`scieflow.core.run.actions`, not two callers of the same function. Either
+way the run writes the same `checkpoint` event and ends in the same state.
+There is no separate "web logic" to drift out of sync with the terminal —
+each `service.*` wrapper the web app calls is a thin pass-through to the
+same `actions`/`gates` module the CLI uses, so the two cannot disagree about
+what a run's state is, even though only the web currently calls `service`
+for this.
 
 Cancelling a job has no CLI command to mirror — a job you started from a
 terminal you stopped by killing the process yourself. The browser has no
@@ -86,12 +92,15 @@ restrictions, not because the network happens to be trusted:
   `Depends(auth.csrf_protect)` trusts that flag rather than re-parsing the
   body — a router mounted without the middleware fails closed with a 403
   instead of silently passing.
-- **A declared inventory of mutating routes.** `tests/web/test_read_only.py`
+- **A declared inventory of mutating routes.** `tests/web/mutating_paths.py`
   lists every path allowed to accept anything but `GET`/`HEAD`/`OPTIONS`
-  (`MUTATING_PATHS`) and fails the build if a route starts mutating without
-  being added to it, or if a listed route stops mutating — so a new
-  state-changing endpoint can't land unnoticed by this doc or by CSRF
-  coverage.
+  (`MUTATING_PATHS`); `tests/web/test_read_only.py` fails the build if a route
+  starts mutating without being added to it, or if a listed route stops
+  mutating. `tests/web/test_mutations.py` reads the same list — via a sample
+  form body per path — to run its session-guard and CSRF-guard tests, and
+  asserts the two stay in lockstep. So a new state-changing endpoint can't
+  land unnoticed by this doc, and it can't gain an inventory entry without
+  also gaining a guard test.
 - **No CORS.** The app sends no `Access-Control-Allow-Origin` header at
   all, so no other origin's page can read a response from it, cross-site
   request or not.

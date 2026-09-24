@@ -213,6 +213,17 @@ def test_advance_refused_when_the_iteration_budget_is_spent(project):
     assert status.read_status(ws)["stopped"]["reason"] == "low-budget"
 
 
+def test_record_spend_rejects_negative_values(project):
+    """The budget ledger must never move backwards through the service layer
+    — that is the one automatic brake on runaway agent spend."""
+    from scieflow.core.run import budget
+
+    budget.write_budget(project.run_dir("r1"), budget.new_budget(3, 10, 60))
+    with pytest.raises(service.ServiceError, match="negative"):
+        service.record_spend(project, "r1", experiment_runs=-5)
+    assert budget.read_budget(project.run_dir("r1"))["spent"]["experiment_runs"] == 0
+
+
 def test_record_spend_accumulates(project):
     from scieflow.core.run import budget
 

@@ -3,6 +3,7 @@ import pytest
 from scieflow.core import events
 from scieflow.core.run import status
 from scieflow.web import auth
+from tests.web.mutating_paths import MUTATING_PATHS, SAMPLES, concrete_path
 
 
 def post(client, path, **form):
@@ -11,34 +12,30 @@ def post(client, path, **form):
     return client.post(path, data={auth.CSRF_FIELD: token, **form})
 
 
-MUTATIONS = [
-    ("/api/v1/runs/r1/phase", {"phase": "hypothesize", "state": "running"}),
-    ("/api/v1/runs/r1/advance", {}),
-    ("/api/v1/runs/r1/checkpoint", {"reason": "user"}),
-    ("/api/v1/runs/r1/resume", {}),
-    ("/api/v1/runs/r1/spend", {"experiment_runs": "1"}),
-    # Placeholder ids: these two guard tests only need the request refused
-    # before it ever reaches the service layer, so a real gate/job id isn't
-    # necessary — a session-less or CSRF-less request never gets far enough
-    # to look one up.
-    ("/api/v1/runs/r1/gates/no-such-gate/answer", {"answer": "A"}),
-    ("/api/v1/jobs/no-such-job/cancel", {}),
-]
+def test_every_mutating_path_has_a_guard_sample():
+    """The inventory (`MUTATING_PATHS`, also read by test_read_only.py) and
+    the guard samples below are two different data structures; nothing but
+    this assertion keeps them in lockstep. Without it, a route can be added
+    to one and not the other — which is exactly what happened before (the
+    inventory grew to 11 paths while the guard tests covered 7)."""
+    assert set(SAMPLES) == set(MUTATING_PATHS)
 
 
-@pytest.mark.parametrize("path, form", MUTATIONS)
-def test_every_mutation_needs_a_session(project, path, form):
+@pytest.mark.parametrize("template", sorted(MUTATING_PATHS))
+def test_every_mutation_needs_a_session(project, template):
     from fastapi.testclient import TestClient
 
     from scieflow.web.app import create_app
 
     with TestClient(create_app(project, "tok")) as anonymous:
-        assert anonymous.post(path, data=form).status_code in (401, 403)
+        response = anonymous.post(concrete_path(template), data=SAMPLES[template])
+        assert response.status_code in (401, 403)
 
 
-@pytest.mark.parametrize("path, form", MUTATIONS)
-def test_every_mutation_needs_csrf(client, path, form):
-    assert client.post(path, data=form).status_code == 403
+@pytest.mark.parametrize("template", sorted(MUTATING_PATHS))
+def test_every_mutation_needs_csrf(client, template):
+    response = client.post(concrete_path(template), data=SAMPLES[template])
+    assert response.status_code == 403
 
 
 def test_mark_phase_over_http(client, project):
@@ -60,6 +57,29 @@ def test_answer_a_gate_over_http(client, project):
                 answer="A").status_code == 200
     assert client.get("/api/v1/gates").json() == []
     assert "gate.answered" in [e["type"] for e in events.read(project.run_dir("r1"))]
+
+
+def test_spend_over_http_records_the_ledger(client, project):
+    """The spend route has only ever had guard tests; a positive round trip
+    was missing."""
+    from scieflow.core.run import budget
+
+    response = post(client, "/api/v1/runs/r1/spend",
+                    experiment_runs="2", wall_minutes="1.5")
+    assert response.status_code == 200
+    b = budget.read_budget(project.run_dir("r1"))
+    assert b["spent"]["experiment_runs"] == 2
+    assert b["spent"]["wall_minutes"] == 1.5
+
+
+def test_negative_spend_over_http_is_refused_and_leaves_the_ledger_alone(client, project):
+    """`budget.spent.experiment_runs` must never go negative through this
+    route — that is the one automatic brake on runaway agent spend."""
+    from scieflow.core.run import budget
+
+    response = post(client, "/api/v1/runs/r1/spend", experiment_runs="-5")
+    assert response.status_code != 200
+    assert budget.read_budget(project.run_dir("r1"))["spent"]["experiment_runs"] == 0
 
 
 def test_a_mutation_on_an_unknown_run_is_404(client):
