@@ -37,6 +37,19 @@
     <span class="dim">{{ gate.kind }}</span>
     {% if gate.requires_human %}<span class="dim">[needs you]</span>{% endif %}
     <div>{{ gate.question }}</div>
+    {% if gate.options %}<div class="dim">options: {{ gate.options|join(", ") }}</div>{% endif %}
+    <form method="post" action="/runs/{{ gate.slug }}/gates/{{ gate.id }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      {% if gate.options %}
+        <select name="answer">
+          {% for option in gate.options %}<option>{{ option }}</option>{% endfor %}
+        </select>
+      {% else %}
+        <input name="answer" required>
+      {% endif %}
+      <input name="note" placeholder="note (optional)">
+      <button>Answer</button>
+    </form>
   </div>
   {% endfor %}
 {% endif %}

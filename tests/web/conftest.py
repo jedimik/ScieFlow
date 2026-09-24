@@ -49,3 +49,22 @@ def client(project):
     with TestClient(create_app(project, TOKEN)) as signed_in:
         signed_in.get(f"/healthz?token={TOKEN}")     # exchange token for cookies
         yield signed_in
+
+
+@pytest.fixture
+def running_job(project):
+    """A job still running, so it can be cancelled.
+
+    `jobs.start` returns `(Job, subprocess.Popen)`, not just a `Job` — unpack
+    both. Teardown mirrors `jobs.wait`'s use elsewhere in this suite
+    (tests/web/test_sse.py): `cancel` sends the kill signal and updates the
+    record, and `wait` then reaps the subprocess so no `sleep 300` is left
+    running (or a zombie) once the test ends, whether or not the test itself
+    already cancelled the job.
+    """
+    job, proc = jobs.start(project, [sys.executable, "-c", "import time; time.sleep(300)"],
+                           kind="agent", cwd=project.root,
+                           run_dir=project.run_dir("r1"), label="sleepy")
+    yield job
+    jobs.cancel(job)
+    jobs.wait(job, proc)

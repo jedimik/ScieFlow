@@ -25,6 +25,9 @@ MUTATING_PATHS = {
     "/api/v1/runs/{slug}/spend": {"post"},
     "/api/v1/runs/{slug}/gates/{gate_id}/answer": {"post"},
     "/api/v1/jobs/{job_id}/cancel": {"post"},
+    "/runs/{slug}/gates/{gate_id}": {"post"},
+    "/runs/{slug}/act": {"post"},
+    "/runs/{slug}/jobs/{job_id}/cancel": {"post"},
 }
 
 
