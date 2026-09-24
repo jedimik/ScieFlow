@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from scieflow.core import jobs as jobs_mod
@@ -55,6 +55,46 @@ async def dashboard(request: Request) -> HTMLResponse:
         "gates": service.open_gates(project),
         "csrf": auth.csrf_token(request),
     })
+
+
+@router.get("/agents", response_class=HTMLResponse)
+async def agents_page(request: Request, slug: str = "", error: str = "",
+                      assign: list[str] = Query(default=[])) -> HTMLResponse:
+    from scieflow.core import agent_config
+
+    project = _project(request)
+    preview, problem = None, error
+    if assign:
+        try:
+            preview = service.plan_staffing(project, assign, slug or None)
+        except service.ServiceError as exc:
+            problem = str(exc)
+    return TEMPLATES.TemplateResponse(request, "agents.html", {
+        "slug": slug,
+        "settings": service.agent_settings(project, slug or None),
+        "roles": list(agent_config.ROLES),
+        "runs": service.list_runs(project),
+        "assign": assign,
+        "preview": preview,
+        "error": problem,
+        "csrf": auth.csrf_token(request),
+    })
+
+
+@router.post("/agents", dependencies=MUTATE)
+async def apply_agents(request: Request, slug: str = Form(""),
+                       assign: list[str] = Form(default=[])):
+    target = "/agents" + (f"?slug={quote(slug)}" if slug else "")
+    if not assign:
+        return RedirectResponse(target + ("&" if slug else "?")
+                                + "error=" + quote("choose a role and an agent first"),
+                                status_code=303)
+    try:
+        service.apply_staffing(_project(request), assign, slug or None)
+    except service.ServiceError as exc:
+        return RedirectResponse(target + ("&" if slug else "?")
+                                + "error=" + quote(str(exc)), status_code=303)
+    return RedirectResponse(target, status_code=303)
 
 
 @router.get("/runs/{slug}", response_class=HTMLResponse)

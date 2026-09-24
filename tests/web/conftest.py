@@ -19,9 +19,23 @@ def project(tmp_path):
     """A project with one run that has state, budget, events, a job and a gate."""
     (tmp_path / "config").mkdir()
     (tmp_path / "config" / "agents.yml").write_text(
-        f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1}}\n')
+        f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1}}\n'
+        '  stub2: {cmd: "%s", enabled: true, timeout_min: 1}\n' % STUB)
     (tmp_path / "config" / "defaults.yml").write_text(
-        "assignments:\n  research.outline: stub\n")
+        "assignments:\n"
+        "  loop.experiment: stub\n"
+        "  loop.literature: stub\n"
+        "  loop.paper-draft: stub\n"
+        "  research.search: [stub]\n"
+        "  research.cross-review: [stub]\n"
+        "  research.gap-analysis: [stub]\n"
+        "  research.debate: [stub]\n"
+        "  research.journal-profile: [stub]\n"
+        "  research.reviewer: stub\n"
+        "  research.submitter: stub2\n"
+        "  research.outline: stub\n"
+        "  research.draft-authors: [stub]\n"
+        "  research.consistency: stub\n")
     (tmp_path / "schemas").mkdir()
     for name in ("status", "gates", "status-research"):
         (tmp_path / "schemas" / f"{name}.yml").write_text(

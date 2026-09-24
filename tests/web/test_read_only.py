@@ -28,6 +28,7 @@ MUTATING_PATHS = {
     "/runs/{slug}/gates/{gate_id}": {"post"},
     "/runs/{slug}/act": {"post"},
     "/runs/{slug}/jobs/{job_id}/cancel": {"post"},
+    "/agents": {"post"},
 }
 
 

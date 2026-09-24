@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Agents — ScieFlow{% endblock %}
+{% block nav %}<a href="/">← all runs</a>{% endblock %}
+{% block content %}
+<h1>Agents</h1>
+{% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
+<p class="dim">
+  {% if slug %}Editing run <strong>{{ slug }}</strong> — a workspace only stores
+  what differs from the defaults.{% else %}Editing the project defaults.{% endif %}
+  Per-agent fields, promotions and demotions stay on the CLI &mdash; see
+  <code>docs/agents.md</code>.
+</p>
+
+<form method="get" action="/agents">
+  <select name="slug" onchange="this.form.submit()">
+    <option value="">project defaults</option>
+    {% for run in runs %}
+    <option value="{{ run.slug }}" {% if run.slug == slug %}selected{% endif %}>{{ run.slug }}</option>
+    {% endfor %}
+  </select>
+  <noscript><button>Switch</button></noscript>
+</form>
+
+<h2>Who does what</h2>
+<table>
+  <tr><th>role</th><th>agent</th><th>from</th></tr>
+  {% for role in roles %}
+  {% set current = settings.assignments.get(role) %}
+  <tr>
+    <td>{{ role }}</td>
+    <td>{{ current.value if current else "—" }}</td>
+    <td class="dim">{{ current.source if current else "unset" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Change an assignment</h2>
+<form method="get" action="/agents" class="actions">
+  <input type="hidden" name="slug" value="{{ slug }}">
+  <!-- Unused by this GET, but keeps a CSRF token in the page even before a
+       preview has produced the apply form below. -->
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <!-- One select carrying "role=agent", so the preview needs no JavaScript. -->
+  <select name="assign">
+    {% for role in roles %}{% for name in settings.agents %}
+    <option value="{{ role }}={{ name }}">{{ role }} &rarr; {{ name }}</option>
+    {% endfor %}{% endfor %}
+  </select>
+  <button>Preview</button>
+</form>
+{% if preview %}
+  {% if preview.empty %}
+    <p class="dim">Already configured that way; nothing to write.</p>
+  {% else %}
+    <pre class="diff">{{ preview.diff }}</pre>
+    {% for warning in preview.warnings %}<p class="state-failed">{{ warning }}</p>{% endfor %}
+    <form method="post" action="/agents">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="slug" value="{{ slug }}">
+      {% for one in assign %}<input type="hidden" name="assign" value="{{ one }}">{% endfor %}
+      <button>Apply these changes</button>
+    </form>
+  {% endif %}
+{% endif %}
+{% endblock %}
