@@ -72,26 +72,16 @@ async def _supplied_csrf(request: Request) -> str:
     `body()` first, and `form()` afterwards reads from that cache for both
     urlencoded and multipart payloads.
 
-    Calling this a second time further downstream — from the route's own
-    `csrf_protect` dependency, after FastAPI has already parsed a
-    `Form(...)` parameter on that same request — finds the stream already
-    consumed by that earlier parse (FastAPI reads the form for its own
-    parameters before dependencies run, and does so via `Request.form()`
-    directly, which never populates `_body`). `body()` then raises rather
-    than replaying a cache that was never written; `form()` alone is still
-    safe there, because Starlette caches the parsed `FormData` regardless
-    of which caller parses it first.
+    Only the middleware below calls this. The per-route `csrf_protect`
+    dependency trusts the verdict the middleware already recorded instead of
+    parsing the body a second time — see its docstring for why.
     """
     header = request.headers.get(CSRF_HEADER)
     if header:
         return header
     if not request.headers.get("content-type", "").startswith(FORM_TYPES):
         return ""
-    try:
-        await request.body()         # cache it, so the route still sees it
-    except RuntimeError as exc:
-        if "Stream consumed" not in str(exc):
-            raise
+    await request.body()            # cache it, so the route still sees it
     form = await request.form()
     return str(form.get(CSRF_FIELD) or "")
 
@@ -101,11 +91,21 @@ def csrf_ok(cookie: str, supplied: str) -> bool:
 
 
 async def csrf_protect(request: Request) -> None:
-    """FastAPI dependency for unsafe methods: double-submit cookie check."""
+    """FastAPI dependency for unsafe methods: double-submit cookie check.
+
+    Every unsafe request already passed through `install_session`'s
+    middleware before reaching any route — that is where the double-submit
+    check actually happens, on `request.state.csrf_checked`, because it is
+    the one place that can read the token as a form field without racing
+    FastAPI's own `Form(...)` parsing for the route's parameters (which
+    consumes the same body first, downstream of this dependency, for any
+    route that declares one). So this dependency does not re-derive the
+    verdict; it trusts the flag. A missing flag — a router mounted without
+    `install_session`, say — fails closed as a 403, not a silent pass.
+    """
     if request.method in SAFE_METHODS:
         return
-    if not csrf_ok(request.cookies.get(CSRF_COOKIE) or "",
-                   await _supplied_csrf(request)):
+    if not getattr(request.state, "csrf_checked", False):
         raise HTTPException(status_code=403, detail="CSRF token missing or wrong")
 
 
@@ -141,8 +141,11 @@ def install_session(app, refuse=None) -> None:
             # Central enforcement: every unsafe request needs the
             # double-submit token, as a header or a form field, whether or
             # not the route that will handle it also declares
-            # `Depends(csrf_protect)`.
+            # `Depends(csrf_protect)`. Record the verdict on the request
+            # state so that dependency can trust it instead of re-parsing
+            # the body — see `csrf_protect`'s docstring for why.
             if not csrf_ok(request.cookies.get(CSRF_COOKIE) or "",
                            await _supplied_csrf(request)):
                 return refuse(request, 403, "CSRF token missing or wrong")
+            request.state.csrf_checked = True
         return await call_next(request)

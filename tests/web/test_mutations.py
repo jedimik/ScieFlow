@@ -17,6 +17,12 @@ MUTATIONS = [
     ("/api/v1/runs/r1/checkpoint", {"reason": "user"}),
     ("/api/v1/runs/r1/resume", {}),
     ("/api/v1/runs/r1/spend", {"experiment_runs": "1"}),
+    # Placeholder ids: these two guard tests only need the request refused
+    # before it ever reaches the service layer, so a real gate/job id isn't
+    # necessary — a session-less or CSRF-less request never gets far enough
+    # to look one up.
+    ("/api/v1/runs/r1/gates/no-such-gate/answer", {"answer": "A"}),
+    ("/api/v1/jobs/no-such-job/cancel", {}),
 ]
 
 
