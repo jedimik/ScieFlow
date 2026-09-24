@@ -2578,6 +2578,7 @@ research = [
 web = [
     { name = "fastapi" },
     { name = "jinja2" },
+    { name = "python-multipart" },
     { name = "uvicorn" },
 ]
 
@@ -2609,6 +2610,7 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'experiments'", specifier = ">=3.8" },
     { name = "nicegui", marker = "extra == 'news-gui'", specifier = ">=2.0" },
     { name = "numpy", marker = "extra == 'experiments'", specifier = ">=1.26" },
+    { name = "python-multipart", marker = "extra == 'web'", specifier = ">=0.0.18" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "questionary", specifier = ">=2.0" },
     { name = "requests", marker = "extra == 'research'", specifier = ">=2.31" },

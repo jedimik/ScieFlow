@@ -28,10 +28,14 @@ chats = [
     "jsonschema>=4.21",
 ]
 # Local web app (scieflow.web): `scieflow serve`, loopback only.
+# python-multipart is required by FastAPI's Form(...) parameters at
+# route-definition time (import fails without it) — declare it explicitly
+# rather than relying on it arriving transitively via another extra.
 web = [
     "fastapi>=0.110",
     "uvicorn>=0.27",
     "jinja2>=3.1",
+    "python-multipart>=0.0.18",
 ]
 # Local web GUI for the news module (`scieflow news gui`).
 news-gui = [
