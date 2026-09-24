@@ -185,6 +185,30 @@ Settable agent fields: `model`, `reasoning`, `timeout_min`, `cmd`,
 `stdin_cmd`, and — in the defaults only — `enabled`. New agents are added to
 `config/agents.yml` by hand.
 
+## The Agents page
+
+`scieflow serve` (see [The local web app](web.md)) has a browser page at
+`/agents` for the one piece of this that comes up often enough to want a
+form: **which agent performs which role**. `GET /agents` shows the
+assignments in effect for the project defaults, or for one run with
+`?slug=<run>`; picking a role and an agent and choosing Preview calls
+`service.plan_staffing`, the same planning step `scieflow agent configure`
+uses, and shows the same unified diff `configure` would print. Nothing is
+written until you choose Apply, which posts to `/agents` and calls
+`service.apply_staffing` — the same validation, the same diff, the same
+`assignments:` key in `config/defaults.yml` or the run's `config.yml`.
+`?assign=role=agent` can be repeated in the URL to preview more than one
+change at once, the same way `--assign` is repeatable on the command line.
+
+The page is deliberately narrower than `configure`: it covers role
+assignment only. Per-agent field edits (`model`, `reasoning`,
+`timeout_min`, `cmd`, `stdin_cmd`, `enabled`), and granting or removing a
+`--promote` exception (see ["Support agents as primary, per
+role"](#support-agents-as-primary-per-role) above), stay on the CLI —
+`scieflow agent configure --set ...`, `--promote` and `--demote`. A
+one-click promotion would work against the whole point of `--promote`
+being a deliberate, visible exception, so the page never offers it.
+
 Older research runs may carry top-level `agents:`, `reviewer:`, `submitter:`,
 `outline_agent:` or `consistency_agent:` keys. They are still read, and any
 assignment written by `configure` takes precedence over them.

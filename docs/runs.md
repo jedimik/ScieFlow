@@ -7,10 +7,12 @@ research loop, a paper draft and a literature review are all runs.
 
 Everything on this page is a thin caller of one service layer
 (`scieflow.core.service`), so the CLI, the coordinator agent and the local
-web app (`scieflow serve`, see [The local web app](web.md)) all read the
-same state through it. The web app is read-only in this milestone —
-changing a run (marking a phase, advancing, answering a gate) is still
-terminal-only.
+web app (`scieflow serve`, see [The local web app](web.md)) all read and
+change the same state through it. Every command below has a browser
+equivalent on the run's page — marking a phase, advancing, checkpointing,
+resuming, recording spend and answering a gate all go through the same
+service function either way, so the two never disagree about what a run's
+state is.
 
 ## The state of a run
 
@@ -33,7 +35,21 @@ uv run scieflow run spend <slug> --experiment-runs 4   # spend the runner can't 
 ```
 
 Every one of those writes under a lock, validates against `schemas/status.yml`
-and records an event.
+and records an event. Each has a browser form on `/runs/<slug>` that does
+the same thing:
+
+| CLI command | On the run page |
+|---|---|
+| `run mark` | the phase form — pick a phase and a state, "Mark phase" |
+| `run advance` | "Advance iteration" |
+| `run checkpoint` | the "Checkpoint" button (a reason of `user` and whatever you type as detail) |
+| `run resume` | the "Resume" button, shown in its place once the run is stopped |
+| `run spend` | the "Record spend" form |
+| `gate answer` | each open gate's own answer form, on the run page and the dashboard |
+
+The only difference is who is recorded as `actor`: a command run with
+`--as-agent` logs `agent`, the browser's forms log `human` — same as running
+the command without `--as-agent` yourself.
 
 ## History: the event log
 
@@ -85,6 +101,12 @@ uv run scieflow gate show <slug> <id>
 uv run scieflow gate answer <slug> <id> approve
 uv run scieflow gate wait <slug> <id>      # what the agent blocks on
 ```
+
+`gate answer` is the one command with two browser homes, not one: an open
+gate's question, options and an answer form appear on both the dashboard
+(`/`, across every run) and the run page (`/runs/<slug>`), so answering the
+gate blocking a run has never needed you to know which run it belongs to
+first.
 
 The kinds live in `schemas/gates.yml`:
 
