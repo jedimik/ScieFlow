@@ -24,6 +24,7 @@ TYPES = frozenset({
     "job.queued", "job.started", "job.finished", "job.failed", "job.timeout",
     "job.cancelled", "job.lost", "job.refused", "sandbox.disabled",
     "gate.opened", "gate.answered", "gate.withdrawn",
+    "charter.set", "charter.reverted",
     "integration.call", "sync.pushed", "sync.pulled",
 })
 
