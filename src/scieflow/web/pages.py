@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from scieflow.core import jobs as jobs_mod
@@ -174,7 +174,7 @@ async def act(request: Request, slug: str, action: str = Form(...),
                                           ("iterations", iterations)) if v}
             service.record_spend(project, slug, **recorded)
         else:
-            raise HTTPException(status_code=400, detail=f"unknown action {action!r}")
+            return _back(slug, f"unknown action {action!r}")
     except service.ServiceError as exc:
         return _back(slug, str(exc))
     return _back(slug)

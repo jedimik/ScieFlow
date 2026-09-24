@@ -62,6 +62,23 @@ def test_good_token_redirects_without_the_token_and_sets_cookies(app):
         assert client.get("/guarded").json() == {"seen": True}
 
 
+def test_reopening_the_token_url_keeps_the_same_csrf_cookie(app):
+    """The printed `?token=` URL is an ordinary thing to open twice — a
+    second tab, a bookmark. A fresh CSRF cookie on the second exchange would
+    403 a form the first tab already rendered, purely because its embedded
+    token no longer matches the rotated cookie."""
+    with TestClient(app) as client:
+        client.get(f"/guarded?token={TOKEN}")
+        first_csrf = client.cookies[auth.CSRF_COOKIE]
+        response = client.get(f"/guarded?token={TOKEN}", follow_redirects=False)
+        cookies = response.headers.get_list("set-cookie")
+        assert not any(c.startswith(f"{auth.CSRF_COOKIE}=") for c in cookies)
+        assert client.cookies[auth.CSRF_COOKIE] == first_csrf
+        # the token from the first exchange still works
+        response = client.post("/guarded", headers={auth.CSRF_HEADER: first_csrf})
+        assert response.status_code == 200
+
+
 def test_session_cookie_is_not_the_token(app):
     with TestClient(app) as client:
         client.get(f"/guarded?token={TOKEN}")
@@ -103,6 +120,22 @@ def test_csrf_is_enforced_centrally_not_just_per_route(app):
         with_header = client.post("/guarded-no-csrf-dependency",
                                   headers={auth.CSRF_HEADER: csrf})
         assert with_header.status_code == 200
+
+
+def test_malformed_multipart_body_is_400_not_500(app):
+    """`request.form()` parses a multipart body eagerly, upstream of every
+    exception handler (those live in ExceptionMiddleware, downstream of
+    call_next). A broken body must fail closed with a clean 400 from the
+    middleware itself, not leak a raw traceback."""
+    with TestClient(app) as client:
+        client.get(f"/guarded?token={TOKEN}")
+        response = client.post(
+            "/guarded",
+            content=b"not actually multipart",
+            headers={"content-type": "multipart/form-data; boundary=zzz"},
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]
 
 
 def test_unauthorized_html_explains_how_to_get_in(app):

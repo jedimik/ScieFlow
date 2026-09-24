@@ -5,14 +5,16 @@ A **run** is one piece of research with its own directory under
 jobs it started, the approvals it asked for, and everything it produced. The
 research loop, a paper draft and a literature review are all runs.
 
-Everything on this page is a thin caller of one service layer
-(`scieflow.core.service`), so the CLI, the coordinator agent and the local
-web app (`scieflow serve`, see [The local web app](web.md)) all read and
-change the same state through it. Every command below has a browser
-equivalent on the run's page — marking a phase, advancing, checkpointing,
-resuming, recording spend and answering a gate all go through the same
-service function either way, so the two never disagree about what a run's
-state is.
+Everything on this page is a thin caller of one set of run primitives
+(`scieflow.core.run.actions` and `scieflow.core.run.gates`), so the CLI, the
+coordinator agent and the local web app (`scieflow serve`, see [The local web
+app](web.md)) all read and change the same state through them. The CLI calls
+those functions directly; the web app calls them through a thin wrapper layer
+(`scieflow.core.service`) that exists for the browser's sake. Every command
+below has a browser equivalent on the run's page — marking a phase,
+advancing, checkpointing, resuming, recording spend and answering a gate all
+go through the same underlying run action either way, so the two never
+disagree about what a run's state is.
 
 ## The state of a run
 

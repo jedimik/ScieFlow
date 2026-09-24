@@ -21,7 +21,6 @@ CSRF_FIELD = "csrf_token"
 FORM_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data")
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"})
-OPEN_PATHS = frozenset({"/healthz"})
 
 
 def loopback_only(host: str) -> str:
@@ -39,13 +38,19 @@ def new_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def _issue_session(app, response) -> None:
+def _issue_session(request: Request, response) -> None:
     session = secrets.token_urlsafe(32)
-    app.state.sessions.add(session)
+    request.app.state.sessions.add(session)
     response.set_cookie(SESSION_COOKIE, session, httponly=True,
                         samesite="strict", path="/")
-    response.set_cookie(CSRF_COOKIE, secrets.token_urlsafe(32), httponly=False,
-                        samesite="strict", path="/")
+    # Only issue a fresh CSRF cookie when this request carries none. The
+    # printed `?token=` URL is an ordinary thing to open twice (a second tab,
+    # a bookmark) — rotating the cookie on every exchange would 403 a form
+    # rendered before the re-open, purely because its embedded token no
+    # longer matches the new cookie.
+    if not request.cookies.get(CSRF_COOKIE):
+        response.set_cookie(CSRF_COOKIE, secrets.token_urlsafe(32), httponly=False,
+                            samesite="strict", path="/")
 
 
 def has_session(request: Request) -> bool:
@@ -135,7 +140,7 @@ def install_session(app, refuse=None) -> None:
                 return refuse(request, 403, "bad token")
             clean = str(request.url.remove_query_params("token"))
             response = RedirectResponse(clean, status_code=303)
-            _issue_session(request.app, response)
+            _issue_session(request, response)
             return response
         if request.method not in SAFE_METHODS:
             # Central enforcement: every unsafe request needs the
@@ -144,8 +149,18 @@ def install_session(app, refuse=None) -> None:
             # `Depends(csrf_protect)`. Record the verdict on the request
             # state so that dependency can trust it instead of re-parsing
             # the body — see `csrf_protect`'s docstring for why.
-            if not csrf_ok(request.cookies.get(CSRF_COOKIE) or "",
-                           await _supplied_csrf(request)):
+            try:
+                supplied_csrf = await _supplied_csrf(request)
+            except Exception:
+                # `request.form()` parses the body eagerly; a malformed
+                # multipart payload (bad boundary, truncated body) raises
+                # straight out of this middleware, upstream of every
+                # exception handler (those live in ExceptionMiddleware,
+                # downstream of call_next). Fail closed with a clean 400
+                # instead of leaking a 500 traceback from the one function
+                # that runs before routing decides anything.
+                return refuse(request, 400, "malformed request body")
+            if not csrf_ok(request.cookies.get(CSRF_COOKIE) or "", supplied_csrf):
                 return refuse(request, 403, "CSRF token missing or wrong")
             request.state.csrf_checked = True
         return await call_next(request)
