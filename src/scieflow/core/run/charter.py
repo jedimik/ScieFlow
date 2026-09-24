@@ -74,6 +74,8 @@ def _append(ws: Path, text: str, actor: str, note: str) -> dict:
 def set_text(ws: Path, text: str, actor: str = "human", note: str = "") -> dict:
     if not text or not text.strip():
         raise CharterError("a charter needs text")
+    if actor not in events.ACTORS:
+        raise CharterError(f"unknown actor {actor!r} (one of {', '.join(sorted(events.ACTORS))})")
     version = _append(ws, text, actor, note)
     events.emit(ws, "charter.set", actor, version=version["n"], note=note)
     return version
@@ -85,6 +87,8 @@ def revert(ws: Path, version: int, actor: str = "human") -> dict:
         wanted = int(version)
     except (TypeError, ValueError) as exc:
         raise CharterError(f"not a version number: {version!r}") from exc
+    if actor not in events.ACTORS:
+        raise CharterError(f"unknown actor {actor!r} (one of {', '.join(sorted(events.ACTORS))})")
     match = next((v for v in read(ws)["versions"] if v.get("n") == wanted), None)
     if match is None:
         raise CharterError(f"no charter version {wanted}")

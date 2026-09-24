@@ -75,6 +75,22 @@ def test_empty_text_is_refused(ws):
         charter.set_text(ws, "   ")
 
 
+def test_an_invalid_actor_in_set_text_is_refused_before_anything_is_written(ws):
+    """An invalid actor must not create a version, because that would leave
+    the file in disagreement with the event log."""
+    with pytest.raises(charter.CharterError, match="actor"):
+        charter.set_text(ws, "goal text", actor="bogus")
+    assert charter.read(ws)["versions"] == []
+
+
+def test_an_invalid_actor_in_revert_is_refused_before_anything_is_written(ws):
+    """An invalid actor must not create a version, even on revert."""
+    charter.set_text(ws, "Original goal.")
+    with pytest.raises(charter.CharterError, match="actor"):
+        charter.revert(ws, 1, actor="invalid")
+    assert len(charter.read(ws)["versions"]) == 1
+
+
 def test_concurrent_writers_do_not_lose_a_version(ws):
     """Two tabs, or a tab and the CLI. Versions are append-only and numbered,
     so a lost update or two versions sharing a number would corrupt the very
