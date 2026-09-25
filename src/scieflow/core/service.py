@@ -13,7 +13,7 @@ from pathlib import Path
 
 from scieflow.core import agent_config, agent_configure as acf, events, gates, jobs, sandbox, workspace
 from scieflow.core.project import Project, ProjectError
-from scieflow.core.run import actions, budget, status
+from scieflow.core.run import actions, budget, charter, status
 
 RECENT_JOBS = 20
 RECENT_EVENTS = 50
@@ -173,6 +173,32 @@ def apply_staffing(project: Project, assignments: list[str],
     acf.write(plan)
     return {"written": [str(c.path.relative_to(project.root)) for c in plan.changes],
             "warnings": list(plan.warnings)}
+
+
+def run_charter(project: Project, slug: str) -> dict:
+    """The run's agreed plan: current text plus the whole version history."""
+    ws = _ws(project, slug)
+    doc = charter.read(ws)
+    return {"current": doc["current"], "text": charter.current_text(ws),
+            "versions": charter.history(ws)}
+
+
+def set_charter(project: Project, slug: str, text: str,
+                actor: str = "human", note: str = "") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return charter.set_text(ws, text, actor, note)
+    except charter.CharterError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def revert_charter(project: Project, slug: str, version: int,
+                   actor: str = "human") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return charter.revert(ws, version, actor)
+    except charter.CharterError as exc:
+        raise ServiceError(str(exc)) from exc
 
 
 def mark_phase(project: Project, slug: str, phase: str, state: str,

@@ -32,3 +32,5 @@ pre.log { background: #0b0d12; color: #d7dbe4; padding: .8rem; overflow: auto;
 .gate.human { border-left-color: var(--bad); }
 .actions { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; }
 form.inline { display: inline; }
+.charter { white-space: pre-wrap; padding: .75rem; border-left: 3px solid var(--warn); }
+textarea { width: 100%; font: inherit; }

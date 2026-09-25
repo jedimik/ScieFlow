@@ -23,9 +23,12 @@ MUTATING_PATHS = {
     "/api/v1/runs/{slug}/spend": {"post"},
     "/api/v1/runs/{slug}/gates/{gate_id}/answer": {"post"},
     "/api/v1/jobs/{job_id}/cancel": {"post"},
+    "/api/v1/runs/{slug}/charter": {"post"},
+    "/api/v1/runs/{slug}/charter/revert": {"post"},
     "/runs/{slug}/gates/{gate_id}": {"post"},
     "/runs/{slug}/act": {"post"},
     "/runs/{slug}/jobs/{job_id}/cancel": {"post"},
+    "/runs/{slug}/charter": {"post"},
     "/agents": {"post"},
 }
 
@@ -43,9 +46,12 @@ SAMPLES: dict[str, dict] = {
     "/api/v1/runs/{slug}/spend": {"experiment_runs": "1"},
     "/api/v1/runs/{slug}/gates/{gate_id}/answer": {"answer": "A"},
     "/api/v1/jobs/{job_id}/cancel": {},
+    "/api/v1/runs/{slug}/charter": {"text": "Find a better catalyst."},
+    "/api/v1/runs/{slug}/charter/revert": {"version": "1"},
     "/runs/{slug}/gates/{gate_id}": {"answer": "A"},
     "/runs/{slug}/act": {"action": "resume"},
     "/runs/{slug}/jobs/{job_id}/cancel": {},
+    "/runs/{slug}/charter": {"text": "A goal."},
     "/agents": {"assign": "research.outline=stub2"},
 }
 

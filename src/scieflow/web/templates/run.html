@@ -15,6 +15,45 @@
      — {{ detail.status.stopped.get("detail", "") }}</p>
 {% endif %}
 
+<h2>The agreed plan</h2>
+{% if not charter.text %}
+  <p class="dim">No charter yet. Whatever you write here is put at the top of
+     every prompt this run sends an agent, so a long conversation cannot drift
+     away from it.</p>
+{% else %}
+  <pre class="charter">{{ charter.text }}</pre>
+{% endif %}
+<form method="post" action="/runs/{{ slug }}/charter">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <textarea name="text" rows="6" placeholder="What this run is for">{{ charter.text }}</textarea>
+  <input name="note" placeholder="why you are changing it (optional)">
+  <button name="action" value="set">Save the plan</button>
+</form>
+{% if charter.versions|length > 1 %}
+<details>
+  <summary class="dim">{{ charter.versions|length }} versions</summary>
+  <table>
+    {% for version in charter.versions %}
+    <tr>
+      <td class="dim">v{{ version.n }}</td>
+      <td class="dim">{{ version.ts[11:19] }}</td>
+      <td class="dim">{{ version.actor }}</td>
+      <td>{{ version.note }}</td>
+      <td>
+        {% if version.n != charter.current %}
+        <form method="post" action="/runs/{{ slug }}/charter" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="version" value="{{ version.n }}">
+          <button name="action" value="revert">Restore</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</details>
+{% endif %}
+
 <h2>Phases</h2>
 <table>
   {% for phase, state in phases %}
