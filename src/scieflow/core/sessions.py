@@ -38,7 +38,11 @@ def _events(output: str):
             continue
         try:
             yield json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # RecursionError is a RuntimeError, not a ValueError, but a
+            # sufficiently nested object raises it from deep inside the
+            # decoder — it means "unparseable" here just as much as a
+            # malformed one does, and must degrade the same way.
             continue
 
 
@@ -48,8 +52,10 @@ def _claude(output: str) -> Session:
         if session_id is None and event.get("session_id"):
             session_id = str(event["session_id"])
         if event.get("type") == "assistant":
-            for block in event.get("message", {}).get("content", []):
-                if block.get("type") == "text":
+            message = event.get("message")
+            content = message.get("content", []) if isinstance(message, dict) else []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
                     said.append(block.get("text", ""))
         elif event.get("type") == "result" and event.get("result"):
             said.append(str(event["result"]))
@@ -62,8 +68,8 @@ def _codex(output: str) -> Session:
         if session_id is None and event.get("type") == "thread.started":
             session_id = str(event.get("thread_id") or "") or None
         if event.get("type") == "item.completed":
-            item = event.get("item") or {}
-            if item.get("type") == "agent_message" and item.get("text"):
+            item = event.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message" and item.get("text"):
                 said.append(str(item["text"]))
     return Session(session_id, _readable(said, output))
 
@@ -85,7 +91,7 @@ def _agy(output: str) -> Session:
     session_id, said = None, []
     try:
         obj = json.loads(output.strip())
-    except ValueError:
+    except (ValueError, RecursionError):
         obj = None
     if isinstance(obj, dict):
         if obj.get("conversation_id"):
@@ -131,5 +137,13 @@ def parse(agent_cfg: dict, output: str) -> Session:
 
 def can_converse(agent_cfg: dict) -> bool:
     """An agent can host a conversation only if it can both start a session
-    and resume one. Anything less would silently restart the context."""
-    return bool(agent_cfg.get("session_cmd")) and bool(agent_cfg.get("resume_cmd"))
+    and resume one, *and* its output can actually be read for the id that
+    makes resuming possible. A session_cmd/resume_cmd pair with a missing or
+    misspelled `family` would otherwise report True while parse() always
+    returns id=None — the exact silent session loss this module exists to
+    prevent, with nothing in the logs to say so."""
+    return (
+        bool(agent_cfg.get("session_cmd"))
+        and bool(agent_cfg.get("resume_cmd"))
+        and family_of(agent_cfg) in FAMILIES
+    )

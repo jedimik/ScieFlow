@@ -104,10 +104,56 @@ def test_noise_before_the_json_is_tolerated():
     assert sessions.parse({"family": "codex"}, noisy).id is not None
 
 
+def test_claude_malformed_message_does_not_raise_and_the_id_survives():
+    """A malformed nested value must not crash the parser, and an id already
+    read from the same event must not be lost because of it."""
+    parsed = sessions.parse(
+        {"family": "claude"},
+        json.dumps({"type": "assistant", "session_id": "x", "message": "oops"}))
+    assert parsed.id == "x"
+
+
+def test_codex_malformed_item_does_not_raise_and_the_id_survives():
+    stream = "\n".join([
+        json.dumps({"type": "thread.started", "thread_id": "01a0d570-a280-7f22-b14f-04df145c95fc"}),
+        json.dumps({"type": "item.completed", "item": "not a dict"}),
+    ])
+    parsed = sessions.parse({"family": "codex"}, stream)
+    assert parsed.id == "01a0d570-a280-7f22-b14f-04df145c95fc"
+
+
+# json.loads raises RecursionError (a RuntimeError, not a ValueError) on a
+# sufficiently nested object; a stray `except ValueError` does not catch it.
+_PATHOLOGICALLY_NESTED = '{"a":' + "[" * 100_000 + "]" * 100_000 + "}"
+
+
+def test_a_pathologically_nested_stream_degrades_instead_of_raising():
+    parsed = sessions.parse({"family": "codex"}, _PATHOLOGICALLY_NESTED)
+    assert parsed.id is None
+    assert parsed.text.strip()
+
+
+def test_a_pathologically_nested_agy_object_degrades_instead_of_raising():
+    parsed = sessions.parse({"family": "agy"}, _PATHOLOGICALLY_NESTED)
+    assert parsed.id is None
+    assert parsed.text.strip()
+
+
 def test_can_converse_requires_both_commands():
-    assert sessions.can_converse({"session_cmd": "x {prompt}", "resume_cmd": "y {session}"})
+    assert sessions.can_converse(
+        {"family": "claude", "session_cmd": "x {prompt}", "resume_cmd": "y {session}"})
     assert not sessions.can_converse({"cmd": "x {prompt}"})
-    assert not sessions.can_converse({"session_cmd": "x {prompt}"})
+    assert not sessions.can_converse({"family": "claude", "session_cmd": "x {prompt}"})
+
+
+def test_can_converse_requires_a_registered_family():
+    """A session_cmd/resume_cmd pair with a missing or misspelled family
+    would otherwise report True while parse() always returns id=None — the
+    silent session loss this module exists to prevent."""
+    assert not sessions.can_converse(
+        {"session_cmd": "x {prompt}", "resume_cmd": "y {session}"})
+    assert not sessions.can_converse(
+        {"family": "not-a-real-family", "session_cmd": "x {prompt}", "resume_cmd": "y {session}"})
 
 
 @pytest.mark.live
