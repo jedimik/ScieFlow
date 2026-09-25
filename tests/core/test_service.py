@@ -18,6 +18,8 @@ def project(tmp_path):
     (tmp_path / "config" / "agents.yml").write_text(
         f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1, family: claude, '
         f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n'
+        f'  stub2: {{cmd: "{STUB}", enabled: true, timeout_min: 1, family: claude, '
+        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n'
         '  sleepy: {cmd: "sleep 300", enabled: true, timeout_min: 5}\n')
     (tmp_path / "config" / "defaults.yml").write_text("approval: per-campaign\n")
     (tmp_path / "schemas").mkdir()
@@ -343,3 +345,41 @@ def test_conversation_reports_whether_it_can_converse(project):
     assert service.conversation_state(project, "r1")["can_converse"] is False
     conversation.set_agent(ws, "stub")
     assert service.conversation_state(project, "r1")["can_converse"] is True
+
+
+def test_switching_the_agent_starts_a_fresh_session(project):
+    """The new agent has no session of its own, so its first turn must start
+    one rather than resuming an id that belongs to a different CLI."""
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    conversation.record_session(ws, "stub-session")
+    service.set_conversation_agent(project, "r1", "stub2")
+    doc = conversation.read(ws)
+    assert doc["agent"] == "stub2" and doc["session"] is None
+
+
+def test_switching_keeps_the_turns_already_said(project):
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    conversation.add_turn(ws, role="human", text="earlier question")
+    service.set_conversation_agent(project, "r1", "stub2")
+    assert conversation.read(ws)["turns"][0]["text"] == "earlier question"
+
+
+def test_switching_to_an_unknown_agent_is_refused(project):
+    with pytest.raises(service.ServiceError, match="unknown agent"):
+        service.set_conversation_agent(project, "r1", "nonesuch")
+
+
+def test_switching_to_an_agent_that_cannot_converse_is_refused(project):
+    with pytest.raises(service.ServiceError, match="conversation"):
+        service.set_conversation_agent(project, "r1", "sleepy")
+
+
+def test_switching_mid_turn_is_refused(project, running_turn):
+    with pytest.raises(service.ServiceError, match="still"):
+        service.set_conversation_agent(project, "r1", "stub2")

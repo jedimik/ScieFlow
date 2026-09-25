@@ -492,3 +492,27 @@ def record_spend(project: Project, slug: str, actor: str = "human", **spent) -> 
     if result is None:
         raise ServiceError(f"run {slug} has no budget.yml")
     return result
+
+
+def set_conversation_agent(project: Project, slug: str, agent: str,
+                           actor: str = "human") -> dict:
+    """Choose who holds this run's conversation.
+
+    Switching discards the session id, because one CLI's session means
+    nothing to another — the next turn starts a new one. The turns already
+    said are history and are kept.
+    """
+    ws = _ws(project, slug)
+    agents = config.load_agents(project.root)
+    if agent not in agents:
+        raise ServiceError(f"unknown agent: {agent} (known: {', '.join(agents)})")
+    if not sessions.can_converse(agents[agent]):
+        raise ServiceError(
+            f"{agent} cannot host a conversation: its configuration has no "
+            "session_cmd and resume_cmd, so every turn would start over")
+    if _turn_in_flight(project, ws):
+        raise ServiceError("a turn is still running; wait for it or cancel it")
+    try:
+        return conversation.set_agent(ws, agent, actor)
+    except conversation.ConversationError as exc:
+        raise ServiceError(str(exc)) from exc
