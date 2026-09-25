@@ -33,11 +33,15 @@ already uses internally: it sends the kill signal to the job's whole
 process group and records `job.cancelled`. It is new *capability*, not a
 new code path — the function already existed for the runner's own use.
 
-Starting a run is **not** something this app does. It steers runs that
-already exist — including talking to their coordinators, below — but a run
-still has to exist (`scieflow run init`) before the browser can do anything
-to it. See ["What stays CLI-only"](#what-stays-cli-only) below for the rest
-of what the browser deliberately does not do.
+Starting a run is also something this app does, on the **Start page**
+(`/start`): a form for the run's name, workflow, goal, approval mode and the
+three budget limits, plus an optional coordinator to hand the run to for its
+first turn. It creates the workspace the same way `scieflow run init` does —
+both reach `run.init.init_workspace` — so a run started from the browser is
+indistinguishable from one started at a terminal. See [Pages](#pages) below
+for exactly what it collects, and ["What stays
+CLI-only"](#what-stays-cli-only) for what the browser still deliberately does
+not do.
 
 ## Running it
 
@@ -134,6 +138,7 @@ at exactly this.
 
 | Page | Route | Shows |
 |---|---|---|
+| Start | `/start` | A form to create a run: name (becomes `workspace/<name>`, validated before anything is written — `init_workspace` itself does not check a slug, so this is what stops a name like `../escape` writing outside `workspace/`), workflow, goal, approval mode, the three budget limits, and — optionally — a coordinator to hand the run to for its first turn. Naming one has that turn happen as part of this same request, as an ordinary conversation turn through `service.say`: sandboxed, counted against the budget, on the timeline, cancellable. Leaving it unset just creates the run, which is also what happens if no configured agent can hold a conversation at all — the picker says so rather than offering a launch it can't perform. Staffing (which agent does which role) isn't collected here; that's still [the Agents page](agents.md#the-agents-page)'s job, since a run resolves its staffing when it dispatches, so setting it right after creation is equivalent. Success redirects to the new run's page; a refusal re-renders this form with what you typed, rather than redirecting to `?error=...` as every other page on this list does — the goal is free text that can run to paragraphs, and a query string is the wrong place to carry it. |
 | Dashboard | `/` | Every run (slug, kind, phase), a budget bar per dimension, and every open gate across all runs, each with an inline form to answer it on the spot — a `charter-adoption` gate also shows the proposed charter text itself, not just its question. |
 | Run page | `/runs/<slug>` | The run's id, iteration and approval mode; its phases with a form to mark one; budget remaining per dimension with a form to record spend; buttons to advance the iteration, checkpoint or resume; the charter panel — current text, an edit form, and (once there is more than one version) a history with a Restore button next to each version other than the current one; a conversation panel — every turn so far, a note if the current agent has quietly lost its session, a box to send the next message (disabled while a turn is running or the chosen agent cannot hold one), and a control to hand the conversation to a different agent (offering only agents that could actually take it — enabled, and able to both start and resume a session), disabled only while a turn is running, never because the current agent can't converse, so a stuck agent can always be replaced; open gates, each with a form to answer it (a `charter-adoption` gate's proposed text is shown above its form, escaped, so adopting is an informed decision); every job it started, linked to its output, with a Cancel button while it runs; and a timeline of the run's events, updated live. |
 | Job output | `/runs/<slug>/jobs/<job_id>` | The job's command, state, exit code and duration, and its captured stdout/stderr. While the job is still running, output streams in live. |
@@ -160,7 +165,10 @@ Every form on these pages posts back to the same page
 (`303 See Other` on success, so a reload never repeats the action) or
 carries you to `?error=<message>` on refusal — the same
 `service.ServiceError` message the CLI would print. There is no separate
-success/failure JSON to keep in sync with the terminal's exit codes.
+success/failure JSON to keep in sync with the terminal's exit codes. The
+Start page is the one exception: it still redirects on success, but a
+refusal re-renders the form directly rather than round-tripping through
+`?error=...` (see [Pages](#pages) above).
 
 ## The API
 
@@ -171,6 +179,7 @@ this app's own pages — it is a stable-enough surface to script against.
 | Route | Gives you |
 |---|---|
 | `GET /api/v1/runs` | Every run: slug, kind, phase, state, last activity. |
+| `POST /api/v1/runs` | Create a run's workspace and return its detail — `service.create_run`, the same primitive `scieflow run init` and the Start page both build on (`run.init.init_workspace`). Takes `slug`, `goal`, `workflow` and `approval` only; the three budget limits and a coordinator hand-off are Start-page-only, not exposed here. |
 | `GET /api/v1/runs/<slug>` | Status, budget, remaining fractions, open gates, recent jobs and events. |
 | `GET /api/v1/runs/<slug>/events` | The run's history, oldest first (`?since=<id>`, repeatable `?type=` with `job.*`-style prefix matching). |
 | `GET /api/v1/runs/<slug>/jobs` | Every job the run started. |
@@ -231,7 +240,6 @@ A few things are terminal-only on purpose, not because nobody got to them:
   `timeout_min`, or granting/removing a `--promote` exception, is still
   `scieflow agent configure`.
 
-And, as noted above: **starting a run is not something this app does.**
-Use `uv run scieflow run init` (see [`docs/cli.md`](cli.md#scieflow-run)) to
-start one; once it exists, everything on this page applies to it, including
-its conversation.
+Starting a run used to belong on this list; it no longer does — see the
+Start page above. Once a run exists, one way or the other, everything else
+on this page applies to it, including its conversation.

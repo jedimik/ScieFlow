@@ -16,6 +16,24 @@ advancing, checkpointing, resuming, recording spend and answering a gate all
 go through the same underlying run action either way, so the two never
 disagree about what a run's state is.
 
+## Creating a run
+
+```bash
+uv run scieflow run init SLUG --goal FILE [--approval per-campaign|autonomous]
+    [--max-iterations N] [--max-experiment-runs N] [--max-wall-minutes N]
+```
+
+Creates `workspace/<slug>/`: goal, config, status, budget and notebook — the
+directory everything else on this page reads and writes. The browser's
+equivalent is the Start page (`/start`; see [The local web
+app](web.md#pages)) — a form for the same name, workflow, goal, approval mode
+and three budget limits, with an optional coordinator to hand the run to for
+its first turn once it's created. Both reach the same
+`run.init.init_workspace`: the CLI's `run init` calls it directly, and the
+browser's `service.create_run` calls it after checking the name is safe to
+use as a directory first — so the two cannot drift apart on what a freshly
+created run looks like.
+
 ## The state of a run
 
 ```bash
