@@ -178,6 +178,19 @@ has and only adds `--conversation {session}`. The one thing `session_cmd`
 itself adds over agy's plain `cmd` is `--output-format json` — without it,
 agy's reply is prose with no `conversation_id` in it to capture at all.
 
+**A conversational prompt too large for argv has nowhere to go on `agy`.** A
+composed prompt over `PROMPT_ARGV_LIMIT` (100 000 bytes — a long chat with a
+big charter reaches this) normally moves to stdin instead of argv. `claude`'s
+session/resume commands and `codex exec resume` both put `{prompt}` last, so
+dropping that one token and reading stdin instead is safe. `agy`'s put it
+right after `--print`, which needs a value — dropping just `{prompt}` would
+leave `--print` to eat whatever flag came next. There is no separate
+conversational stdin form to fall back to (unlike the ordinary `stdin_cmd`,
+which drops `--print` entirely), so `agent_run.prepare` refuses the dispatch
+with `DispatchError` rather than send a broken argv. A long-running
+conversation on `agy` should keep its charter and message short enough to
+stay under the limit.
+
 ## See what is in effect
 
 ```bash

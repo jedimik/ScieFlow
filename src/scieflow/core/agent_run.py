@@ -1,11 +1,13 @@
 """Invoke one agent CLI headless, per config/agents.yml.
 
 usage: scieflow agent run <agent> <prompt_file> <transcript_file> [--cwd DIR]
-Substitutes {model}/{reasoning}/{prompt}/{root}/{python} in the cmd template,
-enforces timeout_min, runs from --cwd (default: repo root), saves stdout to
-<transcript_file>. When the prompt lives inside workspace/<slug>/, that run's
-`agent_overrides:` (config.yml, alongside status.yml) are merged over the
-registry entry. Exit codes: 0 ok, 124 timeout, otherwise the agent's exit code.
+Substitutes {model}/{reasoning}/{prompt}/{root}/{python}/{session} in the cmd
+template, enforces timeout_min, runs from --cwd (default: repo root), saves
+stdout to <transcript_file>. `{session}` fills in only for a conversational
+dispatch's `resume_cmd` — the id a previous turn reported. When the prompt
+lives inside workspace/<slug>/, that run's `agent_overrides:` (config.yml,
+alongside status.yml) are merged over the registry entry. Exit codes: 0 ok,
+124 timeout, otherwise the agent's exit code.
 """
 
 import argparse
@@ -49,6 +51,26 @@ class Dispatch:
     run_dir: Path | None
     writable: list[Path] | None = None    # None means this dispatch is unsandboxed
     env: dict | None = None               # None means inherit this process's
+
+
+def _prompt_via_stdin_safe(template: str) -> bool:
+    """True when dropping `{prompt}` from `template` still leaves a command
+    that reads the prompt from stdin — false when `{prompt}` is a flag's
+    required value (e.g. agy's `--print {prompt}`), where simply removing the
+    token leaves that flag dangling to eat whatever argv comes next instead.
+
+    `claude`'s session/resume commands and `codex exec resume` both put
+    `{prompt}` last, after a plain value (`{session}` or nothing) — dropping
+    it just shortens the argv and the CLI reads stdin. `agy`'s session/resume
+    commands put it right after `--print`, which needs a value — dropping it
+    breaks the invocation instead.
+    """
+    tokens = shlex.split(template)
+    if "{prompt}" not in tokens:
+        return True
+    idx = tokens.index("{prompt}")
+    preceding = tokens[idx - 1] if idx > 0 else ""
+    return not preceding.startswith("-")
 
 
 def build_argv(agent_cfg: dict, prompt: str, root: Path,
@@ -218,7 +240,21 @@ def prepare(project: Project, agent: str, prompt_file: Path,
                 f"{agent} cannot host a conversation: no {key} in its configuration")
 
     use_stdin = len(prompt.encode()) > PROMPT_ARGV_LIMIT
-    if use_stdin and "stdin_cmd" in agent_cfg:
+    if use_stdin and conversational:
+        # The conversational template (session_cmd/resume_cmd) must win over
+        # a plain stdin_cmd here: stdin_cmd is the ordinary one-shot command
+        # and carries neither --resume/--conversation nor the session id, so
+        # using it for an oversized turn silently drops both the turn's
+        # resume and any id to record (finding 2 of the 2026-09-25 review).
+        if not _prompt_via_stdin_safe(template):
+            raise DispatchError(
+                f"{agent}'s {key} takes the prompt as a flag's value ({template!r}) "
+                "with no stdin form of its own, and this turn's composed prompt is "
+                f"{len(prompt.encode())} bytes, over the {PROMPT_ARGV_LIMIT}-byte argv "
+                "limit — it cannot be sent this way")
+        argv = build_argv(agent_cfg, prompt, root, include_prompt=False,
+                          template=template, session=session or "")
+    elif use_stdin and "stdin_cmd" in agent_cfg:
         argv = build_argv(agent_cfg, prompt, root, include_prompt=False,
                           template=agent_cfg["stdin_cmd"])
     elif use_stdin:

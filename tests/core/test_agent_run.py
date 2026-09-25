@@ -699,6 +699,59 @@ def test_a_charter_that_pushes_the_prompt_over_the_argv_limit_still_sends_it(
     assert "G" * 500 in sent, "the prompt was dropped instead of sent on stdin"
 
 
+def _add_agent(project_root: Path, name: str, block: str) -> None:
+    path = project_root / "config" / "agents.yml"
+    path.write_text(path.read_text() + f"  {name}:\n{block}")
+
+
+def test_an_oversized_conversational_prompt_keeps_resume_and_session(
+        project_with_run, monkeypatch):
+    """Finding 2 (2026-09-25 review): `claude` and `agy` both declare a plain
+    `stdin_cmd` alongside `session_cmd`/`resume_cmd`. Before this fix, any
+    conversational turn whose composed prompt went over `PROMPT_ARGV_LIMIT`
+    matched the (agent-agnostic) `stdin_cmd` branch first and silently ran
+    the ordinary one-shot command instead — no `--resume`, no session id on
+    the argv, and nothing for `sessions.parse` to recover on the far side."""
+    project, ws, prompt_file = project_with_run
+    _add_agent(project.root, "claude-like",
+              '    cmd: "echo {prompt}"\n'
+              '    stdin_cmd: "echo stdin-mode"\n'
+              '    session_cmd: "echo start {prompt}"\n'
+              '    resume_cmd: "echo resume --resume {session} {prompt}"\n'
+              '    family: claude\n    enabled: true\n    timeout_min: 1\n')
+    monkeypatch.setattr(agent_run, "PROMPT_ARGV_LIMIT", 10)
+    prompt_file.write_text("output: x.md\nkind: hypothesis\n" + ("x" * 200))
+
+    dispatch = agent_run.prepare(project, "claude-like", prompt_file,
+                                 session="sess-123", conversational=True)
+
+    assert "stdin-mode" not in dispatch.argv
+    assert "sess-123" in dispatch.argv
+    assert dispatch.stdin_text is not None and "x" * 200 in dispatch.stdin_text
+
+
+def test_an_oversized_conversational_prompt_refuses_when_stdin_is_unsafe(
+        project_with_run, monkeypatch):
+    """`agy`'s session/resume templates take the prompt as `--print`'s value
+    (`agy --print {prompt} ...`); dropping only the `{prompt}` token would
+    leave `--print` dangling to swallow the next flag. There is no stdin
+    form of the conversational command to fall back to, so this must refuse
+    loudly (`DispatchError`) rather than send a broken argv."""
+    project, ws, prompt_file = project_with_run
+    _add_agent(project.root, "agy-like",
+              '    cmd: "echo --print {prompt}"\n'
+              '    stdin_cmd: "echo stdin-mode"\n'
+              '    session_cmd: "echo --print {prompt} --output-format json"\n'
+              '    resume_cmd: "echo --print {prompt} --conversation {session}"\n'
+              '    family: agy\n    enabled: true\n    timeout_min: 1\n')
+    monkeypatch.setattr(agent_run, "PROMPT_ARGV_LIMIT", 10)
+    prompt_file.write_text("output: x.md\nkind: hypothesis\n" + ("x" * 200))
+
+    with pytest.raises(agent_run.DispatchError, match="agy-like"):
+        agent_run.prepare(project, "agy-like", prompt_file,
+                          session="sess-123", conversational=True)
+
+
 def test_a_charter_that_is_not_a_mapping_fails_the_dispatch_cleanly(project_with_run):
     """`compose_prompt` used to run outside `prepare`'s try/except, so a
     `charter.yml` that parses to a list raised a bare `AttributeError` clean
