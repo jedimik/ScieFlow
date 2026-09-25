@@ -178,10 +178,12 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
     """One conversation turn: a sandboxed job that resumes the agent's session.
 
     This is an ordinary dispatch — `dispatch_agent` guards the budget, proves
-    the sandbox, starts the job, records spend and writes the transcript.
-    `say` only composes the prompt (through `agent_run.compose_prompt`, so
+    the sandbox, starts the job, records spend and writes the transcript, and
+    (via `agent_run.prepare`) composes the prompt through `compose_prompt`, so
     the run's charter is pinned to this turn exactly as it is to any other
-    dispatch) and records both sides of the exchange.
+    dispatch. `say` writes the raw message here, not a composed one: `prepare`
+    is the one place every dispatch is composed, and composing twice would
+    carry two copies of the charter into a single turn.
 
     The human turn is recorded before the dispatch runs: a turn whose job
     crashes should still show what was asked.
@@ -200,7 +202,7 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
 
     prompt_file = Path(ws) / TURN_PROMPT_DIR / f"turn-{store.new_id()}.md"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
-    prompt_file.write_text(agent_run.compose_prompt(ws, message))
+    prompt_file.write_text(message)
 
     try:
         conversation.add_turn(ws, role="human", text=message, actor=actor)

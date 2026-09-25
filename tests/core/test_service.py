@@ -269,18 +269,40 @@ def test_say_dispatches_a_turn_and_records_both_sides(project):
 
 def test_say_pins_the_charter_into_the_turn(project):
     """The whole point of the charter is that every turn carries it. A turn
-    that composed its own prompt would bypass that silently."""
+    that composed its own prompt would bypass that silently.
+
+    `say` writes the raw message to `logs/turn-*.md` (see
+    `test_say_pins_the_charter_exactly_once` for why) — the charter shows up
+    only once the prompt is actually composed, which happens inside
+    `agent_run.prepare`. So this asserts against what was actually dispatched
+    (the stub's argv, which embeds the whole composed prompt as its trailing
+    `{prompt}` token) rather than against the file on disk.
+    """
     from scieflow.core.run import charter, conversation
 
     ws = project.run_dir("r1")
     charter.set_text(ws, "Goal: characterise the catalyst.")
     conversation.set_agent(ws, "stub")
-    service.say(project, "r1", "next step?")
+    result = service.say(project, "r1", "next step?")
 
-    sent = (ws / "logs").glob("turn-*.md")
-    composed = "\n".join(p.read_text() for p in sent)
-    assert "characterise the catalyst" in composed
-    assert composed.index("characterise the catalyst") < composed.index("next step?")
+    dispatched = " ".join(result["job"]["argv"])
+    assert "characterise the catalyst" in dispatched
+    assert dispatched.index("characterise the catalyst") < dispatched.index("next step?")
+
+
+def test_say_pins_the_charter_exactly_once(project):
+    """`say` must not compose the prompt itself and then let `agent_run.prepare`
+    compose it again — `prepare` is the one place every dispatch is composed,
+    and composing twice would carry two copies of the charter into every turn."""
+    from scieflow.core.run import charter, conversation
+
+    ws = project.run_dir("r1")
+    charter.set_text(ws, "Goal: characterise the catalyst.")
+    conversation.set_agent(ws, "stub")
+    result = service.say(project, "r1", "next step?")
+
+    dispatched = " ".join(result["job"]["argv"])
+    assert dispatched.count("characterise the catalyst") == 1
 
 
 def test_say_refuses_when_no_agent_is_chosen(project):
