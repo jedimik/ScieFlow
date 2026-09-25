@@ -112,6 +112,14 @@ agents:
     cmd: "agy --print {prompt} --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions"
     # Piped prompts must not leave --print waiting for a positional value.
     stdin_cmd: "agy --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions"
+    family: agy
+    # --output-format json is the only addition over `cmd`: it turns agy's
+    # default plain-text reply into the one JSON object sessions.py parses
+    # for conversation_id. Nothing agy accepts on start was found to be
+    # rejected on resume (unlike codex's --sandbox), so resume_cmd keeps the
+    # same flags and only adds --conversation {session}.
+    session_cmd: "agy --print {prompt} --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions --output-format json"
+    resume_cmd: "agy --print {prompt} --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions --output-format json --conversation {session}"
     # Highest Pro-tier Gemini exposed by `agy models` on 2026-09-06.
     # Keep the CLI's inner timeout below the outer timeout_min.
     model: gemini-3.1-pro-high

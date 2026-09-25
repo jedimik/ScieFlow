@@ -15,6 +15,7 @@ logs to say so.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 
@@ -67,6 +68,37 @@ def _codex(output: str) -> Session:
     return Session(session_id, _readable(said, output))
 
 
+_CONVERSATION_ID_RE = re.compile(r'"conversation_id"\s*:\s*"([^"]*)"')
+
+
+def _agy(output: str) -> Session:
+    """agy prints one JSON object per call, not a line-delimited stream of
+    events — `_events` (built for the other two) doesn't fit here, so this
+    parses the object directly instead of bending that helper to it.
+
+    A cancelled or timed-out call can truncate that object mid-flight, and an
+    unclosed object doesn't parse at all. `conversation_id` is written early
+    in it, so a regex recovers it from the fragment even when the whole
+    object cannot be decoded — the same tolerance `_events` gives the
+    line-delimited formats, adapted to a single-object one.
+    """
+    session_id, said = None, []
+    try:
+        obj = json.loads(output.strip())
+    except ValueError:
+        obj = None
+    if isinstance(obj, dict):
+        if obj.get("conversation_id"):
+            session_id = str(obj["conversation_id"])
+        if obj.get("response"):
+            said.append(str(obj["response"]))
+    else:
+        match = _CONVERSATION_ID_RE.search(output)
+        if match:
+            session_id = match.group(1)
+    return Session(session_id, _readable(said, output))
+
+
 def _readable(said: list[str], output: str) -> str:
     """What a person sees on the job page.
 
@@ -78,7 +110,7 @@ def _readable(said: list[str], output: str) -> str:
     return joined if joined.strip() else output
 
 
-FAMILIES = {"claude": _claude, "codex": _codex}
+FAMILIES = {"claude": _claude, "codex": _codex, "agy": _agy}
 
 
 def family_of(agent_cfg: dict) -> str:

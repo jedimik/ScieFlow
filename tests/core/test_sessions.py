@@ -32,6 +32,17 @@ CODEX_STREAM = "\n".join([
     json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1}}),
 ])
 
+# agy prints one JSON object per call, not a line-delimited stream of events.
+AGY_OUTPUT = json.dumps({
+    "conversation_id": "9a563a1a-601b-45aa-8677-10689cf3b31e",
+    "status": "SUCCESS",
+    "response": "Hello.\n",
+    "duration_seconds": 3.001819099,
+    "num_turns": 1,
+    "usage": {"input_tokens": 18722, "output_tokens": 3, "thinking_tokens": 0,
+              "cache_read_tokens": 0, "total_tokens": 18725},
+})
+
 
 def test_claude_session_id_and_text():
     parsed = sessions.parse({"family": "claude"}, CLAUDE_STREAM)
@@ -42,6 +53,12 @@ def test_claude_session_id_and_text():
 def test_codex_session_id_and_text():
     parsed = sessions.parse({"family": "codex"}, CODEX_STREAM)
     assert parsed.id == "01a0d570-a280-7f22-b14f-04df145c95fc"
+    assert "Hello." in parsed.text
+
+
+def test_agy_session_id_and_text():
+    parsed = sessions.parse({"family": "agy"}, AGY_OUTPUT)
+    assert parsed.id == "9a563a1a-601b-45aa-8677-10689cf3b31e"
     assert "Hello." in parsed.text
 
 
@@ -60,8 +77,23 @@ def test_a_truncated_stream_degrades_instead_of_raising():
     assert parsed.id == "01a0d570-a280-7f22-b14f-04df145c95fc"
 
 
+def test_a_truncated_single_object_degrades_instead_of_raising():
+    """A cancelled or timed-out call leaves agy's one JSON object unclosed.
+    `conversation_id` is written early in it, so it survives truncation even
+    though the object as a whole no longer parses."""
+    truncated = AGY_OUTPUT[:len(AGY_OUTPUT) // 2]
+    parsed = sessions.parse({"family": "agy"}, truncated)
+    assert parsed.id == "9a563a1a-601b-45aa-8677-10689cf3b31e"
+
+
 def test_output_with_no_session_id_parses_as_none():
     parsed = sessions.parse({"family": "claude"}, "not json at all\nnor this\n")
+    assert parsed.id is None
+    assert parsed.text.strip()
+
+
+def test_agy_output_with_no_session_id_parses_as_none():
+    parsed = sessions.parse({"family": "agy"}, "not json at all\nnor this\n")
     assert parsed.id is None
     assert parsed.text.strip()
 
@@ -117,3 +149,30 @@ def test_codex_really_reports_and_resumes_a_thread():
          "What word did I ask you to reply with? Answer with just that word."],
         capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300)
     assert "marker-beta" in resumed.stdout, "the resumed thread lost its context"
+
+
+@pytest.mark.live
+@pytest.mark.skipif(shutil.which("agy") is None, reason="agy CLI not installed")
+def test_agy_really_reports_and_resumes_a_conversation():
+    """Pins the real CLI. agy prints one JSON object per call (not a stream);
+    unlike codex's resume, no flag from the starting call was found to be
+    rejected on `--conversation`."""
+    import subprocess
+
+    start = subprocess.run(
+        ["agy", "-p", "Reply with exactly: marker-gamma",
+         "--model", "gemini-3.6-flash-low", "--effort", "low",
+         "--print-timeout", "55m", "--dangerously-skip-permissions",
+         "--output-format", "json"],
+        capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180)
+    parsed = sessions.parse({"family": "agy"}, start.stdout)
+    assert parsed.id, f"no conversation id in agy output: {start.stdout[:400]}"
+
+    resumed = subprocess.run(
+        ["agy", "-p", "What word did I ask you to reply with? Answer with just that word.",
+         "--conversation", parsed.id,
+         "--model", "gemini-3.6-flash-low", "--effort", "low",
+         "--print-timeout", "55m", "--dangerously-skip-permissions",
+         "--output-format", "json"],
+        capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180)
+    assert "marker-gamma" in resumed.stdout, "the resumed conversation lost its context"
