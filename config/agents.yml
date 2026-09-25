@@ -15,6 +15,9 @@ agents:
   claude:
     cmd: "claude -p --dangerously-skip-permissions --model {model} {prompt}"
     stdin_cmd: "claude -p --dangerously-skip-permissions --model {model}"
+    family: claude
+    session_cmd: "claude -p --output-format=stream-json --verbose --dangerously-skip-permissions --model {model} {prompt}"
+    resume_cmd: "claude -p --output-format=stream-json --verbose --dangerously-skip-permissions --model {model} --resume {session} {prompt}"
     model: claude-fable-5
     tier: primary
     timeout_min: 30
@@ -35,6 +38,10 @@ agents:
           --dangerously-skip-permissions --model {model} {prompt}'
   codex:
     cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
+    family: codex
+    session_cmd: "codex exec --json --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
+    # `codex exec resume` rejects --sandbox, and its flags must precede the id.
+    resume_cmd: "codex exec resume --json {session} {prompt}"
     model: gpt-6-astra
     reasoning: high
     tier: primary

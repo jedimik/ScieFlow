@@ -52,7 +52,8 @@ class Dispatch:
 
 
 def build_argv(agent_cfg: dict, prompt: str, root: Path,
-               include_prompt: bool = True, template: str | None = None) -> list[str]:
+               include_prompt: bool = True, template: str | None = None,
+               session: str = "") -> list[str]:
     model = str(agent_cfg.get("model", ""))
     reasoning = str(agent_cfg.get("reasoning", ""))
     cmd_template = template if template is not None else agent_cfg["cmd"]
@@ -65,6 +66,7 @@ def build_argv(agent_cfg: dict, prompt: str, root: Path,
             .replace("{reasoning}", reasoning)
             .replace("{root}", str(root))
             .replace("{python}", sys.executable)
+            .replace("{session}", session)
         )
         argv.append(token.replace("{prompt}", prompt))
     return argv
