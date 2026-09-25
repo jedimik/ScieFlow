@@ -102,6 +102,38 @@ def test_a_failure_partway_leaves_no_half_made_run(project, monkeypatch):
     assert not project.run_dir("r1").exists()
 
 
+def test_a_goal_file_write_failure_is_a_service_error_with_no_leaked_temp_dir(
+        project, monkeypatch, tmp_path):
+    """The temp dir holding `goal.md` is created and written to *before*
+    `init_workspace` is ever called. A failure right there — disk full, no
+    permission on the temp dir — must still come out as a `ServiceError`,
+    and must not leave that temp directory behind, the same as a failure one
+    step later inside `init_workspace` itself."""
+    from scieflow.core import service as service_mod
+
+    fake_tmp = tmp_path / "fake-goal-tmp"
+
+    def fake_mkdtemp(*a, **kw):
+        fake_tmp.mkdir()
+        return str(fake_tmp)
+
+    monkeypatch.setattr(service_mod.tempfile, "mkdtemp", fake_mkdtemp)
+
+    real_write_text = Path.write_text
+
+    def explode(self, *a, **kw):
+        if self == fake_tmp / "goal.md":
+            raise OSError("disk full")
+        return real_write_text(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "write_text", explode)
+
+    with pytest.raises(service.ServiceError):
+        service.create_run(project, "r1", "a goal")
+    assert not fake_tmp.exists(), "the temp directory was left behind"
+    assert not project.run_dir("r1").exists()
+
+
 def test_an_unknown_workflow_is_refused_before_anything_is_written(project):
     with pytest.raises(service.ServiceError, match="workflow"):
         service.create_run(project, "r1", "a goal", workflow="nonesuch")

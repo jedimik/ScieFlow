@@ -120,18 +120,28 @@ def create_run(project: Project, slug: str, goal: str, *, workflow: str = "",
     overrides = {"approval": approval, "max_iterations": max_iterations,
                  "max_experiment_runs": max_experiment_runs,
                  "max_wall_minutes": max_wall_minutes}
-    goal_file = Path(tempfile.mkdtemp()) / "goal.md"
-    goal_file.write_text(goal)
+    # Both the temp dir and the write into it are inside this try/finally too
+    # — a failure here (disk full, no permission on the temp dir) must be
+    # translated to ServiceError and must not leak the temp directory, the
+    # same as a failure inside init_workspace itself.
+    tmp_dir: Path | None = None
     try:
+        tmp_dir = Path(tempfile.mkdtemp())
+        goal_file = tmp_dir / "goal.md"
+        goal_file.write_text(goal)
         init_mod.init_workspace(target.name, goal_file, project.workspace_root,
                                 overrides, project.root)
     except FileExistsError as exc:
         raise ServiceError(f"a run named {target.name} already exists") from exc
     except (OSError, ValueError, KeyError) as exc:
+        # Belt-and-braces: init_workspace already removes `target` itself on
+        # any exception it raises, but this also covers a failure above that
+        # never reaches init_workspace at all (e.g. the goal-file write).
         shutil.rmtree(target, ignore_errors=True)
         raise ServiceError(f"could not create {target.name}: {exc}") from exc
     finally:
-        shutil.rmtree(goal_file.parent, ignore_errors=True)
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
     return run_detail(project, target.name)
 
 
