@@ -34,30 +34,51 @@ def test_the_budget_and_approval_from_the_form_are_applied(client, project):
 
 
 def test_a_bad_slug_is_refused_on_the_page_not_with_a_traceback(client, project):
+    """The refusal re-renders the form in place (200, not a redirect) so a
+    long goal never has to round-trip through a URL — see `start_run`."""
     response = post(client, "/start", slug="../escape", goal="a goal")
-    assert response.status_code == 303
-    assert response.headers["location"].startswith("/start?error=")
-    assert "slug" in client.get(response.headers["location"]).text.lower()
+    assert response.status_code == 200
+    assert "slug" in response.text.lower()
     assert not (project.root.parent / "escape").exists()
 
 
 def test_a_duplicate_slug_is_refused_on_the_page(client, project):
     post(client, "/start", slug="dup", goal="the first goal")
     response = post(client, "/start", slug="dup", goal="the second goal")
-    assert response.headers["location"].startswith("/start?error=")
+    assert response.status_code == 200
+    assert "already exists" in response.text
     assert (project.run_dir("dup") / "goal.md").read_text() == "the first goal"
 
 
 def test_an_empty_goal_is_refused_on_the_page(client, project):
     response = post(client, "/start", slug="no-goal", goal="   ")
-    assert response.headers["location"].startswith("/start?error=")
+    assert response.status_code == 200
     assert not project.run_dir("no-goal").exists()
 
 
 def test_goal_text_is_escaped_when_the_error_page_echoes_it(client):
+    """The refusal re-renders the goal into the textarea (see
+    `test_a_refused_submission_keeps_what_was_typed`), so this is now a real
+    check of Jinja's autoescaping, not a check of a page that never echoes
+    anything back."""
     response = post(client, "/start", slug="../bad", goal="<script>alert('x')</script>")
-    page = client.get(response.headers["location"]).text
-    assert "<script>alert" not in page
+    assert response.status_code == 200
+    assert "<script>alert" not in response.text
+    assert "&lt;script&gt;alert" in response.text
+
+
+def test_a_refused_submission_keeps_what_was_typed(client, project):
+    """Losing a carefully-written goal to a slug typo is the kind of thing
+    nobody forgives twice — every field the user set should still be there
+    to fix and resubmit, not just the goal."""
+    response = post(client, "/start", slug="../escape",
+                    goal="Three careful paragraphs of context nobody wants to retype.",
+                    workflow="lit-review", approval="autonomous", max_iterations="9")
+    page = response.text
+    assert "Three careful paragraphs of context nobody wants to retype." in page
+    assert '<option value="lit-review" selected>' in page
+    assert "<option selected>autonomous</option>" in page
+    assert 'value="9"' in page
 
 
 def test_the_api_creates_a_run(client, project):

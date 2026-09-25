@@ -8,7 +8,7 @@
 <form method="post" action="/start">
   <input type="hidden" name="csrf_token" value="{{ csrf }}">
 
-  <p><label>Name <input name="slug" required
+  <p><label>Name <input name="slug" required value="{{ form.slug }}"
        pattern="[A-Za-z0-9][A-Za-z0-9._ -]*"
        title="Letters, digits, dot, underscore, space or dash"></label>
      <span class="dim">becomes <code>workspace/&lt;name&gt;</code></span></p>
@@ -16,28 +16,28 @@
   <p><label>Workflow
     <select name="workflow">
       {% for workflow in workflows %}
-      <option value="{{ workflow.name }}">{{ workflow.name }} — {{ workflow.ask }}</option>
+      <option value="{{ workflow.name }}"{% if workflow.name == form.workflow %} selected{% endif %}>{{ workflow.name }} — {{ workflow.ask }}</option>
       {% endfor %}
     </select></label></p>
 
   <p><label>Goal<br>
     <textarea name="goal" rows="5" required
-              placeholder="What this run is for"></textarea></label></p>
+              placeholder="What this run is for">{{ form.goal }}</textarea></label></p>
 
   <p><label>Approval
     <select name="approval">
       {% for mode in ["per-campaign", "autonomous"] %}
-      <option {% if mode == defaults.approval %}selected{% endif %}>{{ mode }}</option>
+      <option{% if mode == form.approval %} selected{% endif %}>{{ mode }}</option>
       {% endfor %}
     </select></label></p>
 
   <p class="actions">
     <label>iterations <input name="max_iterations" type="number" min="1"
-           value="{{ defaults.max_iterations }}"></label>
+           value="{{ form.max_iterations }}"></label>
     <label>experiment runs <input name="max_experiment_runs" type="number" min="1"
-           value="{{ defaults.max_experiment_runs }}"></label>
+           value="{{ form.max_experiment_runs }}"></label>
     <label>wall minutes <input name="max_wall_minutes" type="number" min="1"
-           value="{{ defaults.max_wall_minutes }}"></label>
+           value="{{ form.max_wall_minutes }}"></label>
   </p>
 
   <p class="dim">Roles for this workflow are staffed on the

@@ -57,16 +57,48 @@ async def dashboard(request: Request) -> HTMLResponse:
     })
 
 
-@router.get("/start", response_class=HTMLResponse)
-async def start_page(request: Request, error: str = "") -> HTMLResponse:
-    project = _project(request)
+def _start_form(defaults: dict, submitted: dict | None = None) -> dict:
+    """The values the start form should show: whatever was just submitted
+    and refused, falling back field-by-field to the project's defaults —
+    which is also what an empty `submitted` (the first visit) resolves to."""
+    submitted = submitted or {}
+    return {
+        "slug": submitted.get("slug", ""),
+        "goal": submitted.get("goal", ""),
+        "workflow": submitted.get("workflow", ""),
+        "approval": submitted.get("approval") or defaults.get("approval", ""),
+        "max_iterations": (submitted.get("max_iterations")
+                           or defaults.get("max_iterations", "")),
+        "max_experiment_runs": (submitted.get("max_experiment_runs")
+                                or defaults.get("max_experiment_runs", "")),
+        "max_wall_minutes": (submitted.get("max_wall_minutes")
+                             or defaults.get("max_wall_minutes", "")),
+    }
+
+
+def _render_start(request: Request, project, *, error: str = "",
+                  submitted: dict | None = None) -> HTMLResponse:
     return TEMPLATES.TemplateResponse(request, "start.html", {
         "workflows": service.workflows(),
         "agents": service.conversational_agents(project),
-        "defaults": project.defaults(),
+        "form": _start_form(project.defaults(), submitted),
         "error": error,
         "csrf": auth.csrf_token(request),
     })
+
+
+@router.get("/start", response_class=HTMLResponse)
+def start_page(request: Request) -> HTMLResponse:
+    """Plain `def`, not `async def`: `service.workflows()`,
+    `service.conversational_agents` and `project.defaults()` all read a YAML
+    file straight off disk on the event loop — smaller than the blocking
+    calls earlier milestones had to move off it, but the same shape, so it
+    goes in the threadpool like the rest of this page's handlers.
+
+    No `error` query parameter: a refusal is now rendered directly by
+    `start_run` (see its docstring), not redirected here, so there is
+    nothing left that would ever set one."""
+    return _render_start(request, _project(request))
 
 
 @router.post("/start", dependencies=MUTATE)
@@ -76,16 +108,33 @@ def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
               max_wall_minutes: int = Form(0)):
     """Plain `def`, not `async def` — see `say` above: creating a run writes
     several files under a lock, and that blocking work belongs in Starlette's
-    threadpool, not on the event loop."""
+    threadpool, not on the event loop.
+
+    A refusal re-renders the form in place rather than redirecting to
+    `/start?error=...`: the goal is free text that can run to paragraphs,
+    and round-tripping that (plus the slug, workflow, approval and three
+    budget numbers) through a query string risks a URL past what a server
+    or browser will accept, and leaves it sitting in the URL bar and any
+    access log besides. Rendering directly costs this one path the
+    post/redirect/get guarantee every other mutation here keeps — reloading
+    a refused submission re-POSTs it, and the browser will ask first. A
+    successful submission still redirects, so that guarantee holds for the
+    common case.
+    """
+    project = _project(request)
+    submitted = {"slug": slug, "goal": goal, "workflow": workflow, "approval": approval,
+                "max_iterations": max_iterations or None,
+                "max_experiment_runs": max_experiment_runs or None,
+                "max_wall_minutes": max_wall_minutes or None}
     try:
         service.create_run(
-            _project(request), slug, goal, workflow=workflow,
+            project, slug, goal, workflow=workflow,
             approval=approval or None,
             max_iterations=max_iterations or None,
             max_experiment_runs=max_experiment_runs or None,
             max_wall_minutes=max_wall_minutes or None)
     except service.ServiceError as exc:
-        return RedirectResponse(f"/start?error={quote(str(exc))}", status_code=303)
+        return _render_start(request, project, error=str(exc), submitted=submitted)
     return RedirectResponse(f"/runs/{quote(slug)}", status_code=303)
 
 
