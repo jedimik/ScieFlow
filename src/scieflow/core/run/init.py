@@ -11,12 +11,21 @@ from pathlib import Path
 import yaml
 
 from scieflow.core import config
+from scieflow.core.project import clean_slug
 from scieflow.core.run import budget as budget_mod
 from scieflow.core.run import status as status_mod
 
 
 def init_workspace(slug: str, goal_file: Path, workspace_root: Path,
                    overrides: dict, root: Path) -> Path:
+    """Create a run workspace under `workspace_root`.
+
+    `slug` is validated and normalised here with `clean_slug` — the same
+    check `Project.run_dir` applies — so this is safe to call directly, as
+    `scieflow run init` does, not just through `service.create_run`, whose
+    own check ahead of this call is defence in depth, not the only guard.
+    """
+    slug = clean_slug(slug)
     cfg = dict(config.load_defaults(root))
     cfg.update({k: v for k, v in overrides.items() if v is not None})
     ws = workspace_root / slug
