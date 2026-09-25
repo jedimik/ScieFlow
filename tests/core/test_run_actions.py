@@ -246,3 +246,62 @@ def test_run_charter_rejects_a_lone_note(tmp_path, monkeypatch):
     ok = runner.invoke(run_group, ["charter", "r1", "--set", "Real goal.", "--note", "why"])
     assert ok.exit_code == 0, ok.output
     assert charter.current_text(ws) == "Real goal."
+
+
+def test_run_cli_init_refuses_a_traversal_slug(tmp_path, monkeypatch):
+    """`run.cli.init` used to pass the raw slug straight to `init_workspace`,
+    which joined it onto `workspace_root` with no check of its own — so
+    `scieflow run init ../escape --goal g.md` wrote outside `workspace/`,
+    invisible to `run list` and unreachable afterwards because
+    `Project.run_dir` then refuses the same name. The check now lives inside
+    `init_workspace` itself (`clean_slug`), so the CLI path gets it for
+    free, not just the service layer's own pre-check."""
+    from scieflow.core.run.cli import run as run_group
+
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agents.yml").write_text("agents: {}\n")
+    (tmp_path / "config" / "defaults.yml").write_text(
+        "approval: per-campaign\nmax_iterations: 3\n"
+        "max_experiment_runs: 10\nmax_wall_minutes: 60\n")
+    (tmp_path / "schemas").mkdir()
+    real = Path(__file__).resolve().parents[2] / "schemas" / "status.yml"
+    (tmp_path / "schemas" / "status.yml").write_text(real.read_text())
+    (tmp_path / "workspace").mkdir()
+    goal = tmp_path / "g.md"
+    goal.write_text("a goal")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        run_group, ["init", "../escape", "--goal", str(goal)])
+
+    assert result.exit_code != 0
+    assert "not a run slug" in result.output, result.output
+    assert not (tmp_path.parent / "escape").exists()
+    assert list((tmp_path / "workspace").iterdir()) == []
+
+
+def test_run_cli_init_refuses_a_negative_budget(tmp_path, monkeypatch):
+    """`budget.new_budget` refuses a negative cap; the CLI must surface that
+    as a clean refusal, not a traceback, and must not leave a half-made
+    workspace with an already-exhausted budget behind."""
+    from scieflow.core.run.cli import run as run_group
+
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agents.yml").write_text("agents: {}\n")
+    (tmp_path / "config" / "defaults.yml").write_text(
+        "approval: per-campaign\nmax_iterations: 3\n"
+        "max_experiment_runs: 10\nmax_wall_minutes: 60\n")
+    (tmp_path / "schemas").mkdir()
+    real = Path(__file__).resolve().parents[2] / "schemas" / "status.yml"
+    (tmp_path / "schemas" / "status.yml").write_text(real.read_text())
+    (tmp_path / "workspace").mkdir()
+    goal = tmp_path / "g.md"
+    goal.write_text("a goal")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        run_group, ["init", "r1", "--goal", str(goal), "--max-iterations", "-5"])
+
+    assert result.exit_code != 0
+    assert "negative" in result.output
+    assert not (tmp_path / "workspace" / "r1").exists()

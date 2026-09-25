@@ -58,6 +58,10 @@ def init(slug, goal, approval, max_iterations, max_experiment_runs, max_wall_min
                              "max_wall_minutes": max_wall_minutes}, project.root)
     except FileExistsError as e:
         raise click.ClickException(str(e)) from e
+    except ProjectError as e:
+        raise click.ClickException(str(e)) from e
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
     click.echo(f"initialized {ws}")
 
 

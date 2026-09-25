@@ -65,3 +65,16 @@ def test_wall_clock_rejects_naive_datetime():
     b = budget.new_budget(5, 40, 60)
     with pytest.raises(ValueError):
         budget.set_wall_from_clock(b, now=datetime(2026, 7, 11, 12, 0, 0))
+
+
+def test_new_budget_rejects_a_negative_cap():
+    """A negative `max_iterations` (etc.) used to be written as-is: `0 >=
+    -5` is true, so `is_exhausted` reported the run exhausted before its
+    first dispatch. 0 itself still means "unlimited" and must stay allowed."""
+    with pytest.raises(ValueError, match="negative"):
+        budget.new_budget(-5, 40, 240)
+    with pytest.raises(ValueError, match="negative"):
+        budget.new_budget(5, -1, 240)
+    with pytest.raises(ValueError, match="negative"):
+        budget.new_budget(5, 40, -1)
+    budget.new_budget(0, 0, 0)  # unlimited in every dimension: still allowed

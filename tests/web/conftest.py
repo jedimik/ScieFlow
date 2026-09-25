@@ -27,6 +27,10 @@ def project(tmp_path):
         f'  stub_disabled: {{cmd: "{STUB}", enabled: false, timeout_min: 1, family: claude, '
         f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n')
     (tmp_path / "config" / "defaults.yml").write_text(
+        "approval: per-campaign\n"
+        "max_iterations: 3\n"
+        "max_experiment_runs: 10\n"
+        "max_wall_minutes: 60\n"
         "assignments:\n"
         "  loop.experiment: stub\n"
         "  loop.literature: stub\n"

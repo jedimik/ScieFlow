@@ -17,6 +17,15 @@ def _now() -> datetime:
 
 
 def new_budget(max_iterations: int, max_experiment_runs: int, max_wall_minutes: int) -> dict:
+    """A fresh budget ledger. 0 means unlimited (see `is_exhausted`); a
+    negative cap is refused here rather than left to callers — otherwise
+    `is_exhausted` reports the run exhausted before its first dispatch, since
+    any non-negative spend (including 0) is already `>=` a negative cap."""
+    for name, value in (("max_iterations", max_iterations),
+                        ("max_experiment_runs", max_experiment_runs),
+                        ("max_wall_minutes", max_wall_minutes)):
+        if value is not None and value < 0:
+            raise ValueError(f"{name} cannot be negative: {value}")
     return {
         "budgets": {
             "max_iterations": max_iterations,

@@ -8,6 +8,8 @@ for anything a caller should show the user.
 from __future__ import annotations
 
 import hashlib
+import shutil
+import tempfile
 import threading
 from dataclasses import asdict
 from pathlib import Path
@@ -35,6 +37,26 @@ RECENT_EVENTS = 50
 
 class ServiceError(Exception):
     """A request the service cannot fulfil, with a message for the user."""
+
+
+class RunStartedError(ServiceError):
+    """`start_run` failed *after* the run was already created.
+
+    Everything that can fail once `create_run` has returned — handing the
+    conversation to `agent` and taking its first turn — leaves a real run
+    behind: the workspace exists and the conversation agent is recorded, even
+    though the turn itself did not complete (a sandbox refusal, an exhausted
+    budget, an oversized opening prompt). A caller that only catches
+    `ServiceError` and re-renders an empty form would tell the user nothing
+    was made, when in fact resubmitting will now say "a run named X already
+    exists" with no way back to it — so this carries `slug` (the canonical
+    name the run was actually created under) for a caller to send the user
+    to the run's own page instead.
+    """
+
+    def __init__(self, slug: str, message: str):
+        super().__init__(message)
+        self.slug = slug
 
 
 PROPOSAL_PREVIEW_LIMIT = 4000        # characters of a proposal shown in a gate form
@@ -77,6 +99,74 @@ def run_detail(project: Project, slug: str) -> dict:
         "jobs": [job_json(j) for j in jobs.list_jobs(project, ws)][-RECENT_JOBS:][::-1],
         "events": events.read(ws)[-RECENT_EVENTS:],
     }
+
+
+def workflows() -> list[dict]:
+    """The workflows the Start wizard offers, from the one registry the TUI
+    menu already uses — so a workflow added there appears here too."""
+    from scieflow.core import menu
+
+    return [{"name": name, "ask": spec.get("ask", ""),
+             "roles": list(spec.get("roles") or [])}
+            for name, spec in menu.WORKFLOWS.items()]
+
+
+def create_run(project: Project, slug: str, goal: str, *, workflow: str = "",
+               approval: str | None = None, max_iterations: int | None = None,
+               max_experiment_runs: int | None = None,
+               max_wall_minutes: int | None = None) -> dict:
+    """Create a run workspace, the same way `scieflow run init` does.
+
+    The slug is validated by asking `Project.run_dir` for the intended
+    directory before anything is written. `init_workspace` joins the slug to
+    the workspace root itself with no checks, and this is the first caller
+    whose slug can arrive from an HTTP form.
+    """
+    from scieflow.core import menu
+    from scieflow.core.run import init as init_mod
+
+    if not goal or not goal.strip():
+        raise ServiceError("a run needs a goal")
+    if workflow and workflow not in menu.WORKFLOWS:
+        raise ServiceError(
+            f"unknown workflow: {workflow} (known: {', '.join(menu.WORKFLOWS)})")
+    try:
+        target = project.run_dir(slug)          # refuses .., /, and empty
+    except ProjectError as exc:
+        raise ServiceError(str(exc)) from exc
+    if target.exists():
+        raise ServiceError(f"a run named {target.name} already exists")
+
+    overrides = {"approval": approval, "max_iterations": max_iterations,
+                 "max_experiment_runs": max_experiment_runs,
+                 "max_wall_minutes": max_wall_minutes,
+                 "workflow": workflow or None}
+    # Both the temp dir and the write into it are inside this try/finally too
+    # — a failure here (disk full, no permission on the temp dir) must be
+    # translated to ServiceError and must not leak the temp directory, the
+    # same as a failure inside init_workspace itself.
+    tmp_dir: Path | None = None
+    try:
+        tmp_dir = Path(tempfile.mkdtemp())
+        goal_file = tmp_dir / "goal.md"
+        goal_file.write_text(goal, encoding="utf-8")
+        init_mod.init_workspace(target.name, goal_file, project.workspace_root,
+                                overrides, project.root)
+        return run_detail(project, target.name)
+    except FileExistsError as exc:
+        raise ServiceError(f"a run named {target.name} already exists") from exc
+    except (OSError, ValueError, KeyError) as exc:
+        # No cleanup of `target` here: `init_workspace` already removes it on
+        # any exception it raises, and every failure that can reach this
+        # branch *before* `init_workspace` runs (the temp dir, the goal-file
+        # write) happens while `target` does not exist yet — so a
+        # `shutil.rmtree(target, ...)` here would have nothing of this call's
+        # own to remove. It could only ever delete a directory this call did
+        # not create.
+        raise ServiceError(f"could not create {target.name}: {exc}") from exc
+    finally:
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def run_events(project: Project, slug: str, since: str | None = None,
@@ -555,15 +645,16 @@ def record_spend(project: Project, slug: str, actor: str = "human", **spent) -> 
     return result
 
 
-def set_conversation_agent(project: Project, slug: str, agent: str,
-                           actor: str = "human") -> dict:
-    """Choose who holds this run's conversation.
+def _check_can_converse(project: Project, agent: str) -> None:
+    """The per-reason check for whether `agent` could hold a conversation at
+    all: known, enabled, and configured with both session commands and a
+    registered family — each reason with its own message naming the actual
+    problem.
 
-    Switching discards the session id, because one CLI's session means
-    nothing to another — the next turn starts a new one. The turns already
-    said are history and are kept.
+    Shared by `set_conversation_agent` (an existing run picking its agent)
+    and `start_run` (checked *before* the run exists at all, so a refusal
+    here never leaves a half-started run behind).
     """
-    ws = _ws(project, slug)
     agents = config.load_agents(project.root)
     if agent not in agents:
         raise ServiceError(f"unknown agent: {agent} (known: {', '.join(agents)})")
@@ -582,9 +673,83 @@ def set_conversation_agent(project: Project, slug: str, agent: str,
         raise ServiceError(
             f"{agent} cannot host a conversation: no family in its configuration "
             "or the family is not registered")
+
+
+def set_conversation_agent(project: Project, slug: str, agent: str,
+                           actor: str = "human") -> dict:
+    """Choose who holds this run's conversation.
+
+    Switching discards the session id, because one CLI's session means
+    nothing to another — the next turn starts a new one. The turns already
+    said are history and are kept.
+    """
+    ws = _ws(project, slug)
+    _check_can_converse(project, agent)
     if _turn_in_flight(project, ws):
         raise ServiceError("a turn is still running; wait for it or cancel it")
     try:
         return conversation.set_agent(ws, agent, actor)
     except conversation.ConversationError as exc:
         raise ServiceError(str(exc)) from exc
+
+
+def _opening_prompt(slug: str, goal: str, workflow: str) -> str:
+    """The first message handed to a coordinator when a run is started with
+    an agent already chosen — following the same convention
+    `menu.resume_prompt` uses to hand a run to a coordinator, so the TUI and
+    the browser tell a coordinator the same things about a run.
+
+    No workflow named is not a second convention: it falls back exactly the
+    way `resume_prompt` falls back for a `kind` with no entry in
+    `menu.WORKFLOWS` — a skill reference is still named, just the generic
+    `src/scieflow/research/AGENTS.md` rather than a workflow-specific skill.
+
+    The goal is pinned in verbatim, at the end, as data — never templated or
+    interpreted.
+    """
+    from scieflow.core import menu
+
+    skill = menu.WORKFLOWS.get(workflow, {}).get("skill", "src/scieflow/research/AGENTS.md")
+    return (f"Read AGENTS.md and src/scieflow/research/AGENTS.md. Start the run "
+            f"workspace/{slug}: read its goal.md and status.yml and continue per "
+            f"{skill}.\n\nGoal: {goal}")
+
+
+def start_run(project: Project, slug: str, goal: str, agent: str = "", *,
+              workflow: str = "", **limits) -> dict:
+    """Create a run and, when an agent is named, have it take the first turn.
+
+    The agent is checked *before* the run is created: a half-started run with
+    no way to talk to it is worse than a refusal. Creating and launching stay
+    separate (`create_run`, `set_conversation_agent`, `say`) — this is just
+    the convenience that chains them, so a run can also be made with no agent
+    at all when the registry has nothing conversational, leaving a run
+    someone can pick an agent for later on its own page.
+
+    Everything after creation uses `run["run"]["slug"]` — the canonical name
+    `create_run` actually made the workspace under — not the raw `slug` this
+    call was given. `Project.run_dir` legitimately rewrites a slug (a
+    `workspace/` prefix stripped, a trailing slash or surrounding whitespace
+    trimmed), so the two can differ, and a caller that instead reused the raw
+    slug would tell the conversation agent, and eventually the browser's own
+    redirect, to look for a run at a path that 404s while the real one sits
+    one path segment over.
+
+    A failure once the run exists (`set_conversation_agent` or `say` refusing
+    — a sandbox verify failure, an exhausted budget, an oversized opening
+    prompt) raises `RunStartedError`, not a plain `ServiceError`: the run is
+    real, and the caller should send the user to it, not pretend nothing
+    happened.
+    """
+    if agent:
+        _check_can_converse(project, agent)
+    run = create_run(project, slug, goal, workflow=workflow, **limits)
+    canonical = run["run"]["slug"]
+    if not agent:
+        return {"run": run, "slug": canonical, "turn": None}
+    try:
+        set_conversation_agent(project, canonical, agent)
+        said = say(project, canonical, _opening_prompt(canonical, goal, workflow))
+    except ServiceError as exc:
+        raise RunStartedError(canonical, str(exc)) from exc
+    return {"run": run, "slug": canonical, "turn": said["turn"]}

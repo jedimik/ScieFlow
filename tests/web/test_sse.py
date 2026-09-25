@@ -219,6 +219,64 @@ def test_the_server_keeps_answering_while_a_turn_is_in_flight(live, project):
     assert turn_done.is_set(), "the turn never completed"
 
 
+def _start_ignoring_sigterm(project):
+    """A job whose process traps `SIGTERM` and sleeps, so `_kill_group` has
+    to wait out its whole `KILL_GRACE` before it escalates to `SIGKILL`.
+
+    Returns `(job, proc)` -- unpack both, like `jobs.start` itself, so the
+    caller can `jobs.wait` the process once the cancel has actually killed
+    it (mirrors the `running_job` fixture in `tests/web/conftest.py`)."""
+    from scieflow.core import jobs
+
+    script = (
+        "import signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "time.sleep(60)\n"
+    )
+    return jobs.start(project, [sys.executable, "-c", script], kind="agent",
+                      cwd=project.root, run_dir=project.run_dir("r1"),
+                      label="ignores-sigterm")
+
+
+def test_the_server_keeps_answering_while_a_cancel_is_in_flight(live, project):
+    """`jobs.cancel` -> `_kill_group` polls with `time.sleep(0.1)` for up to
+    `KILL_GRACE` (10s) seconds against a process that ignores `SIGTERM`,
+    before escalating to `SIGKILL`. An `async def` cancel handler doing that
+    wait would block the one event loop for the whole grace period -- on the
+    very button that exists to get you out of a stuck run. `/healthz` must
+    stay fast while a cancel against such a process is genuinely in flight
+    on a real socket -- a `TestClient` cannot exercise this, see this
+    module's own docstring."""
+    from scieflow.core import jobs
+    from scieflow.web.auth import CSRF_COOKIE
+
+    job, proc = _start_ignoring_sigterm(project)
+    done = threading.Event()
+
+    def cancel():
+        live.post(f"/api/v1/jobs/{job.id}/cancel",
+                 headers={"x-csrf-token": live.cookies[CSRF_COOKIE]}, timeout=30.0)
+        done.set()
+
+    canceller = threading.Thread(target=cancel, daemon=True)
+    canceller.start()
+    try:
+        time.sleep(0.5)   # let the cancel actually start waiting on the process
+        assert not done.is_set(), "the cancel finished too fast to prove anything"
+
+        start = time.monotonic()
+        health = live.get("/healthz")
+        elapsed = time.monotonic() - start
+
+        assert health.status_code == 200
+        assert elapsed < 2.0, f"/healthz took {elapsed:.1f}s -- the event loop was blocked"
+
+        canceller.join(timeout=15.0)
+        assert done.is_set(), "the cancel never completed"
+    finally:
+        jobs.wait(job, proc)
+
+
 def test_streams_need_a_session(project):
     from fastapi.testclient import TestClient
 

@@ -16,6 +16,27 @@ advancing, checkpointing, resuming, recording spend and answering a gate all
 go through the same underlying run action either way, so the two never
 disagree about what a run's state is.
 
+## Creating a run
+
+```bash
+uv run scieflow run init SLUG --goal FILE [--approval per-campaign|autonomous]
+    [--max-iterations N] [--max-experiment-runs N] [--max-wall-minutes N]
+```
+
+Creates `workspace/<slug>/`: goal, config, status, budget and notebook — the
+directory everything else on this page reads and writes. The browser's
+equivalent is the Start page (`/start`; see [The local web
+app](web.md#pages)) — a form for the same name, workflow, goal, approval mode
+and three budget limits, with an optional coordinator to hand the run to for
+its first turn once it's created. Both reach the same
+`run.init.init_workspace`, and the slug check now lives there too (the same
+one `Project.run_dir` applies, `clean_slug`): the CLI's `run init` passes its
+argument straight through with no check of its own, and the browser's
+`service.create_run` checks it again first, as defence in depth, not the only
+guard. Either path alone now refuses the same bad names, so the two cannot
+drift apart on what a freshly created run looks like — in name, as well as
+in contents.
+
 ## The state of a run
 
 ```bash

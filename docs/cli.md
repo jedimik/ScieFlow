@@ -33,7 +33,9 @@ uv run scieflow run init SLUG --goal FILE [--approval per-campaign|autonomous]
     [--max-iterations N] [--max-experiment-runs N] [--max-wall-minutes N]
 ```
 Create a research-loop run workspace. `--goal` must be an existing file
-(copied to `goal.md`); unset options fall back to `config/defaults.yml`.
+(copied to `goal.md`); unset options fall back to `config/defaults.yml`. The
+browser has the same thing as a form — the Start page, `/start` (see [The
+local web app](web.md#pages)) — with an optional coordinator hand-off besides.
 
 ```bash
 uv run scieflow run show SLUG [--json]

@@ -2,9 +2,10 @@
 {% block title %}ScieFlow — runs{% endblock %}
 {% block content %}
 <h1>Runs</h1>
+<p><a href="/start">Start a run</a></p>
 {% if not runs %}
-  <p class="dim">No runs yet. Start one with
-    <code>uv run scieflow run init &lt;slug&gt; --goal goal.md</code>.</p>
+  <p class="dim">No runs yet. <a href="/start">Start your first run</a> to
+    pick a workflow, name it and set a goal.</p>
 {% else %}
 <table>
   <tr><th>run</th><th>kind</th><th>phase</th><th>budget left</th><th>updated</th></tr>
