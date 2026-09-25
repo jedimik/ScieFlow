@@ -57,6 +57,38 @@ async def dashboard(request: Request) -> HTMLResponse:
     })
 
 
+@router.get("/start", response_class=HTMLResponse)
+async def start_page(request: Request, error: str = "") -> HTMLResponse:
+    project = _project(request)
+    return TEMPLATES.TemplateResponse(request, "start.html", {
+        "workflows": service.workflows(),
+        "agents": service.conversational_agents(project),
+        "defaults": project.defaults(),
+        "error": error,
+        "csrf": auth.csrf_token(request),
+    })
+
+
+@router.post("/start", dependencies=MUTATE)
+def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
+              workflow: str = Form(""), approval: str = Form(""),
+              max_iterations: int = Form(0), max_experiment_runs: int = Form(0),
+              max_wall_minutes: int = Form(0)):
+    """Plain `def`, not `async def` — see `say` above: creating a run writes
+    several files under a lock, and that blocking work belongs in Starlette's
+    threadpool, not on the event loop."""
+    try:
+        service.create_run(
+            _project(request), slug, goal, workflow=workflow,
+            approval=approval or None,
+            max_iterations=max_iterations or None,
+            max_experiment_runs=max_experiment_runs or None,
+            max_wall_minutes=max_wall_minutes or None)
+    except service.ServiceError as exc:
+        return RedirectResponse(f"/start?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/runs/{quote(slug)}", status_code=303)
+
+
 @router.get("/agents", response_class=HTMLResponse)
 async def agents_page(request: Request, slug: str = "", error: str = "",
                       assign: list[str] = Query(default=[])) -> HTMLResponse:

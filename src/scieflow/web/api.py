@@ -53,6 +53,19 @@ async def run_jobs(request: Request, slug: str) -> list[dict]:
     return [service.job_json(job) for job in jobs.list_jobs(project, ws)]
 
 
+@router.post("/runs", dependencies=MUTATE, tags=["runs"])
+def create_run(request: Request, slug: str = Form(...), goal: str = Form(...),
+               workflow: str = Form(""), approval: str = Form("")) -> dict:
+    """Create a run workspace and return its detail.
+
+    Plain `def`, not `async def` — see `say` below: creating a run writes
+    several files under a lock, and that blocking work belongs in
+    Starlette's threadpool, not on the event loop.
+    """
+    return service.create_run(_project(request), slug, goal,
+                              workflow=workflow, approval=approval or None)
+
+
 @router.get("/gates", tags=["gates"])
 async def open_gates(request: Request,
                      slug: str | None = Query(default=None,

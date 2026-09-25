@@ -33,6 +33,8 @@ MUTATING_PATHS = {
     "/api/v1/runs/{slug}/conversation": {"post"},
     "/api/v1/runs/{slug}/conversation/agent": {"post"},
     "/runs/{slug}/say": {"post"},
+    "/start": {"post"},
+    "/api/v1/runs": {"post"},
 }
 
 #: Placeholder ids for the templated paths above. Guard tests never resolve
@@ -59,6 +61,8 @@ SAMPLES: dict[str, dict] = {
     "/api/v1/runs/{slug}/conversation": {"message": "hi"},
     "/api/v1/runs/{slug}/conversation/agent": {"agent": "stub"},
     "/runs/{slug}/say": {"message": "hi"},
+    "/start": {"slug": "guard-start", "goal": "a goal"},
+    "/api/v1/runs": {"slug": "guard-api-runs", "goal": "a goal"},
 }
 
 

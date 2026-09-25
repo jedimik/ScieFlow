@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Start a run — ScieFlow{% endblock %}
+{% block nav %}<a href="/">← all runs</a>{% endblock %}
+{% block content %}
+<h1>Start a run</h1>
+{% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
+
+<form method="post" action="/start">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+
+  <p><label>Name <input name="slug" required
+       pattern="[A-Za-z0-9][A-Za-z0-9._ -]*"
+       title="Letters, digits, dot, underscore, space or dash"></label>
+     <span class="dim">becomes <code>workspace/&lt;name&gt;</code></span></p>
+
+  <p><label>Workflow
+    <select name="workflow">
+      {% for workflow in workflows %}
+      <option value="{{ workflow.name }}">{{ workflow.name }} — {{ workflow.ask }}</option>
+      {% endfor %}
+    </select></label></p>
+
+  <p><label>Goal<br>
+    <textarea name="goal" rows="5" required
+              placeholder="What this run is for"></textarea></label></p>
+
+  <p><label>Approval
+    <select name="approval">
+      {% for mode in ["per-campaign", "autonomous"] %}
+      <option {% if mode == defaults.approval %}selected{% endif %}>{{ mode }}</option>
+      {% endfor %}
+    </select></label></p>
+
+  <p class="actions">
+    <label>iterations <input name="max_iterations" type="number" min="1"
+           value="{{ defaults.max_iterations }}"></label>
+    <label>experiment runs <input name="max_experiment_runs" type="number" min="1"
+           value="{{ defaults.max_experiment_runs }}"></label>
+    <label>wall minutes <input name="max_wall_minutes" type="number" min="1"
+           value="{{ defaults.max_wall_minutes }}"></label>
+  </p>
+
+  <p class="dim">Roles for this workflow are staffed on the
+     <a href="/agents">agents page</a> — a run resolves its staffing when it
+     dispatches, so you can set it now or straight after creating the run.</p>
+
+  <button>Create the run</button>
+</form>
+{% endblock %}
