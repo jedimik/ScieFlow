@@ -156,8 +156,16 @@ async def answer(request: Request, slug: str, gate_id: str,
 
 
 @router.post("/jobs/{job_id}/cancel", dependencies=MUTATE, tags=["jobs"])
-async def cancel(request: Request, job_id: str) -> dict:
-    """Cancel a running job and its whole process group."""
+def cancel(request: Request, job_id: str) -> dict:
+    """Cancel a running job and its whole process group.
+
+    Plain `def`, not `async def` — see `say` below: `service.cancel_job` ->
+    `jobs.cancel` -> `_kill_group` polls with `time.sleep(0.1)` for up to
+    `KILL_GRACE` (10s) against a process that ignores `SIGTERM`. An `async
+    def` handler doing that wait would block the one event loop for the
+    whole grace period, on the very button that exists to get you out of a
+    stuck run.
+    """
     return service.cancel_job(_project(request), job_id)
 
 

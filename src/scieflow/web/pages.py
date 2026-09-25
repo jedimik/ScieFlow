@@ -308,7 +308,11 @@ async def act(request: Request, slug: str, action: str = Form(...),
 
 
 @router.post("/runs/{slug}/jobs/{job_id}/cancel", dependencies=MUTATE)
-async def cancel_job(request: Request, slug: str, job_id: str):
+def cancel_job(request: Request, slug: str, job_id: str):
+    """Plain `def`, not `async def` — see `say` above: `service.cancel_job`
+    -> `jobs.cancel` -> `_kill_group` polls with `time.sleep(0.1)` for up to
+    `KILL_GRACE` (10s) against a process that ignores `SIGTERM`, blocking
+    the one event loop for the whole grace period if run here directly."""
     project = _project(request)
     _owning_job(project, slug, job_id)
     try:
