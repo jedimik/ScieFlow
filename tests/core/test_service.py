@@ -16,7 +16,8 @@ STUB = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
 def project(tmp_path):
     (tmp_path / "config").mkdir()
     (tmp_path / "config" / "agents.yml").write_text(
-        f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1}}\n'
+        f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1, family: claude, '
+        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n'
         '  sleepy: {cmd: "sleep 300", enabled: true, timeout_min: 5}\n')
     (tmp_path / "config" / "defaults.yml").write_text("approval: per-campaign\n")
     (tmp_path / "schemas").mkdir()
@@ -29,6 +30,24 @@ def project(tmp_path):
     (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
     status.write_status(ws, status.new_status("r1", "autonomous"))
     return Project(tmp_path)
+
+
+@pytest.fixture
+def running_turn(project):
+    """A turn already in flight for r1: a still-running agent job, so the
+    busy check in `service.say` has something to refuse against. Uses the
+    `sleepy` agent's `sleep 300` command, same as
+    `test_dispatch_detached_then_cancel`, and cancels it on teardown."""
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    prompt = ws / "logs" / "running.md"
+    prompt.write_text("hi")
+    job = service.dispatch_agent(project, "sleepy", prompt, ws / "logs" / "running.out.md",
+                                 detach=True)
+    yield job
+    service.cancel_job(project, job["id"])
 
 
 def test_list_and_detail(project):
@@ -233,3 +252,72 @@ def test_record_spend_accumulates(project):
     service.record_spend(project, "r1", experiment_runs=2)
     service.record_spend(project, "r1", experiment_runs=3)
     assert budget.read_budget(project.run_dir("r1"))["spent"]["experiment_runs"] == 5
+
+
+def test_say_dispatches_a_turn_and_records_both_sides(project):
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    result = service.say(project, "r1", "What should we try next?")
+
+    turns = conversation.read(ws)["turns"]
+    assert [t["role"] for t in turns] == ["human", "agent"]
+    assert turns[0]["text"] == "What should we try next?"
+    assert turns[1]["job_id"] == result["job"]["id"]
+
+
+def test_say_pins_the_charter_into_the_turn(project):
+    """The whole point of the charter is that every turn carries it. A turn
+    that composed its own prompt would bypass that silently."""
+    from scieflow.core.run import charter, conversation
+
+    ws = project.run_dir("r1")
+    charter.set_text(ws, "Goal: characterise the catalyst.")
+    conversation.set_agent(ws, "stub")
+    service.say(project, "r1", "next step?")
+
+    sent = (ws / "logs").glob("turn-*.md")
+    composed = "\n".join(p.read_text() for p in sent)
+    assert "characterise the catalyst" in composed
+    assert composed.index("characterise the catalyst") < composed.index("next step?")
+
+
+def test_say_refuses_when_no_agent_is_chosen(project):
+    with pytest.raises(service.ServiceError, match="agent"):
+        service.say(project, "r1", "hello")
+
+
+def test_say_refuses_an_agent_that_cannot_hold_a_session(project):
+    """The spec is explicit: an agent that cannot report a session id must be
+    refused plainly, not silently restarted on every turn."""
+    from scieflow.core.run import conversation
+
+    conversation.set_agent(project.run_dir("r1"), "sleepy")   # no session_cmd
+    with pytest.raises(service.ServiceError, match="conversation"):
+        service.say(project, "r1", "hello")
+
+
+def test_say_refuses_while_a_turn_is_still_running(project, running_turn):
+    """Two concurrent resumes of one session is not something either CLI
+    promises to handle, and two jobs appending one record is a lost update."""
+    with pytest.raises(service.ServiceError, match="still"):
+        service.say(project, "r1", "and another thing")
+
+
+def test_say_refuses_an_empty_message(project):
+    from scieflow.core.run import conversation
+
+    conversation.set_agent(project.run_dir("r1"), "stub")
+    with pytest.raises(service.ServiceError):
+        service.say(project, "r1", "   ")
+
+
+def test_conversation_reports_whether_it_can_converse(project):
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "sleepy")
+    assert service.conversation_state(project, "r1")["can_converse"] is False
+    conversation.set_agent(ws, "stub")
+    assert service.conversation_state(project, "r1")["can_converse"] is True

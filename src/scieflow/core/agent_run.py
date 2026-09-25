@@ -178,7 +178,8 @@ def sandbox_disabled_in_run(project: Project, run_dir: Path | None) -> bool:
 
 def prepare(project: Project, agent: str, prompt_file: Path,
             cwd: Path | None = None, role: str | None = None, *,
-            sandbox_enabled: bool = True) -> Dispatch:
+            sandbox_enabled: bool = True,
+            session: str | None = None, conversational: bool = False) -> Dispatch:
     root = project.root
     agents = config.load_agents(root)
     if agent not in agents:
@@ -208,6 +209,14 @@ def prepare(project: Project, agent: str, prompt_file: Path,
         prompt = compose_prompt(run_dir, prompt_file.read_text())
     except (OSError, ValueError, yaml.YAMLError, charter.CharterError) as exc:
         raise DispatchError(f"invalid run charter: {exc}") from exc
+    template = None
+    if conversational:
+        key = "resume_cmd" if session else "session_cmd"
+        template = agent_cfg.get(key)
+        if not template:
+            raise DispatchError(
+                f"{agent} cannot host a conversation: no {key} in its configuration")
+
     use_stdin = len(prompt.encode()) > PROMPT_ARGV_LIMIT
     if use_stdin and "stdin_cmd" in agent_cfg:
         argv = build_argv(agent_cfg, prompt, root, include_prompt=False,
@@ -215,9 +224,10 @@ def prepare(project: Project, agent: str, prompt_file: Path,
     elif use_stdin:
         # No stdin_cmd: drop the {prompt} token from the normal command and
         # send the text on stdin instead (stdin_text below carries it).
-        argv = build_argv(agent_cfg, prompt, root, include_prompt=False)
+        argv = build_argv(agent_cfg, prompt, root, include_prompt=False,
+                          template=template, session=session or "")
     else:
-        argv = build_argv(agent_cfg, prompt, root)
+        argv = build_argv(agent_cfg, prompt, root, template=template, session=session or "")
     disabled = sandbox_disabled_in_run(project, run_dir)
     use_sandbox = sandbox_enabled and not disabled
     writable = (sandbox.writable_for(project, run_dir=run_dir, coordinator=False)

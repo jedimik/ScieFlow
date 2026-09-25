@@ -12,10 +12,22 @@ import threading
 from dataclasses import asdict
 from pathlib import Path
 
-from scieflow.core import agent_config, agent_configure as acf, events, gates, jobs, sandbox, workspace
+from scieflow.core import (
+    agent_config,
+    agent_configure as acf,
+    agent_run,
+    config,
+    events,
+    gates,
+    jobs,
+    sandbox,
+    sessions,
+    store,
+    workspace,
+)
 from scieflow.core.gates import ADOPTED, CHARTER_ADOPTION
 from scieflow.core.project import Project, ProjectError
-from scieflow.core.run import actions, budget, charter, status
+from scieflow.core.run import actions, budget, charter, conversation, status
 
 RECENT_JOBS = 20
 RECENT_EVENTS = 50
@@ -74,12 +86,12 @@ def run_events(project: Project, slug: str, since: str | None = None,
 
 def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: Path, *,
                    cwd: Path | None = None, role: str | None = None,
-                   detach: bool = False) -> dict:
-    from scieflow.core.agent_run import DispatchError, prepare
-
+                   detach: bool = False, session: str | None = None,
+                   conversational: bool = False) -> dict:
     try:
-        d = prepare(project, agent, Path(prompt_file), cwd, role)
-    except (DispatchError, sandbox.SandboxError) as e:
+        d = agent_run.prepare(project, agent, Path(prompt_file), cwd, role,
+                              session=session, conversational=conversational)
+    except (agent_run.DispatchError, sandbox.SandboxError) as e:
         raise ServiceError(str(e)) from e
     if d.run_dir is not None:
         try:
@@ -123,6 +135,92 @@ def cancel_job(project: Project, job_id: str) -> dict:
     if job is None:
         raise ServiceError(f"no job {job_id}")
     return asdict(jobs.cancel(job))
+
+
+TURN_PROMPT_DIR = "logs"
+
+
+def _turn_in_flight(project: Project, ws: Path) -> bool:
+    """True when a turn's job is still running for this run.
+
+    This is a plain read of the job records, not a lock: two `say()` calls
+    that both read "not busy" before either one's job is recorded can still
+    both proceed. It narrows that window to the time between reading the
+    conversation record and starting the job, but does not close it — a real
+    fix would need a lock held across that whole span (e.g. the run-scoped
+    file lock `store.locked` already uses elsewhere), which this task does
+    not add.
+    """
+    return any(job.state == "running" and job.kind == "agent"
+              for job in jobs.list_jobs(project, ws))
+
+
+def conversation_state(project: Project, slug: str) -> dict:
+    """The record, plus whether a turn is in flight and whether this agent
+    can hold a session at all.
+
+    Named `conversation_state`, not `conversation` — `conversation` is
+    already the name of the imported module, and a same-named function here
+    would shadow it.
+    """
+    ws = _ws(project, slug)
+    try:
+        doc = conversation.read(ws)
+    except conversation.ConversationError as exc:
+        raise ServiceError(str(exc)) from exc
+    cfg = config.load_agents(project.root).get(doc["agent"], {})
+    return {**doc,
+            "busy": _turn_in_flight(project, ws),
+            "can_converse": bool(doc["agent"]) and sessions.can_converse(cfg)}
+
+
+def say(project: Project, slug: str, message: str, actor: str = "human") -> dict:
+    """One conversation turn: a sandboxed job that resumes the agent's session.
+
+    This is an ordinary dispatch — `dispatch_agent` guards the budget, proves
+    the sandbox, starts the job, records spend and writes the transcript.
+    `say` only composes the prompt (through `agent_run.compose_prompt`, so
+    the run's charter is pinned to this turn exactly as it is to any other
+    dispatch) and records both sides of the exchange.
+
+    The human turn is recorded before the dispatch runs: a turn whose job
+    crashes should still show what was asked.
+    """
+    if not message or not message.strip():
+        raise ServiceError("say something")
+    ws = _ws(project, slug)
+    try:
+        doc = conversation.read(ws)
+    except conversation.ConversationError as exc:
+        raise ServiceError(str(exc)) from exc
+    if not doc["agent"]:
+        raise ServiceError("choose an agent for this run's conversation first")
+    if _turn_in_flight(project, ws):
+        raise ServiceError("a turn is still running; wait for it or cancel it")
+
+    prompt_file = Path(ws) / TURN_PROMPT_DIR / f"turn-{store.new_id()}.md"
+    prompt_file.parent.mkdir(parents=True, exist_ok=True)
+    prompt_file.write_text(agent_run.compose_prompt(ws, message))
+
+    try:
+        conversation.add_turn(ws, role="human", text=message, actor=actor)
+    except conversation.ConversationError as exc:
+        raise ServiceError(str(exc)) from exc
+
+    transcript = prompt_file.with_suffix(".out.md")
+    job = dispatch_agent(project, doc["agent"], prompt_file, transcript,
+                         session=doc["session"], conversational=True)
+
+    parsed = sessions.parse(config.load_agents(project.root)[doc["agent"]],
+                            Path(transcript).read_text())
+    try:
+        conversation.record_session(ws, parsed.id)
+        turn = conversation.add_turn(ws, role="agent", text=parsed.text,
+                                     job_id=job["id"], actor="agent")
+    except conversation.ConversationError as exc:
+        raise ServiceError(str(exc)) from exc
+    Path(transcript).write_text(parsed.text)      # the job page shows prose, not JSON
+    return {"job": job, "turn": turn}
 
 
 def open_gates(project: Project, slug: str | None = None) -> list[dict]:
