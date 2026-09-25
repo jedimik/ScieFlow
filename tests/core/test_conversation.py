@@ -88,3 +88,38 @@ def test_concurrent_turns_do_not_lose_one(ws):
     for t in threads:
         t.join()
     assert len(conversation.read(ws)["turns"]) == 8
+
+
+def test_invalid_actor_on_add_turn_leaves_file_untouched(ws):
+    """An invalid actor must be rejected BEFORE the write, so the file and
+    event log don't diverge."""
+    conversation.set_agent(ws, "claude")
+    with pytest.raises(conversation.ConversationError):
+        conversation.add_turn(ws, role="human", text="hi", actor="wizard")
+    # File was not modified - no turn was added
+    assert conversation.read(ws)["turns"] == []
+    # No event was emitted
+    assert not events.read(ws)
+
+
+def test_invalid_actor_on_set_agent_is_rejected(ws):
+    """set_agent must validate the actor parameter it accepts."""
+    with pytest.raises(conversation.ConversationError):
+        conversation.set_agent(ws, "claude", actor="wizard")
+    # File was not modified
+    assert conversation.read(ws) == {"agent": "", "session": None, "turns": []}
+
+
+def test_malformed_yaml_in_all_write_paths(ws):
+    """Hand-edited non-mapping files produce ConversationError consistently."""
+    # Write a YAML list to conversation.yml to simulate hand-editing
+    import yaml
+    (ws / "conversation.yml").write_text(yaml.safe_dump([1, 2, 3]))
+
+    # All write paths should refuse with ConversationError, not bare exceptions
+    with pytest.raises(conversation.ConversationError):
+        conversation.set_agent(ws, "claude")
+    with pytest.raises(conversation.ConversationError):
+        conversation.add_turn(ws, role="human", text="hi")
+    with pytest.raises(conversation.ConversationError):
+        conversation.record_session(ws, "session-id")

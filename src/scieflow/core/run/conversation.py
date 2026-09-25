@@ -32,6 +32,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _guard_dict(doc) -> dict:
+    """Ensure doc is a dict, raising ConversationError if not."""
+    if not isinstance(doc, dict):
+        raise ConversationError(f"malformed {CONVERSATION_FILE}: not a mapping")
+    return doc
+
+
 def read(ws: Path) -> dict:
     doc = store.read_yaml(_path(ws), default=None) or {}
     if not isinstance(doc, dict):
@@ -46,16 +53,22 @@ def set_agent(ws: Path, agent: str, actor: str = "human") -> dict:
     id is meaningful only to the CLI that issued it."""
     if not agent or not agent.strip():
         raise ConversationError("name an agent")
+    if actor not in events.ACTORS:
+        raise ConversationError(f"unknown actor {actor!r} (one of {', '.join(sorted(events.ACTORS))})")
 
     def change(doc: dict) -> dict:
-        current = dict(doc or {})
+        doc = _guard_dict(doc or {})
+        current = dict(doc)
         if str(current.get("agent") or "") != agent:
             current["session"] = None
         current["agent"] = agent
         current.setdefault("turns", [])
         return current
 
-    store.update_yaml(_path(ws), change)
+    try:
+        store.update_yaml(_path(ws), change)
+    except (TypeError, ValueError) as exc:
+        raise ConversationError(f"failed to set agent: {exc}") from exc
     return read(ws)
 
 
@@ -67,7 +80,15 @@ def record_session(ws: Path, session_id: str | None) -> dict:
     """
     if not session_id:
         return read(ws)
-    store.update_yaml(_path(ws), lambda doc: {**(doc or {}), "session": str(session_id)})
+
+    def update_session(doc: dict) -> dict:
+        doc = _guard_dict(doc or {})
+        return {**doc, "session": str(session_id)}
+
+    try:
+        store.update_yaml(_path(ws), update_session)
+    except (TypeError, ValueError) as exc:
+        raise ConversationError(f"failed to record session: {exc}") from exc
     return read(ws)
 
 
@@ -75,14 +96,22 @@ def add_turn(ws: Path, *, role: str, text: str, job_id: str = "",
              actor: str = "human") -> dict:
     if role not in ROLES:
         raise ConversationError(f"unknown turn role {role!r} (one of {', '.join(sorted(ROLES))})")
+    if actor not in events.ACTORS:
+        raise ConversationError(f"unknown actor {actor!r} (one of {', '.join(sorted(events.ACTORS))})")
+
     turn = {"role": role, "text": text, "job_id": job_id, "ts": _now()}
 
     def append(doc: dict) -> dict:
-        current = dict(doc or {})
+        doc = _guard_dict(doc or {})
+        current = dict(doc)
         current["turns"] = [*(current.get("turns") or []), dict(turn)]
         return current
 
-    store.update_yaml(_path(ws), append)
+    try:
+        store.update_yaml(_path(ws), append)
+    except (TypeError, ValueError) as exc:
+        raise ConversationError(f"failed to add turn: {exc}") from exc
+
     events.emit(ws, "turn.sent" if role == "human" else "turn.received",
                 actor, role=role, job=job_id)
     return turn
