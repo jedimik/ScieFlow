@@ -79,3 +79,18 @@ def test_charter_text_is_escaped_on_the_page(client, project):
 
 def test_a_charter_route_on_an_unknown_run_is_404(client):
     assert client.get("/api/v1/runs/nope/charter").status_code == 404
+
+
+def test_adopting_a_proposal_from_the_gate_form(client, project):
+    from scieflow.core import gates
+
+    ws = project.run_dir("r1")
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("Adopted from the browser.")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[proposal])
+
+    assert post(client, f"/runs/r1/gates/{gate['id']}",
+                answer="adopt").status_code == 303
+    assert charter.current_text(ws) == "Adopted from the browser."

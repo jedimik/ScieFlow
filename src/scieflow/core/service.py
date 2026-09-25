@@ -23,6 +23,9 @@ class ServiceError(Exception):
     """A request the service cannot fulfil, with a message for the user."""
 
 
+ADOPTED = frozenset({"adopt", "yes", "approve", "approved"})
+
+
 def _ws(project: Project, slug: str) -> Path:
     try:
         ws = project.run_dir(slug)
@@ -129,12 +132,37 @@ def open_gates(project: Project, slug: str | None = None) -> list[dict]:
     return out
 
 
+def _adopt_charter(ws: Path, gate: dict, actor: str) -> None:
+    """A `charter-adoption` gate carries its proposal as the file it names.
+
+    `open_gate` has no payload field, so the proposal travels the way every
+    other document a gate refers to travels — as a file inside the run.
+    """
+    files = gate.get("files") or []
+    if not files:
+        raise ServiceError("that proposal names no file to adopt")
+    path = Path(files[0])
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise ServiceError(f"cannot read the proposal at {path}: {exc}") from exc
+    try:
+        charter.set_text(ws, text, actor,
+                         f"adopted from a proposal (gate {gate['id']})")
+    except charter.CharterError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 def answer_gate(project: Project, slug: str, gate_id: str, answer: str,
                 actor: str = "human", rationale: str = "", note: str = "") -> dict:
+    ws = _ws(project, slug)
     try:
-        return gates.answer(project, _ws(project, slug), gate_id, answer, actor, rationale, note)
+        gate = gates.answer(project, ws, gate_id, answer, actor, rationale, note)
     except gates.GateError as e:
         raise ServiceError(str(e)) from e
+    if gate["kind"] == "charter-adoption" and answer.strip().lower() in ADOPTED:
+        _adopt_charter(ws, gate, actor)
+    return gate
 
 
 def agent_settings(project: Project, slug: str | None = None) -> dict:

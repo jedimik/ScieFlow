@@ -91,6 +91,24 @@ the browser genuinely share a function call, not just a common primitive.
 The charter is data, never instructions to ScieFlow itself: it changes what
 an agent is told, never what any `scieflow` command does.
 
+### A coordinator may propose a charter
+
+A human is not the only author. A coordinator agent can write a plan to a
+file inside its own run and open a `charter-adoption` gate naming that file —
+`open_gate` has no field for a payload, so the proposal travels the way every
+other document a gate points to already travels, as a file the gate's
+`files` names. That gate is marked `requires_human: true`, the same as
+`scope-change` and for the same reason: adopting a charter redefines what the
+run is *for*, so the agent that wrote the proposal cannot also adopt it.
+
+When a human answers the gate `adopt`, ScieFlow reads the proposal file and
+writes it as a new charter version — attributed to whoever answered, with a
+note recording which gate it came from — after the gate itself is recorded
+as answered, so the decision and the charter can never disagree. Answering
+`decline` (or anything else) leaves the charter untouched. The proposal file
+itself is ordinary run data: if it is missing by the time someone answers,
+adoption is refused rather than silently doing nothing.
+
 ## History: the event log
 
 `workspace/<slug>/events.jsonl` is the run's history — one JSON object per
@@ -162,6 +180,7 @@ The kinds live in `schemas/gates.yml`:
 | `tier-promotion` | **yes** | let a support agent act as primary for a role |
 | `scope-change` | **yes** | leave the approved question, scope or bounds |
 | `budget-extension` | **yes** | raise a budget limit |
+| `charter-adoption` | **yes** | adopt a proposed plan as this run's charter |
 
 In a **gated** run (`approval: per-campaign`) you answer every gate. In an
 **autonomous** run the coordinator may answer a gate itself — only a kind that

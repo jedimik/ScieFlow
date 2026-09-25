@@ -1,9 +1,13 @@
 """The run charter: a versioned record of what has been agreed."""
 
+from pathlib import Path
+
 import pytest
 
 from scieflow.core import events
 from scieflow.core.run import charter
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
@@ -14,6 +18,24 @@ def ws(tmp_path):
     workspace.mkdir(parents=True)
     status.write_status(workspace, status.new_status("r1", "autonomous"))
     return workspace
+
+
+@pytest.fixture
+def project_ws(tmp_path):
+    """A `(Project, ws)` pair for run `r1`, with `schemas/gates.yml` copied
+    in so `gates.kinds(project)` can read it."""
+    from scieflow.core.project import Project
+    from scieflow.core.run import status
+
+    (tmp_path / "schemas").mkdir()
+    (tmp_path / "schemas" / "gates.yml").write_text(
+        (ROOT / "schemas" / "gates.yml").read_text())
+
+    project = Project(tmp_path)
+    workspace = project.run_dir("r1")
+    workspace.mkdir(parents=True)
+    status.write_status(workspace, status.new_status("r1", "autonomous"))
+    return project, workspace
 
 
 def test_a_run_without_a_charter_reads_as_empty(ws):
@@ -115,3 +137,80 @@ def test_concurrent_writers_do_not_lose_a_version(ws):
     numbers = [v["n"] for v in charter.read(ws)["versions"]]
     assert numbers == list(range(1, 9)), f"lost or duplicated versions: {numbers}"
     assert charter.read(ws)["current"] == 8
+
+
+def test_a_proposal_becomes_the_charter_when_the_gate_is_answered(project_ws):
+    """The coordinator proposes; a human adopts. The decision is recorded
+    with an actor and a timestamp, like every other approval."""
+    from scieflow.core import gates, service
+    from scieflow.core.run import charter
+
+    project, ws = project_ws
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("Goal: characterise the catalyst before scaling.")
+
+    gate = gates.open_gate(project, ws, "charter-adoption",
+                           "Adopt this plan as the run's charter?",
+                           options=["adopt", "decline"], files=[proposal])
+    assert gate["requires_human"] is True
+
+    service.answer_gate(project, "r1", gate["id"], "adopt")
+
+    assert charter.current_text(ws) == "Goal: characterise the catalyst before scaling."
+    assert charter.history(ws)[0]["actor"] == "human"
+    assert "adopted from a proposal" in charter.history(ws)[0]["note"]
+
+
+def test_declining_a_proposal_changes_nothing(project_ws):
+    from scieflow.core import gates, service
+    from scieflow.core.run import charter
+
+    project, ws = project_ws
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("A plan nobody wants.")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[proposal])
+
+    service.answer_gate(project, "r1", gate["id"], "decline")
+
+    assert charter.current_text(ws) == ""
+
+
+def test_an_agent_cannot_adopt_its_own_proposal(project_ws):
+    """requires_human is the point: a coordinator that could rewrite its own
+    goal is not autonomous within a scope, it is unbounded."""
+    from scieflow.core import gates, service
+    from scieflow.core.run import charter
+
+    project, ws = project_ws
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("Let me do whatever I like.")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[proposal])
+
+    with pytest.raises(service.ServiceError):
+        service.answer_gate(project, "r1", gate["id"], "adopt",
+                            actor="agent", rationale="I wrote it myself")
+    assert charter.current_text(ws) == ""
+
+
+def test_adopting_a_proposal_whose_file_is_gone_is_refused(project_ws):
+    """The agent's run is writable by the agent, so the file it named can be
+    deleted between proposing and adopting."""
+    from scieflow.core import gates, service
+    from scieflow.core.run import charter
+
+    project, ws = project_ws
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("Here now, gone later.")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[proposal])
+    proposal.unlink()
+
+    with pytest.raises(service.ServiceError, match="proposal"):
+        service.answer_gate(project, "r1", gate["id"], "adopt")
+    assert charter.current_text(ws) == ""

@@ -12,4 +12,5 @@ kinds:
   tier-promotion:      {requires_human: true,  help: "Let a support agent act as primary for a role"}
   scope-change:        {requires_human: true,  help: "Leave the approved question, scope or bounds"}
   budget-extension:    {requires_human: true,  help: "Raise a budget limit"}
+  charter-adoption:    {requires_human: true,  help: "Adopt a proposed plan as this run's charter"}
 states: [open, answered, withdrawn]

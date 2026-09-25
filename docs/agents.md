@@ -219,7 +219,29 @@ None of the above changes what an agent is told to do for a given run — that
 is the run's [charter](runs.md#the-charter-what-this-run-agreed-to-do).
 Whichever agent, model and effort a role resolves to, the prompt it is
 dispatched with already opens with that run's current charter
-(`agent_run.compose_prompt` prepends it before any role override is applied).
-A coordinator or sub-agent composing a prompt for a run should not restate
-the goal or paste the charter back in — it is already at the top of what it
-receives, on every turn.
+(`agent_run.compose_prompt` prepends it independent of any role override —
+role and model resolution never touch the charter). A coordinator or
+sub-agent composing a prompt for a run should not restate the goal or paste
+the charter back in — it is already at the top of what it receives, on
+every turn.
+
+### A coordinator may propose a charter, but cannot adopt its own proposal
+
+An agent that wants to change the run's standing goal writes its proposed
+plan to a file inside its own run (for example
+`workspace/<slug>/proposals/charter.md`) and opens a gate naming that file:
+
+```bash
+uv run scieflow gate open <slug> --kind charter-adoption \
+    --question "Adopt this plan as the run's charter?" \
+    --option adopt --option decline --file workspace/<slug>/proposals/charter.md
+```
+
+`charter-adoption` is `requires_human: true`, the same as `scope-change` —
+adopting a charter redefines what the run is *for*, so do not expect to
+answer this gate yourself, even in an autonomous run and even with
+`--in-scope`; `gate answer --as-agent` is refused for any gate marked this
+way. Open the gate, then `gate wait` (or simply stop and let the human find
+it). If a human answers `adopt`, ScieFlow reads your proposal file and writes
+it as the run's new charter version; anything else leaves the charter
+unchanged.
