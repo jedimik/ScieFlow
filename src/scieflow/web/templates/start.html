@@ -44,6 +44,20 @@
      <a href="/agents">agents page</a> — a run resolves its staffing when it
      dispatches, so you can set it now or straight after creating the run.</p>
 
+  <p><label>Coordinator
+    {% if not agents %}
+      <span class="dim">no agent in this project can hold a conversation —
+        the run will be created without one, and you can choose later on its
+        page once an agent has <code>session_cmd</code> and
+        <code>resume_cmd</code> configured.</span>
+    {% else %}
+      <select name="agent">
+        <option value="">none — just create the run</option>
+        {% for name in agents %}<option>{{ name }}</option>{% endfor %}
+      </select>
+    {% endif %}
+  </label></p>
+
   <button>Create the run</button>
 </form>
 {% endblock %}

@@ -144,3 +144,89 @@ def test_workflows_lists_the_registry(project):
     names = [w["name"] for w in service.workflows()]
     assert "research-loop" in names and "lit-review" in names
     assert all(w["ask"] for w in service.workflows())
+
+
+@pytest.fixture
+def project_with_agent(tmp_path):
+    """The same shape as `project`, with `stub` additionally configured to
+    hold a conversation (`family`, `session_cmd`, `resume_cmd`) — copied from
+    the conversation milestone's fixture in `tests/core/test_service.py`.
+    `project` itself keeps `stub` non-conversational, which is what the
+    refusal test needs."""
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agents.yml").write_text(
+        f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1, family: claude, '
+        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n')
+    (tmp_path / "config" / "defaults.yml").write_text(
+        "approval: per-campaign\nmax_iterations: 3\n"
+        "max_experiment_runs: 10\nmax_wall_minutes: 60\n")
+    (tmp_path / "schemas").mkdir()
+    for name in ("status", "gates", "status-research"):
+        (tmp_path / "schemas" / f"{name}.yml").write_text(
+            (ROOT / "schemas" / f"{name}.yml").read_text())
+    (tmp_path / "workspace").mkdir()
+    return Project(tmp_path)
+
+
+def test_start_run_creates_the_run_and_takes_the_first_turn(project_with_agent):
+    from scieflow.core.run import conversation
+
+    project = project_with_agent
+    result = service.start_run(project, "r1", "Find a catalyst.", "stub",
+                               workflow="research-loop")
+    ws = project.run_dir("r1")
+    doc = conversation.read(ws)
+    assert doc["agent"] == "stub"
+    assert [t["role"] for t in doc["turns"]] == ["human", "agent"]
+    assert result["turn"]["role"] == "agent"
+
+
+def test_the_first_turn_names_the_workflow_skill(project_with_agent):
+    """The prompt must follow the convention `menu` already uses to hand a run
+    to a coordinator, so the TUI and the browser say the same thing."""
+    from scieflow.core.run import conversation
+
+    project = project_with_agent
+    service.start_run(project, "r1", "Find a catalyst.", "stub",
+                      workflow="research-loop")
+    first = conversation.read(project.run_dir("r1"))["turns"][0]["text"]
+    assert "skills/research-loop/SKILL.md" in first
+    assert "Find a catalyst." in first
+
+
+def test_start_run_without_an_agent_still_creates_the_run(project):
+    """A registry with nothing conversational must still let someone make a
+    run — they can choose an agent later on its page."""
+    result = service.start_run(project, "r1", "a goal", "")
+    assert project.run_dir("r1").exists()
+    assert "turn" not in result or result["turn"] is None
+
+
+def test_start_run_refuses_an_agent_that_cannot_converse_before_creating(project):
+    """The run must not exist afterwards: a half-started run with no way to
+    talk to it is worse than a refusal."""
+    with pytest.raises(service.ServiceError, match="conversation"):
+        service.start_run(project, "r1", "a goal", "stub")   # no session_cmd
+    assert not project.run_dir("r1").exists()
+
+
+def test_a_very_large_goal_survives_storage_and_the_first_turn(project_with_agent):
+    """The goal is stored verbatim and pinned into every prompt, so it can push
+    the first turn's prompt past the argv limit."""
+    project = project_with_agent
+    goal = "G" * 150_000
+    from scieflow.core.run import conversation
+
+    service.start_run(project, "r1", goal, "stub", workflow="research-loop")
+    ws = project.run_dir("r1")
+    assert (ws / "goal.md").read_text() == goal
+    agent_turn = next(t for t in conversation.read(ws)["turns"] if t["role"] == "agent")
+    assert agent_turn["job_id"], "the first turn was never dispatched"
+
+
+def test_goal_text_is_stored_literally(project_with_agent):
+    """Braces and delimiter-looking text are data, not templating."""
+    project = project_with_agent
+    goal = "Use {model} and --- and ## headings; mind `backticks`."
+    service.start_run(project, "r1", goal, "stub", workflow="research-loop")
+    assert (project.run_dir("r1") / "goal.md").read_text() == goal

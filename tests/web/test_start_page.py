@@ -94,3 +94,22 @@ def test_the_dashboard_links_to_start(client):
 def test_the_wizard_points_at_the_agents_page_for_staffing(client):
     """Staffing has one editor, and it is not this form."""
     assert 'href="/agents"' in client.get("/start").text
+
+
+def test_choosing_an_agent_launches_the_coordinator(client, project):
+    from scieflow.core.run import conversation
+
+    post(client, "/start", slug="launched", goal="a goal",
+         workflow="research-loop", agent="stub")
+    doc = conversation.read(project.run_dir("launched"))
+    assert doc["agent"] == "stub"
+    assert doc["turns"], "no first turn was taken"
+
+
+def test_the_wizard_says_so_when_no_agent_can_converse(client, project, monkeypatch):
+    from scieflow.core import service as service_mod
+
+    monkeypatch.setattr(service_mod, "conversational_agents", lambda project: [])
+    page = client.get("/start").text
+    assert "no agent" in page.lower()
+    assert 'name="agent"' not in page or "disabled" in page

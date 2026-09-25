@@ -621,15 +621,16 @@ def record_spend(project: Project, slug: str, actor: str = "human", **spent) -> 
     return result
 
 
-def set_conversation_agent(project: Project, slug: str, agent: str,
-                           actor: str = "human") -> dict:
-    """Choose who holds this run's conversation.
+def _check_can_converse(project: Project, agent: str) -> None:
+    """The per-reason check for whether `agent` could hold a conversation at
+    all: known, enabled, and configured with both session commands and a
+    registered family — each reason with its own message naming the actual
+    problem.
 
-    Switching discards the session id, because one CLI's session means
-    nothing to another — the next turn starts a new one. The turns already
-    said are history and are kept.
+    Shared by `set_conversation_agent` (an existing run picking its agent)
+    and `start_run` (checked *before* the run exists at all, so a refusal
+    here never leaves a half-started run behind).
     """
-    ws = _ws(project, slug)
     agents = config.load_agents(project.root)
     if agent not in agents:
         raise ServiceError(f"unknown agent: {agent} (known: {', '.join(agents)})")
@@ -648,9 +649,61 @@ def set_conversation_agent(project: Project, slug: str, agent: str,
         raise ServiceError(
             f"{agent} cannot host a conversation: no family in its configuration "
             "or the family is not registered")
+
+
+def set_conversation_agent(project: Project, slug: str, agent: str,
+                           actor: str = "human") -> dict:
+    """Choose who holds this run's conversation.
+
+    Switching discards the session id, because one CLI's session means
+    nothing to another — the next turn starts a new one. The turns already
+    said are history and are kept.
+    """
+    ws = _ws(project, slug)
+    _check_can_converse(project, agent)
     if _turn_in_flight(project, ws):
         raise ServiceError("a turn is still running; wait for it or cancel it")
     try:
         return conversation.set_agent(ws, agent, actor)
     except conversation.ConversationError as exc:
         raise ServiceError(str(exc)) from exc
+
+
+def _opening_prompt(slug: str, goal: str, workflow: str) -> str:
+    """The first message handed to a coordinator when a run is started with
+    an agent already chosen — following the same convention
+    `menu.resume_prompt` uses to hand a run to a coordinator, so the TUI and
+    the browser tell a coordinator the same things about a run.
+
+    The goal is pinned in verbatim, at the end, as data — never templated or
+    interpreted.
+    """
+    from scieflow.core import menu
+
+    if not workflow:
+        return f"Read AGENTS.md. Start the run workspace/{slug}: read its goal.md.\n\nGoal: {goal}"
+    skill = menu.WORKFLOWS[workflow]["skill"]
+    return (f"Read AGENTS.md and src/scieflow/research/AGENTS.md. Start the run "
+            f"workspace/{slug}: read its goal.md and status.yml and continue per "
+            f"{skill}.\n\nGoal: {goal}")
+
+
+def start_run(project: Project, slug: str, goal: str, agent: str = "", *,
+              workflow: str = "", **limits) -> dict:
+    """Create a run and, when an agent is named, have it take the first turn.
+
+    The agent is checked *before* the run is created: a half-started run with
+    no way to talk to it is worse than a refusal. Creating and launching stay
+    separate (`create_run`, `set_conversation_agent`, `say`) — this is just
+    the convenience that chains them, so a run can also be made with no agent
+    at all when the registry has nothing conversational, leaving a run
+    someone can pick an agent for later on its own page.
+    """
+    if agent:
+        _check_can_converse(project, agent)
+    run = create_run(project, slug, goal, workflow=workflow, **limits)
+    if not agent:
+        return {"run": run, "turn": None}
+    set_conversation_agent(project, slug, agent)
+    said = say(project, slug, _opening_prompt(slug, goal, workflow))
+    return {"run": run, "turn": said["turn"]}

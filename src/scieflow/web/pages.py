@@ -103,7 +103,7 @@ def start_page(request: Request) -> HTMLResponse:
 
 @router.post("/start", dependencies=MUTATE)
 def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
-              workflow: str = Form(""), approval: str = Form(""),
+              workflow: str = Form(""), agent: str = Form(""), approval: str = Form(""),
               max_iterations: int = Form(0), max_experiment_runs: int = Form(0),
               max_wall_minutes: int = Form(0)):
     """Plain `def`, not `async def` — see `say` above: creating a run writes
@@ -120,6 +120,12 @@ def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
     a refused submission re-POSTs it, and the browser will ask first. A
     successful submission still redirects, so that guarantee holds for the
     common case.
+
+    Calls `service.start_run` instead of `service.create_run` so a chosen
+    agent takes the first turn as part of this same request — the agent is
+    checked before anything is created, so a refusal here behaves exactly
+    like the existing refusals: nothing written, form re-rendered with what
+    was typed.
     """
     project = _project(request)
     submitted = {"slug": slug, "goal": goal, "workflow": workflow, "approval": approval,
@@ -127,8 +133,8 @@ def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
                 "max_experiment_runs": max_experiment_runs or None,
                 "max_wall_minutes": max_wall_minutes or None}
     try:
-        service.create_run(
-            project, slug, goal, workflow=workflow,
+        service.start_run(
+            project, slug, goal, agent, workflow=workflow,
             approval=approval or None,
             max_iterations=max_iterations or None,
             max_experiment_runs=max_experiment_runs or None,
