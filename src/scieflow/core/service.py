@@ -8,6 +8,8 @@ for anything a caller should show the user.
 from __future__ import annotations
 
 import hashlib
+import shutil
+import tempfile
 import threading
 from dataclasses import asdict
 from pathlib import Path
@@ -77,6 +79,60 @@ def run_detail(project: Project, slug: str) -> dict:
         "jobs": [job_json(j) for j in jobs.list_jobs(project, ws)][-RECENT_JOBS:][::-1],
         "events": events.read(ws)[-RECENT_EVENTS:],
     }
+
+
+def workflows() -> list[dict]:
+    """The workflows the Start wizard offers, from the one registry the TUI
+    menu already uses — so a workflow added there appears here too."""
+    from scieflow.core import menu
+
+    return [{"name": name, "ask": spec.get("ask", ""),
+             "roles": list(spec.get("roles") or [])}
+            for name, spec in menu.WORKFLOWS.items()]
+
+
+def create_run(project: Project, slug: str, goal: str, *, workflow: str = "",
+               approval: str | None = None, max_iterations: int | None = None,
+               max_experiment_runs: int | None = None,
+               max_wall_minutes: int | None = None) -> dict:
+    """Create a run workspace, the same way `scieflow run init` does.
+
+    The slug is validated by asking `Project.run_dir` for the intended
+    directory before anything is written. `init_workspace` joins the slug to
+    the workspace root itself with no checks, and this is the first caller
+    whose slug can arrive from an HTTP form.
+    """
+    from scieflow.core import menu
+    from scieflow.core.run import init as init_mod
+
+    if not goal or not goal.strip():
+        raise ServiceError("a run needs a goal")
+    if workflow and workflow not in menu.WORKFLOWS:
+        raise ServiceError(
+            f"unknown workflow: {workflow} (known: {', '.join(menu.WORKFLOWS)})")
+    try:
+        target = project.run_dir(slug)          # refuses .., /, and empty
+    except ProjectError as exc:
+        raise ServiceError(str(exc)) from exc
+    if target.exists():
+        raise ServiceError(f"a run named {target.name} already exists")
+
+    overrides = {"approval": approval, "max_iterations": max_iterations,
+                 "max_experiment_runs": max_experiment_runs,
+                 "max_wall_minutes": max_wall_minutes}
+    goal_file = Path(tempfile.mkdtemp()) / "goal.md"
+    goal_file.write_text(goal)
+    try:
+        init_mod.init_workspace(target.name, goal_file, project.workspace_root,
+                                overrides, project.root)
+    except FileExistsError as exc:
+        raise ServiceError(f"a run named {target.name} already exists") from exc
+    except (OSError, ValueError, KeyError) as exc:
+        shutil.rmtree(target, ignore_errors=True)
+        raise ServiceError(f"could not create {target.name}: {exc}") from exc
+    finally:
+        shutil.rmtree(goal_file.parent, ignore_errors=True)
+    return run_detail(project, target.name)
 
 
 def run_events(project: Project, slug: str, since: str | None = None,
