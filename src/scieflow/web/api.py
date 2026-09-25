@@ -111,11 +111,35 @@ async def spend(request: Request, slug: str,
     return service.record_spend(_project(request), slug, **recorded)
 
 
+@router.get("/runs/{slug}/charter", tags=["runs"])
+async def run_charter(request: Request, slug: str) -> dict:
+    """The run's agreed plan, with its version history."""
+    return service.run_charter(_project(request), slug)
+
+
+@router.post("/runs/{slug}/charter", dependencies=MUTATE, tags=["runs"])
+async def set_charter(request: Request, slug: str,
+                      text: str = Form(...), note: str = Form("")) -> dict:
+    """Replace the charter, keeping the previous version in the history."""
+    return service.set_charter(_project(request), slug, text, note=note)
+
+
+@router.post("/runs/{slug}/charter/revert", dependencies=MUTATE, tags=["runs"])
+async def revert_charter(request: Request, slug: str,
+                         version: int = Form(...)) -> dict:
+    """Make an earlier version current again, by appending a copy of it."""
+    return service.revert_charter(_project(request), slug, version)
+
+
 @router.post("/runs/{slug}/gates/{gate_id}/answer", dependencies=MUTATE, tags=["gates"])
 async def answer(request: Request, slug: str, gate_id: str,
-                 answer: str = Form(...), note: str = Form("")) -> dict:
-    """Answer an open gate as the human."""
-    return service.answer_gate(_project(request), slug, gate_id, answer, note=note)
+                 answer: str = Form(...), note: str = Form(""),
+                 proposal_digest: str = Form("")) -> dict:
+    """Answer an open gate as the human. `proposal_digest`, if given, must
+    match the proposal file's current sha256 or the answer is refused —
+    it is how a caller proves it is adopting what it actually read."""
+    return service.answer_gate(_project(request), slug, gate_id, answer, note=note,
+                               proposal_digest=proposal_digest or None)
 
 
 @router.post("/jobs/{job_id}/cancel", dependencies=MUTATE, tags=["jobs"])

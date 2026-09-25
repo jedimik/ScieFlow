@@ -38,8 +38,20 @@
     {% if gate.requires_human %}<span class="dim">[needs you]</span>{% endif %}
     <div>{{ gate.question }}</div>
     {% if gate.options %}<div class="dim">options: {{ gate.options|join(", ") }}</div>{% endif %}
+    {% if gate.kind == "charter-adoption" %}
+      {% if gate.proposal_text %}
+        <div class="dim">proposed charter:</div>
+        <pre class="proposal">{{ gate.proposal_text }}</pre>
+      {% else %}
+        <p class="dim">(the proposal file could not be read for preview — answering
+        "adopt" will try again and may fail)</p>
+      {% endif %}
+    {% endif %}
     <form method="post" action="/runs/{{ gate.slug }}/gates/{{ gate.id }}">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      {% if gate.kind == "charter-adoption" and gate.proposal_digest %}
+        <input type="hidden" name="proposal_digest" value="{{ gate.proposal_digest }}">
+      {% endif %}
       {% if gate.options %}
         <select name="answer">
           {% for option in gate.options %}<option>{{ option }}</option>{% endfor %}

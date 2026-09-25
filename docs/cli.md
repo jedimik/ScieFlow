@@ -72,6 +72,23 @@ automatically already. Pass at least one dimension. Never hand-edit
 `budget.yml`.
 
 ```bash
+uv run scieflow run charter SLUG [--set TEXT] [--note TEXT] [--revert N] [--as-agent]
+```
+Show or change what this run has agreed to do. With no flags, prints the
+current charter text and its version. `--set TEXT` writes a new version
+(`--note TEXT` records why, and only makes sense with `--set`); `--revert N`
+makes version `N` current again by appending a copy of it, rather than
+rewinding — the history of how the goal moved is never lost. `--set` and
+`--revert` are mutually exclusive, and an empty `--set` is refused.
+**`--as-agent` may only be used to read the charter** — an agent passing it
+together with `--set` or `--revert` is refused: a coordinator that could
+rewrite its own goal directly would defeat the `charter-adoption` gate's
+`requires_human` guarantee. An agent that wants the charter changed opens
+that gate instead and lets a human adopt the proposal. See
+[The charter](runs.md#the-charter-what-this-run-agreed-to-do) for what gets
+pinned to every prompt and how a coordinator can propose one.
+
+```bash
 uv run scieflow run events SLUG [--since EVENT_ID] [--type TYPE ...] [--follow] [--json]
 ```
 The run's history. `--type` is repeatable and accepts a `job.*`-style prefix

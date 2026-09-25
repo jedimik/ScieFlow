@@ -71,6 +71,20 @@ def test_agent_needs_scope_and_rationale(tmp_path):
         gates.answer(project, ws, in_scope["id"], "ok", actor="agent")
 
 
+def test_a_charter_adoption_gate_must_offer_an_adopt_word(tmp_path):
+    """Free-form options that never spell an adopt word would let a human
+    answer "accept" and have the gate recorded as answered with no charter
+    ever written, silently. Refuse the gate at open time instead."""
+    project, ws = setup(tmp_path)
+    with pytest.raises(gates.GateError, match="adopt"):
+        gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                        options=["accept", "reject"])
+    # An adopt word among the options is enough, whatever else is offered.
+    g = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                        options=["approve", "reject"])
+    assert g["state"] == "open"
+
+
 def test_unknown_kind_and_double_answer_are_refused(tmp_path):
     project, ws = setup(tmp_path)
     with pytest.raises(gates.GateError):
@@ -109,3 +123,64 @@ def test_cli_open_list_answer(tmp_path, monkeypatch):
     assert gate_id in cli.invoke(gate, ["list", "r1", "--open"]).output
     assert cli.invoke(gate, ["answer", "r1", gate_id, "B"]).exit_code == 0
     assert "B" in cli.invoke(gate, ["show", "r1", gate_id]).output
+
+
+def _cli_charter_env(tmp_path):
+    """A run workspace plus the config/schemas `gate answer` needs when
+    invoked through `Project.discover()` from `tmp_path` as cwd."""
+    project, ws = setup(tmp_path)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agents.yml").write_text("agents: {}\n")
+    (tmp_path / "schemas").mkdir()
+    for name in ("gates", "status"):
+        (tmp_path / "schemas" / f"{name}.yml").write_text((ROOT / "schemas" / f"{name}.yml").read_text())
+    return Project(tmp_path), ws
+
+
+def test_cli_gate_answer_adopt_actually_writes_the_charter(tmp_path, monkeypatch):
+    """C1: `scieflow gate answer <slug> <id> adopt` from a terminal used to
+    call `gates.answer` directly, which flips the gate to `answered` but
+    knows nothing about charters — so no charter.set event, no charter text,
+    and (because a gate must be `open` to be answered) no way to retry. This
+    must go through `service.answer_gate`, the same as the browser."""
+    from scieflow.core.gates import gate
+    from scieflow.core.run import charter
+
+    project, ws = _cli_charter_env(tmp_path)
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("Adopted from the terminal.")
+    g = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                        options=["adopt", "decline"], files=[proposal])
+    monkeypatch.chdir(tmp_path)
+
+    cli = CliRunner()
+    result = cli.invoke(gate, ["answer", "r1", g["id"], "adopt"])
+
+    assert result.exit_code == 0, result.output
+    assert charter.current_text(ws) == "Adopted from the terminal."
+    assert "charter.set" in [e["type"] for e in events.read(ws)]
+
+
+def test_cli_gate_answer_adopt_with_a_missing_proposal_leaves_the_gate_open(tmp_path, monkeypatch):
+    """C1's other half: a proposal that vanished between proposing and
+    adopting must not be recorded as answered from the terminal either — it
+    stays `open` so a fixed file can be adopted on retry."""
+    from scieflow.core.gates import gate
+    from scieflow.core.run import charter
+
+    project, ws = _cli_charter_env(tmp_path)
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("Here now, gone later.")
+    g = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                        options=["adopt", "decline"], files=[proposal])
+    proposal.unlink()
+    monkeypatch.chdir(tmp_path)
+
+    cli = CliRunner()
+    result = cli.invoke(gate, ["answer", "r1", g["id"], "adopt"])
+
+    assert result.exit_code != 0
+    assert charter.current_text(ws) == ""
+    assert gates.get(ws, g["id"])["state"] == "open"

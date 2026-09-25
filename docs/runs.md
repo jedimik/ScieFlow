@@ -53,6 +53,94 @@ The only difference is who is recorded as `actor`: a command run with
 `--as-agent` logs `agent`, the browser's forms log `human` — same as running
 the command without `--as-agent` yourself.
 
+## The charter: what this run agreed to do
+
+`workspace/<slug>/charter.yml` holds a run's standing goal — a short,
+human-curated statement of what the run is for, versioned like everything
+else here. Unlike status and budget, nothing computes it; it exists because a
+long agent conversation drifts from where it started, and the fix is to
+re-state the goal rather than trust the conversation to remember it. Every
+prompt a run sends an agent is composed with the current charter pinned to
+the top (`agent_run.compose_prompt`) — that is the entire reason the feature
+exists. A run with no charter composes exactly as it always has.
+
+A revert does not rewind: it appends a fresh version that copies an earlier
+one's text, so the sequence of how the goal moved stays on the record instead
+of being erased. "Current" is always whichever version is newest.
+
+```bash
+uv run scieflow run charter <slug>                       # show the current text and its version
+uv run scieflow run charter <slug> --set "..." --note "narrowed scope to X"
+uv run scieflow run charter <slug> --revert 3            # make version 3 current again
+```
+
+| CLI command | On the run page |
+|---|---|
+| `run charter <slug>` | the charter panel, always visible |
+| `run charter <slug> --set` | the panel's edit form |
+| `run charter <slug> --revert` | a "Restore" button next to that version in its history |
+
+Unlike the other `run` subcommands above, `run charter` calls
+`service.run_charter`, `service.set_charter` and `service.revert_charter`
+directly — the very same functions the browser's charter panel calls —
+rather than going through `scieflow.core.run.actions`. Those wrappers already
+existed for the browser, and calling them from the CLI too was the shortest
+correct path to the one `charter` primitive underneath, so here the CLI and
+the browser genuinely share a function call, not just a common primitive.
+
+The charter is data, never instructions to ScieFlow itself: it changes what
+an agent is told, never what any `scieflow` command does.
+
+### A coordinator may propose a charter
+
+A human is not the only author. A coordinator agent can write a plan to a
+file inside its own run and open a `charter-adoption` gate naming that file —
+`open_gate` has no field for a payload, so the proposal travels the way every
+other document a gate points to already travels, as a file the gate's
+`files` names. That gate is marked `requires_human: true`, the same as
+`scope-change` and for the same reason: adopting a charter redefines what the
+run is *for*, so the agent that wrote the proposal cannot also adopt it — and
+`scieflow run charter --set/--revert` itself refuses `--as-agent`, so this
+gate is the only path a coordinator has to change the charter at all. The
+run page shows the proposed text itself alongside the gate's question, so
+answering "adopt" is an informed decision, not a click on an agent-written
+question with no idea what it commits to. `open_gate` also checks, at the
+moment the gate is opened, that its options include a recognised adopt word
+(`adopt`, `yes`, `approve`, `approved`) — a gate offering only `accept`/
+`reject`, say, is refused before it exists, rather than silently recording an
+answer that never becomes a charter.
+
+The proposal file must resolve inside the run — the same containment rule
+the artifact browser applies to a path a browser request names, applied here
+to a path an agent's gate record names, since this text is about to become
+the charter pinned to every later prompt the run sends. A path that resolves
+outside the run is refused, never read, and a gate naming more than one file
+is refused outright rather than silently adopting the first.
+
+Answering `adopt` does the file read and validation — missing, unreadable,
+empty, or escaping the run are all refused the same way — *before* the gate
+itself is recorded as answered, and only then writes the charter, attributed
+to whoever answered with a note recording which gate it came from. That
+ordering runs both ways: the gate is never recorded as answered by an
+adoption that could not also produce a charter, and the charter is never
+written before the decision to adopt it is on the record. A gate whose
+proposal turns out to be unreadable is refused and stays open, so fixing the
+file and answering again is possible; nothing is left half-decided.
+Answering `decline` (or anything else) never touches the proposal file and
+leaves the charter untouched. This is the one path both the terminal
+(`gate answer`) and the browser share end to end: both call
+`service.answer_gate`, so a proposal adopted from a terminal writes the
+charter exactly as adopting it from the browser would.
+
+The browser's gate form also carries a hidden digest of the *whole* proposal
+file, taken at the moment the page rendered it — the run directory is
+agent-writable, and the agent that proposed the charter is typically still
+alive, polling `gate wait`, so it could rewrite the proposal between the
+human reading the preview and clicking "Answer". `answer_gate` recomputes the
+digest when the answer arrives and refuses a mismatch, so what gets adopted
+is provably what was shown, not whatever the file happens to contain a
+moment later.
+
 ## History: the event log
 
 `workspace/<slug>/events.jsonl` is the run's history — one JSON object per
@@ -124,6 +212,7 @@ The kinds live in `schemas/gates.yml`:
 | `tier-promotion` | **yes** | let a support agent act as primary for a role |
 | `scope-change` | **yes** | leave the approved question, scope or bounds |
 | `budget-extension` | **yes** | raise a budget limit |
+| `charter-adoption` | **yes** | adopt a proposed plan as this run's charter |
 
 In a **gated** run (`approval: per-campaign`) you answer every gate. In an
 **autonomous** run the coordinator may answer a gate itself — only a kind that

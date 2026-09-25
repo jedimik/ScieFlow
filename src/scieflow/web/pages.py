@@ -110,6 +110,7 @@ async def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse
         "remaining": {dim: _percent(value)
                       for dim, value in (detail["remaining"] or {}).items()},
         "jobs": [service.job_json(job) for job in reversed(jobs_mod.list_jobs(project, ws))],
+        "charter": service.run_charter(project, slug),
         "error": error,
         "csrf": auth.csrf_token(request),
     })
@@ -142,11 +143,28 @@ def _back(slug: str, error: str = "") -> RedirectResponse:
     return RedirectResponse(target, status_code=303)
 
 
+@router.post("/runs/{slug}/charter", dependencies=MUTATE)
+async def edit_charter(request: Request, slug: str, action: str = Form("set"),
+                       text: str = Form(""), note: str = Form(""),
+                       version: int = Form(0)):
+    project = _project(request)
+    try:
+        if action == "revert":
+            service.revert_charter(project, slug, version)
+        else:
+            service.set_charter(project, slug, text, note=note)
+    except service.ServiceError as exc:
+        return _back(slug, str(exc))
+    return _back(slug)
+
+
 @router.post("/runs/{slug}/gates/{gate_id}", dependencies=MUTATE)
 async def answer_gate(request: Request, slug: str, gate_id: str,
-                      answer: str = Form(...), note: str = Form("")):
+                      answer: str = Form(...), note: str = Form(""),
+                      proposal_digest: str = Form("")):
     try:
-        service.answer_gate(_project(request), slug, gate_id, answer, note=note)
+        service.answer_gate(_project(request), slug, gate_id, answer, note=note,
+                            proposal_digest=proposal_digest or None)
     except service.ServiceError as exc:
         return _back(slug, str(exc))
     return _back(slug)

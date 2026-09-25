@@ -7,13 +7,15 @@ for anything a caller should show the user.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from dataclasses import asdict
 from pathlib import Path
 
 from scieflow.core import agent_config, agent_configure as acf, events, gates, jobs, sandbox, workspace
+from scieflow.core.gates import ADOPTED, CHARTER_ADOPTION
 from scieflow.core.project import Project, ProjectError
-from scieflow.core.run import actions, budget, status
+from scieflow.core.run import actions, budget, charter, status
 
 RECENT_JOBS = 20
 RECENT_EVENTS = 50
@@ -21,6 +23,9 @@ RECENT_EVENTS = 50
 
 class ServiceError(Exception):
     """A request the service cannot fulfil, with a message for the user."""
+
+
+PROPOSAL_PREVIEW_LIMIT = 4000        # characters of a proposal shown in a gate form
 
 
 def _ws(project: Project, slug: str) -> Path:
@@ -56,7 +61,7 @@ def run_detail(project: Project, slug: str) -> dict:
         "status": st,
         "budget": b,
         "remaining": budget.remaining_fraction(b) if b else None,
-        "gates": gates.list_gates(ws, "open"),
+        "gates": _with_proposal_preview(ws, gates.list_gates(ws, "open")),
         "jobs": [job_json(j) for j in jobs.list_jobs(project, ws)][-RECENT_JOBS:][::-1],
         "events": events.read(ws)[-RECENT_EVENTS:],
     }
@@ -124,17 +129,149 @@ def open_gates(project: Project, slug: str | None = None) -> list[dict]:
     slugs = [slug] if slug else [r["slug"] for r in list_runs(project)]
     out = []
     for name in slugs:
-        for g in gates.list_gates(_ws(project, name), "open"):
+        ws = _ws(project, name)
+        for g in _with_proposal_preview(ws, gates.list_gates(ws, "open")):
             out.append({**g, "slug": name})
     return out
 
 
-def answer_gate(project: Project, slug: str, gate_id: str, answer: str,
-                actor: str = "human", rationale: str = "", note: str = "") -> dict:
+def _resolve_in_run(ws: Path, raw: str) -> Path:
+    """`raw` resolved to an absolute path, refusing anything outside `ws`.
+
+    Mirrors the containment check `scieflow.web.files.resolve` applies to a
+    browser-requested artifact path — resolve first (normalising `..` and
+    following symlinks), then check containment on the *resolved* path
+    against the *resolved* run root, never on the raw string — rather than
+    importing that web module here, which would be the wrong direction for
+    the service layer to depend on. `raw` may already be absolute, as every
+    `files` entry `open_gate` stores is: joining an absolute path onto `ws`
+    with `Path.__truediv__` discards `ws` and returns the absolute path
+    unchanged, so the same containment check still catches an absolute path
+    that points outside the run.
+    """
+    root = Path(ws).resolve()
     try:
-        return gates.answer(project, _ws(project, slug), gate_id, answer, actor, rationale, note)
+        candidate = (root / raw).resolve()
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"path escapes the run: {raw!r}") from exc
+    if candidate == root or root not in candidate.parents:
+        raise ValueError(f"path escapes the run: {raw!r}")
+    return candidate
+
+
+def _proposal_path(ws: Path, gate: dict) -> Path:
+    """The file a `charter-adoption` gate names, confined to this run.
+
+    `files` is written by whichever agent opened the gate, and the text at
+    this path is about to become the charter pinned to every later prompt on
+    the run — so a path outside the run is refused rather than read.
+    """
+    files = gate.get("files") or []
+    if not files:
+        raise ServiceError("that proposal names no file to adopt")
+    if len(files) > 1:
+        raise ServiceError(
+            "that proposal names more than one file; a charter adoption needs exactly one")
+    raw = str(files[0])
+    try:
+        return _resolve_in_run(ws, raw)
+    except ValueError:
+        raise ServiceError(f"that proposal's path escapes the run: {raw!r}") from None
+
+
+def _read_proposal(ws: Path, gate: dict) -> str:
+    """The proposal text for a `charter-adoption` gate, resolved and
+    validated *before* the gate is answered.
+
+    Order matters. `gates.answer` immediately records `state: "answered"`,
+    and refuses to touch a gate that is not `open` — so once the gate is
+    answered there is no re-answering it. If a bad proposal (missing,
+    unreadable, escaping the run, or empty) were discovered only after
+    `gates.answer` ran, the gate would be left permanently asserting an
+    adoption that never happened, with no way to fix the file and retry.
+    Calling this first, and raising before `gates.answer` is ever called,
+    means nothing is recorded until there is a charter worth recording.
+    """
+    path = _proposal_path(ws, gate)
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise ServiceError(f"cannot read the proposal at {path}: {exc}") from exc
+    if not text.strip():
+        raise ServiceError(f"the proposal at {path} is empty")
+    return text
+
+
+def _proposal_preview(ws: Path, gate: dict) -> str | None:
+    """A short, safe preview of a `charter-adoption` gate's proposal, so a
+    human can see what they are being asked to adopt. Never raises: listing
+    an open gate must not break just because its proposal has since gone
+    missing, escaped the run, or become unreadable — answering the gate is
+    what catches that, not viewing it.
+    """
+    try:
+        text = _proposal_path(ws, gate).read_text()
+    except (ServiceError, OSError):
+        return None
+    if len(text) > PROPOSAL_PREVIEW_LIMIT:
+        return text[:PROPOSAL_PREVIEW_LIMIT] + "\n… (truncated)"
+    return text
+
+
+def _proposal_digest(ws: Path, gate: dict) -> str | None:
+    """sha256 of the *whole* proposal file — never the truncated preview, or
+    a proposal longer than `PROPOSAL_PREVIEW_LIMIT` could never match. This
+    is what a gate form carries back so `answer_gate` can tell the file
+    changed since it was previewed. Never raises, for the same reason
+    `_proposal_preview` doesn't: an unreadable proposal is caught when the
+    gate is answered, not when the page merely lists it.
+    """
+    try:
+        text = _proposal_path(ws, gate).read_text()
+    except (ServiceError, OSError):
+        return None
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _with_proposal_preview(ws: Path, gate_list: list[dict]) -> list[dict]:
+    return [{**g, "proposal_text": _proposal_preview(ws, g),
+            "proposal_digest": _proposal_digest(ws, g)} if g["kind"] == CHARTER_ADOPTION
+           else g for g in gate_list]
+
+
+def answer_gate(project: Project, slug: str, gate_id: str, answer: str,
+                actor: str = "human", rationale: str = "", note: str = "",
+                proposal_digest: str | None = None) -> dict:
+    """Answer a gate. `proposal_digest`, when given, must match a fresh
+    sha256 of the proposal file — carried by the gate form as a hidden
+    field from whatever was rendered for the human to read — or the answer
+    is refused. Without it (the CLI has no preview step to digest) the check
+    is simply skipped, same as before this existed.
+    """
+    ws = _ws(project, slug)
+    try:
+        gate_before = gates.get(ws, gate_id)
     except gates.GateError as e:
         raise ServiceError(str(e)) from e
+    if gate_before["state"] != "open":
+        raise ServiceError(f"gate {gate_id} is not open ({gate_before['state']})")
+    proposal_text = None
+    if gate_before["kind"] == CHARTER_ADOPTION and answer.strip().lower() in ADOPTED:
+        proposal_text = _read_proposal(ws, gate_before)      # before the gate is answered
+        if proposal_digest and hashlib.sha256(proposal_text.encode()).hexdigest() != proposal_digest:
+            raise ServiceError("the proposal changed since you read it — reload and check "
+                               "it again before adopting")
+    try:
+        gate = gates.answer(project, ws, gate_id, answer, actor, rationale, note)
+    except gates.GateError as e:
+        raise ServiceError(str(e)) from e
+    if proposal_text is not None:
+        try:
+            charter.set_text(ws, proposal_text, actor,
+                             f"adopted from a proposal (gate {gate['id']})")
+        except charter.CharterError as exc:
+            raise ServiceError(str(exc)) from exc
+    return gate
 
 
 def agent_settings(project: Project, slug: str | None = None) -> dict:
@@ -173,6 +310,37 @@ def apply_staffing(project: Project, assignments: list[str],
     acf.write(plan)
     return {"written": [str(c.path.relative_to(project.root)) for c in plan.changes],
             "warnings": list(plan.warnings)}
+
+
+def run_charter(project: Project, slug: str) -> dict:
+    """The run's agreed plan: current text plus the whole version history.
+
+    `charter.snapshot` reads `charter.yml` once, so a concurrent write
+    cannot pair one read's `current` with a different read's version text.
+    """
+    ws = _ws(project, slug)
+    try:
+        return charter.snapshot(ws)
+    except charter.CharterError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def set_charter(project: Project, slug: str, text: str,
+                actor: str = "human", note: str = "") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return charter.set_text(ws, text, actor, note)
+    except charter.CharterError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def revert_charter(project: Project, slug: str, version: int,
+                   actor: str = "human") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return charter.revert(ws, version, actor)
+    except charter.CharterError as exc:
+        raise ServiceError(str(exc)) from exc
 
 
 def mark_phase(project: Project, slug: str, phase: str, state: str,
