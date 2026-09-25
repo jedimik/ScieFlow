@@ -92,7 +92,8 @@ def test_agent_run_role_applies_override_and_refuses_unassigned(tmp_path):
     d["assignments"]["research.submitter"] = "codex"
     (root / "config" / "defaults.yml").write_text(yaml.safe_dump(d))
     (root / "p.md").write_text("hi")
-    run = [sys.executable, "-m", "scieflow.core.agent_run"]
+    # These prompts belong to no run, which the sandbox refuses by design.
+    run = [sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox"]
     ok = subprocess.run([*run, "--role", "research.draft-authors", "codex", "p.md", "t.md"],
                         cwd=root, capture_output=True, text=True)
     assert ok.returncode == 0, ok.stderr

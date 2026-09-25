@@ -61,9 +61,10 @@ def test_agent_run_shim_runs_the_stub_from_a_vendor_cwd(tmp_path):
     output = tmp_path / "hypothesis.md"
     prompt.write_text(f"kind: hypothesis\noutput: {output}\n")
     transcript = tmp_path / "out.md"
+    # This prompt belongs to no run, which the sandbox refuses by design.
     done = subprocess.run(
-        [sys.executable, "scripts/agent_run.py", "stub", str(prompt), str(transcript),
-         "--cwd", "vendors/ResearchX"],
+        [sys.executable, "scripts/agent_run.py", "--no-sandbox", "stub", str(prompt),
+         str(transcript), "--cwd", "vendors/ResearchX"],
         cwd=REPO, capture_output=True, text=True, timeout=120,
     )
     assert "legacy:" in done.stderr

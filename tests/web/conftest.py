@@ -19,9 +19,23 @@ def project(tmp_path):
     """A project with one run that has state, budget, events, a job and a gate."""
     (tmp_path / "config").mkdir()
     (tmp_path / "config" / "agents.yml").write_text(
-        f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1}}\n')
+        f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1}}\n'
+        '  stub2: {cmd: "%s", enabled: true, timeout_min: 1}\n' % STUB)
     (tmp_path / "config" / "defaults.yml").write_text(
-        "assignments:\n  research.outline: stub\n")
+        "assignments:\n"
+        "  loop.experiment: stub\n"
+        "  loop.literature: stub\n"
+        "  loop.paper-draft: stub\n"
+        "  research.search: [stub]\n"
+        "  research.cross-review: [stub]\n"
+        "  research.gap-analysis: [stub]\n"
+        "  research.debate: [stub]\n"
+        "  research.journal-profile: [stub]\n"
+        "  research.reviewer: stub\n"
+        "  research.submitter: stub2\n"
+        "  research.outline: stub\n"
+        "  research.draft-authors: [stub]\n"
+        "  research.consistency: stub\n")
     (tmp_path / "schemas").mkdir()
     for name in ("status", "gates", "status-research"):
         (tmp_path / "schemas" / f"{name}.yml").write_text(
@@ -49,3 +63,22 @@ def client(project):
     with TestClient(create_app(project, TOKEN)) as signed_in:
         signed_in.get(f"/healthz?token={TOKEN}")     # exchange token for cookies
         yield signed_in
+
+
+@pytest.fixture
+def running_job(project):
+    """A job still running, so it can be cancelled.
+
+    `jobs.start` returns `(Job, subprocess.Popen)`, not just a `Job` — unpack
+    both. Teardown mirrors `jobs.wait`'s use elsewhere in this suite
+    (tests/web/test_sse.py): `cancel` sends the kill signal and updates the
+    record, and `wait` then reaps the subprocess so no `sleep 300` is left
+    running (or a zombie) once the test ends, whether or not the test itself
+    already cancelled the job.
+    """
+    job, proc = jobs.start(project, [sys.executable, "-c", "import time; time.sleep(300)"],
+                           kind="agent", cwd=project.root,
+                           run_dir=project.run_dir("r1"), label="sleepy")
+    yield job
+    jobs.cancel(job)
+    jobs.wait(job, proc)

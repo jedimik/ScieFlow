@@ -3,6 +3,7 @@
 {% block nav %}<a href="/">← all runs</a>{% endblock %}
 {% block content %}
 <h1>{{ slug }}</h1>
+{% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
 <p><a href="/runs/{{ slug }}/files">browse this run's files →</a></p>
 <p class="dim">
   id {{ (detail.status or {}).get("id", "—") }} ·
@@ -34,6 +35,34 @@
   {% endfor %}
 </table>
 
+<h2>Actions</h2>
+<form method="post" action="/runs/{{ slug }}/act" class="actions">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <select name="phase">
+    {% for phase, _ in phases %}<option>{{ phase }}</option>{% endfor %}
+  </select>
+  <select name="state">
+    {% for state in ["pending", "running", "done", "failed"] %}<option>{{ state }}</option>{% endfor %}
+  </select>
+  <button name="action" value="phase">Mark phase</button>
+</form>
+<form method="post" action="/runs/{{ slug }}/act" class="actions">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <button name="action" value="advance">Advance iteration</button>
+  {% if (detail.status or {}).get("stopped") %}
+    <button name="action" value="resume">Resume</button>
+  {% else %}
+    <input name="detail" placeholder="why you are stopping">
+    <button name="action" value="checkpoint">Checkpoint</button>
+  {% endif %}
+</form>
+<form method="post" action="/runs/{{ slug }}/act" class="actions">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input name="experiment_runs" type="number" min="0" value="0" title="experiment runs">
+  <input name="wall_minutes" type="number" min="0" step="0.1" value="0" title="wall minutes">
+  <button name="action" value="spend">Record spend</button>
+</form>
+
 <h2>Gates</h2>
 {% if not detail.gates %}
   <p class="dim">No gate is waiting.</p>
@@ -43,9 +72,18 @@
     <span class="dim">{{ gate.kind }}{% if gate.requires_human %} · needs you{% endif %}</span>
     <div>{{ gate.question }}</div>
     {% if gate.options %}<div class="dim">options: {{ gate.options|join(", ") }}</div>{% endif %}
-    <div class="dim">answer it with
-      <code>uv run scieflow gate answer {{ slug }} {{ gate.id }} &lt;answer&gt;</code>
-      — answering from this page arrives with the control milestone.</div>
+    <form method="post" action="/runs/{{ slug }}/gates/{{ gate.id }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      {% if gate.options %}
+        <select name="answer">
+          {% for option in gate.options %}<option>{{ option }}</option>{% endfor %}
+        </select>
+      {% else %}
+        <input name="answer" required>
+      {% endif %}
+      <input name="note" placeholder="note (optional)">
+      <button>Answer</button>
+    </form>
   </div>
   {% endfor %}
 {% endif %}
@@ -60,9 +98,19 @@
   <tr>
     <td class="dim">{{ (job.started or job.queued or "")[11:19] }}</td>
     <td>{{ job.label or job.kind }}</td>
-    <td class="state-{{ job.state }}">{{ job.state }}</td>
+    <td class="state-{{ job.state }}">
+      {{ job.state }}{% if not job.sandboxed %} <span class="dim">· unsandboxed</span>{% endif %}
+    </td>
     <td class="dim">{{ "%.1f"|format(job.duration_s) if job.duration_s else "—" }}</td>
-    <td><a href="/runs/{{ slug }}/jobs/{{ job.id }}">output</a></td>
+    <td>
+      <a href="/runs/{{ slug }}/jobs/{{ job.id }}">output</a>
+      {% if job.state == "running" %}
+      <form method="post" action="/runs/{{ slug }}/jobs/{{ job.id }}/cancel" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button>Cancel</button>
+      </form>
+      {% endif %}
+    </td>
   </tr>
   {% endfor %}
 </table>

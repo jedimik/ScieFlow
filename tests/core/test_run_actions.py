@@ -104,3 +104,25 @@ def test_run_cli_spend_records_what_the_runner_cannot_see(tmp_path, monkeypatch)
     assert "budget.recorded" in [e["type"] for e in events.read(ws)]
     empty = cli.invoke(run_group, ["spend", "r1"])
     assert empty.exit_code != 0 and "nothing to record" in empty.output
+
+
+def test_run_cli_spend_rejects_negative_and_leaves_the_ledger_alone(tmp_path, monkeypatch):
+    """The CLI bypasses the service layer for `spend` (it calls
+    `actions.record_spend` directly), so the negative-value guard in
+    `budget.record` is the only thing that protects it. It must surface as a
+    clean ClickException, not an unhandled traceback."""
+    from scieflow.core.run.cli import run as run_group
+
+    ws = make_loop_run(tmp_path)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agents.yml").write_text("agents: {}\n")
+    (tmp_path / "schemas").mkdir()
+    real = Path(__file__).resolve().parents[2] / "schemas" / "status.yml"
+    (tmp_path / "schemas" / "status.yml").write_text(real.read_text())
+    monkeypatch.chdir(tmp_path)
+    cli = CliRunner()
+    result = cli.invoke(run_group, ["spend", "r1", "--experiment-runs", "-5"])
+    assert result.exit_code != 0
+    assert not isinstance(result.exception, ValueError), result.output
+    assert "negative" in result.output
+    assert budget.read_budget(ws)["spent"]["experiment_runs"] == 0

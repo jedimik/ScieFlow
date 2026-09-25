@@ -17,6 +17,27 @@ if command -v latexmk >/dev/null 2>&1; then ok "latexmk"; else
   wrn "latexmk missing — only needed for LaTeX builds: sudo apt-get install latexmk texlive-latex-extra"
 fi
 
+echo "== sandbox =="
+if command -v bwrap >/dev/null 2>&1; then
+  ok "bwrap $(bwrap --version | awk '{print $2}')"
+  probe="$HOME/.scieflow-doctor-probe-$$"
+  rm -f "$probe"
+  sbtmp="$(mktemp -d)"
+  bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
+        --bind "$sbtmp" "$sbtmp" --chdir "$sbtmp" --unshare-pid --die-with-parent \
+        -- /bin/sh -c "touch '$probe' 2>/dev/null; touch '$sbtmp/inside'" >/dev/null 2>&1 || true
+  if [ -e "$probe" ]; then
+    rm -f "$probe"; bad "bwrap did not confine a write to \$HOME — dispatches will be refused"
+  elif [ -e "$sbtmp/inside" ]; then
+    ok "confines writes (granted path writable, \$HOME blocked)"
+  else
+    bad "bwrap could not run the probe at all"
+  fi
+  rm -rf "$sbtmp"
+else
+  bad "bwrap missing — agent dispatches are refused (sudo apt-get install -y bubblewrap)"
+fi
+
 echo "Python deps:"
 if uv run python -c "import yaml, click, requests, jsonschema, numpy, skimage" 2>/dev/null; then ok "importable"; else bad "run: uv sync --all-extras"; fi
 

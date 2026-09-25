@@ -9,11 +9,35 @@ caller of that layer and holds no logic of its own, so the app can never
 show you a different truth than `scieflow run show` or `scieflow gate list`
 would.
 
-This milestone's app is **read-only**. You can watch a run — its status,
-budget, timeline, job output, gates and artifacts — but you cannot act on
-one from the browser yet: answering a gate, starting a run and changing
-agent configuration are all still terminal-only. See
-["What it does not do yet"](#what-it-does-not-do-yet) below.
+The app is no longer a viewer. From the browser you can answer a gate, mark
+a phase, advance an iteration, checkpoint and resume a run, record spend,
+cancel a job, and change which agent performs which role. For everything
+except cancelling a job, that is exactly what the matching CLI command
+does, because both reach the same underlying run action: `POST
+/runs/r1/act` with `action=checkpoint` goes through `service.checkpoint_run`,
+and `scieflow run checkpoint r1` calls `actions.checkpoint_run` directly —
+two callers of the one `checkpoint_run` primitive in
+`scieflow.core.run.actions`, not two callers of the same function. Either
+way the run writes the same `checkpoint` event and ends in the same state.
+There is no separate "web logic" to drift out of sync with the terminal —
+each `service.*` wrapper the web app calls is a thin pass-through to the
+same `actions`/`gates` module the CLI uses, so the two cannot disagree about
+what a run's state is, even though only the web currently calls `service`
+for this.
+
+Cancelling a job has no CLI command to mirror — a job you started from a
+terminal you stopped by killing the process yourself. The browser has no
+process to kill, so `POST /runs/<slug>/jobs/<job_id>/cancel` calls
+`service.cancel_job`, which reaches the same `jobs.cancel` that a timeout
+already uses internally: it sends the kill signal to the job's whole
+process group and records `job.cancelled`. It is new *capability*, not a
+new code path — the function already existed for the runner's own use.
+
+Starting a run and the coordinator conversation are **not** in this
+milestone — they arrive in A1b. This milestone steers runs that already
+exist; a run still has to exist (`scieflow run init`) before you can do
+anything to it here. See ["What stays CLI-only"](#what-stays-cli-only)
+below for the rest of what the browser deliberately does not do.
 
 ## Running it
 
@@ -58,13 +82,30 @@ restrictions, not because the network happens to be trusted:
   (`auth.require_session`); without one you get a 401 (an HTML page if your
   browser asked for HTML, JSON otherwise).
 - **CSRF double-submit.** `GET`/`HEAD`/`OPTIONS` need only the session
-  cookie. Any other method also needs the `X-CSRF-Token` header to match the
-  `scieflow_csrf` cookie's value (`auth.csrf_protect`) — a cookie alone,
-  which a browser attaches automatically, is not enough to make a
-  state-changing request.
+  cookie. Every other method needs the `X-CSRF-Token` header (or a
+  `csrf_token` form field) to match the `scieflow_csrf` cookie's value — a
+  cookie alone, which a browser attaches automatically, is not enough to
+  make a state-changing request. The check happens once, centrally, in
+  `auth.install_session`'s middleware, for every unsafe request before
+  routing decides anything; the middleware records the verdict on
+  `request.state.csrf_checked`, and each mutating route's
+  `Depends(auth.csrf_protect)` trusts that flag rather than re-parsing the
+  body — a router mounted without the middleware fails closed with a 403
+  instead of silently passing.
+- **A declared inventory of mutating routes.** `tests/web/mutating_paths.py`
+  lists every path allowed to accept anything but `GET`/`HEAD`/`OPTIONS`
+  (`MUTATING_PATHS`); `tests/web/test_read_only.py` fails the build if a route
+  starts mutating without being added to it, or if a listed route stops
+  mutating. `tests/web/test_mutations.py` reads the same list — via a sample
+  form body per path — to run its session-guard and CSRF-guard tests, and
+  asserts the two stay in lockstep. So a new state-changing endpoint can't
+  land unnoticed by this doc, and it can't gain an inventory entry without
+  also gaining a guard test.
 - **No CORS.** The app sends no `Access-Control-Allow-Origin` header at
   all, so no other origin's page can read a response from it, cross-site
   request or not.
+- **Every agent dispatch the service layer starts is sandboxed**, under the
+  same guarantee documented in [the sandbox reference](sandbox.md).
 - **The artifact browser cannot leave the run directory.** Every path a
   request names is resolved to an absolute path and checked to be a strict
   descendant of that run's workspace directory (`scieflow.web.files.resolve`)
@@ -93,15 +134,22 @@ at exactly this.
 
 | Page | Route | Shows |
 |---|---|---|
-| Dashboard | `/` | Every run (slug, kind, phase), a budget bar per dimension, and every open gate across all runs. |
-| Run page | `/runs/<slug>` | The run's id, iteration and approval mode; its phases; budget remaining per dimension; open gates (with the `scieflow gate answer` command to use, since answering here is not built yet); every job it started, linked to its output; and a timeline of the run's events, updated live. |
+| Dashboard | `/` | Every run (slug, kind, phase), a budget bar per dimension, and every open gate across all runs, each with an inline form to answer it on the spot. |
+| Run page | `/runs/<slug>` | The run's id, iteration and approval mode; its phases with a form to mark one; budget remaining per dimension with a form to record spend; buttons to advance the iteration, checkpoint or resume; open gates, each with a form to answer it; every job it started, linked to its output, with a Cancel button while it runs; and a timeline of the run's events, updated live. |
 | Job output | `/runs/<slug>/jobs/<job_id>` | The job's command, state, exit code and duration, and its captured stdout/stderr. While the job is still running, output streams in live. |
 | Artifact browser | `/runs/<slug>/files[?path=...]` | A directory listing under the run; `/runs/<slug>/file?path=...` renders a small text file inline or downloads anything else, per the security model above. |
+| Agents | `/agents[?slug=<run>]` | Role assignments in effect (defaults, or one run's if `slug` is given), a form to pick a role and an agent, a preview of the resulting diff, and an Apply button. See [Agent configuration](agents.md#the-agents-page). |
 
 The run page's timeline and a running job's output are both live: each page
 opens a browser `EventSource` against the matching `/api/v1` stream (below)
 and appends new rows/lines as they arrive, with no page reload and no extra
 JavaScript framework.
+
+Every form on these pages posts back to the same page
+(`303 See Other` on success, so a reload never repeats the action) or
+carries you to `?error=<message>` on refusal — the same
+`service.ServiceError` message the CLI would print. There is no separate
+success/failure JSON to keep in sync with the terminal's exit codes.
 
 ## The API
 
@@ -119,6 +167,19 @@ this app's own pages — it is a stable-enough surface to script against.
 | `GET /api/v1/agents` | Effective role assignments and agent settings, with their sources. |
 | `GET /api/v1/runs/<slug>/events/stream` | Server-sent events: the timeline, replayed then followed live. |
 | `GET /api/v1/jobs/<job_id>/log/stream` | Server-sent events: one frame per line of a job's stdout, as it is written. |
+| `POST /api/v1/runs/<slug>/phase` | Set a phase's state — `service.mark_phase`, same as `scieflow run mark`. |
+| `POST /api/v1/runs/<slug>/advance` | Start the next iteration — `service.advance_run`, same as `scieflow run advance`. |
+| `POST /api/v1/runs/<slug>/checkpoint` | Stop the run gracefully — `service.checkpoint_run`, same as `scieflow run checkpoint`. |
+| `POST /api/v1/runs/<slug>/resume` | Clear a stop — `service.resume_run`, same as `scieflow run resume`. |
+| `POST /api/v1/runs/<slug>/spend` | Record spend the runner can't measure — `service.record_spend`, same as `scieflow run spend`. |
+| `POST /api/v1/runs/<slug>/gates/<gate_id>/answer` | Answer an open gate as the human — `service.answer_gate`, same as `scieflow gate answer`. |
+| `POST /api/v1/jobs/<job_id>/cancel` | Cancel a running job and its whole process group — `service.cancel_job`; no CLI command mirrors this one (see "What it is" above). |
+
+Every `POST` above needs the CSRF header as well as the session cookie (see
+[Security model](#security-model)); the HTML pages use the equivalent
+`/runs/<slug>/...` and `/agents` routes instead, which redirect back to a
+page rather than returning JSON. Both sets — and no others — are exactly
+the mutating-route inventory `tests/web/test_read_only.py` enforces.
 
 The generated OpenAPI schema is at `/api/v1/openapi.json`, and interactive
 docs (Swagger UI) are at `/api/v1/docs` — both need the session cookie too.
@@ -132,19 +193,28 @@ curl -c cookies.txt "http://127.0.0.1:8765/healthz?token=<token from the printed
 curl -b cookies.txt http://127.0.0.1:8765/api/v1/runs
 ```
 
-## What it does not do yet
+## What stays CLI-only
 
-This milestone is deliberately read-only. The following are all
-terminal-only for now, and arrive with the control milestone (M2c):
+A few things are terminal-only on purpose, not because nobody got to them:
 
-- **Answering a gate** — use `uv run scieflow gate answer` (see
-  [`docs/cli.md`](cli.md#scieflow-gate)). The run page shows you the exact
-  command for each open gate.
-- **Starting a run** — use `uv run scieflow run init` (see
-  [`docs/cli.md`](cli.md#scieflow-run)).
-- **Changing agent configuration** — use `uv run scieflow agent configure`
-  (see [`docs/cli.md`](cli.md#scieflow-agent) and
-  [Agent configuration](agents.md)).
+- **`scieflow chats push` / `chats pull`** — a chat bundle is encrypted with
+  your passphrase, and `AGENTS.md` rule 16 forbids an agent starting a backup
+  or restore on its own initiative. A prompt for a passphrase has no honest
+  place in a browser form. See [Chat backups](chats/index.md).
+- **DVC uploads** — a run's workspace can be gigabytes, and the sync rule
+  (`AGENTS.md`) requires asking before anything of that size moves. See
+  [DVC storage](DVC_STORAGE.md).
+- **`--promote`** — the exception that lets a support-tier agent stand in
+  for a primary on one role. It exists to be deliberate and explicit (see
+  [Agent configuration](agents.md#support-agents-as-primary-per-role)); a
+  button that could do it in one click would defeat that purpose.
+- **Per-agent field edits, promotions and demotions on the Agents page.**
+  The page (below) covers role assignment only — see
+  ["The Agents page"](agents.md#the-agents-page). Changing a field like
+  `timeout_min`, or granting/removing a `--promote` exception, is still
+  `scieflow agent configure`.
 
-Dispatching a coordinator headless from the browser, and browser/`ntfy`
-notifications, are also deferred to the control milestone.
+And, as noted above: **starting a run and the coordinator conversation are
+not in this milestone.** They belong to A1b. Use `uv run scieflow run init`
+(see [`docs/cli.md`](cli.md#scieflow-run)) to start one; once it exists,
+everything on this page applies to it.

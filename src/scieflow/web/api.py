@@ -8,12 +8,14 @@ is the integration surface other tools use.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 
 from scieflow.core import jobs, service
 from scieflow.web import auth
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(auth.require_session)])
+
+MUTATE = [Depends(auth.csrf_protect)]
 
 
 def _project(request: Request):
@@ -70,3 +72,53 @@ async def agent_settings(request: Request,
     if slug is not None:
         service.run_workspace(project, slug)  # raises ServiceError -> 404
     return service.agent_settings(project, slug)
+
+
+@router.post("/runs/{slug}/phase", dependencies=MUTATE, tags=["runs"])
+async def set_phase(request: Request, slug: str,
+                    phase: str = Form(...), state: str = Form(...)) -> dict:
+    """Set a phase's state (pending/running/done/failed)."""
+    return service.mark_phase(_project(request), slug, phase, state)
+
+
+@router.post("/runs/{slug}/advance", dependencies=MUTATE, tags=["runs"])
+async def advance(request: Request, slug: str) -> dict:
+    """Start the next iteration; refused when the iteration budget is spent."""
+    return service.advance_run(_project(request), slug)
+
+
+@router.post("/runs/{slug}/checkpoint", dependencies=MUTATE, tags=["runs"])
+async def checkpoint(request: Request, slug: str, reason: str = Form(...),
+                     detail: str = Form("")) -> dict:
+    """Stop the run gracefully with resume instructions."""
+    return service.checkpoint_run(_project(request), slug, reason, detail)
+
+
+@router.post("/runs/{slug}/resume", dependencies=MUTATE, tags=["runs"])
+async def resume(request: Request, slug: str) -> dict:
+    """Clear a stop so the run can continue."""
+    return service.resume_run(_project(request), slug)
+
+
+@router.post("/runs/{slug}/spend", dependencies=MUTATE, tags=["runs"])
+async def spend(request: Request, slug: str,
+                experiment_runs: int = Form(0), wall_minutes: float = Form(0.0),
+                iterations: int = Form(0)) -> dict:
+    """Record spend the runner cannot measure."""
+    recorded = {k: v for k, v in (("experiment_runs", experiment_runs),
+                                  ("wall_minutes", wall_minutes),
+                                  ("iterations", iterations)) if v}
+    return service.record_spend(_project(request), slug, **recorded)
+
+
+@router.post("/runs/{slug}/gates/{gate_id}/answer", dependencies=MUTATE, tags=["gates"])
+async def answer(request: Request, slug: str, gate_id: str,
+                 answer: str = Form(...), note: str = Form("")) -> dict:
+    """Answer an open gate as the human."""
+    return service.answer_gate(_project(request), slug, gate_id, answer, note=note)
+
+
+@router.post("/jobs/{job_id}/cancel", dependencies=MUTATE, tags=["jobs"])
+async def cancel(request: Request, job_id: str) -> dict:
+    """Cancel a running job and its whole process group."""
+    return service.cancel_job(_project(request), job_id)

@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scieflow.core import events, store
+from scieflow.core import events, sandbox, store
 from scieflow.core.project import Project
 
 STATES = ("queued", "running", "done", "failed", "timeout", "cancelled", "lost")
@@ -44,6 +44,7 @@ class Job:
     timeout_s: float | None = None
     log: str = ""
     err: str = ""
+    sandboxed: bool = False
 
     @property
     def duration_s(self) -> float | None:
@@ -139,23 +140,28 @@ def _alive(pid: int) -> bool:
 
 def start(project: Project, argv: list[str], *, kind: str, cwd: Path,
           run_dir: Path | None = None, label: str = "", timeout_s: float | None = None,
-          stdin_text: str | None = None, env: dict | None = None) -> tuple[Job, subprocess.Popen]:
+          stdin_text: str | None = None, env: dict | None = None,
+          sandbox_writable: list[Path] | None = None) -> tuple[Job, subprocess.Popen]:
     job_id = store.new_id()
     directory = jobs_dir(project, run_dir)
     directory.mkdir(parents=True, exist_ok=True)
     job = Job(id=job_id, kind=kind, argv=list(argv), cwd=str(cwd), label=label,
               run_dir=str(run_dir) if run_dir else None, queued=_now(), timeout_s=timeout_s,
-              log=str(directory / f"{job_id}.log"), err=str(directory / f"{job_id}.err"))
+              log=str(directory / f"{job_id}.log"), err=str(directory / f"{job_id}.err"),
+              sandboxed=sandbox_writable is not None)
     save(job)
     _emit(job, "job.queued")
     with open(job.log, "w") as out, open(job.err, "w") as err:
         try:
+            # The job records the command that was asked for; the wrapper is plumbing.
+            launch = (sandbox.wrap(argv, writable=sandbox_writable, cwd=cwd)
+                      if sandbox_writable is not None else list(argv))
             proc = subprocess.Popen(
-                argv, cwd=cwd, stdout=out, stderr=err, text=True, env=env,
+                launch, cwd=cwd, stdout=out, stderr=err, text=True, env=env,
                 stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
                 start_new_session=True,
             )
-        except OSError as exc:
+        except (OSError, sandbox.SandboxError) as exc:
             err.write(f"failed to launch: {exc}\n")
             job.state, job.finished = "failed", _now()
             save(job)

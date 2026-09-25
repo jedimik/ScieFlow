@@ -24,7 +24,10 @@ when to stop.
    Inside a run: scripts you write go in `tools/`; test output, pytest temp
    dirs, conda/uv envs, repository clones and caches go in `scratch/` (left
    out of archives). `logs/` holds prompts and transcripts only. Never rename
-   or move a run directory — old chats and in-run links cite its path.
+   or move a run directory — old chats and in-run links cite its path. This
+   boundary is enforced, not merely requested: a dispatch runs inside a
+   sandbox that can write only into its own run, and one that cannot prove
+   its sandbox confines is refused (`docs/sandbox.md`).
 2. Inter-agent communication is file-based only: write a prompt file to
    `workspace/<slug>/logs/`, then run
    `uv run scieflow agent run <agent> <prompt> <transcript>` (sub-agents run

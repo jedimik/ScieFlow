@@ -1,0 +1,23 @@
+# Paths a sandboxed agent may write in addition to its own run.
+#
+# Deny-by-default: delete an entry and that path becomes read-only for agents.
+# Agents cannot edit this file — config/ is never writable inside the sandbox —
+# so extending this list is always a human decision. Every entry needs a reason.
+#
+# `unsandboxed_runs:` is the per-run escape hatch. It lives here, not in a run's
+# own config.yml, because that file is inside the dispatch's writable bind — an
+# agent could otherwise switch off its own sandbox and then choose, through
+# `agent_overrides:` in the same file, what the unconfined dispatch runs.
+# Every entry needs a slug and a reason; `--no-sandbox` remains the one-off form.
+#
+# unsandboxed_runs:
+#   - slug: 2026-09-23-some-run
+#     reason: >-
+#       why this run must dispatch without filesystem confinement.
+
+writable:
+  - path: config/journals
+    reason: >-
+      paper-review and paper-draft cache journal profiles here, the one
+      documented exception to AGENTS.md rule 1
+      (src/scieflow/research/AGENTS.md).

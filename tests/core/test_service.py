@@ -73,3 +73,163 @@ def test_gates_across_runs(project):
 def test_unknown_run_is_a_service_error(project):
     with pytest.raises(service.ServiceError):
         service.run_detail(project, "nope")
+
+
+def test_dispatch_through_the_service_is_sandboxed(project, monkeypatch):
+    """The web app must inherit the boundary without knowing it exists."""
+    seen = {}
+    real_start = service.jobs.start
+
+    def spy(project_, argv, **kw):
+        seen.update(kw)
+        return real_start(project_, argv, **kw)
+
+    monkeypatch.setattr(service.jobs, "start", spy)
+    ws = project.run_dir("r1")
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text(f"output: {ws / 'out.md'}\nkind: hypothesis\n")
+    service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    assert seen["sandbox_writable"] is not None
+    assert ws in seen["sandbox_writable"]
+
+
+def test_service_dispatch_refuses_without_a_sandbox(project, monkeypatch):
+    from scieflow.core import sandbox
+
+    monkeypatch.setattr(sandbox, "available", lambda: False)
+    ws = project.run_dir("r1")
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text("go\n")
+    with pytest.raises(service.ServiceError, match="bubblewrap"):
+        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+
+
+def test_service_refusal_leaves_a_job_refused_event_on_the_timeline(project, monkeypatch):
+    """agent_run.main() emits job.refused on this path; the service must too,
+    or a refusal from the web app leaves nothing on the run's history."""
+    from scieflow.core import events, sandbox
+
+    monkeypatch.setattr(sandbox, "available", lambda: False)
+    ws = project.run_dir("r1")
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text("go\n")
+    with pytest.raises(service.ServiceError):
+        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    refused = [e for e in events.read(ws) if e["type"] == "job.refused"]
+    assert len(refused) == 1
+    assert refused[0]["data"]["reason"] == "sandbox"
+
+
+def test_service_escape_hatch_leaves_a_sandbox_disabled_event(project):
+    """agent_run.main() emits sandbox.disabled on this path; the service must
+    too, so an unsandboxed dispatch from the web app is visible in the run's
+    history and not only via the per-job marker on the page."""
+    from scieflow.core import events
+
+    ws = project.run_dir("r1")
+    (project.root / "config" / "sandbox.yml").write_text(
+        "unsandboxed_runs:\n  - slug: r1\n    reason: a human decided\n")
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text(f"output: {ws / 'out.md'}\nkind: hypothesis\n")
+    job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    assert job["state"] == "done"
+    disabled = [e for e in events.read(ws) if e["type"] == "sandbox.disabled"]
+    assert len(disabled) == 1
+    assert disabled[0]["data"]["why"] == "config/sandbox.yml unsandboxed_runs"
+
+
+def test_service_ignores_a_run_config_that_tries_to_disable_the_sandbox(project):
+    """The same escape as on the CLI path, through the web app: an agent that
+    appends `sandbox: off` to its own run config must not get an unconfined
+    dispatch out of the service layer either."""
+    ws = project.run_dir("r1")
+    config_path = ws / "config.yml"
+    config_path.write_text(config_path.read_text() + "sandbox: off\n")
+    out = ws / "out.md"
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text(f"output: {out}\nkind: hypothesis\n")
+    with pytest.raises(service.ServiceError, match="config/sandbox.yml"):
+        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    assert not out.exists()
+
+
+def test_normal_sandboxed_dispatch_leaves_neither_event(project):
+    """The new emissions must not fire on the happy path."""
+    from scieflow.core import events
+
+    ws = project.run_dir("r1")
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text(f"output: {ws / 'out.md'}\nkind: hypothesis\n")
+    job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    assert job["state"] == "done"
+    types = {e["type"] for e in events.read(ws)}
+    assert "job.refused" not in types
+    assert "sandbox.disabled" not in types
+
+
+def test_mark_phase_through_the_service(project):
+    from scieflow.core.run import status
+
+    service.mark_phase(project, "r1", "hypothesize", "running")
+    assert status.read_status(project.run_dir("r1"))["phases"]["hypothesize"] == "running"
+
+
+def test_service_run_actions_reject_a_bad_slug(project):
+    for call in (
+        lambda: service.mark_phase(project, "nope", "hypothesize", "running"),
+        lambda: service.advance_run(project, "nope"),
+        lambda: service.checkpoint_run(project, "nope", "user"),
+        lambda: service.resume_run(project, "nope"),
+        lambda: service.record_spend(project, "nope", experiment_runs=1),
+    ):
+        with pytest.raises(service.ServiceError):
+            call()
+
+
+def test_mark_phase_rejects_an_invalid_state(project):
+    with pytest.raises(service.ServiceError, match="state"):
+        service.mark_phase(project, "r1", "hypothesize", "banana")
+
+
+def test_checkpoint_then_resume_round_trip(project):
+    from scieflow.core.run import status
+
+    service.checkpoint_run(project, "r1", "user", detail="stepping away")
+    assert status.read_status(project.run_dir("r1"))["stopped"]["reason"] == "user"
+    service.resume_run(project, "r1")
+    assert not status.read_status(project.run_dir("r1")).get("stopped")
+
+
+def test_advance_refused_when_the_iteration_budget_is_spent(project):
+    """A refusal must arrive as ServiceError — and must leave the run
+    checkpointed exactly as the CLI leaves it, not half-changed."""
+    from scieflow.core.run import budget, status
+
+    ws = project.run_dir("r1")
+    budget.write_budget(ws, budget.new_budget(1, 10, 60))
+    service.record_spend(project, "r1", iterations=1)
+    with pytest.raises(service.ServiceError):
+        service.advance_run(project, "r1")
+    assert status.read_status(ws)["stopped"]["reason"] == "low-budget"
+
+
+def test_record_spend_rejects_negative_values(project):
+    """The budget ledger must never move backwards through the service layer
+    — that is the one automatic brake on runaway agent spend."""
+    from scieflow.core.run import budget
+
+    budget.write_budget(project.run_dir("r1"), budget.new_budget(3, 10, 60))
+    with pytest.raises(service.ServiceError, match="negative"):
+        service.record_spend(project, "r1", experiment_runs=-5)
+    assert budget.read_budget(project.run_dir("r1"))["spent"]["experiment_runs"] == 0
+
+
+def test_record_spend_accumulates(project):
+    from scieflow.core.run import budget
+
+    # The fixture's run carries no budget.yml, and record_spend returns None
+    # without one — which the service turns into a ServiceError.
+    budget.write_budget(project.run_dir("r1"), budget.new_budget(3, 10, 60))
+    service.record_spend(project, "r1", experiment_runs=2)
+    service.record_spend(project, "r1", experiment_runs=3)
+    assert budget.read_budget(project.run_dir("r1"))["spent"]["experiment_runs"] == 5

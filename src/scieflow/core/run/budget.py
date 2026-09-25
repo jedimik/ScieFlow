@@ -42,10 +42,20 @@ def is_exhausted(b: dict, dim: str) -> bool:
 
 
 def record(b: dict, **spent) -> dict:
-    """Add increments, e.g. record(b, iterations=1, experiment_runs=6). All-or-nothing."""
-    for k in spent:
+    """Add increments, e.g. record(b, iterations=1, experiment_runs=6). All-or-nothing.
+
+    Negative values are rejected here rather than left to callers, because
+    this is the one place every spend-recording path — the CLI's
+    `scieflow run spend`, the service layer's `record_spend` (and therefore
+    the web app), and `actions.record_spend`'s own internal callers — funnels
+    through. A negative increment would silently un-spend the budget ledger,
+    defeating the one automatic brake on runaway agent spend.
+    """
+    for k, v in spent.items():
         if k not in DIMENSIONS:
             raise ValueError(f"unknown budget dimension: {k}")
+        if v < 0:
+            raise ValueError(f"spend cannot be negative: {k}={v}")
     for k, v in spent.items():
         b["spent"][k] += v
     return b

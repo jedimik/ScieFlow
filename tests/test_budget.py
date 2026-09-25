@@ -50,6 +50,17 @@ def test_record_is_all_or_nothing():
     assert b["spent"]["iterations"] == 0
 
 
+def test_record_rejects_negative_spend():
+    """A negative increment would un-spend the ledger, defeating the one
+    automatic brake on runaway agent spend — refuse it outright, and leave
+    every dimension in the call untouched (all-or-nothing, like the unknown
+    dimension case above)."""
+    b = budget.new_budget(5, 40, 240)
+    with pytest.raises(ValueError, match="negative"):
+        budget.record(b, iterations=1, experiment_runs=-5)
+    assert b["spent"] == {"iterations": 0, "experiment_runs": 0, "wall_minutes": 0}
+
+
 def test_wall_clock_rejects_naive_datetime():
     b = budget.new_budget(5, 40, 60)
     with pytest.raises(ValueError):

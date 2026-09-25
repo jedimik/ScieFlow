@@ -8,9 +8,10 @@ against the SSE routes; nothing here needs JavaScript to be useful.
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from scieflow.core import jobs as jobs_mod
 from scieflow.core import service
@@ -18,6 +19,8 @@ from scieflow.web import auth
 from scieflow.web.app import TEMPLATES
 
 router = APIRouter(dependencies=[Depends(auth.require_session)])
+
+MUTATE = [Depends(auth.csrf_protect)]
 
 
 def _project(request: Request):
@@ -50,11 +53,52 @@ async def dashboard(request: Request) -> HTMLResponse:
         "runs": runs,
         "detail": detail,
         "gates": service.open_gates(project),
+        "csrf": auth.csrf_token(request),
     })
 
 
+@router.get("/agents", response_class=HTMLResponse)
+async def agents_page(request: Request, slug: str = "", error: str = "",
+                      assign: list[str] = Query(default=[])) -> HTMLResponse:
+    from scieflow.core import agent_config
+
+    project = _project(request)
+    preview, problem = None, error
+    if assign:
+        try:
+            preview = service.plan_staffing(project, assign, slug or None)
+        except service.ServiceError as exc:
+            problem = str(exc)
+    return TEMPLATES.TemplateResponse(request, "agents.html", {
+        "slug": slug,
+        "settings": service.agent_settings(project, slug or None),
+        "roles": list(agent_config.ROLES),
+        "runs": service.list_runs(project),
+        "assign": assign,
+        "preview": preview,
+        "error": problem,
+        "csrf": auth.csrf_token(request),
+    })
+
+
+@router.post("/agents", dependencies=MUTATE)
+async def apply_agents(request: Request, slug: str = Form(""),
+                       assign: list[str] = Form(default=[])):
+    target = "/agents" + (f"?slug={quote(slug)}" if slug else "")
+    if not assign:
+        return RedirectResponse(target + ("&" if slug else "?")
+                                + "error=" + quote("choose a role and an agent first"),
+                                status_code=303)
+    try:
+        service.apply_staffing(_project(request), assign, slug or None)
+    except service.ServiceError as exc:
+        return RedirectResponse(target + ("&" if slug else "?")
+                                + "error=" + quote(str(exc)), status_code=303)
+    return RedirectResponse(target, status_code=303)
+
+
 @router.get("/runs/{slug}", response_class=HTMLResponse)
-async def run_page(request: Request, slug: str) -> HTMLResponse:
+async def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
     project = _project(request)
     detail = service.run_detail(project, slug)          # ServiceError -> 404
     ws = service.run_workspace(project, slug)
@@ -66,16 +110,91 @@ async def run_page(request: Request, slug: str) -> HTMLResponse:
         "remaining": {dim: _percent(value)
                       for dim, value in (detail["remaining"] or {}).items()},
         "jobs": [service.job_json(job) for job in reversed(jobs_mod.list_jobs(project, ws))],
+        "error": error,
+        "csrf": auth.csrf_token(request),
     })
+
+
+def _owning_job(project, slug: str, job_id: str) -> jobs_mod.Job:
+    """The job, if it belongs to this run. Raises `service.ServiceError`
+    (-> 404) otherwise.
+
+    One copy, because this is what stops a request reaching a job in a
+    different run: two copies is how a later fix lands on one and not the
+    other. `ServiceError` — rather than an `HTTPException` here — because
+    the app's exception handler already maps it to the same 404 JSON body
+    for any caller, GET or POST, matching `run_workspace`'s own use of
+    `ServiceError` for "no such run" a line above every call site here.
+    """
+    ws = service.run_workspace(project, slug)            # validates the slug
+    job = jobs_mod.find(project, job_id)
+    if job is None or job.run_dir is None or Path(job.run_dir).resolve() != ws.resolve():
+        raise service.ServiceError(f"no job {job_id} in {slug}")
+    return job
+
+
+def _back(slug: str, error: str = "") -> RedirectResponse:
+    """Post/redirect/get: the browser lands on a fresh read of the page, so
+    reloading never repeats the action."""
+    target = f"/runs/{slug}"
+    if error:
+        target += "?error=" + quote(error)
+    return RedirectResponse(target, status_code=303)
+
+
+@router.post("/runs/{slug}/gates/{gate_id}", dependencies=MUTATE)
+async def answer_gate(request: Request, slug: str, gate_id: str,
+                      answer: str = Form(...), note: str = Form("")):
+    try:
+        service.answer_gate(_project(request), slug, gate_id, answer, note=note)
+    except service.ServiceError as exc:
+        return _back(slug, str(exc))
+    return _back(slug)
+
+
+@router.post("/runs/{slug}/act", dependencies=MUTATE)
+async def act(request: Request, slug: str, action: str = Form(...),
+              phase: str = Form(""), state: str = Form(""),
+              reason: str = Form(""), detail: str = Form(""),
+              experiment_runs: int = Form(0), wall_minutes: float = Form(0.0),
+              iterations: int = Form(0)):
+    project = _project(request)
+    try:
+        if action == "phase":
+            service.mark_phase(project, slug, phase, state)
+        elif action == "advance":
+            service.advance_run(project, slug)
+        elif action == "checkpoint":
+            service.checkpoint_run(project, slug, reason or "user", detail)
+        elif action == "resume":
+            service.resume_run(project, slug)
+        elif action == "spend":
+            recorded = {k: v for k, v in (("experiment_runs", experiment_runs),
+                                          ("wall_minutes", wall_minutes),
+                                          ("iterations", iterations)) if v}
+            service.record_spend(project, slug, **recorded)
+        else:
+            return _back(slug, f"unknown action {action!r}")
+    except service.ServiceError as exc:
+        return _back(slug, str(exc))
+    return _back(slug)
+
+
+@router.post("/runs/{slug}/jobs/{job_id}/cancel", dependencies=MUTATE)
+async def cancel_job(request: Request, slug: str, job_id: str):
+    project = _project(request)
+    _owning_job(project, slug, job_id)
+    try:
+        service.cancel_job(project, job_id)
+    except service.ServiceError as exc:
+        return _back(slug, str(exc))
+    return _back(slug)
 
 
 @router.get("/runs/{slug}/jobs/{job_id}", response_class=HTMLResponse)
 async def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
     project = _project(request)
-    ws = service.run_workspace(project, slug)           # validates the slug
-    job = jobs_mod.find(project, job_id)
-    if job is None or job.run_dir is None or Path(job.run_dir).resolve() != ws.resolve():
-        raise service.ServiceError(f"no job {job_id} in {slug}")
+    job = _owning_job(project, slug, job_id)
 
     def _read(path: str) -> str:
         try:

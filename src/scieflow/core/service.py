@@ -11,9 +11,9 @@ import threading
 from dataclasses import asdict
 from pathlib import Path
 
-from scieflow.core import agent_config, events, gates, jobs, workspace
+from scieflow.core import agent_config, agent_configure as acf, events, gates, jobs, sandbox, workspace
 from scieflow.core.project import Project, ProjectError
-from scieflow.core.run import budget, status
+from scieflow.core.run import actions, budget, status
 
 RECENT_JOBS = 20
 RECENT_EVENTS = 50
@@ -71,19 +71,31 @@ def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: 
                    cwd: Path | None = None, role: str | None = None,
                    detach: bool = False) -> dict:
     from scieflow.core.agent_run import DispatchError, prepare
-    from scieflow.core.run import actions
 
     try:
         d = prepare(project, agent, Path(prompt_file), cwd, role)
-    except DispatchError as e:
+    except (DispatchError, sandbox.SandboxError) as e:
         raise ServiceError(str(e)) from e
     if d.run_dir is not None:
         try:
             actions.guard_budget(d.run_dir, ("wall_minutes",))
         except actions.BudgetExhausted as e:
             raise ServiceError(f"{e} — run checkpointed") from e
+    if d.writable is None:
+        if d.run_dir is not None:
+            events.emit(d.run_dir, "sandbox.disabled", "human", agent=d.agent,
+                        why=f"{sandbox.ALLOWLIST_FILE} unsandboxed_runs")
+    else:
+        try:
+            sandbox.verify(d.writable, d.cwd)
+        except sandbox.SandboxError as exc:
+            if d.run_dir is not None:
+                events.emit(d.run_dir, "job.refused", "system", reason="sandbox",
+                            detail=str(exc))
+            raise ServiceError(str(exc)) from exc
     job, proc = jobs.start(project, d.argv, kind="agent", cwd=d.cwd, run_dir=d.run_dir,
-                           label=agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text)
+                           label=agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text,
+                           sandbox_writable=d.writable, env=d.env)
 
     def finish() -> jobs.Job:
         done = jobs.wait(job, proc)
@@ -127,3 +139,88 @@ def answer_gate(project: Project, slug: str, gate_id: str, answer: str,
 
 def agent_settings(project: Project, slug: str | None = None) -> dict:
     return agent_config.resolve(project.root, slug).to_json()
+
+
+def _staffing_plan(project: Project, assignments: list[str], slug: str | None):
+    try:
+        ops = [acf.parse_assign(text) for text in assignments]
+        if slug:
+            _ws(project, slug)          # validates the slug the same way
+            return acf.plan_workspace(project.root, slug, ops)
+        return acf.plan_defaults(project.root, ops)
+    except acf.ConfigureError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def plan_staffing(project: Project, assignments: list[str],
+                  slug: str | None = None) -> dict:
+    """What changing these role assignments would write, as a diff."""
+    plan = _staffing_plan(project, assignments, slug)
+    return {
+        "diff": "".join(change.diff(project.root) for change in plan.changes),
+        "notes": list(plan.notes),
+        "warnings": list(plan.warnings),
+        "empty": not plan.changes,
+    }
+
+
+def apply_staffing(project: Project, assignments: list[str],
+                   slug: str | None = None) -> dict:
+    """Re-plan from what is on disk right now, then write."""
+    plan = _staffing_plan(project, assignments, slug)
+    if not plan.changes:
+        raise ServiceError("already configured that way; nothing to write")
+    acf.write(plan)
+    return {"written": [str(c.path.relative_to(project.root)) for c in plan.changes],
+            "warnings": list(plan.warnings)}
+
+
+def mark_phase(project: Project, slug: str, phase: str, state: str,
+               actor: str = "human") -> dict:
+    """Set a phase's state. The browser and the CLI share this path."""
+    ws = _ws(project, slug)
+    try:
+        return actions.mark_phase(ws, phase, state, actor)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def advance_run(project: Project, slug: str, actor: str = "human") -> dict:
+    """Start the next iteration; refused (and the run checkpointed) when the
+    iteration budget is spent."""
+    ws = _ws(project, slug)
+    try:
+        return actions.advance_iteration(ws, actor)
+    except (actions.BudgetExhausted, ValueError) as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def checkpoint_run(project: Project, slug: str, reason: str, detail: str = "",
+                   actor: str = "human") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return actions.checkpoint_run(ws, reason, detail, actor)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def resume_run(project: Project, slug: str, actor: str = "human") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return actions.resume(ws, actor)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def record_spend(project: Project, slug: str, actor: str = "human", **spent) -> dict:
+    """Record spend the runner cannot measure (remote jobs, manual work)."""
+    ws = _ws(project, slug)
+    if not spent:
+        raise ServiceError("nothing to record; name at least one budget dimension")
+    try:
+        result = actions.record_spend(ws, actor, **spent)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+    if result is None:
+        raise ServiceError(f"run {slug} has no budget.yml")
+    return result

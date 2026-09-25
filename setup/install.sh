@@ -28,6 +28,7 @@ check() { # name, install hint, post-install hint
 check claude    "npm install -g @anthropic-ai/claude-code" "claude (login on first run)"
 check codex     "npm install -g @openai/codex" "codex login"
 check agy       "see https://antigravity.google (CLI install docs)" "agy install"
+check bwrap     "sudo apt-get install -y bubblewrap (required: agent sandboxing)" ""
 check apptainer "see https://apptainer.org/docs (needed for recorded experiment runs)" ""
 check conda     "see https://docs.conda.io (only for conda-based stage environments)" "conda env create -f envs/experiments.yml"
 check zot       "see the zot-cli project README (research: Zotero export)" "zot config init"

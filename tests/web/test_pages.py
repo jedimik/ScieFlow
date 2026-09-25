@@ -149,3 +149,12 @@ def test_job_page_shows_the_finished_job_duration(client, project):
     assert job.duration_s is not None and job.duration_s > 0
     body = client.get(f"/runs/r1/jobs/{job.id}").text
     assert f"· {job.duration_s:.1f}s" in body
+
+
+def test_run_page_marks_an_unsandboxed_job(client, project):
+    from scieflow.core import jobs
+
+    job = jobs.list_jobs(project, project.run_dir("r1"))[0]
+    job.sandboxed = False
+    jobs.save(job)
+    assert "unsandboxed" in client.get("/runs/r1").text.lower()

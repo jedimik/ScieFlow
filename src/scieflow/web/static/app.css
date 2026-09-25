@@ -21,6 +21,7 @@ th { color: var(--dim); font-weight: 500; }
 .state-done, .state-ok { color: var(--ok); }
 .state-running { color: var(--warn); }
 .state-failed, .state-timeout, .state-lost { color: var(--bad); }
+.note { color: var(--warn); }
 .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--ok); }
 .bar.low > span { background: var(--bad); }
@@ -29,3 +30,5 @@ pre.log { background: #0b0d12; color: #d7dbe4; padding: .8rem; overflow: auto;
 .gate { border: 1px solid var(--line); border-left: 3px solid var(--warn);
         padding: .6rem .8rem; margin: .5rem 0; }
 .gate.human { border-left-color: var(--bad); }
+.actions { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; }
+form.inline { display: inline; }
