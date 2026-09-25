@@ -39,6 +39,26 @@ class ServiceError(Exception):
     """A request the service cannot fulfil, with a message for the user."""
 
 
+class RunStartedError(ServiceError):
+    """`start_run` failed *after* the run was already created.
+
+    Everything that can fail once `create_run` has returned — handing the
+    conversation to `agent` and taking its first turn — leaves a real run
+    behind: the workspace exists and the conversation agent is recorded, even
+    though the turn itself did not complete (a sandbox refusal, an exhausted
+    budget, an oversized opening prompt). A caller that only catches
+    `ServiceError` and re-renders an empty form would tell the user nothing
+    was made, when in fact resubmitting will now say "a run named X already
+    exists" with no way back to it — so this carries `slug` (the canonical
+    name the run was actually created under) for a caller to send the user
+    to the run's own page instead.
+    """
+
+    def __init__(self, slug: str, message: str):
+        super().__init__(message)
+        self.slug = slug
+
+
 PROPOSAL_PREVIEW_LIMIT = 4000        # characters of a proposal shown in a gate form
 
 
@@ -119,7 +139,8 @@ def create_run(project: Project, slug: str, goal: str, *, workflow: str = "",
 
     overrides = {"approval": approval, "max_iterations": max_iterations,
                  "max_experiment_runs": max_experiment_runs,
-                 "max_wall_minutes": max_wall_minutes}
+                 "max_wall_minutes": max_wall_minutes,
+                 "workflow": workflow or None}
     # Both the temp dir and the write into it are inside this try/finally too
     # — a failure here (disk full, no permission on the temp dir) must be
     # translated to ServiceError and must not leak the temp directory, the
@@ -128,21 +149,24 @@ def create_run(project: Project, slug: str, goal: str, *, workflow: str = "",
     try:
         tmp_dir = Path(tempfile.mkdtemp())
         goal_file = tmp_dir / "goal.md"
-        goal_file.write_text(goal)
+        goal_file.write_text(goal, encoding="utf-8")
         init_mod.init_workspace(target.name, goal_file, project.workspace_root,
                                 overrides, project.root)
+        return run_detail(project, target.name)
     except FileExistsError as exc:
         raise ServiceError(f"a run named {target.name} already exists") from exc
     except (OSError, ValueError, KeyError) as exc:
-        # Belt-and-braces: init_workspace already removes `target` itself on
-        # any exception it raises, but this also covers a failure above that
-        # never reaches init_workspace at all (e.g. the goal-file write).
-        shutil.rmtree(target, ignore_errors=True)
+        # No cleanup of `target` here: `init_workspace` already removes it on
+        # any exception it raises, and every failure that can reach this
+        # branch *before* `init_workspace` runs (the temp dir, the goal-file
+        # write) happens while `target` does not exist yet — so a
+        # `shutil.rmtree(target, ...)` here would have nothing of this call's
+        # own to remove. It could only ever delete a directory this call did
+        # not create.
         raise ServiceError(f"could not create {target.name}: {exc}") from exc
     finally:
         if tmp_dir is not None:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-    return run_detail(project, target.name)
 
 
 def run_events(project: Project, slug: str, since: str | None = None,
@@ -701,12 +725,31 @@ def start_run(project: Project, slug: str, goal: str, agent: str = "", *,
     the convenience that chains them, so a run can also be made with no agent
     at all when the registry has nothing conversational, leaving a run
     someone can pick an agent for later on its own page.
+
+    Everything after creation uses `run["run"]["slug"]` — the canonical name
+    `create_run` actually made the workspace under — not the raw `slug` this
+    call was given. `Project.run_dir` legitimately rewrites a slug (a
+    `workspace/` prefix stripped, a trailing slash or surrounding whitespace
+    trimmed), so the two can differ, and a caller that instead reused the raw
+    slug would tell the conversation agent, and eventually the browser's own
+    redirect, to look for a run at a path that 404s while the real one sits
+    one path segment over.
+
+    A failure once the run exists (`set_conversation_agent` or `say` refusing
+    — a sandbox verify failure, an exhausted budget, an oversized opening
+    prompt) raises `RunStartedError`, not a plain `ServiceError`: the run is
+    real, and the caller should send the user to it, not pretend nothing
+    happened.
     """
     if agent:
         _check_can_converse(project, agent)
     run = create_run(project, slug, goal, workflow=workflow, **limits)
+    canonical = run["run"]["slug"]
     if not agent:
-        return {"run": run, "turn": None}
-    set_conversation_agent(project, slug, agent)
-    said = say(project, slug, _opening_prompt(slug, goal, workflow))
-    return {"run": run, "turn": said["turn"]}
+        return {"run": run, "slug": canonical, "turn": None}
+    try:
+        set_conversation_agent(project, canonical, agent)
+        said = say(project, canonical, _opening_prompt(canonical, goal, workflow))
+    except ServiceError as exc:
+        raise RunStartedError(canonical, str(exc)) from exc
+    return {"run": run, "slug": canonical, "turn": said["turn"]}

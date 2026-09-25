@@ -42,6 +42,28 @@ def test_create_run_makes_a_workspace_with_its_goal(project):
     assert detail["status"]["run"] == "r1"
 
 
+def test_the_goal_file_is_written_with_an_explicit_utf8_encoding(project, monkeypatch):
+    """Without an explicit encoding, `Path.write_text` falls back to
+    `locale.getpreferredencoding()` — under `LANG=C` a single em-dash in the
+    goal would raise `UnicodeEncodeError` and refuse the run for no good
+    reason. This checks the write itself names `encoding="utf-8"`, not just
+    that the goal round-trips under this test's own (typically UTF-8)
+    locale, which would pass either way and prove nothing about the bug."""
+    calls = []
+    real_write_text = Path.write_text
+
+    def spy(self, data, *a, **kw):
+        if self.name == "goal.md":
+            calls.append(kw.get("encoding"))
+        return real_write_text(self, data, *a, **kw)
+
+    monkeypatch.setattr(Path, "write_text", spy)
+    service.create_run(project, "r1", "Optimise the yield — then report it.")
+    assert calls == ["utf-8"]
+    assert (project.run_dir("r1") / "goal.md").read_text(encoding="utf-8") == \
+        "Optimise the yield — then report it."
+
+
 def test_create_run_applies_the_defaults(project):
     from scieflow.core.run import budget
 
@@ -134,6 +156,28 @@ def test_a_goal_file_write_failure_is_a_service_error_with_no_leaked_temp_dir(
     assert not project.run_dir("r1").exists()
 
 
+def test_the_chosen_workflow_is_recorded_on_the_run(project):
+    """`workspace.describe`'s `kind` and a later conversation both need to
+    know what was chosen — `create_run` validates `workflow` against
+    `menu.WORKFLOWS` but used to never write it anywhere, so the choice was
+    collected, validated, displayed, and then discarded."""
+    import yaml
+
+    service.create_run(project, "r1", "a goal", workflow="lit-review")
+    cfg = yaml.safe_load((project.run_dir("r1") / "config.yml").read_text())
+    assert cfg["workflow"] == "lit-review"
+
+
+def test_no_workflow_chosen_records_nothing(project):
+    """The empty choice is not itself a workflow — `create_run`'s default
+    (`workflow=""`) must not write a literal empty string into config.yml."""
+    import yaml
+
+    service.create_run(project, "r1", "a goal")
+    cfg = yaml.safe_load((project.run_dir("r1") / "config.yml").read_text())
+    assert "workflow" not in cfg
+
+
 def test_an_unknown_workflow_is_refused_before_anything_is_written(project):
     with pytest.raises(service.ServiceError, match="workflow"):
         service.create_run(project, "r1", "a goal", workflow="nonesuch")
@@ -206,6 +250,50 @@ def test_the_first_turn_falls_back_like_resume_prompt_with_no_workflow(project_w
     first = conversation.read(project.run_dir("r1"))["turns"][0]["text"]
     assert "src/scieflow/research/AGENTS.md" in first
     assert "Find a catalyst." in first
+
+
+def test_start_run_uses_the_canonical_slug_not_the_raw_one(project_with_agent):
+    """`Project.run_dir` legitimately normalises a slug — here, stripping a
+    `workspace/` prefix `run_dir` already accepts. `create_run` makes the
+    workspace under the *canonical* name (`target.name`); everything after
+    creation (the conversation agent, the opening turn, and — on the
+    browser — the redirect) must use that same canonical name, not the raw
+    slug this call was given, or it ends up naming a run one path segment
+    away from the one that actually exists.
+    """
+    from scieflow.core.run import conversation
+
+    project = project_with_agent
+    result = service.start_run(project, "workspace/pfx", "Find a catalyst.", "stub",
+                               workflow="research-loop")
+    assert result["slug"] == "pfx"
+    ws = project.run_dir("pfx")
+    assert ws.exists()
+    doc = conversation.read(ws)
+    assert doc["agent"] == "stub"
+    assert doc["turns"], "no first turn was taken"
+    first = doc["turns"][0]["text"]
+    assert "Start the run workspace/pfx:" in first
+    assert "workspace/workspace/pfx" not in first
+
+
+def test_a_post_creation_failure_raises_run_started_error_with_the_run_intact(
+        project_with_agent, monkeypatch):
+    """A failure once the run already exists (a sandbox refusal, an
+    exhausted budget, an oversized prompt — all surfaced through `say`) must
+    not look like the pre-creation refusals a half-made run never survives:
+    the run is real, so the caller needs its slug, not just a message."""
+    from scieflow.core import service as service_mod
+
+    def explode(*a, **kw):
+        raise service.ServiceError("the sandbox refused this run")
+
+    monkeypatch.setattr(service_mod, "say", explode)
+    project = project_with_agent
+    with pytest.raises(service.RunStartedError) as exc_info:
+        service.start_run(project, "r1", "a goal", "stub", workflow="research-loop")
+    assert exc_info.value.slug == "r1"
+    assert project.run_dir("r1").exists(), "the run must still exist after this failure"
 
 
 def test_start_run_without_an_agent_still_creates_the_run(project):
