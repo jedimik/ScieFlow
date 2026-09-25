@@ -371,15 +371,49 @@ def test_switching_keeps_the_turns_already_said(project):
 
 
 def test_switching_to_an_unknown_agent_is_refused(project):
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    conversation.record_session(ws, "stub-session")
     with pytest.raises(service.ServiceError, match="unknown agent"):
         service.set_conversation_agent(project, "r1", "nonesuch")
+    # Verify nothing changed
+    doc = conversation.read(ws)
+    assert doc["agent"] == "stub" and doc["session"] == "stub-session"
 
 
 def test_switching_to_an_agent_that_cannot_converse_is_refused(project):
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    conversation.record_session(ws, "stub-session")
     with pytest.raises(service.ServiceError, match="conversation"):
         service.set_conversation_agent(project, "r1", "sleepy")
+    # Verify nothing changed
+    doc = conversation.read(ws)
+    assert doc["agent"] == "stub" and doc["session"] == "stub-session"
 
 
 def test_switching_mid_turn_is_refused(project, running_turn):
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
     with pytest.raises(service.ServiceError, match="still"):
         service.set_conversation_agent(project, "r1", "stub2")
+    # Verify nothing changed
+    doc = conversation.read(ws)
+    assert doc["agent"] == "stub"
+
+
+def test_switching_to_the_same_agent_keeps_the_session(project):
+    """Switching to the same agent keeps its session, since the CLI is the same."""
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    conversation.record_session(ws, "stub-session")
+    service.set_conversation_agent(project, "r1", "stub")
+    doc = conversation.read(ws)
+    assert doc["agent"] == "stub" and doc["session"] == "stub-session"

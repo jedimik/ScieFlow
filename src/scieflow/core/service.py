@@ -506,10 +506,19 @@ def set_conversation_agent(project: Project, slug: str, agent: str,
     agents = config.load_agents(project.root)
     if agent not in agents:
         raise ServiceError(f"unknown agent: {agent} (known: {', '.join(agents)})")
-    if not sessions.can_converse(agents[agent]):
+    agent_cfg = agents[agent]
+    if not agent_cfg.get("session_cmd"):
         raise ServiceError(
-            f"{agent} cannot host a conversation: its configuration has no "
-            "session_cmd and resume_cmd, so every turn would start over")
+            f"{agent} cannot host a conversation: no session_cmd in its configuration")
+    if not agent_cfg.get("resume_cmd"):
+        raise ServiceError(
+            f"{agent} cannot host a conversation: no resume_cmd in its configuration")
+    if not sessions.can_converse(agent_cfg):
+        # The only remaining reason can_converse can fail (given both commands exist)
+        # is an invalid family
+        raise ServiceError(
+            f"{agent} cannot host a conversation: no family in its configuration "
+            "or the family is not registered")
     if _turn_in_flight(project, ws):
         raise ServiceError("a turn is still running; wait for it or cancel it")
     try:
