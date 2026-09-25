@@ -141,7 +141,10 @@ needs: `family`, `session_cmd` and `resume_cmd`. An agent missing any of
 them, or naming a `family` no parser is registered for, cannot hold a
 conversation — `service.set_conversation_agent` refuses to hand the
 conversation to it and says so, and the run page explains the same thing
-rather than quietly starting a fresh context on every turn.
+rather than quietly starting a fresh context on every turn. `enabled: false`
+refuses it too, the same as an unknown agent; the run page's hand-over picker
+only ever lists agents that pass all of this, so it never offers a choice
+`set_conversation_agent` would just refuse.
 
 - `family` — which output dialect `scieflow.core.sessions` should parse:
   `claude`, `codex` or `agy`. It is declared per agent, not guessed from its

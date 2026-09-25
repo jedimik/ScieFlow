@@ -47,7 +47,12 @@ def _events(output: str):
 
 
 def _claude(output: str) -> Session:
-    session_id, said = None, []
+    """`claude -p`'s final `result` event carries the assistant's reply
+    verbatim — the same text the `assistant` events' text blocks already
+    built up turn by turn. Preferring `result` when it is there (and falling
+    back to the accumulated blocks only when it never arrives — a cancelled
+    or timed-out turn, say) is what stops the reply being said twice."""
+    session_id, blocks, result = None, [], None
     for event in _events(output):
         if session_id is None and event.get("session_id"):
             session_id = str(event["session_id"])
@@ -56,9 +61,10 @@ def _claude(output: str) -> Session:
             content = message.get("content", []) if isinstance(message, dict) else []
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "text":
-                    said.append(block.get("text", ""))
+                    blocks.append(block.get("text", ""))
         elif event.get("type") == "result" and event.get("result"):
-            said.append(str(event["result"]))
+            result = str(event["result"])
+    said = [result] if result is not None else blocks
     return Session(session_id, _readable(said, output))
 
 
@@ -77,6 +83,31 @@ def _codex(output: str) -> Session:
 _CONVERSATION_ID_RE = re.compile(r'"conversation_id"\s*:\s*"([^"]*)"')
 
 
+def _largest_json_object(text: str) -> object | None:
+    """`text` parsed whole, or — when a banner or a warning line agy adds
+    ahead of (or after) its one JSON object stops the whole thing from
+    parsing — the widest `{...}` span inside it, parsed instead.
+
+    Without this, any surrounding noise dropped straight to the
+    `conversation_id` regex below, which recovers the id but leaves `said`
+    empty — the chat then shows the raw JSON blob (this module's `_readable`
+    falls back to the whole raw `output`) instead of the reply the JSON
+    object actually carried.
+    """
+    stripped = text.strip()
+    try:
+        return json.loads(stripped)
+    except (ValueError, RecursionError):
+        pass
+    start, end = stripped.find("{"), stripped.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        return json.loads(stripped[start:end + 1])
+    except (ValueError, RecursionError):
+        return None
+
+
 def _agy(output: str) -> Session:
     """agy prints one JSON object per call, not a line-delimited stream of
     events — `_events` (built for the other two) doesn't fit here, so this
@@ -89,10 +120,7 @@ def _agy(output: str) -> Session:
     line-delimited formats, adapted to a single-object one.
     """
     session_id, said = None, []
-    try:
-        obj = json.loads(output.strip())
-    except (ValueError, RecursionError):
-        obj = None
+    obj = _largest_json_object(output)
     if isinstance(obj, dict):
         if obj.get("conversation_id"):
             session_id = str(obj["conversation_id"])

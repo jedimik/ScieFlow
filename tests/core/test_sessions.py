@@ -50,6 +50,17 @@ def test_claude_session_id_and_text():
     assert "Hello." in parsed.text
 
 
+def test_claude_does_not_say_the_reply_twice():
+    """Finding 5 (2026-09-25 review): `claude -p`'s final `result` event
+    repeats the assistant's text blocks verbatim. The old parser appended
+    both, so `CLAUDE_STREAM` (one "Hello." assistant block, one "Hello."
+    result) parsed to "Hello.\\n\\nHello." — a membership check
+    (`"Hello." in parsed.text`) is too weak to see that; counting is not."""
+    parsed = sessions.parse({"family": "claude"}, CLAUDE_STREAM)
+    assert parsed.text == "Hello."
+    assert parsed.text.count("Hello.") == 1
+
+
 def test_codex_session_id_and_text():
     parsed = sessions.parse({"family": "codex"}, CODEX_STREAM)
     assert parsed.id == "01a0d570-a280-7f22-b14f-04df145c95fc"
@@ -68,6 +79,19 @@ def test_the_readable_text_is_not_the_raw_stream():
     parsed = sessions.parse({"family": "claude"}, CLAUDE_STREAM)
     assert "session_id" not in parsed.text
     assert '"type"' not in parsed.text
+
+
+def test_the_agy_readable_text_is_not_the_raw_stream_either():
+    """The `agy` analogue: a banner or a warning line ahead of agy's one
+    JSON object used to drop straight to the conversation_id regex, which
+    recovers the id but leaves `said` empty — so the chat showed the raw
+    JSON blob instead of the reply. A wide `{...}` scan must recover both."""
+    noisy = "Antigravity CLI v2.1 — warming the model cache\n" + AGY_OUTPUT
+    parsed = sessions.parse({"family": "agy"}, noisy)
+    assert parsed.id == "9a563a1a-601b-45aa-8677-10689cf3b31e"
+    assert parsed.text == "Hello.\n"
+    assert '"conversation_id"' not in parsed.text
+    assert "Antigravity CLI" not in parsed.text
 
 
 def test_a_truncated_stream_degrades_instead_of_raising():

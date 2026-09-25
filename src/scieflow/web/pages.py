@@ -112,7 +112,7 @@ async def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse
         "jobs": [service.job_json(job) for job in reversed(jobs_mod.list_jobs(project, ws))],
         "charter": service.run_charter(project, slug),
         "conversation": service.conversation_state(project, slug),
-        "agents": service.agent_settings(project, slug)["agents"],
+        "agents": service.conversational_agents(project),
         "error": error,
         "csrf": auth.csrf_token(request),
     })

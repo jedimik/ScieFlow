@@ -63,12 +63,19 @@
   <p class="state-failed">{{ conversation.agent }} cannot host a conversation:
      its configuration has no session commands, so every turn would start over.
      Choose another agent.</p>
+{% elif conversation.session_lost %}
+  <p class="state-failed">{{ conversation.agent }}'s last turn reported no session
+     id, and none was ever recorded — the next message will start a fresh
+     context rather than resuming what came before.</p>
 {% endif %}
 
 <div class="chat">
   {% for turn in conversation.turns %}
   <div class="turn {{ turn.role }}">
-    <span class="dim">{{ turn.role }} · {{ turn.ts[11:19] }}</span>
+    <span class="dim">{{ turn.role }} · {{ turn.get("ts", "")[11:19] }}</span>
+    {% if turn.state and turn.state != "done" %}
+    <span class="state-failed">({{ turn.state }})</span>
+    {% endif %}
     <pre>{{ turn.text }}</pre>
     {% if turn.job_id %}
     <a class="dim" href="/runs/{{ slug }}/jobs/{{ turn.job_id }}">this turn's job →</a>

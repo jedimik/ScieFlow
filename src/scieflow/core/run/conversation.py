@@ -14,6 +14,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
 from scieflow.core import events, store
 
 CONVERSATION_FILE = "conversation.yml"
@@ -40,7 +42,10 @@ def _guard_dict(doc) -> dict:
 
 
 def read(ws: Path) -> dict:
-    doc = store.read_yaml(_path(ws), default=None) or {}
+    try:
+        doc = store.read_yaml(_path(ws), default=None) or {}
+    except yaml.YAMLError as exc:
+        raise ConversationError(f"malformed {CONVERSATION_FILE}: {exc}") from exc
     if not isinstance(doc, dict):
         raise ConversationError(f"malformed {CONVERSATION_FILE}: not a mapping")
     return {"agent": str(doc.get("agent") or ""),
@@ -67,7 +72,7 @@ def set_agent(ws: Path, agent: str, actor: str = "human") -> dict:
 
     try:
         store.update_yaml(_path(ws), change)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, yaml.YAMLError) as exc:
         raise ConversationError(f"failed to set agent: {exc}") from exc
     return read(ws)
 
@@ -87,19 +92,25 @@ def record_session(ws: Path, session_id: str | None) -> dict:
 
     try:
         store.update_yaml(_path(ws), update_session)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, yaml.YAMLError) as exc:
         raise ConversationError(f"failed to record session: {exc}") from exc
     return read(ws)
 
 
 def add_turn(ws: Path, *, role: str, text: str, job_id: str = "",
-             actor: str = "human") -> dict:
+             actor: str = "human", state: str = "") -> dict:
+    """`state` is the dispatching job's final state (`done`, `failed`,
+    `timeout`, `cancelled`) — recorded only when given, so a turn with none
+    (every human turn, and every agent turn from before this field existed)
+    doesn't carry a misleading empty value."""
     if role not in ROLES:
         raise ConversationError(f"unknown turn role {role!r} (one of {', '.join(sorted(ROLES))})")
     if actor not in events.ACTORS:
         raise ConversationError(f"unknown actor {actor!r} (one of {', '.join(sorted(events.ACTORS))})")
 
     turn = {"role": role, "text": text, "job_id": job_id, "ts": _now()}
+    if state:
+        turn["state"] = state
 
     def append(doc: dict) -> dict:
         doc = _guard_dict(doc or {})
@@ -109,7 +120,7 @@ def add_turn(ws: Path, *, role: str, text: str, job_id: str = "",
 
     try:
         store.update_yaml(_path(ws), append)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, yaml.YAMLError) as exc:
         raise ConversationError(f"failed to add turn: {exc}") from exc
 
     events.emit(ws, "turn.sent" if role == "human" else "turn.received",

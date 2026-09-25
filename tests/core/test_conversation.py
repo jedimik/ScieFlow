@@ -110,6 +110,38 @@ def test_invalid_actor_on_set_agent_is_rejected(ws):
     assert conversation.read(ws) == {"agent": "", "session": None, "turns": []}
 
 
+def test_add_turn_records_the_jobs_state_when_given(ws):
+    conversation.set_agent(ws, "claude")
+    turn = conversation.add_turn(ws, role="agent", text="ok", job_id="J1", state="failed")
+    assert turn["state"] == "failed"
+    assert conversation.read(ws)["turns"][0]["state"] == "failed"
+
+
+def test_add_turn_omits_state_when_not_given(ws):
+    """No misleading empty value on a turn nothing reported a state for."""
+    conversation.set_agent(ws, "claude")
+    conversation.add_turn(ws, role="human", text="hi")
+    assert "state" not in conversation.read(ws)["turns"][0]
+
+
+def test_a_syntax_broken_conversation_yaml_is_a_conversation_error(ws):
+    """A hand-edited or corrupted `conversation.yml` that fails to parse at
+    all must come out as `ConversationError`, the same as one that parses to
+    the wrong shape — not a bare `yaml.YAMLError` that only
+    `conversation_state`'s narrower `except ConversationError` misses,
+    degrading the whole run page to a 404."""
+    (ws / "conversation.yml").write_text("agent: [unterminated\n")
+
+    with pytest.raises(conversation.ConversationError):
+        conversation.read(ws)
+    with pytest.raises(conversation.ConversationError):
+        conversation.set_agent(ws, "claude")
+    with pytest.raises(conversation.ConversationError):
+        conversation.add_turn(ws, role="human", text="hi")
+    with pytest.raises(conversation.ConversationError):
+        conversation.record_session(ws, "id")
+
+
 def test_malformed_yaml_in_all_write_paths(ws):
     """Hand-edited non-mapping files produce ConversationError consistently."""
     # Write a YAML list to conversation.yml to simulate hand-editing

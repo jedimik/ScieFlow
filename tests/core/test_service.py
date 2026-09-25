@@ -20,7 +20,11 @@ def project(tmp_path):
         f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n'
         f'  stub2: {{cmd: "{STUB}", enabled: true, timeout_min: 1, family: claude, '
         f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n'
-        '  sleepy: {cmd: "sleep 300", enabled: true, timeout_min: 5}\n')
+        '  sleepy: {cmd: "sleep 300", enabled: true, timeout_min: 5}\n'
+        '  sleepy_turn: {cmd: "sleep 300", enabled: true, timeout_min: 5, '
+        'family: claude, session_cmd: "sleep 300", resume_cmd: "sleep 300"}\n'
+        f'  stub_disabled: {{cmd: "{STUB}", enabled: false, timeout_min: 1, family: claude, '
+        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n')
     (tmp_path / "config" / "defaults.yml").write_text("approval: per-campaign\n")
     (tmp_path / "schemas").mkdir()
     for name in ("status", "gates", "status-research"):
@@ -36,18 +40,21 @@ def project(tmp_path):
 
 @pytest.fixture
 def running_turn(project):
-    """A turn already in flight for r1: a still-running agent job, so the
-    busy check in `service.say` has something to refuse against. Uses the
-    `sleepy` agent's `sleep 300` command, same as
-    `test_dispatch_detached_then_cancel`, and cancels it on teardown."""
+    """A turn already in flight for r1: a still-running job dispatched
+    conversationally (`kind="turn"`), so the busy check in `service.say` has
+    an actual *turn* to refuse against — not just any agent job (see
+    `test_a_non_turn_agent_job_does_not_block_say`, which checks the other
+    side of that same distinction). Uses `sleepy_turn`'s `sleep 300` command,
+    same idea as `test_dispatch_detached_then_cancel`, and cancels it on
+    teardown."""
     from scieflow.core.run import conversation
 
     ws = project.run_dir("r1")
-    conversation.set_agent(ws, "stub")
+    conversation.set_agent(ws, "sleepy_turn")
     prompt = ws / "logs" / "running.md"
     prompt.write_text("hi")
-    job = service.dispatch_agent(project, "sleepy", prompt, ws / "logs" / "running.out.md",
-                                 detach=True)
+    job = service.dispatch_agent(project, "sleepy_turn", prompt, ws / "logs" / "running.out.md",
+                                 detach=True, conversational=True)
     yield job
     service.cancel_job(project, job["id"])
 
@@ -269,6 +276,52 @@ def test_say_dispatches_a_turn_and_records_both_sides(project):
     assert turns[1]["job_id"] == result["job"]["id"]
 
 
+def test_say_completes_a_conversational_turn_and_resumes_it(project):
+    """Finding 3 (2026-09-25 review): before the stub had a conversational
+    mode, every `say` test dispatched a prompt with no `output:`/`kind:`
+    lines the stub understood, so it exited 1 and every one of these tests
+    passed against a *failing* dispatch with an empty agent turn — nothing
+    offline ever exercised a successful turn or the resume path, which is
+    the one assumption this whole feature rests on."""
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    first = service.say(project, "r1", "kind: conversation\nWhat should we try next?")
+
+    doc = conversation.read(ws)
+    session = doc["session"]
+    assert session, "no session id was recorded from the first turn"
+    assert doc["turns"][1]["text"] == (
+        "stub heard: kind: conversation\nWhat should we try next?")
+    assert doc["turns"][1]["job_id"] == first["job"]["id"]
+
+    second = service.say(project, "r1", "kind: conversation\nAnd then?")
+    assert session in second["job"]["argv"], (
+        "the session id turn one recorded never reached turn two's argv")
+
+
+def test_a_non_turn_agent_job_does_not_block_say(project):
+    """Finding 4 (2026-09-25 review): `_turn_in_flight` used to match any
+    running `kind="agent"` job — which is every dispatch a coordinator makes
+    (a campaign, a review), not just a chat turn. A plain agent dispatch
+    running in the same workspace must not disable the chat."""
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    prompt = ws / "logs" / "campaign.md"
+    prompt.write_text("hi")
+    job = service.dispatch_agent(project, "sleepy", prompt, ws / "logs" / "campaign.out.md",
+                                 detach=True)   # kind="agent", not a turn
+    try:
+        assert service.conversation_state(project, "r1")["busy"] is False
+        result = service.say(project, "r1", "kind: conversation\nstill there?")
+        assert result["job"]["state"] == "done"
+    finally:
+        service.cancel_job(project, job["id"])
+
+
 def test_say_pins_the_charter_into_the_turn(project):
     """The whole point of the charter is that every turn carries it. A turn
     that composed its own prompt would bypass that silently.
@@ -315,11 +368,48 @@ def test_say_refuses_when_no_agent_is_chosen(project):
 def test_say_refuses_an_agent_that_cannot_hold_a_session(project):
     """The spec is explicit: an agent that cannot report a session id must be
     refused plainly, not silently restarted on every turn."""
+    from scieflow.core import events
     from scieflow.core.run import conversation
 
-    conversation.set_agent(project.run_dir("r1"), "sleepy")   # no session_cmd
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "sleepy")   # no session_cmd
     with pytest.raises(service.ServiceError, match="conversation"):
         service.say(project, "r1", "hello")
+    # Finding 7 (2026-09-25 review): a pre-flight refusal — this one is
+    # cheap and has no side effect — must leave no human turn and no
+    # `turn.sent` event: nothing was ever attempted for this message.
+    assert conversation.read(ws)["turns"] == []
+    assert not [e for e in events.read(ws) if e["type"] == "turn.sent"]
+
+
+def test_say_preflight_refuses_an_unknown_agent_before_writing_anything(project):
+    from scieflow.core import events
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "no-such-agent")
+    with pytest.raises(service.ServiceError, match="unknown agent"):
+        service.say(project, "r1", "hello")
+    assert conversation.read(ws)["turns"] == []
+    assert not [e for e in events.read(ws) if e["type"] == "turn.sent"]
+
+
+def test_say_keeps_the_human_turn_when_the_dispatch_itself_fails(project, monkeypatch):
+    """The other side of finding 7: a failure *during* the dispatch (sandbox
+    verify, here) is not a pre-flight condition — the human turn is already
+    on record by the time it happens, and must stay, unlike a pre-flight
+    refusal."""
+    from scieflow.core import events, sandbox
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    monkeypatch.setattr(sandbox, "available", lambda: False)
+    with pytest.raises(service.ServiceError, match="bubblewrap"):
+        service.say(project, "r1", "hello")
+    turns = conversation.read(ws)["turns"]
+    assert len(turns) == 1 and turns[0]["role"] == "human" and turns[0]["text"] == "hello"
+    assert len([e for e in events.read(ws) if e["type"] == "turn.sent"]) == 1
 
 
 def test_say_refuses_while_a_turn_is_still_running(project, running_turn):
@@ -345,6 +435,54 @@ def test_conversation_reports_whether_it_can_converse(project):
     assert service.conversation_state(project, "r1")["can_converse"] is False
     conversation.set_agent(ws, "stub")
     assert service.conversation_state(project, "r1")["can_converse"] is True
+
+
+def test_conversation_state_reports_no_session_lost_before_any_turn(project):
+    from scieflow.core.run import conversation
+
+    conversation.set_agent(project.run_dir("r1"), "stub")
+    assert service.conversation_state(project, "r1")["session_lost"] is False
+
+
+def test_conversation_state_reports_a_lost_session(project):
+    """Finding 6 (2026-09-25 review): `record_session(ws, None)` leaves a
+    prior id alone by design, but if the CLI never reported one at ALL —
+    here, the stub's own "missing directives" failure, same shape as any
+    crashed turn — the session stays unset forever and nothing says so
+    anywhere but a careful read of `conversation.yml`."""
+    from scieflow.core import events
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    service.say(project, "r1", "no marker here, so the stub fails and reports no id")
+
+    state = service.conversation_state(project, "r1")
+    assert state["session_lost"] is True
+    assert [e for e in events.read(ws) if e["type"] == "turn.session_lost"]
+
+
+def test_a_turn_with_empty_parsed_text_does_not_erase_the_transcript(project, monkeypatch):
+    """Minor (2026-09-25 review): `say` used to record any turn — failed,
+    cancelled or timed out — as an ordinary reply with empty text, and then
+    overwrite the transcript with that same empty text, discarding whatever
+    raw output the job actually wrote. Skipping the overwrite when the
+    parsed text is empty, and recording the job's state on the turn, are
+    this fix's two halves."""
+    from scieflow.core import sessions
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    monkeypatch.setattr(sessions, "parse", lambda cfg, out: sessions.Session(None, "  "))
+
+    service.say(project, "r1", "kind: conversation\nhi")
+
+    [transcript] = list((ws / "logs").glob("turn-*.out.md"))
+    assert "session_id" in transcript.read_text(), "the raw output was erased"
+    turn = conversation.read(ws)["turns"][1]
+    assert turn["text"] == "  "
+    assert turn["state"] == "done"
 
 
 def test_switching_the_agent_starts_a_fresh_session(project):
@@ -396,6 +534,30 @@ def test_switching_to_an_agent_that_cannot_converse_is_refused(project):
     assert doc["agent"] == "stub" and doc["session"] == "stub-session"
 
 
+def test_switching_to_a_disabled_agent_is_refused(project):
+    """Minor (2026-09-25 review): `enabled: false` (registry-wide, not tied
+    to any run) must stop an agent from being handed a conversation, the
+    same as an unknown one or one that cannot converse at all."""
+    from scieflow.core.run import conversation
+
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    conversation.record_session(ws, "stub-session")
+    with pytest.raises(service.ServiceError, match="disabled"):
+        service.set_conversation_agent(project, "r1", "stub_disabled")
+    doc = conversation.read(ws)
+    assert doc["agent"] == "stub" and doc["session"] == "stub-session"
+
+
+def test_conversational_agents_excludes_disabled_and_non_conversational_agents(project):
+    """What the run page's hand-over picker offers (`pages.run_page`): only
+    agents `set_conversation_agent` would actually accept."""
+    agents = service.conversational_agents(project)
+    assert "stub" in agents and "stub2" in agents
+    assert "sleepy" not in agents          # no session_cmd/resume_cmd at all
+    assert "stub_disabled" not in agents   # enabled: false
+
+
 def test_switching_mid_turn_is_refused(project, running_turn):
     from scieflow.core.run import conversation
 
@@ -404,7 +566,7 @@ def test_switching_mid_turn_is_refused(project, running_turn):
         service.set_conversation_agent(project, "r1", "stub2")
     # Verify nothing changed
     doc = conversation.read(ws)
-    assert doc["agent"] == "stub"
+    assert doc["agent"] == "sleepy_turn"
 
 
 def test_switching_to_the_same_agent_keeps_the_session(project):

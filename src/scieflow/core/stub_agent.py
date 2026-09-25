@@ -3,11 +3,19 @@
 Reads `output: <path>` and `kind: <kind>` lines from the prompt and writes a
 canned artifact there: markdown for research-loop phases, schema-valid JSON
 for research-module workflows, and text/TeX for debate and drafting steps.
+
+`kind: conversation` is a second mode with no `output:` file: it prints a
+`session_id` JSON line followed by a `result` JSON line that echoes the
+prompt back, in the shape `scieflow.core.sessions`' claude-family parser
+reads. It exists so offline tests can dispatch a real (if fake) conversation
+turn through `service.say` — session recorded, resumed on the next turn,
+readable text on the transcript — without a real CLI or network access.
 """
 
 import json
 import re
 import sys
+import uuid
 from pathlib import Path
 
 # Research loop phases (hypothesize, experiment, literature, synthesize, notebook).
@@ -150,10 +158,25 @@ CANNED_TEXT = {
 }
 
 
+def _converse(prompt: str) -> None:
+    """Print a session id, then a readable reply, as one line each of JSON —
+    the shape `sessions._claude` parses a `claude -p --output-format=
+    stream-json` stream into: an event carrying `session_id`, followed by one
+    with `type: result` and the reply text. A test agent config declares
+    `family: claude` to read it."""
+    session_id = f"stub-{uuid.uuid4().hex[:12]}"
+    reply = f"stub heard: {prompt}"
+    print(json.dumps({"session_id": session_id}))
+    print(json.dumps({"type": "result", "result": reply}))
+
+
 def main() -> None:
     prompt = sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read()
-    out = re.search(r"^output:\s*(\S+)", prompt, re.M)
     kind = re.search(r"^kind:\s*(\S+)", prompt, re.M)
+    if kind and kind.group(1) == "conversation":
+        _converse(prompt)
+        return
+    out = re.search(r"^output:\s*(\S+)", prompt, re.M)
     known = set(CANNED_MARKDOWN) | set(CANNED_JSON) | set(CANNED_TEXT)
     if not out or not kind or kind.group(1) not in known:
         sys.exit(

@@ -110,7 +110,12 @@ def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: 
                 events.emit(d.run_dir, "job.refused", "system", reason="sandbox",
                             detail=str(exc))
             raise ServiceError(str(exc)) from exc
-    job, proc = jobs.start(project, d.argv, kind="agent", cwd=d.cwd, run_dir=d.run_dir,
+    # A conversational dispatch is tagged "turn", not "agent" — this is what
+    # lets `_turn_in_flight` (below) tell a chat turn apart from every other
+    # agent-kind job the run starts (a campaign, a review), which must never
+    # make the chat box look busy.
+    job, proc = jobs.start(project, d.argv, kind="turn" if conversational else "agent",
+                           cwd=d.cwd, run_dir=d.run_dir,
                            label=agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text,
                            sandbox_writable=d.writable, env=d.env)
 
@@ -141,23 +146,31 @@ TURN_PROMPT_DIR = "logs"
 
 
 def _turn_in_flight(project: Project, ws: Path) -> bool:
-    """True when a turn's job is still running for this run.
+    """True when a turn's own job — not just any agent job — is still
+    running for this run.
 
-    This is a plain read of the job records, not a lock: two `say()` calls
-    that both read "not busy" before either one's job is recorded can still
-    both proceed. It narrows that window to the time between reading the
-    conversation record and starting the job, but does not close it — a real
-    fix would need a lock held across that whole span (e.g. the run-scoped
-    file lock `store.locked` already uses elsewhere), which this task does
-    not add.
+    `dispatch_agent` tags a conversational dispatch's job `kind="turn"`
+    (every other dispatch, including a coordinator's own campaign and review
+    work, stays `kind="agent"`), so this matches only that. Before this
+    distinction existed, matching `kind == "agent"` made the chat look busy
+    for nearly all of an autonomous run's life — every dispatch the
+    coordinator itself makes is `kind="agent"` too.
+
+    This is still a plain read of the job records, not a lock: two `say()`
+    calls that both read "not busy" before either one's job is recorded can
+    still both proceed. It narrows that window to the time between reading
+    the conversation record and starting the job, but does not close it — a
+    real fix would need a lock held across that whole span (e.g. the
+    run-scoped file lock `store.locked` already uses elsewhere), which this
+    task does not add.
     """
-    return any(job.state == "running" and job.kind == "agent"
+    return any(job.state == "running" and job.kind == "turn"
               for job in jobs.list_jobs(project, ws))
 
 
 def conversation_state(project: Project, slug: str) -> dict:
-    """The record, plus whether a turn is in flight and whether this agent
-    can hold a session at all.
+    """The record, plus whether a turn is in flight, whether this agent can
+    hold a session at all, and whether it has quietly lost the one it had.
 
     Named `conversation_state`, not `conversation` — `conversation` is
     already the name of the imported module, and a same-named function here
@@ -169,9 +182,17 @@ def conversation_state(project: Project, slug: str) -> dict:
     except conversation.ConversationError as exc:
         raise ServiceError(str(exc)) from exc
     cfg = config.load_agents(project.root).get(doc["agent"], {})
+    can_converse = bool(doc["agent"]) and sessions.can_converse(cfg)
+    # `record_session(ws, None)` leaves a prior id alone by design, but if
+    # there was never one at all — the CLI's configuration promises a
+    # session but its runtime output never carried one — every turn after
+    # the first re-picks `session_cmd` and the conversation silently starts
+    # fresh each time. This is the one state field that says so.
+    session_lost = bool(doc["turns"]) and can_converse and not doc["session"]
     return {**doc,
             "busy": _turn_in_flight(project, ws),
-            "can_converse": bool(doc["agent"]) and sessions.can_converse(cfg)}
+            "can_converse": can_converse,
+            "session_lost": session_lost}
 
 
 def say(project: Project, slug: str, message: str, actor: str = "human") -> dict:
@@ -185,8 +206,14 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
     is the one place every dispatch is composed, and composing twice would
     carry two copies of the charter into a single turn.
 
-    The human turn is recorded before the dispatch runs: a turn whose job
-    crashes should still show what was asked.
+    Preconditions cheap and free of side effects — the agent is known, it can
+    actually hold a session, and the run's wall-minutes budget is not already
+    spent — are checked *before* the human turn is written, so a refusal here
+    leaves no orphan turn, no orphan `turn.sent` event and no orphan prompt
+    file for a message nothing was ever attempted for. A failure *during* the
+    dispatch itself (sandbox verify, a crash, a timeout) is different: the
+    human turn is already on record by then, and a turn that genuinely
+    started and died should still show what was asked.
     """
     if not message or not message.strip():
         raise ServiceError("say something")
@@ -199,6 +226,19 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
         raise ServiceError("choose an agent for this run's conversation first")
     if _turn_in_flight(project, ws):
         raise ServiceError("a turn is still running; wait for it or cancel it")
+
+    agents = config.load_agents(project.root)
+    agent_cfg = agents.get(doc["agent"])
+    if agent_cfg is None:
+        raise ServiceError(f"unknown agent: {doc['agent']} (known: {', '.join(agents)})")
+    if not sessions.can_converse(agent_cfg):
+        raise ServiceError(
+            f"{doc['agent']} cannot host a conversation: its configuration has no "
+            "session commands (or no registered family), so every turn would start over")
+    try:
+        actions.guard_budget(ws, ("wall_minutes",))
+    except actions.BudgetExhausted as exc:
+        raise ServiceError(f"{exc} — run checkpointed") from exc
 
     prompt_file = Path(ws) / TURN_PROMPT_DIR / f"turn-{store.new_id()}.md"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
@@ -213,15 +253,21 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
     job = dispatch_agent(project, doc["agent"], prompt_file, transcript,
                          session=doc["session"], conversational=True)
 
-    parsed = sessions.parse(config.load_agents(project.root)[doc["agent"]],
-                            Path(transcript).read_text())
+    parsed = sessions.parse(agent_cfg, Path(transcript).read_text())
     try:
-        conversation.record_session(ws, parsed.id)
+        after_session = conversation.record_session(ws, parsed.id)
         turn = conversation.add_turn(ws, role="agent", text=parsed.text,
-                                     job_id=job["id"], actor="agent")
+                                     job_id=job["id"], actor="agent", state=job["state"])
     except conversation.ConversationError as exc:
         raise ServiceError(str(exc)) from exc
-    Path(transcript).write_text(parsed.text)      # the job page shows prose, not JSON
+    if not after_session["session"]:
+        # Not just "this turn reported no id" — `record_session(ws, None)`
+        # leaves a prior id alone, so this only fires when there was never
+        # one at all: the exact silent-restart failure `sessions.py` exists
+        # to prevent, now visible on the run's own timeline.
+        events.emit(ws, "turn.session_lost", "system", agent=doc["agent"], job=job["id"])
+    if parsed.text.strip():
+        Path(transcript).write_text(parsed.text)  # the job page shows prose, not JSON
     return {"job": job, "turn": turn}
 
 
@@ -378,6 +424,21 @@ def agent_settings(project: Project, slug: str | None = None) -> dict:
     return agent_config.resolve(project.root, slug).to_json()
 
 
+def conversational_agents(project: Project) -> list[str]:
+    """Registry entries that could actually hold a run's conversation:
+    enabled, and configured to both start and resume a session.
+
+    This is what the run page's hand-over picker offers. The full registry
+    (`config/agents.yml`) also carries support agents with no `session_cmd`
+    at all and agents marked `enabled: false` — offering those as a
+    conversation target would let someone hand a live conversation to an
+    agent `set_conversation_agent` refuses the very next moment.
+    """
+    agents = config.load_agents(project.root)
+    return sorted(name for name, cfg in agents.items()
+                  if cfg.get("enabled", True) and sessions.can_converse(cfg))
+
+
 def _staffing_plan(project: Project, assignments: list[str], slug: str | None):
     try:
         ops = [acf.parse_assign(text) for text in assignments]
@@ -507,6 +568,8 @@ def set_conversation_agent(project: Project, slug: str, agent: str,
     if agent not in agents:
         raise ServiceError(f"unknown agent: {agent} (known: {', '.join(agents)})")
     agent_cfg = agents[agent]
+    if not agent_cfg.get("enabled", True):
+        raise ServiceError(f"{agent} is disabled (config/agents.yml); enable it first")
     if not agent_cfg.get("session_cmd"):
         raise ServiceError(
             f"{agent} cannot host a conversation: no session_cmd in its configuration")
