@@ -36,3 +36,7 @@ form.inline { display: inline; }
 .proposal { white-space: pre-wrap; background: #0b0d12; color: #d7dbe4; padding: .6rem .8rem;
             margin: .4rem 0; max-height: 14rem; overflow: auto; border-radius: 4px; }
 textarea { width: 100%; font: inherit; }
+.chat { display: flex; flex-direction: column; gap: .75rem; margin: 1rem 0; }
+.turn pre { white-space: pre-wrap; margin: .25rem 0; }
+.turn.human pre { border-left: 3px solid var(--link); padding-left: .75rem; }
+.turn.agent pre { border-left: 3px solid var(--warn); padding-left: .75rem; }

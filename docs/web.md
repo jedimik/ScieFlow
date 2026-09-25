@@ -33,11 +33,11 @@ already uses internally: it sends the kill signal to the job's whole
 process group and records `job.cancelled`. It is new *capability*, not a
 new code path — the function already existed for the runner's own use.
 
-Starting a run and the coordinator conversation are **not** in this
-milestone — they arrive in A1b. This milestone steers runs that already
-exist; a run still has to exist (`scieflow run init`) before you can do
-anything to it here. See ["What stays CLI-only"](#what-stays-cli-only)
-below for the rest of what the browser deliberately does not do.
+Starting a run is **not** something this app does. It steers runs that
+already exist — including talking to their coordinators, below — but a run
+still has to exist (`scieflow run init`) before the browser can do anything
+to it. See ["What stays CLI-only"](#what-stays-cli-only) below for the rest
+of what the browser deliberately does not do.
 
 ## Running it
 
@@ -135,7 +135,7 @@ at exactly this.
 | Page | Route | Shows |
 |---|---|---|
 | Dashboard | `/` | Every run (slug, kind, phase), a budget bar per dimension, and every open gate across all runs, each with an inline form to answer it on the spot — a `charter-adoption` gate also shows the proposed charter text itself, not just its question. |
-| Run page | `/runs/<slug>` | The run's id, iteration and approval mode; its phases with a form to mark one; budget remaining per dimension with a form to record spend; buttons to advance the iteration, checkpoint or resume; the charter panel — current text, an edit form, and (once there is more than one version) a history with a Restore button next to each version other than the current one; open gates, each with a form to answer it (a `charter-adoption` gate's proposed text is shown above its form, escaped, so adopting is an informed decision); every job it started, linked to its output, with a Cancel button while it runs; and a timeline of the run's events, updated live. |
+| Run page | `/runs/<slug>` | The run's id, iteration and approval mode; its phases with a form to mark one; budget remaining per dimension with a form to record spend; buttons to advance the iteration, checkpoint or resume; the charter panel — current text, an edit form, and (once there is more than one version) a history with a Restore button next to each version other than the current one; a conversation panel — every turn so far, a note if the current agent has quietly lost its session, a box to send the next message (disabled while a turn is running or the chosen agent cannot hold one), and a control to hand the conversation to a different agent (offering only agents that could actually take it — enabled, and able to both start and resume a session), disabled only while a turn is running, never because the current agent can't converse, so a stuck agent can always be replaced; open gates, each with a form to answer it (a `charter-adoption` gate's proposed text is shown above its form, escaped, so adopting is an informed decision); every job it started, linked to its output, with a Cancel button while it runs; and a timeline of the run's events, updated live. |
 | Job output | `/runs/<slug>/jobs/<job_id>` | The job's command, state, exit code and duration, and its captured stdout/stderr. While the job is still running, output streams in live. |
 | Artifact browser | `/runs/<slug>/files[?path=...]` | A directory listing under the run; `/runs/<slug>/file?path=...` renders a small text file inline or downloads anything else, per the security model above. |
 | Agents | `/agents[?slug=<run>]` | Role assignments in effect (defaults, or one run's if `slug` is given), a form to pick a role and an agent, a preview of the resulting diff, and an Apply button. See [Agent configuration](agents.md#the-agents-page). |
@@ -144,6 +144,17 @@ The run page's timeline and a running job's output are both live: each page
 opens a browser `EventSource` against the matching `/api/v1` stream (below)
 and appends new rows/lines as they arrive, with no page reload and no extra
 JavaScript framework.
+
+The conversation panel is the exception: it refreshes when a turn lands
+rather than streaming the agent's output as it is produced. Sending a
+message posts the form and waits for the reply; the new turn appears only
+once that redirect reloads the page. That is a deliberate difference, not a
+missing feature — a conversational dispatch's job log is the raw JSON event
+stream its `session_cmd`/`resume_cmd` produces, and the readable text a
+person would want to read live does not exist yet while the turn is running:
+it is only produced by parsing that stream (`scieflow.core.sessions.parse`)
+once the job has finished. Streaming the job's own output live would show a
+wall of JSON, not the agent's reply.
 
 Every form on these pages posts back to the same page
 (`303 See Other` on success, so a reload never repeats the action) or
@@ -164,6 +175,9 @@ this app's own pages — it is a stable-enough surface to script against.
 | `GET /api/v1/runs/<slug>/events` | The run's history, oldest first (`?since=<id>`, repeatable `?type=` with `job.*`-style prefix matching). |
 | `GET /api/v1/runs/<slug>/jobs` | Every job the run started. |
 | `GET /api/v1/runs/<slug>/charter` | The current charter text plus its whole version history — `service.run_charter`, same function `scieflow run charter <slug>` calls. |
+| `GET /api/v1/runs/<slug>/conversation` | The run's conversation: which agent is holding it, its session state, whether a turn is in flight, and every turn so far — `service.conversation_state`. |
+| `POST /api/v1/runs/<slug>/conversation` | Send one message; the reply is a sandboxed job that resumes the agent's session — `service.say`. There is no CLI equivalent: the conversation is browser-only today. |
+| `POST /api/v1/runs/<slug>/conversation/agent` | Hand the conversation to a different agent, clearing its recorded session — `service.set_conversation_agent`. |
 | `GET /api/v1/gates` | Gates still waiting for an answer, optionally `?slug=<run>`. |
 | `GET /api/v1/agents` | Effective role assignments and agent settings, with their sources. |
 | `GET /api/v1/runs/<slug>/events/stream` | Server-sent events: the timeline, replayed then followed live. |
@@ -217,7 +231,7 @@ A few things are terminal-only on purpose, not because nobody got to them:
   `timeout_min`, or granting/removing a `--promote` exception, is still
   `scieflow agent configure`.
 
-And, as noted above: **starting a run and the coordinator conversation are
-not in this milestone.** They belong to A1b. Use `uv run scieflow run init`
-(see [`docs/cli.md`](cli.md#scieflow-run)) to start one; once it exists,
-everything on this page applies to it.
+And, as noted above: **starting a run is not something this app does.**
+Use `uv run scieflow run init` (see [`docs/cli.md`](cli.md#scieflow-run)) to
+start one; once it exists, everything on this page applies to it, including
+its conversation.

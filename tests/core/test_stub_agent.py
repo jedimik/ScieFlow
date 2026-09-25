@@ -40,3 +40,18 @@ def test_stub_writes_research_json_and_text_kinds(tmp_path):
         out = tmp_path / f"{kind}.txt"
         assert run_stub(f"output: {out}\nkind: {kind}\n").returncode == 0
         assert marker in out.read_text()
+
+
+def test_stub_conversation_mode_prints_a_session_id_and_echoes_the_prompt():
+    """No `output:`/`kind: <artifact>` lines needed for `kind: conversation`
+    — this is what `service.say` sends: a raw human message, not an artifact
+    request."""
+    import json
+
+    prompt = "kind: conversation\nWhat should we try next?"
+    proc = run_stub(prompt)
+    assert proc.returncode == 0, proc.stderr
+    lines = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+    assert len(lines) == 2
+    assert lines[0]["session_id"]
+    assert lines[1] == {"type": "result", "result": f"stub heard: {prompt}"}

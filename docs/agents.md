@@ -6,7 +6,7 @@ configured in layers; each layer only states what differs from the one below.
 
 | Layer | File | Holds |
 |---|---|---|
-| Registry | `config/agents.yml` | per agent: `cmd`, `model`, `reasoning`, `timeout_min`, `tier`, `enabled`, `menu` |
+| Registry | `config/agents.yml` | per agent: `cmd`, `model`, `reasoning`, `timeout_min`, `tier`, `enabled`, `menu`, and — for an agent that can hold a [conversation](#holding-a-conversation) — `family`, `session_cmd`, `resume_cmd` |
 | Defaults | `config/defaults.yml` → `assignments:` | which agent performs each role |
 | Run | `workspace/<slug>/config.yml` → `assignments:`, `agent_overrides:` | this run's differences |
 | News | `config/news.yml` → `agent`, `model`, `reasoning`, `timeout` | the news module's own settings |
@@ -131,6 +131,68 @@ the agent's `cmd` template (`apply_role_override` in
 role's dispatch. `agent show [--workspace <slug>] --json` includes
 `role_overrides` in its output, so a coordinator agent can check what a
 role will actually run before dispatching.
+
+## Holding a conversation
+
+A run's page lets you talk to its coordinator (see [the run's
+conversation](runs.md#the-conversation-talking-to-the-coordinator)), and that
+takes more from an agent's registry entry than an ordinary one-shot dispatch
+needs: `family`, `session_cmd` and `resume_cmd`. An agent missing any of
+them, or naming a `family` no parser is registered for, cannot hold a
+conversation — `service.set_conversation_agent` refuses to hand the
+conversation to it and says so, and the run page explains the same thing
+rather than quietly starting a fresh context on every turn. `enabled: false`
+refuses it too, the same as an unknown agent; the run page's hand-over picker
+only ever lists agents that pass all of this, so it never offers a choice
+`set_conversation_agent` would just refuse.
+
+- `family` — which output dialect `scieflow.core.sessions` should parse:
+  `claude`, `codex` or `agy`. It is declared per agent, not guessed from its
+  name, so a second profile of the same CLI (`claude-paper`, `codex-review`)
+  could be given its own `family` too, if it should ever hold a conversation.
+- `session_cmd` — the command that starts a session, run on the first turn.
+- `resume_cmd` — the command that continues one, run on every later turn,
+  with `{session}` filled in from the id the previous turn reported.
+
+These values were pinned by running the real binaries, not by trusting
+either CLI's own documentation — codex's behavior in particular did not
+match what was assumed about it before that verification:
+
+| Agent | Start a session | The id appears as | Resume |
+|---|---|---|---|
+| `claude` | `--output-format=stream-json --verbose` | `session_id`, on every event | `--resume <id>` |
+| `codex` | `exec --json` | `thread_id`, inside the first `thread.started` event | `codex exec resume --json <id> <prompt>` |
+| `agy` | `--output-format json` | `conversation_id`, in one JSON object | `--conversation <id>` |
+
+Two things cost real time to find and are worth stating outright:
+
+- **`codex exec resume` rejects `--sandbox`.** `codex`'s ordinary `cmd` and
+  its `session_cmd` both pass `--sandbox workspace-write`, but `resume_cmd`
+  cannot reuse either template as a base — it is its own command line, and
+  its flags (`--json`) must come *before* the session id, not after.
+- **`claude` needs `--verbose` alongside `--output-format=stream-json`.**
+  `claude -p` refuses stream-json output without it. What comes back is
+  enormous in practice, because Claude's own session-start hooks echo entire
+  skill documents into the stream before the model says anything.
+
+`agy` needed no such workaround: nothing its ordinary flags accept was found
+to be rejected on resume, so its `resume_cmd` keeps every flag `session_cmd`
+has and only adds `--conversation {session}`. The one thing `session_cmd`
+itself adds over agy's plain `cmd` is `--output-format json` — without it,
+agy's reply is prose with no `conversation_id` in it to capture at all.
+
+**A conversational prompt too large for argv has nowhere to go on `agy`.** A
+composed prompt over `PROMPT_ARGV_LIMIT` (100 000 bytes — a long chat with a
+big charter reaches this) normally moves to stdin instead of argv. `claude`'s
+session/resume commands and `codex exec resume` both put `{prompt}` last, so
+dropping that one token and reading stdin instead is safe. `agy`'s put it
+right after `--print`, which needs a value — dropping just `{prompt}` would
+leave `--print` to eat whatever flag came next. There is no separate
+conversational stdin form to fall back to (unlike the ordinary `stdin_cmd`,
+which drops `--print` entirely), so `agent_run.prepare` refuses the dispatch
+with `DispatchError` rather than send a broken argv. A long-running
+conversation on `agy` should keep its charter and message short enough to
+stay under the limit.
 
 ## See what is in effect
 

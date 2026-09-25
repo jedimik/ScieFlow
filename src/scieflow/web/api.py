@@ -146,3 +146,33 @@ async def answer(request: Request, slug: str, gate_id: str,
 async def cancel(request: Request, job_id: str) -> dict:
     """Cancel a running job and its whole process group."""
     return service.cancel_job(_project(request), job_id)
+
+
+@router.get("/runs/{slug}/conversation", tags=["runs"])
+async def conversation(request: Request, slug: str) -> dict:
+    """The run's conversation: agent, session state and every turn."""
+    return service.conversation_state(_project(request), slug)
+
+
+@router.post("/runs/{slug}/conversation", dependencies=MUTATE, tags=["runs"])
+def say(request: Request, slug: str, message: str = Form(...)) -> dict:
+    """Send one message; the reply is a sandboxed job that resumes the session.
+
+    Plain `def`, not `async def`: `service.say` runs `dispatch_agent`, which
+    blocks on `proc.wait(timeout=...)` for as long as the agent's own
+    `timeout_min` (30 minutes for claude, 180 for codex in the shipped
+    registry). `serve.py` runs a single uvicorn process — an `async def`
+    handler doing that wait would block the one event loop for that whole
+    window, so nothing else (the dashboard, every run page, both SSE
+    streams, the Cancel button) could be served meanwhile. A synchronous
+    `def` handler is instead run in Starlette's threadpool, which is what
+    keeps the rest of the app answering while a turn is in flight.
+    """
+    return service.say(_project(request), slug, message)
+
+
+@router.post("/runs/{slug}/conversation/agent", dependencies=MUTATE, tags=["runs"])
+async def set_conversation_agent(request: Request, slug: str,
+                                 agent: str = Form(...)) -> dict:
+    """Hand the conversation to a different agent; the next turn starts fresh."""
+    return service.set_conversation_agent(_project(request), slug, agent)

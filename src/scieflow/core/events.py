@@ -25,6 +25,7 @@ TYPES = frozenset({
     "job.cancelled", "job.lost", "job.refused", "sandbox.disabled",
     "gate.opened", "gate.answered", "gate.withdrawn",
     "charter.set", "charter.reverted",
+    "turn.sent", "turn.received", "turn.session_lost",
     "integration.call", "sync.pushed", "sync.pulled",
 })
 

@@ -180,6 +180,77 @@ An agent dispatch also runs filesystem-sandboxed by default — confined to
 its own run — and is refused (exit 77) if that confinement cannot be
 proven; see [The agent sandbox](sandbox.md).
 
+## The conversation: talking to the coordinator
+
+A run can be steered by talking to its coordinator, not only by marking
+phases and answering gates. **ScieFlow holds no long-lived agent process**,
+here or anywhere else: every message you send is one more job, dispatched the
+same way as a campaign or a review. `service.say` records the human turn,
+then calls the same `dispatch_agent` any other agent invocation goes through
+— so a chat turn is sandboxed, is refused if the run's `wall_minutes` budget
+is spent, records its wall time as spend once it finishes, appears in the
+run's job list and on its timeline, and can be cancelled from there exactly
+like any other job. There is no separate chat pipeline sitting beside the
+rest of the run's machinery. The one difference is the job's own `kind`: a
+turn's job is tagged `"turn"`, not `"agent"`, which is what lets the chat
+panel tell "a turn is running" apart from "the coordinator is off running a
+campaign" — the two used to be indistinguishable, which made the chat box
+look busy for nearly all of an autonomous run's life.
+
+The route handling a message (`POST .../conversation`, and the page's
+`.../say`) is an ordinary synchronous function, not `async def`: it blocks
+for as long as the dispatch takes — up to the agent's own `timeout_min` — and
+a synchronous handler is what lets Starlette run it in a worker thread
+instead of on the app's single event loop, so the rest of the app (the
+dashboard, other run pages, both SSE streams, Cancel) keeps answering while
+a turn is in flight.
+
+What turns a sequence of one-shot jobs into a *conversation*, rather than a
+series of strangers, is the agent CLI's own session id — not anything
+ScieFlow reconstructs from history. The first turn's output is parsed for
+that id and recorded on the run (`workspace/<slug>/conversation.yml`); every
+later turn hands it back to the same CLI (`claude --resume <id>`, `codex exec
+resume <id>`, `agy --conversation <id>`), so the CLI itself remembers what
+was said, not ScieFlow. Not every agent's registry entry can do this — see
+[what a conversational agent needs](agents.md#holding-a-conversation). Each
+turn's prompt is still composed the same way every dispatch's prompt is
+(`agent_run.compose_prompt`), so the run's charter is pinned to the top of
+every turn exactly as it is pinned to a campaign or a review prompt: a long
+chat cannot drift from what the run agreed to do any more than a long
+campaign can.
+
+Only one turn runs at a time — `say` refuses a second message while a turn's
+job is still running, rather than queuing it or racing two dispatches over
+one session. Handing the conversation to a different agent keeps every turn
+already said (they are history, never rewritten), but clears the recorded
+session: an id one CLI issued means nothing to another, so the next turn
+starts that new agent's own, fresh session rather than trying to resume a
+session it never opened. The hand-over picker itself only offers agents that
+could actually take it: enabled, and configured to both start and resume a
+session — the rest are refused the moment `set_conversation_agent` is asked
+for them, so they are not offered as if they would work.
+
+If a turn's own dispatch fails or is cancelled before the dispatch even
+starts (an unknown agent, one that cannot converse, an exhausted budget), the
+message is refused before anything is written: no human turn, no `turn.sent`
+event, no orphan prompt file. A failure *during* the dispatch (the sandbox,
+a crash, a timeout) is different — by then the human turn is already on
+record, and stays, because a turn that genuinely started and died should
+still show what was asked; its agent turn, when the dispatch does produce
+one, carries the job's own final state (`done`, `failed`, `timeout`,
+`cancelled`) alongside the reply.
+
+A run's agent can be configured to converse (`session_cmd` and `resume_cmd`
+and a registered `family`) and still, at runtime, never actually report a
+session id — a CLI update that renamed the field it prints it under, say.
+`record_session` leaves a prior id alone in that case, so an established
+conversation survives one bad turn, but if there was never an id to begin
+with, every later turn re-picks `session_cmd` and the conversation silently
+starts fresh each time. The run page says so plainly next to the chat panel
+when this happens, and a `turn.session_lost` event lands on the run's
+timeline the moment it does — the same place every other conversation event
+(`turn.sent`, `turn.received`) already lands.
+
 ## Gates: approvals as data
 
 Every approval a protocol requires is a file, not a sentence in a chat window
