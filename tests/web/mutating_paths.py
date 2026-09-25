@@ -30,6 +30,9 @@ MUTATING_PATHS = {
     "/runs/{slug}/jobs/{job_id}/cancel": {"post"},
     "/runs/{slug}/charter": {"post"},
     "/agents": {"post"},
+    "/api/v1/runs/{slug}/conversation": {"post"},
+    "/api/v1/runs/{slug}/conversation/agent": {"post"},
+    "/runs/{slug}/say": {"post"},
 }
 
 #: Placeholder ids for the templated paths above. Guard tests never resolve
@@ -53,6 +56,9 @@ SAMPLES: dict[str, dict] = {
     "/runs/{slug}/jobs/{job_id}/cancel": {},
     "/runs/{slug}/charter": {"text": "A goal."},
     "/agents": {"assign": "research.outline=stub2"},
+    "/api/v1/runs/{slug}/conversation": {"message": "hi"},
+    "/api/v1/runs/{slug}/conversation/agent": {"agent": "stub"},
+    "/runs/{slug}/say": {"message": "hi"},
 }
 
 

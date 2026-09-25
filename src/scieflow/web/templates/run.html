@@ -54,6 +54,49 @@
 </details>
 {% endif %}
 
+<h2>Conversation</h2>
+{% if not conversation.agent %}
+  <p class="dim">No agent is holding this conversation yet — choose an agent
+     below to start one. Each message is a sandboxed job that resumes the
+     agent's own session, so it keeps its context between turns.</p>
+{% elif not conversation.can_converse %}
+  <p class="state-failed">{{ conversation.agent }} cannot host a conversation:
+     its configuration has no session commands, so every turn would start over.
+     Choose another agent.</p>
+{% endif %}
+
+<div class="chat">
+  {% for turn in conversation.turns %}
+  <div class="turn {{ turn.role }}">
+    <span class="dim">{{ turn.role }} · {{ turn.ts[11:19] }}</span>
+    <pre>{{ turn.text }}</pre>
+    {% if turn.job_id %}
+    <a class="dim" href="/runs/{{ slug }}/jobs/{{ turn.job_id }}">this turn's job →</a>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% if conversation.busy %}<p class="dim">A turn is running…</p>{% endif %}
+</div>
+
+<form method="post" action="/runs/{{ slug }}/say">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <textarea name="message" rows="3" placeholder="Say something to the coordinator"
+            {% if conversation.busy or not conversation.can_converse %}disabled{% endif %}></textarea>
+  <button name="action" value="say"
+          {% if conversation.busy or not conversation.can_converse %}disabled{% endif %}>Send</button>
+</form>
+
+<form method="post" action="/runs/{{ slug }}/say" class="actions">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <select name="agent">
+    {% for name in agents %}
+    <option {% if name == conversation.agent %}selected{% endif %}>{{ name }}</option>
+    {% endfor %}
+  </select>
+  <button name="action" value="agent"
+          {% if conversation.busy %}disabled{% endif %}>Hand the conversation over</button>
+</form>
+
 <h2>Phases</h2>
 <table>
   {% for phase, state in phases %}
@@ -183,6 +226,7 @@
   const stream = new EventSource("/api/v1/runs/" + {{ slug|tojson }} + "/events/stream");
   stream.addEventListener("run", (message) => {
     const event = JSON.parse(message.data);
+    if (event.type === "turn.received") { location.reload(); }
     const row = timeline.insertRow(0);
     const ts = row.insertCell();
     ts.className = "dim";

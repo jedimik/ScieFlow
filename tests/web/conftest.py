@@ -19,8 +19,10 @@ def project(tmp_path):
     """A project with one run that has state, budget, events, a job and a gate."""
     (tmp_path / "config").mkdir()
     (tmp_path / "config" / "agents.yml").write_text(
-        f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1}}\n'
-        '  stub2: {cmd: "%s", enabled: true, timeout_min: 1}\n' % STUB)
+        f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1, family: claude, '
+        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n'
+        f'  stub2: {{cmd: "{STUB}", enabled: true, timeout_min: 1, family: claude, '
+        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n')
     (tmp_path / "config" / "defaults.yml").write_text(
         "assignments:\n"
         "  loop.experiment: stub\n"

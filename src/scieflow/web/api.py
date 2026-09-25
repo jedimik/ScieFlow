@@ -146,3 +146,22 @@ async def answer(request: Request, slug: str, gate_id: str,
 async def cancel(request: Request, job_id: str) -> dict:
     """Cancel a running job and its whole process group."""
     return service.cancel_job(_project(request), job_id)
+
+
+@router.get("/runs/{slug}/conversation", tags=["runs"])
+async def conversation(request: Request, slug: str) -> dict:
+    """The run's conversation: agent, session state and every turn."""
+    return service.conversation_state(_project(request), slug)
+
+
+@router.post("/runs/{slug}/conversation", dependencies=MUTATE, tags=["runs"])
+async def say(request: Request, slug: str, message: str = Form(...)) -> dict:
+    """Send one message; the reply is a sandboxed job that resumes the session."""
+    return service.say(_project(request), slug, message)
+
+
+@router.post("/runs/{slug}/conversation/agent", dependencies=MUTATE, tags=["runs"])
+async def set_conversation_agent(request: Request, slug: str,
+                                 agent: str = Form(...)) -> dict:
+    """Hand the conversation to a different agent; the next turn starts fresh."""
+    return service.set_conversation_agent(_project(request), slug, agent)

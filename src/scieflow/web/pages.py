@@ -111,6 +111,8 @@ async def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse
                       for dim, value in (detail["remaining"] or {}).items()},
         "jobs": [service.job_json(job) for job in reversed(jobs_mod.list_jobs(project, ws))],
         "charter": service.run_charter(project, slug),
+        "conversation": service.conversation_state(project, slug),
+        "agents": service.agent_settings(project, slug)["agents"],
         "error": error,
         "csrf": auth.csrf_token(request),
     })
@@ -153,6 +155,20 @@ async def edit_charter(request: Request, slug: str, action: str = Form("set"),
             service.revert_charter(project, slug, version)
         else:
             service.set_charter(project, slug, text, note=note)
+    except service.ServiceError as exc:
+        return _back(slug, str(exc))
+    return _back(slug)
+
+
+@router.post("/runs/{slug}/say", dependencies=MUTATE)
+async def say(request: Request, slug: str, action: str = Form("say"),
+              message: str = Form(""), agent: str = Form("")):
+    project = _project(request)
+    try:
+        if action == "agent":
+            service.set_conversation_agent(project, slug, agent)
+        else:
+            service.say(project, slug, message)
     except service.ServiceError as exc:
         return _back(slug, str(exc))
     return _back(slug)
