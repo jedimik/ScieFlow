@@ -79,6 +79,19 @@ outside a workspace, for instance — records its job under
 `workspace/*/jobs` when no run is given), so `scieflow run list` and a
 project-wide job view see everything.
 
+## Conversations are not a special path
+
+ScieFlow holds no long-lived agent process, for a run's coordinator
+conversation any more than for a campaign or a review: `service.say` reaches
+the same `dispatch_agent` every other agent invocation goes through, and a
+conversation is nothing more than a sequence of those ordinary jobs, threaded
+together only by the agent CLI's own session id (recorded in
+`workspace/<slug>/conversation.yml`, not held open anywhere in the process).
+That is exactly what keeps the sandbox, the budget and the timeline
+meaningful for a chat turn — there is no special case in the code for a
+dispatch that happens to be part of a conversation, so every guarantee this
+page already describes for jobs in general already applies to one.
+
 ## The service rule: every action exists once
 
 The reason the CLI, the menu, agent skills and the web app agree on what a

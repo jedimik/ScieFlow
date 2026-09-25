@@ -180,6 +180,41 @@ An agent dispatch also runs filesystem-sandboxed by default — confined to
 its own run — and is refused (exit 77) if that confinement cannot be
 proven; see [The agent sandbox](sandbox.md).
 
+## The conversation: talking to the coordinator
+
+A run can be steered by talking to its coordinator, not only by marking
+phases and answering gates. **ScieFlow holds no long-lived agent process**,
+here or anywhere else: every message you send is one more job, identical in
+kind to a campaign dispatch or a review. `service.say` records the human
+turn, then calls the same `dispatch_agent` any other agent invocation goes
+through — so a chat turn is sandboxed, is refused if the run's
+`wall_minutes` budget is spent, records its wall time as spend once it
+finishes, appears in the run's job list and on its timeline, and can be
+cancelled from there exactly like any other job. There is no separate chat
+pipeline sitting beside the rest of the run's machinery.
+
+What turns a sequence of one-shot jobs into a *conversation*, rather than a
+series of strangers, is the agent CLI's own session id — not anything
+ScieFlow reconstructs from history. The first turn's output is parsed for
+that id and recorded on the run (`workspace/<slug>/conversation.yml`); every
+later turn hands it back to the same CLI (`claude --resume <id>`, `codex exec
+resume <id>`, `agy --conversation <id>`), so the CLI itself remembers what
+was said, not ScieFlow. Not every agent's registry entry can do this — see
+[what a conversational agent needs](agents.md#holding-a-conversation). Each
+turn's prompt is still composed the same way every dispatch's prompt is
+(`agent_run.compose_prompt`), so the run's charter is pinned to the top of
+every turn exactly as it is pinned to a campaign or a review prompt: a long
+chat cannot drift from what the run agreed to do any more than a long
+campaign can.
+
+Only one turn runs at a time — `say` refuses a second message while a turn's
+job is still running, rather than queuing it or racing two dispatches over
+one session. Handing the conversation to a different agent keeps every turn
+already said (they are history, never rewritten), but clears the recorded
+session: an id one CLI issued means nothing to another, so the next turn
+starts that new agent's own, fresh session rather than trying to resume a
+session it never opened.
+
 ## Gates: approvals as data
 
 Every approval a protocol requires is a file, not a sentence in a chat window
