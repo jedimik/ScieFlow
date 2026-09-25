@@ -161,8 +161,12 @@ async def edit_charter(request: Request, slug: str, action: str = Form("set"),
 
 
 @router.post("/runs/{slug}/say", dependencies=MUTATE)
-async def say(request: Request, slug: str, action: str = Form("say"),
-              message: str = Form(""), agent: str = Form("")):
+def say(request: Request, slug: str, action: str = Form("say"),
+        message: str = Form(""), agent: str = Form("")):
+    """Plain `def`, not `async def` — see `scieflow.web.api.say` for why:
+    `service.say` blocks for up to the agent's `timeout_min`, and an `async
+    def` handler doing that would stall the one event loop this app runs on
+    for the whole turn."""
     project = _project(request)
     try:
         if action == "agent":

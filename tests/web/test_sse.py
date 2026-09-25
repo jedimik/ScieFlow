@@ -170,6 +170,55 @@ def test_job_log_stream_flushes_unterminated_final_line(live, project):
     assert frames == ["no trailing newline"]
 
 
+def test_the_server_keeps_answering_while_a_turn_is_in_flight(live, project):
+    """CRITICAL 1 (2026-09-25 review): `api.say` and `pages.say` used to be
+    `async def` handlers calling `service.say`, which blocks on
+    `proc.wait(timeout=...)` for as long as the dispatched agent's own
+    `timeout_min` -- up to 30 minutes for claude, 180 for codex in the
+    shipped registry. `serve.py` runs a single uvicorn process, so that
+    blocked the *one* event loop for the whole turn: the reviewer reproduced
+    `/healthz` timing out after 9s while an 18.6s turn ran, leaving the
+    dashboard, every run page, both SSE streams and the Cancel button
+    unreachable. A plain `def` handler runs in Starlette's threadpool
+    instead, which is what this proves: `/healthz` must stay fast while a
+    (here, 3-second) turn is genuinely in flight on a real socket -- a
+    `TestClient` cannot exercise this, see this module's own docstring."""
+    from scieflow.core.run import conversation
+    from scieflow.web.auth import CSRF_COOKIE
+
+    ws = project.run_dir("r1")
+    slow = f"{sys.executable} -c 'import time; time.sleep(3)' {{prompt}}"
+    agents_yml = project.root / "config" / "agents.yml"
+    agents_yml.write_text(agents_yml.read_text() + (
+        f'  slow:\n    cmd: "{slow}"\n    session_cmd: "{slow}"\n'
+        f'    resume_cmd: "{slow}"\n    family: claude\n    enabled: true\n'
+        "    timeout_min: 1\n"
+    ))
+    conversation.set_agent(ws, "slow")
+
+    turn_done = threading.Event()
+
+    def send_turn():
+        live.post("/api/v1/runs/r1/conversation", data={"message": "hello"},
+                  headers={"x-csrf-token": live.cookies[CSRF_COOKIE]}, timeout=30.0)
+        turn_done.set()
+
+    sender = threading.Thread(target=send_turn, daemon=True)
+    sender.start()
+    time.sleep(0.5)   # let the turn actually start dispatching
+    assert not turn_done.is_set(), "the turn finished before the probe ran -- test is racy"
+
+    start = time.monotonic()
+    health = live.get("/healthz")
+    elapsed = time.monotonic() - start
+
+    assert health.status_code == 200
+    assert elapsed < 2.0, f"/healthz took {elapsed:.1f}s -- the event loop was blocked"
+
+    sender.join(timeout=15.0)
+    assert turn_done.is_set(), "the turn never completed"
+
+
 def test_streams_need_a_session(project):
     from fastapi.testclient import TestClient
 
