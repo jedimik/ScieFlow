@@ -99,16 +99,23 @@ file inside its own run and open a `charter-adoption` gate naming that file —
 other document a gate points to already travels, as a file the gate's
 `files` names. That gate is marked `requires_human: true`, the same as
 `scope-change` and for the same reason: adopting a charter redefines what the
-run is *for*, so the agent that wrote the proposal cannot also adopt it. The
+run is *for*, so the agent that wrote the proposal cannot also adopt it — and
+`scieflow run charter --set/--revert` itself refuses `--as-agent`, so this
+gate is the only path a coordinator has to change the charter at all. The
 run page shows the proposed text itself alongside the gate's question, so
 answering "adopt" is an informed decision, not a click on an agent-written
-question with no idea what it commits to.
+question with no idea what it commits to. `open_gate` also checks, at the
+moment the gate is opened, that its options include a recognised adopt word
+(`adopt`, `yes`, `approve`, `approved`) — a gate offering only `accept`/
+`reject`, say, is refused before it exists, rather than silently recording an
+answer that never becomes a charter.
 
 The proposal file must resolve inside the run — the same containment rule
 the artifact browser applies to a path a browser request names, applied here
 to a path an agent's gate record names, since this text is about to become
 the charter pinned to every later prompt the run sends. A path that resolves
-outside the run is refused, never read.
+outside the run is refused, never read, and a gate naming more than one file
+is refused outright rather than silently adopting the first.
 
 Answering `adopt` does the file read and validation — missing, unreadable,
 empty, or escaping the run are all refused the same way — *before* the gate
@@ -120,7 +127,19 @@ written before the decision to adopt it is on the record. A gate whose
 proposal turns out to be unreadable is refused and stays open, so fixing the
 file and answering again is possible; nothing is left half-decided.
 Answering `decline` (or anything else) never touches the proposal file and
-leaves the charter untouched.
+leaves the charter untouched. This is the one path both the terminal
+(`gate answer`) and the browser share end to end: both call
+`service.answer_gate`, so a proposal adopted from a terminal writes the
+charter exactly as adopting it from the browser would.
+
+The browser's gate form also carries a hidden digest of the *whole* proposal
+file, taken at the moment the page rendered it — the run directory is
+agent-writable, and the agent that proposed the charter is typically still
+alive, polling `gate wait`, so it could rewrite the proposal between the
+human reading the preview and clicking "Answer". `answer_gate` recomputes the
+digest when the answer arrives and refuses a mismatch, so what gets adopted
+is provably what was shown, not whatever the file happens to contain a
+moment later.
 
 ## History: the event log
 

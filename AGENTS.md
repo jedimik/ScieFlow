@@ -42,7 +42,12 @@ when to stop.
    `checkpoint.py` still work but record no events). On entry to a run,
    `uv run scieflow run show <slug>` and continue from the first phase not
    `done`. Log notable moments with `uv run scieflow run log <slug>
-   note.<name> --message …` alongside `log.md`.
+   note.<name> --message …` alongside `log.md`. Read the standing goal with
+   `uv run scieflow run charter <slug>` — it is pinned to the top of every
+   prompt you are sent already, so you never need to repeat it yourself. You
+   may not set or revert it (`--as-agent` refuses `--set`/`--revert`); to
+   change it, propose a `charter-adoption` gate per rule 14 and
+   `docs/runs.md#the-charter-what-this-run-agreed-to-do`.
 5. **Stop criteria** (all active in autonomous mode): max iterations;
    convergence (no improvement for `convergence_window` iterations);
    anomaly (failed runs, metric collapse — report honestly, never
@@ -52,7 +57,9 @@ when to stop.
    `wall_minutes` refuses the next dispatch (exit 75), exhausted
    `experiment_runs` refuses the next sweep, and `run advance` refuses a new
    iteration once `iterations` is spent — each refusal checkpoints the run.
-   Never edit `budget.yml` to get past one; ask the user.
+   Never edit `budget.yml` to get past one; ask the user. Never hand-edit
+   `charter.yml` either — propose a change through a `charter-adoption` gate
+   (rule 14), never by writing the file.
 6. Literature comes only from the research module's search commands
    (`scieflow research search <source>`) via the literature-cycle skill.
    Never invent papers, DOIs, or citation counts. Instruct experiments-module
