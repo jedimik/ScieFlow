@@ -3,6 +3,15 @@
 Every page reads through the service layer and renders a Jinja template.
 Live regions (job output, the timeline) are the browser's own EventSource
 against the SSE routes; nothing here needs JavaScript to be useful.
+
+Every handler in this module is plain `def`, not `async def` — `serve.py`
+runs one uvicorn process, and a synchronous handler runs in Starlette's
+threadpool instead of blocking that process's single event loop. Most of
+these block only briefly (a YAML read, a template render); `say` and
+`cancel_job` block far longer and say so in their own docstrings.
+`tests/web/async_allowlist.py` and `tests/web/test_async_routes.py` enforce
+this for the whole app — the SSE streams in `scieflow.web.sse` are the only
+routes that genuinely need to run on the event loop.
 """
 
 from __future__ import annotations
@@ -35,7 +44,7 @@ def _percent(fraction: float | None) -> int:
 
 
 @router.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request) -> HTMLResponse:
+def dashboard(request: Request) -> HTMLResponse:
     project = _project(request)
     runs = service.list_runs(project)
     detail = {}
@@ -57,6 +66,19 @@ async def dashboard(request: Request) -> HTMLResponse:
     })
 
 
+#: The workflow the form's `<select>` shows chosen when nothing else applies
+#: — a fresh visit, or a refusal that carried no workflow at all. Not "no
+#: workflow": `init_workspace` (what this wizard calls, unconditionally)
+#: always writes the loop-shaped `status.yml` `workspace.describe` reads a
+#: `kind` of "loop" from — research-loop's own phases and roles — so it is
+#: the one entry in `service.workflows()` whose skill actually matches the
+#: run this page produces. Without an explicit default here, an HTML
+#: `<select>` with none of its `<option>`s marked `selected` silently submits
+#: whichever one is listed first (`lit-review`) for a visitor who never
+#: touched the dropdown.
+DEFAULT_WORKFLOW = "research-loop"
+
+
 def _start_form(defaults: dict, submitted: dict | None = None) -> dict:
     """The values the start form should show: whatever was just submitted
     and refused, falling back field-by-field to the project's defaults —
@@ -65,7 +87,7 @@ def _start_form(defaults: dict, submitted: dict | None = None) -> dict:
     return {
         "slug": submitted.get("slug", ""),
         "goal": submitted.get("goal", ""),
-        "workflow": submitted.get("workflow", ""),
+        "workflow": submitted.get("workflow") or DEFAULT_WORKFLOW,
         "agent": submitted.get("agent", ""),
         "approval": submitted.get("approval") or defaults.get("approval", ""),
         "max_iterations": (submitted.get("max_iterations")
@@ -107,26 +129,42 @@ def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
               workflow: str = Form(""), agent: str = Form(""), approval: str = Form(""),
               max_iterations: int = Form(0), max_experiment_runs: int = Form(0),
               max_wall_minutes: int = Form(0)):
-    """Plain `def`, not `async def` — see `say` above: creating a run writes
+    """Plain `def`, not `async def` — see `say` below: creating a run writes
     several files under a lock, and that blocking work belongs in Starlette's
     threadpool, not on the event loop.
 
-    A refusal re-renders the form in place rather than redirecting to
-    `/start?error=...`: the goal is free text that can run to paragraphs,
-    and round-tripping that (plus the slug, workflow, approval and three
-    budget numbers) through a query string risks a URL past what a server
-    or browser will accept, and leaves it sitting in the URL bar and any
-    access log besides. Rendering directly costs this one path the
+    A pre-creation refusal re-renders the form in place rather than
+    redirecting to `/start?error=...`: the goal is free text that can run to
+    paragraphs, and round-tripping that (plus the slug, workflow, approval
+    and three budget numbers) through a query string risks a URL past what a
+    server or browser will accept, and leaves it sitting in the URL bar and
+    any access log besides. Rendering directly costs this one path the
     post/redirect/get guarantee every other mutation here keeps — reloading
-    a refused submission re-POSTs it, and the browser will ask first. A
-    successful submission still redirects, so that guarantee holds for the
-    common case.
+    a refused submission re-POSTs it, and the browser will ask first. Nothing
+    is written for this kind of refusal — the same is true whether the agent
+    or the slug or the goal is what's rejected.
+
+    A *post*-creation failure (`service.RunStartedError` — the sandbox
+    refused the first turn, the budget was already exhausted, the opening
+    prompt was oversized) is different: the run itself was made, under the
+    slug the error carries, so this redirects to that run's own page with
+    the error visible, the same as any other mutation on an existing run —
+    the post/redirect/get guarantee holds there too, and resubmitting from a
+    blank form would only produce "a run named X already exists" with no way
+    back to it.
+
+    A successful submission also redirects, using the canonical slug
+    `service.start_run` reports the run was actually created under — which
+    can differ from what was typed (`Project.run_dir` strips a `workspace/`
+    prefix, a trailing slash, surrounding whitespace) — never the raw form
+    value, or a redirect could land on a slug that 404s while the real run
+    sits one path segment over.
 
     Calls `service.start_run` instead of `service.create_run` so a chosen
     agent takes the first turn as part of this same request — the agent is
-    checked before anything is created, so a refusal here behaves exactly
-    like the existing refusals: nothing written, form re-rendered with what
-    was typed.
+    checked before anything is created, so a refusal *before* creation
+    behaves exactly like the existing refusals: nothing written, form
+    re-rendered with what was typed.
     """
     project = _project(request)
     submitted = {"slug": slug, "goal": goal, "workflow": workflow, "agent": agent,
@@ -135,20 +173,23 @@ def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
                 "max_experiment_runs": max_experiment_runs or None,
                 "max_wall_minutes": max_wall_minutes or None}
     try:
-        service.start_run(
+        result = service.start_run(
             project, slug, goal, agent, workflow=workflow,
             approval=approval or None,
             max_iterations=max_iterations or None,
             max_experiment_runs=max_experiment_runs or None,
             max_wall_minutes=max_wall_minutes or None)
+    except service.RunStartedError as exc:
+        return RedirectResponse(f"/runs/{quote(exc.slug)}?error={quote(str(exc))}",
+                                status_code=303)
     except service.ServiceError as exc:
         return _render_start(request, project, error=str(exc), submitted=submitted)
-    return RedirectResponse(f"/runs/{quote(slug)}", status_code=303)
+    return RedirectResponse(f"/runs/{quote(result['slug'])}", status_code=303)
 
 
 @router.get("/agents", response_class=HTMLResponse)
-async def agents_page(request: Request, slug: str = "", error: str = "",
-                      assign: list[str] = Query(default=[])) -> HTMLResponse:
+def agents_page(request: Request, slug: str = "", error: str = "",
+                assign: list[str] = Query(default=[])) -> HTMLResponse:
     from scieflow.core import agent_config
 
     project = _project(request)
@@ -171,8 +212,8 @@ async def agents_page(request: Request, slug: str = "", error: str = "",
 
 
 @router.post("/agents", dependencies=MUTATE)
-async def apply_agents(request: Request, slug: str = Form(""),
-                       assign: list[str] = Form(default=[])):
+def apply_agents(request: Request, slug: str = Form(""),
+                 assign: list[str] = Form(default=[])):
     target = "/agents" + (f"?slug={quote(slug)}" if slug else "")
     if not assign:
         return RedirectResponse(target + ("&" if slug else "?")
@@ -187,7 +228,7 @@ async def apply_agents(request: Request, slug: str = Form(""),
 
 
 @router.get("/runs/{slug}", response_class=HTMLResponse)
-async def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
+def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
     project = _project(request)
     detail = service.run_detail(project, slug)          # ServiceError -> 404
     ws = service.run_workspace(project, slug)
@@ -235,9 +276,9 @@ def _back(slug: str, error: str = "") -> RedirectResponse:
 
 
 @router.post("/runs/{slug}/charter", dependencies=MUTATE)
-async def edit_charter(request: Request, slug: str, action: str = Form("set"),
-                       text: str = Form(""), note: str = Form(""),
-                       version: int = Form(0)):
+def edit_charter(request: Request, slug: str, action: str = Form("set"),
+                 text: str = Form(""), note: str = Form(""),
+                 version: int = Form(0)):
     project = _project(request)
     try:
         if action == "revert":
@@ -268,9 +309,9 @@ def say(request: Request, slug: str, action: str = Form("say"),
 
 
 @router.post("/runs/{slug}/gates/{gate_id}", dependencies=MUTATE)
-async def answer_gate(request: Request, slug: str, gate_id: str,
-                      answer: str = Form(...), note: str = Form(""),
-                      proposal_digest: str = Form("")):
+def answer_gate(request: Request, slug: str, gate_id: str,
+                answer: str = Form(...), note: str = Form(""),
+                proposal_digest: str = Form("")):
     try:
         service.answer_gate(_project(request), slug, gate_id, answer, note=note,
                             proposal_digest=proposal_digest or None)
@@ -280,11 +321,11 @@ async def answer_gate(request: Request, slug: str, gate_id: str,
 
 
 @router.post("/runs/{slug}/act", dependencies=MUTATE)
-async def act(request: Request, slug: str, action: str = Form(...),
-              phase: str = Form(""), state: str = Form(""),
-              reason: str = Form(""), detail: str = Form(""),
-              experiment_runs: int = Form(0), wall_minutes: float = Form(0.0),
-              iterations: int = Form(0)):
+def act(request: Request, slug: str, action: str = Form(...),
+        phase: str = Form(""), state: str = Form(""),
+        reason: str = Form(""), detail: str = Form(""),
+        experiment_runs: int = Form(0), wall_minutes: float = Form(0.0),
+        iterations: int = Form(0)):
     project = _project(request)
     try:
         if action == "phase":
@@ -323,7 +364,7 @@ def cancel_job(request: Request, slug: str, job_id: str):
 
 
 @router.get("/runs/{slug}/jobs/{job_id}", response_class=HTMLResponse)
-async def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
+def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
     project = _project(request)
     job = _owning_job(project, slug, job_id)
 
@@ -343,7 +384,7 @@ async def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
 
 
 @router.get("/runs/{slug}/files", response_class=HTMLResponse)
-async def files_page(request: Request, slug: str, path: str = "") -> HTMLResponse:
+def files_page(request: Request, slug: str, path: str = "") -> HTMLResponse:
     from fastapi import HTTPException
 
     from scieflow.web import files as files_mod
@@ -360,7 +401,7 @@ async def files_page(request: Request, slug: str, path: str = "") -> HTMLRespons
 
 
 @router.get("/runs/{slug}/file")
-async def file_view(request: Request, slug: str, path: str):
+def file_view(request: Request, slug: str, path: str):
     from fastapi import HTTPException
     from fastapi.responses import FileResponse
 
