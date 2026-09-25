@@ -61,18 +61,18 @@ def create_app(project: Project, token: str) -> FastAPI:
         return _refuse(request, exc.status_code, exc.detail)
 
     @app.get("/healthz", tags=["meta"])
-    async def healthz() -> dict:
+    def healthz() -> dict:
         """Liveness only — deliberately says nothing about the project."""
         return {"ok": True}
 
     @app.get("/api/v1/openapi.json", include_in_schema=False,
              dependencies=[Depends(auth.require_session)])
-    async def openapi_schema() -> dict:
+    def openapi_schema() -> dict:
         return app.openapi()
 
     @app.get("/api/v1/docs", include_in_schema=False,
              dependencies=[Depends(auth.require_session)])
-    async def swagger_docs() -> HTMLResponse:
+    def swagger_docs() -> HTMLResponse:
         return get_swagger_ui_html(openapi_url="/api/v1/openapi.json",
                                    title=f"{app.title} — Swagger UI")
 
