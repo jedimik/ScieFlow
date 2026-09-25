@@ -49,6 +49,9 @@
     {% endif %}
     <form method="post" action="/runs/{{ gate.slug }}/gates/{{ gate.id }}">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      {% if gate.kind == "charter-adoption" and gate.proposal_digest %}
+        <input type="hidden" name="proposal_digest" value="{{ gate.proposal_digest }}">
+      {% endif %}
       {% if gate.options %}
         <select name="answer">
           {% for option in gate.options %}<option>{{ option }}</option>{% endfor %}

@@ -133,9 +133,13 @@ async def revert_charter(request: Request, slug: str,
 
 @router.post("/runs/{slug}/gates/{gate_id}/answer", dependencies=MUTATE, tags=["gates"])
 async def answer(request: Request, slug: str, gate_id: str,
-                 answer: str = Form(...), note: str = Form("")) -> dict:
-    """Answer an open gate as the human."""
-    return service.answer_gate(_project(request), slug, gate_id, answer, note=note)
+                 answer: str = Form(...), note: str = Form(""),
+                 proposal_digest: str = Form("")) -> dict:
+    """Answer an open gate as the human. `proposal_digest`, if given, must
+    match the proposal file's current sha256 or the answer is refused —
+    it is how a caller proves it is adopting what it actually read."""
+    return service.answer_gate(_project(request), slug, gate_id, answer, note=note,
+                               proposal_digest=proposal_digest or None)
 
 
 @router.post("/jobs/{job_id}/cancel", dependencies=MUTATE, tags=["jobs"])

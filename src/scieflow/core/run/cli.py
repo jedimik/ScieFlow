@@ -161,9 +161,9 @@ def resume(slug, as_agent):
 
 @run.command("charter")
 @click.argument("slug")
-@click.option("--set", "text", default="", help="Replace the charter with TEXT.")
-@click.option("--note", default="", help="Why you are changing it.")
-@click.option("--revert", "version", type=int, default=0,
+@click.option("--set", "text", default=None, help="Replace the charter with TEXT.")
+@click.option("--note", default="", help="Why you are changing it (only with --set).")
+@click.option("--revert", "version", type=int, default=None,
               help="Make version N current again, by appending a copy of it.")
 @AGENT_FLAG
 def charter_cmd(slug, text, note, version, as_agent):
@@ -173,17 +173,34 @@ def charter_cmd(slug, text, note, version, as_agent):
     a long conversation cannot drift away from the goal it started with. A
     revert appends a copy of the old version rather than rewinding, so the
     history of how the goal moved is never lost.
+
+    Only a human writes or reverts it directly. An agent that wants the
+    charter changed opens a `charter-adoption` gate instead (rule 14) and
+    lets a human adopt the proposal — `--as-agent` here is refused together
+    with `--set`/`--revert` for exactly that reason.
     """
     from scieflow.core import service
 
     project = Project.discover()
+    if text is not None and version is not None:
+        raise click.ClickException("--set and --revert are mutually exclusive")
+    if as_agent and (text is not None or version is not None):
+        raise click.ClickException(
+            "an agent cannot set or revert the charter directly — open a "
+            "charter-adoption gate and let a human adopt it "
+            "(`scieflow gate open <slug> --kind charter-adoption --question ... "
+            "--option adopt --option decline --file <proposal>`)")
+    if text is not None and not text.strip():
+        raise click.ClickException("--set needs non-empty text")
+    if note and text is None:
+        raise click.ClickException("--note only makes sense together with --set")
     actor = _actor(as_agent)
     try:
-        if version:
+        if version is not None:
             result = service.revert_charter(project, slug, version, actor)
             click.echo(f"restored version {version} as v{result['n']}")
             return
-        if text:
+        if text is not None:
             result = service.set_charter(project, slug, text, actor, note)
             click.echo(f"charter v{result['n']} written")
             return

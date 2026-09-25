@@ -160,9 +160,11 @@ async def edit_charter(request: Request, slug: str, action: str = Form("set"),
 
 @router.post("/runs/{slug}/gates/{gate_id}", dependencies=MUTATE)
 async def answer_gate(request: Request, slug: str, gate_id: str,
-                      answer: str = Form(...), note: str = Form("")):
+                      answer: str = Form(...), note: str = Form(""),
+                      proposal_digest: str = Form("")):
     try:
-        service.answer_gate(_project(request), slug, gate_id, answer, note=note)
+        service.answer_gate(_project(request), slug, gate_id, answer, note=note,
+                            proposal_digest=proposal_digest or None)
     except service.ServiceError as exc:
         return _back(slug, str(exc))
     return _back(slug)

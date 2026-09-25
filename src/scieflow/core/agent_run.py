@@ -202,7 +202,10 @@ def prepare(project: Project, agent: str, prompt_file: Path,
     cwd = cwd or root
     if not cwd.is_absolute():
         cwd = root / cwd
-    prompt = compose_prompt(run_dir, prompt_file.read_text())
+    try:
+        prompt = compose_prompt(run_dir, prompt_file.read_text())
+    except (OSError, ValueError, yaml.YAMLError, charter.CharterError) as exc:
+        raise DispatchError(f"invalid run charter: {exc}") from exc
     use_stdin = len(prompt.encode()) > PROMPT_ARGV_LIMIT
     if use_stdin and "stdin_cmd" in agent_cfg:
         argv = build_argv(agent_cfg, prompt, root, include_prompt=False,

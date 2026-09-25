@@ -22,6 +22,12 @@ from scieflow.core.run import status as status_mod
 
 GATES_DIR = "gates"
 
+CHARTER_ADOPTION = "charter-adoption"
+# The words that count as adopting a `charter-adoption` gate's proposal
+# (`service.answer_gate` is the only other place this matters, and it
+# imports this set rather than keeping its own copy).
+ADOPTED = frozenset({"adopt", "yes", "approve", "approved"})
+
 
 class GateError(ValueError):
     """A gate operation the rules do not allow."""
@@ -62,6 +68,14 @@ def open_gate(project: Project, ws: Path, kind: str, question: str, options=(),
     table = kinds(project)
     if kind not in table:
         raise GateError(f"unknown gate kind {kind!r} (known: {', '.join(table)})")
+    if kind == CHARTER_ADOPTION and options:
+        offered = {str(o).strip().lower() for o in options}
+        if not offered & ADOPTED:
+            raise GateError(
+                f"a {CHARTER_ADOPTION} gate's options must include an adopt word "
+                f"(one of: {', '.join(sorted(ADOPTED))}) — none of {list(options)} "
+                "would ever write the charter, even if the human answering it "
+                "means to adopt")
     gate = {
         "id": store.new_id(), "kind": kind, "question": question,
         "options": list(options), "files": [str(f) for f in files],
@@ -189,12 +203,23 @@ def show_cmd(slug, gate_id):
 @click.option("--as-agent", is_flag=True, help="Answer as the coordinator (autonomous runs only).")
 @click.option("--rationale", default="")
 def answer_cmd(slug, gate_id, answer_text, note, as_agent, rationale):
-    """Answer an open gate."""
-    project, ws = _ws(slug)
+    """Answer an open gate.
+
+    Goes through `service.answer_gate`, not `answer` above, even though this
+    is the CLI and `service` exists "for the browser's sake" — a
+    `charter-adoption` gate's whole point (writing the charter on adoption)
+    lives only in `service.answer_gate`, and every other gate kind is a
+    no-op pass-through there, so routing here costs nothing for them.
+    """
+    # Imported locally: `service` imports `gates` at module level, so a
+    # module-level import here would be a cycle.
+    from scieflow.core import service
+
+    project, _ = _ws(slug)          # validates the slug the same way
     try:
-        g = answer(project, ws, gate_id, answer_text, "agent" if as_agent else "human",
-                   rationale, note)
-    except GateError as e:
+        g = service.answer_gate(project, slug, gate_id, answer_text,
+                                "agent" if as_agent else "human", rationale, note)
+    except service.ServiceError as e:
         raise click.ClickException(str(e)) from e
     click.echo(f"{g['id']}: {g['answer']}")
 

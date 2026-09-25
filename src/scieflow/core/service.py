@@ -7,11 +7,13 @@ for anything a caller should show the user.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from dataclasses import asdict
 from pathlib import Path
 
 from scieflow.core import agent_config, agent_configure as acf, events, gates, jobs, sandbox, workspace
+from scieflow.core.gates import ADOPTED, CHARTER_ADOPTION
 from scieflow.core.project import Project, ProjectError
 from scieflow.core.run import actions, budget, charter, status
 
@@ -23,8 +25,6 @@ class ServiceError(Exception):
     """A request the service cannot fulfil, with a message for the user."""
 
 
-ADOPTED = frozenset({"adopt", "yes", "approve", "approved"})
-CHARTER_ADOPTION = "charter-adoption"
 PROPOSAL_PREVIEW_LIMIT = 4000        # characters of a proposal shown in a gate form
 
 
@@ -169,6 +169,9 @@ def _proposal_path(ws: Path, gate: dict) -> Path:
     files = gate.get("files") or []
     if not files:
         raise ServiceError("that proposal names no file to adopt")
+    if len(files) > 1:
+        raise ServiceError(
+            "that proposal names more than one file; a charter adoption needs exactly one")
     raw = str(files[0])
     try:
         return _resolve_in_run(ws, raw)
@@ -215,21 +218,49 @@ def _proposal_preview(ws: Path, gate: dict) -> str | None:
     return text
 
 
+def _proposal_digest(ws: Path, gate: dict) -> str | None:
+    """sha256 of the *whole* proposal file — never the truncated preview, or
+    a proposal longer than `PROPOSAL_PREVIEW_LIMIT` could never match. This
+    is what a gate form carries back so `answer_gate` can tell the file
+    changed since it was previewed. Never raises, for the same reason
+    `_proposal_preview` doesn't: an unreadable proposal is caught when the
+    gate is answered, not when the page merely lists it.
+    """
+    try:
+        text = _proposal_path(ws, gate).read_text()
+    except (ServiceError, OSError):
+        return None
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 def _with_proposal_preview(ws: Path, gate_list: list[dict]) -> list[dict]:
-    return [{**g, "proposal_text": _proposal_preview(ws, g)} if g["kind"] == CHARTER_ADOPTION
+    return [{**g, "proposal_text": _proposal_preview(ws, g),
+            "proposal_digest": _proposal_digest(ws, g)} if g["kind"] == CHARTER_ADOPTION
            else g for g in gate_list]
 
 
 def answer_gate(project: Project, slug: str, gate_id: str, answer: str,
-                actor: str = "human", rationale: str = "", note: str = "") -> dict:
+                actor: str = "human", rationale: str = "", note: str = "",
+                proposal_digest: str | None = None) -> dict:
+    """Answer a gate. `proposal_digest`, when given, must match a fresh
+    sha256 of the proposal file — carried by the gate form as a hidden
+    field from whatever was rendered for the human to read — or the answer
+    is refused. Without it (the CLI has no preview step to digest) the check
+    is simply skipped, same as before this existed.
+    """
     ws = _ws(project, slug)
     try:
         gate_before = gates.get(ws, gate_id)
     except gates.GateError as e:
         raise ServiceError(str(e)) from e
+    if gate_before["state"] != "open":
+        raise ServiceError(f"gate {gate_id} is not open ({gate_before['state']})")
     proposal_text = None
     if gate_before["kind"] == CHARTER_ADOPTION and answer.strip().lower() in ADOPTED:
         proposal_text = _read_proposal(ws, gate_before)      # before the gate is answered
+        if proposal_digest and hashlib.sha256(proposal_text.encode()).hexdigest() != proposal_digest:
+            raise ServiceError("the proposal changed since you read it — reload and check "
+                               "it again before adopting")
     try:
         gate = gates.answer(project, ws, gate_id, answer, actor, rationale, note)
     except gates.GateError as e:
@@ -282,11 +313,16 @@ def apply_staffing(project: Project, assignments: list[str],
 
 
 def run_charter(project: Project, slug: str) -> dict:
-    """The run's agreed plan: current text plus the whole version history."""
+    """The run's agreed plan: current text plus the whole version history.
+
+    `charter.snapshot` reads `charter.yml` once, so a concurrent write
+    cannot pair one read's `current` with a different read's version text.
+    """
     ws = _ws(project, slug)
-    doc = charter.read(ws)
-    return {"current": doc["current"], "text": charter.current_text(ws),
-            "versions": charter.history(ws)}
+    try:
+        return charter.snapshot(ws)
+    except charter.CharterError as exc:
+        raise ServiceError(str(exc)) from exc
 
 
 def set_charter(project: Project, slug: str, text: str,

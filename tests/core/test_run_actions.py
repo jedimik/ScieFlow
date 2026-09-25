@@ -175,3 +175,74 @@ def test_run_charter_reverting_to_a_missing_version_fails_cleanly(tmp_path, monk
     assert result.exit_code != 0
     assert "version" in result.output
     assert "Traceback" not in result.output
+
+
+def test_run_charter_as_agent_cannot_set_or_revert(tmp_path, monkeypatch):
+    """I1: a coordinator that could adopt its own charter directly would
+    defeat the whole point of the `charter-adoption` gate being
+    `requires_human`. `--as-agent` may only read."""
+    from scieflow.core.run import charter
+    from scieflow.core.run.cli import run as run_group
+
+    ws = _cli_project(tmp_path, monkeypatch)
+    runner = CliRunner()
+
+    result = runner.invoke(run_group,
+                           ["charter", "r1", "--set", "My own new goal.", "--as-agent"])
+    assert result.exit_code != 0
+    assert "gate" in result.output.lower()
+    assert charter.current_text(ws) == ""
+
+    charter.set_text(ws, "Human-set goal.")
+    result = runner.invoke(run_group, ["charter", "r1", "--revert", "1", "--as-agent"])
+    assert result.exit_code != 0
+    assert charter.current_text(ws) == "Human-set goal."
+
+    # Reading needs no human decision, so --as-agent alone stays harmless.
+    result = runner.invoke(run_group, ["charter", "r1", "--as-agent"])
+    assert result.exit_code == 0
+    assert "Human-set goal." in result.output
+
+
+def test_run_charter_set_and_revert_are_mutually_exclusive(tmp_path, monkeypatch):
+    from scieflow.core.run import charter
+    from scieflow.core.run.cli import run as run_group
+
+    ws = _cli_project(tmp_path, monkeypatch)
+    charter.set_text(ws, "Original.")
+    runner = CliRunner()
+
+    result = runner.invoke(run_group,
+                           ["charter", "r1", "--set", "New goal.", "--revert", "1"])
+    assert result.exit_code != 0
+    assert charter.current_text(ws) == "Original."
+
+
+def test_run_charter_rejects_an_empty_set(tmp_path, monkeypatch):
+    from scieflow.core.run import charter
+    from scieflow.core.run.cli import run as run_group
+
+    ws = _cli_project(tmp_path, monkeypatch)
+    runner = CliRunner()
+
+    result = runner.invoke(run_group, ["charter", "r1", "--set", ""])
+    assert result.exit_code != 0
+    assert charter.current_text(ws) == ""
+
+
+def test_run_charter_rejects_a_lone_note(tmp_path, monkeypatch):
+    """`--note` with no `--set` used to be silently dropped, falling through
+    to "show"."""
+    from scieflow.core.run import charter
+    from scieflow.core.run.cli import run as run_group
+
+    ws = _cli_project(tmp_path, monkeypatch)
+    runner = CliRunner()
+
+    result = runner.invoke(run_group, ["charter", "r1", "--note", "why"])
+    assert result.exit_code != 0
+    assert charter.current_text(ws) == ""
+
+    ok = runner.invoke(run_group, ["charter", "r1", "--set", "Real goal.", "--note", "why"])
+    assert ok.exit_code == 0, ok.output
+    assert charter.current_text(ws) == "Real goal."

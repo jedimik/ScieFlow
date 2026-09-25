@@ -697,3 +697,26 @@ def test_a_charter_that_pushes_the_prompt_over_the_argv_limit_still_sends_it(
     dispatch = agent_run.prepare(project, "stub", prompt_file)
     sent = dispatch.stdin_text or " ".join(dispatch.argv)
     assert "G" * 500 in sent, "the prompt was dropped instead of sent on stdin"
+
+
+def test_a_charter_that_is_not_a_mapping_fails_the_dispatch_cleanly(project_with_run):
+    """`compose_prompt` used to run outside `prepare`'s try/except, so a
+    `charter.yml` that parses to a list raised a bare `AttributeError` clean
+    through `prepare` — a traceback with no transcript, and nothing for a
+    coordinator to retry with. It must come out as `DispatchError` instead."""
+    project, ws, prompt_file = project_with_run
+    (ws / "charter.yml").write_text("- just a list\n")
+
+    with pytest.raises(agent_run.DispatchError):
+        agent_run.prepare(project, "stub", prompt_file)
+
+
+def test_malformed_charter_yaml_fails_the_dispatch_cleanly(project_with_run):
+    """Same failure shape, different cause: a `charter.yml` that fails to
+    parse at all used to raise `yaml.parser.ParserError` straight through
+    `prepare`."""
+    project, ws, prompt_file = project_with_run
+    (ws / "charter.yml").write_text("current: 1\nversions: [\n")
+
+    with pytest.raises(agent_run.DispatchError):
+        agent_run.prepare(project, "stub", prompt_file)

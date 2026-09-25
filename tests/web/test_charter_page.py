@@ -1,9 +1,13 @@
 """The charter panel: read it, edit it, revert it, from the browser."""
 
+import re
+
 import pytest
 
 from scieflow.core.run import charter
 from scieflow.web import auth
+
+DIGEST_RE = re.compile(r'name="proposal_digest" value="([0-9a-f]+)"')
 
 
 def post(client, path, **form):
@@ -149,6 +153,70 @@ def test_the_gate_form_shows_the_proposed_charter_text(client, project):
     assert "the real plan" in page
     assert "<script>alert" not in page
     assert "&lt;script&gt;" in page
+
+
+def test_the_run_page_carries_the_proposal_digest_and_adopts_when_unchanged(client, project):
+    """I3: the gate form must carry a digest of what the human was actually
+    shown, so `answer_gate` can prove the proposal it is about to adopt is
+    the same one, not something the still-running proposing agent rewrote
+    between the preview and the click."""
+    from scieflow.core import gates
+
+    ws = project.run_dir("r1")
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("The plan as previewed.")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[proposal])
+
+    page = client.get("/runs/r1").text
+    match = DIGEST_RE.search(page)
+    assert match, "the gate form must carry a proposal_digest hidden field"
+
+    response = post(client, f"/runs/r1/gates/{gate['id']}", answer="adopt",
+                    proposal_digest=match.group(1))
+    assert response.status_code == 303
+    assert charter.current_text(ws) == "The plan as previewed."
+
+
+def test_the_dashboard_gate_form_also_carries_the_digest(client, project):
+    from scieflow.core import gates
+
+    ws = project.run_dir("r1")
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("Shown on the dashboard.")
+    gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                    options=["adopt", "decline"], files=[proposal])
+
+    page = client.get("/").text
+    assert DIGEST_RE.search(page), "the dashboard's gate form must carry a proposal_digest too"
+
+
+def test_adopting_is_refused_when_the_proposal_changed_since_the_preview(client, project):
+    """The agent that proposed the charter is typically still alive, polling
+    `gate wait` — this is what stops it rewriting the file after the human
+    has read it but before they click "Answer"."""
+    from scieflow.core import gates
+
+    ws = project.run_dir("r1")
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("The plan as previewed.")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[proposal])
+
+    page = client.get("/runs/r1").text
+    stale_digest = DIGEST_RE.search(page).group(1)
+    proposal.write_text("A different plan, rewritten after the preview.")
+
+    response = post(client, f"/runs/r1/gates/{gate['id']}", answer="adopt",
+                    proposal_digest=stale_digest)
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/runs/r1?error=")
+    assert "changed" in client.get(response.headers["location"]).text
+    assert charter.current_text(ws) == ""
+    assert gates.get(ws, gate["id"])["state"] == "open"
 
 
 def test_the_gate_form_degrades_when_the_proposal_cannot_be_previewed(client, project):

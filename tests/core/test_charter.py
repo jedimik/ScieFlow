@@ -44,6 +44,33 @@ def test_a_run_without_a_charter_reads_as_empty(ws):
     assert charter.history(ws) == []
 
 
+def test_read_refuses_a_charter_that_is_not_a_mapping(ws):
+    """A `charter.yml` that parses to a list (or anything else that is not a
+    mapping) must be a typed `CharterError`, not an `AttributeError` from
+    `doc.get(...)` reaching a caller that never expected one."""
+    (ws / "charter.yml").write_text("- just a list\n")
+    with pytest.raises(charter.CharterError, match="mapping"):
+        charter.read(ws)
+
+
+def test_read_refuses_malformed_yaml(ws):
+    """A `charter.yml` that fails to parse at all is the same kind of
+    failure as one that parses to the wrong shape: refused as
+    `CharterError`, not a raw `yaml.YAMLError` escaping `read`."""
+    (ws / "charter.yml").write_text("current: 1\nversions: [\n")
+    with pytest.raises(charter.CharterError):
+        charter.read(ws)
+
+
+def test_snapshot_reads_once_and_matches_the_separate_calls(ws):
+    charter.set_text(ws, "First.", note="one")
+    charter.set_text(ws, "Second.", note="two")
+    snap = charter.snapshot(ws)
+    assert snap == {"current": charter.read(ws)["current"],
+                    "text": charter.current_text(ws),
+                    "versions": charter.history(ws)}
+
+
 def test_setting_the_first_version(ws):
     version = charter.set_text(ws, "Find a better catalyst.", note="initial goal")
     assert version["n"] == 1
@@ -255,3 +282,48 @@ def test_adopting_a_proposal_outside_the_run_is_refused(project_ws, tmp_path):
         service.answer_gate(project, "r1", gate["id"], "adopt")
     assert charter.current_text(ws) == ""
     assert gates.get(ws, gate["id"])["state"] == "open"
+
+
+def test_a_proposal_naming_more_than_one_file_is_refused(project_ws):
+    """`files[0]` used to be adopted silently, ignoring the rest — so
+    `--file evidence.md --file proposals/charter.md` would adopt the
+    evidence. Refuse outright instead of guessing which file was meant."""
+    from scieflow.core import gates, service
+    from scieflow.core.run import charter
+
+    project, ws = project_ws
+    evidence = ws / "evidence.md"
+    evidence.write_text("Not the plan.")
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("The actual plan.")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[evidence, proposal])
+
+    with pytest.raises(service.ServiceError, match="one file"):
+        service.answer_gate(project, "r1", gate["id"], "adopt")
+    assert charter.current_text(ws) == ""
+    assert gates.get(ws, gate["id"])["state"] == "open"
+
+
+def test_double_answering_a_gate_reports_not_open_even_if_the_proposal_is_gone(project_ws):
+    """The state check must run before the proposal is read, so re-answering
+    an already-answered gate reports "gate is not open" — not a confusing
+    file-read error, which is all a bare `_read_proposal` first would give
+    once the proposal is gone (as it may be, well after the first answer)."""
+    from scieflow.core import gates, service
+    from scieflow.core.run import charter
+
+    project, ws = project_ws
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("A plan nobody wants.")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[proposal])
+
+    service.answer_gate(project, "r1", gate["id"], "decline")
+    proposal.unlink()
+
+    with pytest.raises(service.ServiceError, match="not open"):
+        service.answer_gate(project, "r1", gate["id"], "adopt")
+    assert charter.current_text(ws) == ""
