@@ -53,6 +53,44 @@ The only difference is who is recorded as `actor`: a command run with
 `--as-agent` logs `agent`, the browser's forms log `human` — same as running
 the command without `--as-agent` yourself.
 
+## The charter: what this run agreed to do
+
+`workspace/<slug>/charter.yml` holds a run's standing goal — a short,
+human-curated statement of what the run is for, versioned like everything
+else here. Unlike status and budget, nothing computes it; it exists because a
+long agent conversation drifts from where it started, and the fix is to
+re-state the goal rather than trust the conversation to remember it. Every
+prompt a run sends an agent is composed with the current charter pinned to
+the top (`agent_run.compose_prompt`) — that is the entire reason the feature
+exists. A run with no charter composes exactly as it always has.
+
+A revert does not rewind: it appends a fresh version that copies an earlier
+one's text, so the sequence of how the goal moved stays on the record instead
+of being erased. "Current" is always whichever version is newest.
+
+```bash
+uv run scieflow run charter <slug>                       # show the current text and its version
+uv run scieflow run charter <slug> --set "..." --note "narrowed scope to X"
+uv run scieflow run charter <slug> --revert 3            # make version 3 current again
+```
+
+| CLI command | On the run page |
+|---|---|
+| `run charter <slug>` | the charter panel, always visible |
+| `run charter <slug> --set` | the panel's edit form |
+| `run charter <slug> --revert` | a "Restore" button next to that version in its history |
+
+Unlike the other `run` subcommands above, `run charter` calls
+`service.run_charter`, `service.set_charter` and `service.revert_charter`
+directly — the very same functions the browser's charter panel calls —
+rather than going through `scieflow.core.run.actions`. Those wrappers already
+existed for the browser, and calling them from the CLI too was the shortest
+correct path to the one `charter` primitive underneath, so here the CLI and
+the browser genuinely share a function call, not just a common primitive.
+
+The charter is data, never instructions to ScieFlow itself: it changes what
+an agent is told, never what any `scieflow` command does.
+
 ## History: the event log
 
 `workspace/<slug>/events.jsonl` is the run's history — one JSON object per

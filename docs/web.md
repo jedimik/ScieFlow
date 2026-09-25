@@ -135,7 +135,7 @@ at exactly this.
 | Page | Route | Shows |
 |---|---|---|
 | Dashboard | `/` | Every run (slug, kind, phase), a budget bar per dimension, and every open gate across all runs, each with an inline form to answer it on the spot. |
-| Run page | `/runs/<slug>` | The run's id, iteration and approval mode; its phases with a form to mark one; budget remaining per dimension with a form to record spend; buttons to advance the iteration, checkpoint or resume; open gates, each with a form to answer it; every job it started, linked to its output, with a Cancel button while it runs; and a timeline of the run's events, updated live. |
+| Run page | `/runs/<slug>` | The run's id, iteration and approval mode; its phases with a form to mark one; budget remaining per dimension with a form to record spend; buttons to advance the iteration, checkpoint or resume; the charter panel — current text, an edit form, and (once there is more than one version) a history with a Restore button per version; open gates, each with a form to answer it; every job it started, linked to its output, with a Cancel button while it runs; and a timeline of the run's events, updated live. |
 | Job output | `/runs/<slug>/jobs/<job_id>` | The job's command, state, exit code and duration, and its captured stdout/stderr. While the job is still running, output streams in live. |
 | Artifact browser | `/runs/<slug>/files[?path=...]` | A directory listing under the run; `/runs/<slug>/file?path=...` renders a small text file inline or downloads anything else, per the security model above. |
 | Agents | `/agents[?slug=<run>]` | Role assignments in effect (defaults, or one run's if `slug` is given), a form to pick a role and an agent, a preview of the resulting diff, and an Apply button. See [Agent configuration](agents.md#the-agents-page). |
@@ -163,6 +163,7 @@ this app's own pages — it is a stable-enough surface to script against.
 | `GET /api/v1/runs/<slug>` | Status, budget, remaining fractions, open gates, recent jobs and events. |
 | `GET /api/v1/runs/<slug>/events` | The run's history, oldest first (`?since=<id>`, repeatable `?type=` with `job.*`-style prefix matching). |
 | `GET /api/v1/runs/<slug>/jobs` | Every job the run started. |
+| `GET /api/v1/runs/<slug>/charter` | The current charter text plus its whole version history — `service.run_charter`, same function `scieflow run charter <slug>` calls. |
 | `GET /api/v1/gates` | Gates still waiting for an answer, optionally `?slug=<run>`. |
 | `GET /api/v1/agents` | Effective role assignments and agent settings, with their sources. |
 | `GET /api/v1/runs/<slug>/events/stream` | Server-sent events: the timeline, replayed then followed live. |
@@ -173,6 +174,8 @@ this app's own pages — it is a stable-enough surface to script against.
 | `POST /api/v1/runs/<slug>/resume` | Clear a stop — `service.resume_run`, same as `scieflow run resume`. |
 | `POST /api/v1/runs/<slug>/spend` | Record spend the runner can't measure — `service.record_spend`, same as `scieflow run spend`. |
 | `POST /api/v1/runs/<slug>/gates/<gate_id>/answer` | Answer an open gate as the human — `service.answer_gate`, same as `scieflow gate answer`. |
+| `POST /api/v1/runs/<slug>/charter` | Replace the charter, keeping the old version in its history — `service.set_charter`, same function `scieflow run charter <slug> --set` calls. |
+| `POST /api/v1/runs/<slug>/charter/revert` | Make an earlier version current again by appending a copy of it — `service.revert_charter`, same function `scieflow run charter <slug> --revert` calls. |
 | `POST /api/v1/jobs/<job_id>/cancel` | Cancel a running job and its whole process group — `service.cancel_job`; no CLI command mirrors this one (see "What it is" above). |
 
 Every `POST` above needs the CSRF header as well as the session cookie (see

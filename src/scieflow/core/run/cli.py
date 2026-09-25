@@ -159,6 +159,44 @@ def resume(slug, as_agent):
     click.echo("resumed")
 
 
+@run.command("charter")
+@click.argument("slug")
+@click.option("--set", "text", default="", help="Replace the charter with TEXT.")
+@click.option("--note", default="", help="Why you are changing it.")
+@click.option("--revert", "version", type=int, default=0,
+              help="Make version N current again, by appending a copy of it.")
+@AGENT_FLAG
+def charter_cmd(slug, text, note, version, as_agent):
+    """Show or change what this run has agreed to do.
+
+    The charter is put at the top of every prompt this run sends an agent, so
+    a long conversation cannot drift away from the goal it started with. A
+    revert appends a copy of the old version rather than rewinding, so the
+    history of how the goal moved is never lost.
+    """
+    from scieflow.core import service
+
+    project = Project.discover()
+    actor = _actor(as_agent)
+    try:
+        if version:
+            result = service.revert_charter(project, slug, version, actor)
+            click.echo(f"restored version {version} as v{result['n']}")
+            return
+        if text:
+            result = service.set_charter(project, slug, text, actor, note)
+            click.echo(f"charter v{result['n']} written")
+            return
+        doc = service.run_charter(project, slug)
+        if not doc["text"]:
+            click.echo("no charter yet; set one with --set")
+            return
+        click.echo(doc["text"])
+        click.echo(f"\n(version {doc['current']} of {len(doc['versions'])})")
+    except service.ServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @run.command("events")
 @click.argument("slug")
 @click.option("--since", help="Only events after this event id.")

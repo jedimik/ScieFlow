@@ -212,3 +212,14 @@ being a deliberate, visible exception, so the page never offers it.
 Older research runs may carry top-level `agents:`, `reviewer:`, `submitter:`,
 `outline_agent:` or `consistency_agent:` keys. They are still read, and any
 assignment written by `configure` takes precedence over them.
+
+## The charter is already in the prompt
+
+None of the above changes what an agent is told to do for a given run — that
+is the run's [charter](runs.md#the-charter-what-this-run-agreed-to-do).
+Whichever agent, model and effort a role resolves to, the prompt it is
+dispatched with already opens with that run's current charter
+(`agent_run.compose_prompt` prepends it before any role override is applied).
+A coordinator or sub-agent composing a prompt for a run should not restate
+the goal or paste the charter back in — it is already at the top of what it
+receives, on every turn.

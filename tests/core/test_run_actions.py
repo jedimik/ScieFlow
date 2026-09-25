@@ -126,3 +126,52 @@ def test_run_cli_spend_rejects_negative_and_leaves_the_ledger_alone(tmp_path, mo
     assert not isinstance(result.exception, ValueError), result.output
     assert "negative" in result.output
     assert budget.read_budget(ws)["spent"]["experiment_runs"] == 0
+
+
+def _cli_project(tmp_path, monkeypatch):
+    """Boilerplate the other `run_cli_*` tests above repeat: a discoverable
+    project root plus one loop-run workspace, with the cwd pointed at it."""
+    ws = make_loop_run(tmp_path)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agents.yml").write_text("agents: {}\n")
+    (tmp_path / "schemas").mkdir()
+    real = Path(__file__).resolve().parents[2] / "schemas" / "status.yml"
+    (tmp_path / "schemas" / "status.yml").write_text(real.read_text())
+    monkeypatch.chdir(tmp_path)
+    return ws
+
+
+def test_run_charter_shows_the_current_text(tmp_path, monkeypatch):
+    from scieflow.core.run import charter
+    from scieflow.core.run.cli import run as run_group
+
+    ws = _cli_project(tmp_path, monkeypatch)
+    charter.set_text(ws, "Find a better catalyst.")
+    runner = CliRunner()
+    result = runner.invoke(run_group, ["charter", "r1"])
+    assert result.exit_code == 0, result.output
+    assert "Find a better catalyst." in result.output
+
+
+def test_run_charter_set_and_revert(tmp_path, monkeypatch):
+    from scieflow.core.run import charter
+    from scieflow.core.run.cli import run as run_group
+
+    ws = _cli_project(tmp_path, monkeypatch)
+    runner = CliRunner()
+    assert runner.invoke(run_group, ["charter", "r1", "--set", "First."]).exit_code == 0
+    assert runner.invoke(run_group, ["charter", "r1", "--set", "Second."]).exit_code == 0
+    assert charter.current_text(ws) == "Second."
+    assert runner.invoke(run_group, ["charter", "r1", "--revert", "1"]).exit_code == 0
+    assert charter.current_text(ws) == "First."
+
+
+def test_run_charter_reverting_to_a_missing_version_fails_cleanly(tmp_path, monkeypatch):
+    from scieflow.core.run.cli import run as run_group
+
+    _cli_project(tmp_path, monkeypatch)
+    runner = CliRunner()
+    result = runner.invoke(run_group, ["charter", "r1", "--revert", "99"])
+    assert result.exit_code != 0
+    assert "version" in result.output
+    assert "Traceback" not in result.output
