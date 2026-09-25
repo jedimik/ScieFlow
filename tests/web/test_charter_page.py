@@ -94,3 +94,75 @@ def test_adopting_a_proposal_from_the_gate_form(client, project):
     assert post(client, f"/runs/r1/gates/{gate['id']}",
                 answer="adopt").status_code == 303
     assert charter.current_text(ws) == "Adopted from the browser."
+
+
+def test_a_failed_adoption_from_the_page_leaves_the_gate_open(client, project):
+    """A deleted proposal file must not silently record `adopt` — the gate
+    stays open so a human can fix the file and try again."""
+    from scieflow.core import gates
+
+    ws = project.run_dir("r1")
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("Here now, gone later.")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[proposal])
+    proposal.unlink()
+
+    response = post(client, f"/runs/r1/gates/{gate['id']}", answer="adopt")
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/runs/r1?error=")
+    assert charter.current_text(ws) == ""
+    assert gates.get(ws, gate["id"])["state"] == "open"
+
+
+def test_a_proposal_naming_a_path_outside_the_run_is_refused_from_the_page(client, project, tmp_path):
+    from scieflow.core import gates
+
+    ws = project.run_dir("r1")
+    outside = tmp_path / "outside.md"
+    outside.write_text("Not this run's business.")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[outside])
+
+    response = post(client, f"/runs/r1/gates/{gate['id']}", answer="adopt")
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/runs/r1?error=")
+    assert charter.current_text(ws) == ""
+    assert gates.get(ws, gate["id"])["state"] == "open"
+
+
+def test_the_gate_form_shows_the_proposed_charter_text(client, project):
+    """The human answering `adopt` should see what they are adopting, not
+    just the agent-authored question — that is what makes the approval
+    informed."""
+    from scieflow.core import gates
+
+    ws = project.run_dir("r1")
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("<script>alert('x')</script> the real plan")
+    gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                    options=["adopt", "decline"], files=[proposal])
+
+    page = client.get("/runs/r1").text
+    assert "the real plan" in page
+    assert "<script>alert" not in page
+    assert "&lt;script&gt;" in page
+
+
+def test_the_gate_form_degrades_when_the_proposal_cannot_be_previewed(client, project):
+    """A gate whose proposal has already gone missing must still render the
+    page — the preview is best-effort, not load-bearing."""
+    from scieflow.core import gates
+
+    ws = project.run_dir("r1")
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("Gone before anyone looks.")
+    gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                    options=["adopt", "decline"], files=[proposal])
+    proposal.unlink()
+
+    response = client.get("/runs/r1")
+    assert response.status_code == 200

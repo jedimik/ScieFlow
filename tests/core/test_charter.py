@@ -214,3 +214,44 @@ def test_adopting_a_proposal_whose_file_is_gone_is_refused(project_ws):
     with pytest.raises(service.ServiceError, match="proposal"):
         service.answer_gate(project, "r1", gate["id"], "adopt")
     assert charter.current_text(ws) == ""
+    assert gates.get(ws, gate["id"])["state"] == "open", (
+        "a failed adoption must leave the gate open for a retry, not "
+        "permanently recorded as answered")
+
+
+def test_adopting_an_empty_proposal_is_refused_and_leaves_the_gate_open(project_ws):
+    """An empty file is another way a proposal can fail to become a
+    charter — caught before the gate is answered, same as a missing file."""
+    from scieflow.core import gates, service
+    from scieflow.core.run import charter
+
+    project, ws = project_ws
+    proposal = ws / "proposals" / "charter.md"
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text("   ")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[proposal])
+
+    with pytest.raises(service.ServiceError, match="proposal|empty"):
+        service.answer_gate(project, "r1", gate["id"], "adopt")
+    assert charter.current_text(ws) == ""
+    assert gates.get(ws, gate["id"])["state"] == "open"
+
+
+def test_adopting_a_proposal_outside_the_run_is_refused(project_ws, tmp_path):
+    """`files` is written by the agent that opened the gate; a path outside
+    the run must never be read, let alone become the charter every later
+    prompt on the run is pinned with."""
+    from scieflow.core import gates, service
+    from scieflow.core.run import charter
+
+    project, ws = project_ws
+    outside = tmp_path / "outside.md"
+    outside.write_text("Whatever an escaping path can reach.")
+    gate = gates.open_gate(project, ws, "charter-adoption", "Adopt?",
+                           options=["adopt", "decline"], files=[outside])
+
+    with pytest.raises(service.ServiceError, match="escapes"):
+        service.answer_gate(project, "r1", gate["id"], "adopt")
+    assert charter.current_text(ws) == ""
+    assert gates.get(ws, gate["id"])["state"] == "open"

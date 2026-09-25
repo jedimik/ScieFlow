@@ -99,15 +99,28 @@ file inside its own run and open a `charter-adoption` gate naming that file —
 other document a gate points to already travels, as a file the gate's
 `files` names. That gate is marked `requires_human: true`, the same as
 `scope-change` and for the same reason: adopting a charter redefines what the
-run is *for*, so the agent that wrote the proposal cannot also adopt it.
+run is *for*, so the agent that wrote the proposal cannot also adopt it. The
+run page shows the proposed text itself alongside the gate's question, so
+answering "adopt" is an informed decision, not a click on an agent-written
+question with no idea what it commits to.
 
-When a human answers the gate `adopt`, ScieFlow reads the proposal file and
-writes it as a new charter version — attributed to whoever answered, with a
-note recording which gate it came from — after the gate itself is recorded
-as answered, so the decision and the charter can never disagree. Answering
-`decline` (or anything else) leaves the charter untouched. The proposal file
-itself is ordinary run data: if it is missing by the time someone answers,
-adoption is refused rather than silently doing nothing.
+The proposal file must resolve inside the run — the same containment rule
+the artifact browser applies to a path a browser request names, applied here
+to a path an agent's gate record names, since this text is about to become
+the charter pinned to every later prompt the run sends. A path that resolves
+outside the run is refused, never read.
+
+Answering `adopt` does the file read and validation — missing, unreadable,
+empty, or escaping the run are all refused the same way — *before* the gate
+itself is recorded as answered, and only then writes the charter, attributed
+to whoever answered with a note recording which gate it came from. That
+ordering runs both ways: the gate is never recorded as answered by an
+adoption that could not also produce a charter, and the charter is never
+written before the decision to adopt it is on the record. A gate whose
+proposal turns out to be unreadable is refused and stays open, so fixing the
+file and answering again is possible; nothing is left half-decided.
+Answering `decline` (or anything else) never touches the proposal file and
+leaves the charter untouched.
 
 ## History: the event log
 

@@ -229,19 +229,30 @@ every turn.
 
 An agent that wants to change the run's standing goal writes its proposed
 plan to a file inside its own run (for example
-`workspace/<slug>/proposals/charter.md`) and opens a gate naming that file:
+`workspace/<slug>/proposals/charter.md`) and opens a gate naming that file —
+**relative to the run's own directory**, not to wherever `gate open` was
+invoked from, because that is the path an adoption later resolves against:
 
 ```bash
 uv run scieflow gate open <slug> --kind charter-adoption \
     --question "Adopt this plan as the run's charter?" \
-    --option adopt --option decline --file workspace/<slug>/proposals/charter.md
+    --option adopt --option decline --file proposals/charter.md
 ```
+
+An absolute path works too; either way, it must resolve inside the run — a
+path that escapes it (`../..`, or an absolute path elsewhere) is refused,
+never read, the same containment rule the artifact browser applies to a
+browser-requested path.
 
 `charter-adoption` is `requires_human: true`, the same as `scope-change` —
 adopting a charter redefines what the run is *for*, so do not expect to
 answer this gate yourself, even in an autonomous run and even with
 `--in-scope`; `gate answer --as-agent` is refused for any gate marked this
 way. Open the gate, then `gate wait` (or simply stop and let the human find
-it). If a human answers `adopt`, ScieFlow reads your proposal file and writes
-it as the run's new charter version; anything else leaves the charter
-unchanged.
+it) — the run page shows your proposal's full text next to the question, so
+write it for a human to actually read, not just to satisfy a schema. If a
+human answers `adopt`, ScieFlow validates and reads your proposal file
+*before* recording that answer, then writes it as the run's new charter
+version; if the file is missing, unreadable, empty, or outside the run, the
+adoption is refused and the gate stays open rather than being recorded as
+answered. Answering anything else leaves the charter unchanged.
