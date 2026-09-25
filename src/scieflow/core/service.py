@@ -675,14 +675,17 @@ def _opening_prompt(slug: str, goal: str, workflow: str) -> str:
     `menu.resume_prompt` uses to hand a run to a coordinator, so the TUI and
     the browser tell a coordinator the same things about a run.
 
+    No workflow named is not a second convention: it falls back exactly the
+    way `resume_prompt` falls back for a `kind` with no entry in
+    `menu.WORKFLOWS` — a skill reference is still named, just the generic
+    `src/scieflow/research/AGENTS.md` rather than a workflow-specific skill.
+
     The goal is pinned in verbatim, at the end, as data — never templated or
     interpreted.
     """
     from scieflow.core import menu
 
-    if not workflow:
-        return f"Read AGENTS.md. Start the run workspace/{slug}: read its goal.md.\n\nGoal: {goal}"
-    skill = menu.WORKFLOWS[workflow]["skill"]
+    skill = menu.WORKFLOWS.get(workflow, {}).get("skill", "src/scieflow/research/AGENTS.md")
     return (f"Read AGENTS.md and src/scieflow/research/AGENTS.md. Start the run "
             f"workspace/{slug}: read its goal.md and status.yml and continue per "
             f"{skill}.\n\nGoal: {goal}")

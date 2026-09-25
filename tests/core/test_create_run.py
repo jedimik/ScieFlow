@@ -194,6 +194,20 @@ def test_the_first_turn_names_the_workflow_skill(project_with_agent):
     assert "Find a catalyst." in first
 
 
+def test_the_first_turn_falls_back_like_resume_prompt_with_no_workflow(project_with_agent):
+    """`_opening_prompt` must not fork `menu`'s convention: with no workflow
+    named, `menu.resume_prompt` still names a skill — the generic
+    `src/scieflow/research/AGENTS.md` — rather than dropping the reference
+    entirely."""
+    from scieflow.core.run import conversation
+
+    project = project_with_agent
+    service.start_run(project, "r1", "Find a catalyst.", "stub", workflow="")
+    first = conversation.read(project.run_dir("r1"))["turns"][0]["text"]
+    assert "src/scieflow/research/AGENTS.md" in first
+    assert "Find a catalyst." in first
+
+
 def test_start_run_without_an_agent_still_creates_the_run(project):
     """A registry with nothing conversational must still let someone make a
     run — they can choose an agent later on its page."""
@@ -225,8 +239,20 @@ def test_a_very_large_goal_survives_storage_and_the_first_turn(project_with_agen
 
 
 def test_goal_text_is_stored_literally(project_with_agent):
-    """Braces and delimiter-looking text are data, not templating."""
+    """Braces and delimiter-looking text are data, not templating.
+
+    `goal.md` is written by `create_run`, before `_opening_prompt` ever
+    runs — it says nothing about what actually reached the agent. The job
+    record's `argv` is what was truly dispatched (after `compose_prompt` and
+    `build_argv`'s `{prompt}` substitution), so a `.format()`-style bug in
+    between would still pass a check that only reads `goal.md` back.
+    """
+    from scieflow.core import jobs
+
     project = project_with_agent
     goal = "Use {model} and --- and ## headings; mind `backticks`."
-    service.start_run(project, "r1", goal, "stub", workflow="research-loop")
+    result = service.start_run(project, "r1", goal, "stub", workflow="research-loop")
     assert (project.run_dir("r1") / "goal.md").read_text() == goal
+    job = jobs.find(project, result["turn"]["job_id"])
+    assert any(goal in token for token in job.argv), \
+        "the goal did not survive literally into the dispatched job's argv"

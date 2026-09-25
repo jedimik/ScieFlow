@@ -52,8 +52,8 @@
         <code>resume_cmd</code> configured.</span>
     {% else %}
       <select name="agent">
-        <option value="">none — just create the run</option>
-        {% for name in agents %}<option>{{ name }}</option>{% endfor %}
+        <option value=""{% if not form.agent %} selected{% endif %}>none — just create the run</option>
+        {% for name in agents %}<option{% if name == form.agent %} selected{% endif %}>{{ name }}</option>{% endfor %}
       </select>
     {% endif %}
   </label></p>

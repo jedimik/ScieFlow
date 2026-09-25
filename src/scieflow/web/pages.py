@@ -66,6 +66,7 @@ def _start_form(defaults: dict, submitted: dict | None = None) -> dict:
         "slug": submitted.get("slug", ""),
         "goal": submitted.get("goal", ""),
         "workflow": submitted.get("workflow", ""),
+        "agent": submitted.get("agent", ""),
         "approval": submitted.get("approval") or defaults.get("approval", ""),
         "max_iterations": (submitted.get("max_iterations")
                            or defaults.get("max_iterations", "")),
@@ -128,7 +129,8 @@ def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
     was typed.
     """
     project = _project(request)
-    submitted = {"slug": slug, "goal": goal, "workflow": workflow, "approval": approval,
+    submitted = {"slug": slug, "goal": goal, "workflow": workflow, "agent": agent,
+                "approval": approval,
                 "max_iterations": max_iterations or None,
                 "max_experiment_runs": max_experiment_runs or None,
                 "max_wall_minutes": max_wall_minutes or None}

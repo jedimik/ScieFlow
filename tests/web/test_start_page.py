@@ -70,13 +70,17 @@ def test_goal_text_is_escaped_when_the_error_page_echoes_it(client):
 def test_a_refused_submission_keeps_what_was_typed(client, project):
     """Losing a carefully-written goal to a slug typo is the kind of thing
     nobody forgives twice — every field the user set should still be there
-    to fix and resubmit, not just the goal."""
+    to fix and resubmit, not just the goal. `agent` is the field this task
+    added, and a refusal (here, the bad slug — not the agent) must not drop
+    it any more than it drops workflow or approval."""
     response = post(client, "/start", slug="../escape",
                     goal="Three careful paragraphs of context nobody wants to retype.",
-                    workflow="lit-review", approval="autonomous", max_iterations="9")
+                    workflow="lit-review", agent="stub",
+                    approval="autonomous", max_iterations="9")
     page = response.text
     assert "Three careful paragraphs of context nobody wants to retype." in page
     assert '<option value="lit-review" selected>' in page
+    assert "<option selected>stub</option>" in page
     assert "<option selected>autonomous</option>" in page
     assert 'value="9"' in page
 
