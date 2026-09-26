@@ -58,7 +58,7 @@ Five conditions the spec implies that no obvious test would cover. Each has a te
 - Produces:
   `curation.CURATION_FILE = "manuscript/curation/document.yml"`;
   `curation.KINDS = frozenset({"kept", "mine"})`;
-  `curation.read(ws) -> dict` — `{"round": int, "note": str, "blocks": [...], "versions": int}`, empty shape when absent;
+  `curation.read(ws) -> dict` — `{"round": int, "note": str, "blocks": [...], "version": int}`, empty shape when absent;
   `curation.keep(ws, text, *, agent, section, actor="human") -> dict` — appends a `kept` block;
   `curation.add_own(ws, text, actor="human") -> dict` — appends a `mine` block;
   `curation.edit_block(ws, block_id, text, actor="human") -> dict`;
@@ -105,7 +105,7 @@ def ws(tmp_path):
 
 def test_a_run_without_curation_reads_as_empty(ws):
     doc = curation.read(ws)
-    assert doc == {"round": 1, "note": "", "blocks": [], "versions": 0}
+    assert doc == {"round": 1, "note": "", "blocks": [], "version": 0}
 
 
 def test_keeping_a_passage_records_where_it_came_from(ws):
@@ -200,15 +200,15 @@ def test_every_change_is_a_version_and_any_version_restores(ws):
     yesterday's selection back."""
     curation.keep(ws, "the good passage", agent="claude", section="results")
     curation.add_own(ws, "a second thought")
-    trimmed = curation.read(ws)["versions"]
+    trimmed = curation.read(ws)["version"]
     curation.remove_block(ws, curation.read(ws)["blocks"][0]["id"])
     assert [b["text"] for b in curation.read(ws)["blocks"]] == ["a second thought"]
 
     curation.revert(ws, trimmed)
     assert [b["text"] for b in curation.read(ws)["blocks"]] == [
         "the good passage", "a second thought"]
-    assert curation.read(ws)["versions"] > trimmed, "a revert is a new version, not a rewind"
-    assert len(curation.history(ws)) == curation.read(ws)["versions"]
+    assert curation.read(ws)["version"] > trimmed, "a revert is a new version, not a rewind"
+    assert len(curation.history(ws)) == curation.read(ws)["version"]
 
 
 def test_reverting_to_a_version_that_never_existed_is_refused(ws):
@@ -221,7 +221,7 @@ def test_reverting_to_a_version_that_never_existed_is_refused(ws):
 
 def test_a_revert_restores_the_note_too(ws):
     curation.set_note(ws, "the original note")
-    original = curation.read(ws)["versions"]
+    original = curation.read(ws)["version"]
     curation.set_note(ws, "replaced")
     curation.revert(ws, original)
     assert curation.read(ws)["note"] == "the original note"
@@ -277,11 +277,13 @@ CURATION_FILE = "manuscript/curation/document.yml"
 KINDS = frozenset({"kept", "mine"})
 ```
 
-`read` returns `{"round": int, "note": str, "blocks": list, "versions": int}` and treats a missing file as `{"round": 1, "note": "", "blocks": [], "versions": 0}`. Guard a non-mapping document with `CurationError` the way `conversation.py` does, and catch `yaml.YAMLError` as well as `TypeError`/`ValueError` — a hand-edited file must not surface a raw stdlib error.
+`read` returns `{"round": int, "note": str, "blocks": list, "versions": int}` and treats a missing file as `{"round": 1, "note": "", "blocks": [], "version": 0}`. Guard a non-mapping document with `CurationError` the way `conversation.py` does, and catch `yaml.YAMLError` as well as `TypeError`/`ValueError` — a hand-edited file must not surface a raw stdlib error.
 
-Every mutator validates first — actor against `events.ACTORS`, text non-blank, `kind` in `KINDS`, the block id present — then writes inside one `store.update_yaml` closure, then emits. `versions` increments on every write, which is what makes a change visible without diffing.
+Every mutator validates first — actor against `events.ACTORS`, text non-blank, `kind` in `KINDS`, the block id present — then writes inside one `store.update_yaml` closure, then emits. `version` increments on every write, which is what makes a change visible without diffing.
 
-**History and revert follow `charter.py` exactly.** Read its `_append`, `history` and `revert` and use the same storage shape: the document keeps a `versions:` list, each entry a snapshot with `version`, `at`, `actor`, `note`, and here the `blocks` and `note` as they stood. `read(ws)["versions"]` is the *count* (equivalently, the current version number) and `history(ws)` is the list — the same pairing the charter has, so a reader of one understands the other. `revert(version, …)` validates that the version exists, then appends the restored state as a **new** version rather than truncating; `test_every_change_is_a_version_and_any_version_restores` pins that, because a rewind would destroy the record of the trim you are undoing.
+**History and revert follow `charter.py` exactly.** Read its `_append`, `history` and `revert` and use the same storage shape: the document stores `current:` (the current version number) beside a `versions:` list of snapshots, each carrying `n`, `at`, `actor`, and here the `blocks` and `note` as they stood — the same two keys and the same `n` field `charter.py` uses.
+
+**`read(ws)` returns `version` (singular), not `versions`.** On disk `versions` is the snapshot list; a return value using the same word for an integer count would give one key two meanings, and `history(ws)` is how a caller gets the list. `read` is therefore closer to `charter.snapshot` than to `charter.read`. `revert(version, …)` validates that the version exists, then appends the restored state as a **new** version rather than truncating; `test_every_change_is_a_version_and_any_version_restores` pins that, because a rewind would destroy the record of the trim you are undoing.
 
 Like `charter.snapshot`, any function returning both the current state and its history must read the file **once** — a second read could pair one write's count with another write's blocks.
 
@@ -312,8 +314,10 @@ git commit -m "feat(core): the curation document — kept passages, your own tex
 
 **Files:**
 - Create: `src/scieflow/core/drafts.py`
-- Modify: `src/scieflow/core/service.py`
+- Modify: `src/scieflow/core/service.py`, `tests/core/conftest.py`
 - Test: `tests/core/test_drafts.py` (create), `tests/core/test_service.py` (append)
+
+**Move** the `project` fixture from `tests/core/test_service.py` into `tests/core/conftest.py` unchanged, deleting the original. Tasks 3 and 4 add test modules that need the same fixture, and three copies of a 25-line fixture is the verbatim duplication the review rubric exists to catch. Nothing else about it changes, and `test_service.py` picks it up from the conftest.
 
 **Interfaces:**
 - Consumes: `curation.*` from Task 1, `service._ws`, `service.ServiceError`, `web.files.resolve` as the containment model to mirror.
@@ -485,12 +489,12 @@ def test_the_curation_is_restorable_through_the_service(project):
 
     ws = project.run_dir("r1")
     service.add_own_text(project, "r1", "keep me")
-    version = curation.read(ws)["versions"]
+    version = curation.read(ws)["version"]
     service.remove_curation_block(project, "r1", curation.read(ws)["blocks"][0]["id"])
 
     service.revert_curation(project, "r1", version)
     assert [b["text"] for b in curation.read(ws)["blocks"]] == ["keep me"]
-    assert len(service.curation_history(project, "r1")) == curation.read(ws)["versions"]
+    assert len(service.curation_history(project, "r1")) == curation.read(ws)["version"]
 
 
 def test_reverting_to_an_unknown_version_is_a_service_error(project):
@@ -535,6 +539,8 @@ def _inside(root: Path, *parts: str) -> Path:
 ```
 
 `agents(ws)` returns sorted subdirectory names of `ws / DRAFTS_DIR`, or `[]` when the directory is absent — a run that has not drafted yet is an ordinary state, not an error. `sections(ws, agent)` returns sorted `.tex` stems. `read_section(ws, agent, section)` resolves through `_inside`, raises `DraftError` naming the section when it is missing, and reads with `encoding="utf-8"`.
+
+Validate the **raw** section name before appending `.tex` — pass `agent` and `section` through `_inside`'s name check and only then build `f"{section}.tex"`. Appending first would turn `""` into the plausible filename `".tex"` and `".."` into `"...tex"`, so a bad name would be caught incidentally as a missing file rather than refused as a name.
 
 The round readers are the same three functions over `ROUNDS_DIR`. `rounds(ws)` keeps only subdirectories whose name `.isdigit()` and sorts them as `int`, so `10` follows `2` and `document.yml`'s neighbours are ignored.
 
@@ -629,9 +635,13 @@ from scieflow.core.run import conversation, curation
 
 @pytest.fixture
 def curated(project):
-    """A run with an agent that can hold a conversation and a curation to send."""
+    """A run with an agent that can hold a conversation and a curation to send.
+
+    `stub` is the fixture's conversable agent — it carries `family: claude`,
+    `session_cmd` and `resume_cmd`, which `sessions.can_converse` requires.
+    """
     ws = project.run_dir("r1")
-    conversation.set_agent(ws, "echo")
+    conversation.set_agent(ws, "stub")
     curation.keep(ws, "The catalyst degrades above 400 K.",
                   agent="claude", section="results")
     curation.add_own(ws, "State the limitation in the abstract too.")
@@ -689,7 +699,7 @@ def test_the_merge_appears_in_the_conversation(project, curated):
 
 def test_an_empty_curation_is_refused_and_does_not_advance_the_round(project):
     ws = project.run_dir("r1")
-    conversation.set_agent(ws, "echo")
+    conversation.set_agent(ws, "stub")
     with pytest.raises(service.ServiceError, match="nothing"):
         service.merge_round(project, "r1")
     assert curation.read(ws)["round"] == 1
@@ -699,7 +709,7 @@ def test_an_empty_curation_is_refused_and_does_not_advance_the_round(project):
 def test_a_note_alone_is_enough_to_send_a_round(project):
     """You may have nothing worth keeping and still want to say so."""
     ws = project.run_dir("r1")
-    conversation.set_agent(ws, "echo")
+    conversation.set_agent(ws, "stub")
     curation.set_note(ws, "Start the results section again from the data.")
     assert service.merge_round(project, "r1")["round"] == 2
 
@@ -887,7 +897,7 @@ def test_assemble_never_writes_into_the_runs_manuscript(drafted):
     after = sorted(p.relative_to(drafted) for p in (drafted / "manuscript").rglob("*"))
     added = set(after) - set(before)
     assert added, "nothing was written at all"
-    assert all("curation/preview" in str(p) for p in added), (
+    assert all(str(p).startswith("manuscript/curation") for p in added), (
         f"a preview wrote outside its scratch directory: {added}")
 
 
@@ -1188,7 +1198,7 @@ def test_a_trimmed_curation_is_restorable_from_the_page(client, drafted):
     want the earlier selection back — so the versioning must be reachable
     from the only UI this feature has."""
     client.post("/runs/r1/drafts", data={"action": "mine", "text": "keep me"})
-    version = curation.read(drafted)["versions"]
+    version = curation.read(drafted)["version"]
     block = curation.read(drafted)["blocks"][0]["id"]
     client.post("/runs/r1/drafts", data={"action": "remove", "block": block})
     assert curation.read(drafted)["blocks"] == []
