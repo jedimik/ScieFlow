@@ -6,7 +6,9 @@ draft. `assemble` builds a throwaway document around the directory being
 previewed instead, in a scratch dir, never touching the run's manuscript.
 """
 
+import os
 import shutil
+import subprocess
 from datetime import date
 
 import pytest
@@ -247,18 +249,104 @@ def test_preview_of_before_any_compile_is_the_normal_state(project, drafted):
     assert view == {"available": True, "pdf": None, "state": None, "log": ""}
 
 
-def test_a_second_compile_of_the_same_source_is_refused_while_one_runs(project, drafted):
-    """Two `latexmk` processes writing the same `main.aux` under one `cwd`
-    is worse than making the second request wait; disabling the button
-    itself is Task 6's job."""
-    dest = drafted / "manuscript" / "curation" / "preview" / "agent-claude"
-    dest.mkdir(parents=True)
-    jobs_dir = jobs.jobs_dir(project, drafted)
+def _save_fake_preview_job(project, ws, cwd, pid, job_id="01ARZ3NDEKTSV4RRFFQ69G5FAV"):
+    """A `kind="preview"` job record, `state="running"`, as if some earlier
+    compile started it -- without actually running `latexmk`."""
+    jobs_dir = jobs.jobs_dir(project, ws)
     jobs_dir.mkdir(parents=True, exist_ok=True)
-    running = jobs.Job(id="01ARZ3NDEKTSV4RRFFQ69G5FAV", kind="preview", argv=["latexmk"],
-                       cwd=str(dest), run_dir=str(drafted), state="running",
-                       log=str(jobs_dir / "fake.log"))
-    jobs.save(running)
+    job = jobs.Job(id=job_id, kind="preview", argv=["latexmk"], cwd=str(cwd),
+                   run_dir=str(ws), state="running", pid=pid,
+                   log=str(jobs_dir / f"{job_id}.log"))
+    jobs.save(job)
+    return job
 
-    with pytest.raises(service.ServiceError, match="already running"):
+
+def test_a_running_preview_for_a_different_source_refuses_a_new_compile(project, drafted):
+    """Widened from "same source" to "same run": the shared `.texmf-cache`
+    (one tree per run, not per source) means two concurrent compiles of
+    *different* sources would race on it just the same."""
+    other_dest = drafted / "manuscript" / "curation" / "preview" / "round-1"
+    other_dest.mkdir(parents=True)
+    _save_fake_preview_job(project, drafted, other_dest, pid=os.getpid())
+
+    with pytest.raises(service.ServiceError, match="already compiling"):
         service.compile_preview(project, "r1", "agent:claude")
+
+
+def test_the_refusal_message_says_what_is_happening_and_how_to_clear_it(project, drafted):
+    """Task 6 will disable the button; this message is what a person
+    actually sees when they hit the refusal anyway."""
+    other_dest = drafted / "manuscript" / "curation" / "preview" / "round-1"
+    other_dest.mkdir(parents=True)
+    _save_fake_preview_job(project, drafted, other_dest, pid=os.getpid())
+
+    with pytest.raises(service.ServiceError) as exc_info:
+        service.compile_preview(project, "r1", "agent:claude")
+    message = str(exc_info.value)
+    assert "already compiling" in message, "must say what is happening"
+    assert "cancel" in message.lower() and "job list" in message, (
+        "must say how to clear it")
+
+
+def test_a_stale_running_record_does_not_block_a_new_compile(project, drafted, monkeypatch):
+    """THE important test: a `"running"` record survives whatever killed its
+    process -- crashed, OOM-killed, orphaned by a host restart -- with
+    nothing to correct it automatically except `jobs.reconcile`. Without
+    calling that first, this refusal would wedge every future preview of
+    the run shut forever, which is worse than the race it exists to
+    prevent."""
+    dead = subprocess.Popen(["true"])
+    dead.wait()  # guaranteed not alive: reaped, not just exited
+
+    other_dest = drafted / "manuscript" / "curation" / "preview" / "round-1"
+    other_dest.mkdir(parents=True)
+    _save_fake_preview_job(project, drafted, other_dest, pid=dead.pid)
+
+    def spy(prj, argv, **kwargs):
+        raise RuntimeError("reached run_compile -- the stale record did not block it")
+
+    monkeypatch.setattr(preview.jobs, "run_blocking", spy)
+    monkeypatch.setattr(preview.shutil, "which", lambda name: "/usr/bin/latexmk")
+
+    with pytest.raises(RuntimeError, match="reached run_compile"):
+        service.compile_preview(project, "r1", "agent:claude")
+
+
+def test_log_tail_under_the_limit_returns_the_whole_file(tmp_path):
+    p = tmp_path / "main.log"
+    p.write_text("short log\n")
+    assert service._log_tail(p, limit=1000) == "short log\n"
+
+
+def test_log_tail_of_a_missing_log_is_empty(tmp_path):
+    assert service._log_tail(tmp_path / "no-such.log", limit=1000) == ""
+
+
+def test_log_tail_truncates_a_large_log(tmp_path):
+    p = tmp_path / "main.log"
+    p.write_text("X" * 5000 + "TAIL-MARKER")
+    text = service._log_tail(p, limit=100)
+    assert text.startswith("… (log truncated)\n")
+    assert "TAIL-MARKER" in text
+    assert text.count("X") < 5000, "must not be the whole file"
+
+
+def test_log_tail_survives_a_seek_that_splits_a_multibyte_character(tmp_path):
+    """The contract is "never raises" -- `errors="replace"` substitutes
+    U+FFFD for whatever byte sequence the seek happens to land inside, but
+    nothing in the suite pinned that until now."""
+    prefix = "A" * 10
+    multibyte = "日"          # 3 bytes in UTF-8: E6 97 A5
+    suffix = "B" * 10
+    data = (prefix + multibyte + suffix).encode("utf-8")
+    p = tmp_path / "main.log"
+    p.write_bytes(data)
+
+    # `limit` is chosen so `size - limit` lands one byte into `multibyte`'s
+    # 3-byte encoding -- a continuation byte, invalid as a sequence start.
+    split_at = len(prefix.encode("utf-8")) + 1
+    limit = len(data) - split_at
+
+    text = service._log_tail(p, limit=limit)  # must not raise
+    assert text.endswith(suffix)
+    assert "�" in text, "the split byte must be replaced, not dropped or raised on"

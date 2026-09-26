@@ -1085,12 +1085,30 @@ def compile_preview(project: Project, slug: str, source: str) -> dict:
     or the round it belongs to — the page keeps working from its source
     view either way.
 
-    Refused too when a `kind="preview"` compile of this exact `source` is
-    already `running`: two `latexmk` processes writing the same `main.aux`
-    under one `cwd` is worse than making the second request wait. This is
-    the guard, not the whole fix — disabling the compile button while one
-    is in flight is the page's job (Task 6); this is what still holds if
-    two requests get past that anyway.
+    Refused too when any `kind="preview"` compile for this *run* is
+    genuinely still running — not only one for this exact `source`. The
+    scope is the run, not the source, because the cache `run_compile`
+    points `latexmk` at (below) is one shared tree per run: two concurrent
+    compiles of different sources — two agents' drafts, or a draft and a
+    round — would otherwise race on the same `TEXMFVAR`/`TEXMFCONFIG`/
+    `TEXMFHOME` with no locking of our own, risking a spurious failure or a
+    corrupted `.fmt` that then breaks every later compile until someone
+    finds and deletes it. Previewing two drafts of one run at the same
+    moment is not a workflow worth supporting anyway — a compile takes
+    seconds to minutes, and a researcher curating passages reads one draft
+    at a time.
+
+    "Genuinely still running" is checked, not merely recorded: a job's own
+    `state == "running"` field only ever means *this process last saw it
+    running*, and nothing keeps that in sync with reality — if the compile
+    crashed, was OOM-killed, or was orphaned by a host restart, the record
+    stays `"running"` forever with no automatic correction anywhere in this
+    codebase. `jobs.reconcile` exists precisely to fix that (it turns a
+    `"running"` record whose pid is no longer alive into `"lost"`) but had
+    no caller anywhere before this; without calling it first, this refusal
+    would trade the double-click race it closes for a worse failure mode —
+    a dead job wedging every future preview of the run shut, with no UI
+    yet (Task 6) to explain why the button refuses or to cancel it.
     """
     ws = _ws(project, slug)
     if not preview.available():
@@ -1101,9 +1119,12 @@ def compile_preview(project: Project, slug: str, source: str) -> dict:
         dest = _preview_dest(ws, source)
     except drafts.DraftError as exc:
         raise ServiceError(str(exc)) from exc
-    if any(j.kind == "preview" and j.cwd == str(dest) and j.state == "running"
-           for j in jobs.list_jobs(project, ws)):
-        raise ServiceError(f"a compile of {source} is already running; wait for it to finish")
+
+    jobs.reconcile(project, ws)
+    if any(j.kind == "preview" and j.state == "running" for j in jobs.list_jobs(project, ws)):
+        raise ServiceError(
+            "a preview for this run is already compiling; if it looks stuck, "
+            "cancel it from the run's job list")
     try:
         main = preview.assemble(ws, source, dest)
     except (preview.PreviewError, drafts.DraftError) as exc:

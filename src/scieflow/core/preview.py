@@ -243,7 +243,14 @@ def run_compile(project, ws: Path, main: Path, writable: list[Path]) -> jobs.Job
     rather than one per source: kpathsea's own font/format cache is
     designed to be shared, and a fresh tree per agent draft and per merge
     round would otherwise pile up, unpruned, in the researcher's own run
-    directory for no benefit.
+    directory for no benefit. Sharing it this way is only safe because
+    `service.compile_preview` refuses to start a second preview compile
+    anywhere in this run while one is genuinely still running — two
+    concurrent `latexmk` processes racing on this same cache with no
+    locking of our own would risk a corrupted `.fmt` file breaking every
+    later compile. If that per-run serialization is ever loosened, this
+    cache needs to go back to being per-`main.parent` (as it was before),
+    not stay shared.
     """
     main = Path(main)
     ws = Path(ws)
