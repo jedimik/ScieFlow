@@ -31,6 +31,13 @@ from scieflow.core import events, store
 CURATION_FILE = "manuscript/curation/document.yml"
 KINDS = frozenset({"kept", "mine"})
 
+# `as_text` wraps each block's body between these two lines rather than
+# altering the body itself — see `_delimited`'s docstring. Exported as
+# constants, not inline literals, because whatever composes the merge
+# prompt from `as_text`'s output (a later task) needs to name them too.
+PASSAGE_OPEN = "<<<passage"
+PASSAGE_CLOSE = "passage>>>"
+
 _UNSET = object()
 
 
@@ -331,28 +338,40 @@ def revert(ws: Path, version: int, actor: str = "human") -> dict:
     return _doc(appended)
 
 
-def _fenced(text: str) -> str:
-    """Indent every line of a block's body with `> `.
+def _delimited(text: str) -> str:
+    """Wrap a block's body between `PASSAGE_OPEN` and `PASSAGE_CLOSE`,
+    unaltered in between.
 
-    A passage is someone else's text, and nothing here reads it — but it can
-    still contain a line shaped exactly like one of this function's own
-    headings, such as `## Written by the author`. Indenting reserves the
-    heading shape for lines this function writes itself, so a kept passage
-    cannot forge the provenance framing the merging agent relies on.
+    An earlier version of this function indented every line with `> `,
+    which broke the one property this module exists to keep: a kept
+    passage is the exact words the author chose, reusable byte-for-byte as
+    LaTeX, and `"> "` stitched onto every line meant a multi-line passage
+    no longer appeared anywhere in `as_text`'s output as the contiguous
+    text it actually is.
+
+    Delimiter lines around the body, instead of a prefix inside it, keep
+    the body untouched for every input — including a passage that happens
+    to contain a line shaped exactly like one of this module's own
+    headings, such as `## Written by the author`: sitting between
+    `PASSAGE_OPEN` and `PASSAGE_CLOSE` it cannot be mistaken for a heading,
+    without the body needing to change at all to make that true.
     """
-    if not text:
-        return text
-    return "\n".join(f"> {line}" for line in text.splitlines())
+    return f"{PASSAGE_OPEN}\n{text}\n{PASSAGE_CLOSE}"
 
 
 def as_text(ws: Path) -> str:
     """Render the document for a merge prompt: each block under a heading
-    naming where it came from, then the note.
+    naming where it came from, its body between `PASSAGE_OPEN` and
+    `PASSAGE_CLOSE`, then the note.
 
-    Every passage and the note are inserted verbatim — nothing here escapes,
-    templates, or `.format()`s them. A `.format()`-shaped bug anywhere
-    downstream would mangle a passage that contains `{prompt}`-like braces;
-    this function is not that bug.
+    Every passage and the note are inserted verbatim — nothing here
+    escapes, templates, `.format()`s, or otherwise touches a single byte of
+    them, including their newlines. The delimiters exist precisely so that
+    can be said without qualification: they are what makes a passage's
+    provenance unforgeable (a line inside it that reads like
+    `## Written by the author` still can't be mistaken for one, because it
+    sits inside `PASSAGE_OPEN`/`PASSAGE_CLOSE`), without needing to alter
+    the passage itself to achieve that.
     """
     doc = read(ws)
     parts = []
@@ -365,7 +384,7 @@ def as_text(ws: Path) -> str:
                          f"({block.get('section', '')}, round {block.get('round', '')})")
         else:  # kind == "mine"
             parts.append("## Written by the author")
-        parts.append(_fenced(block.get("text", "")))
+        parts.append(_delimited(block.get("text", "")))
     if doc["note"]:
         parts.append("## Note")
         parts.append(doc["note"])
