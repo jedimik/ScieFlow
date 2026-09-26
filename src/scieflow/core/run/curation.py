@@ -383,24 +383,28 @@ def _wrapped(text: str, open_line: str, close_line: str) -> str:
 
 
 def render(ws: Path) -> dict:
-    """`{"text", "token"}` for a merge prompt — from one read of the document.
+    """`{"round", "note", "blocks", "version", "text", "token"}` for a merge
+    prompt — everything `read` returns, plus the rendered text and the
+    boundary token that render used, all from one read of the document.
 
     `text` is exactly what `as_text` returns; `token` is the boundary token
-    that render used, the same value `_boundary_token` chose while building
-    it. Whatever composes a merge prompt needs both: the rendered curation,
-    and the one token it may declare as authoritative in its own framing,
-    outside that text. Getting them from two separate calls — `as_text`
-    for the text, then re-deriving a token from a second `read(ws)` — is
-    exactly the two-read hazard `charter.snapshot`'s docstring names: a
-    write landing between the two reads could pair one render's text with
-    a different render's token, and nothing would notice. This is the one
-    place that computes both from a single read, so they cannot disagree.
+    `_boundary_token` chose while building it. Whatever composes a merge
+    prompt needs all of this together: the round to write output under (and
+    to decide whether there is anything to merge at all), the rendered
+    curation, and the one token it may declare as authoritative in its own
+    framing, outside that text. Getting these from separate calls — `read`
+    for the round, `as_text` for the text, a second `read` to re-derive a
+    token — is exactly the two-read hazard `charter.snapshot`'s docstring
+    names: a write landing between two reads could pair one round number
+    with a different render's text, or one render's text with a different
+    render's token, and nothing would notice. This is the one place that
+    computes all of it from a single read, so none of it can disagree.
     """
     doc = read(ws)
     texts = [block.get("text", "") for block in doc["blocks"]]
     content = "\n".join([*texts, doc["note"]] if doc["note"] else texts)
     token = _boundary_token(content)
-    return {"text": _render_document(doc, token), "token": token}
+    return {**doc, "text": _render_document(doc, token), "token": token}
 
 
 def _render_document(doc: dict, token: str) -> str:
@@ -460,11 +464,16 @@ def _render_document(doc: dict, token: str) -> str:
 
 
 def as_text(ws: Path) -> str:
-    """Render the document for a merge prompt — see `render`, which this
-    calls for its `text`. A caller that also needs the boundary token
-    `as_text` used (to state it, authoritatively, outside the rendered
-    text) should call `render` directly rather than calling `as_text` and
-    then re-deriving the token from a second read: see `render`'s docstring
-    for why that second read is unsafe.
+    """The rendered curation text alone — see `render`, which this calls and
+    returns `["text"]` from.
+
+    `service.merge_round` (production) does not call this: it calls
+    `render` directly, because it also needs `render`'s `token` (and
+    `round`) from that same read, and calling `as_text` for the text plus a
+    second `read`/`render` to get the token would reintroduce the two-read
+    hazard `render`'s docstring describes. `as_text` exists for callers
+    that only want the text — tests, and anything just displaying or
+    inspecting the document — where no token is needed and the risk of
+    pairing it with a stale one doesn't arise.
     """
     return render(ws)["text"]
