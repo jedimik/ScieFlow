@@ -599,3 +599,34 @@ def test_curation_refusals_reach_the_caller_as_service_errors(project):
         service.add_own_text(project, "r1", "   ")
     with pytest.raises(service.ServiceError, match="block"):
         service.edit_curation_block(project, "r1", "nope", "text")
+
+
+def test_workbench_tolerates_an_escaping_symlink_among_a_drafts_sections(project, tmp_path):
+    """A drafts directory the page reads is not a directory this run wrote
+    unsupervised — a symlink one of its files happens to be must not make
+    the whole workbench view fail."""
+    ws = project.run_dir("r1")
+    d = ws / "manuscript" / "drafts" / "claude"
+    d.mkdir(parents=True)
+    (d / "results.tex").write_text("ok")
+    secret = tmp_path / "secret.tex"
+    secret.write_text("not yours")
+    (d / "sneaky.tex").symlink_to(secret)
+
+    view = service.workbench(project, "r1")
+    assert view["sections"] == ["results"]
+    assert "sneaky" not in view["drafts"]["claude"]
+
+
+def test_workbench_turns_a_draft_error_into_a_service_error(project, monkeypatch):
+    ws = project.run_dir("r1")
+    d = ws / "manuscript" / "drafts" / "claude"
+    d.mkdir(parents=True)
+    (d / "results.tex").write_text("ok")
+
+    def boom(*_args, **_kwargs):
+        raise service.drafts.DraftError("boom")
+
+    monkeypatch.setattr(service.drafts, "read_section", boom)
+    with pytest.raises(service.ServiceError):
+        service.workbench(project, "r1")

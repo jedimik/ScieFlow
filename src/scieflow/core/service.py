@@ -759,39 +759,64 @@ def start_run(project: Project, slug: str, goal: str, agent: str = "", *,
 def workbench(project: Project, slug: str) -> dict:
     """Everything the workbench page shows, in one read: what each agent
     drafted, what each completed merge round produced, and the curation
-    document built from them — so a template does no I/O of its own."""
+    document built from them — so a template does no I/O of its own.
+
+    `drafts.sections(ws, a)` is computed once per agent and reused for both
+    the flat `sections` union and the `drafts` body — computing it twice (a
+    prior defect) let a file that appeared between the two listings land in
+    `drafts` without ever showing up in `sections`.
+
+    `drafts.DraftError` is translated to `ServiceError` here like every
+    other `drafts.*`/`curation.*` call from this layer: the listing
+    functions (`sections`, `round_sections`) already filter out what they
+    can, but `read_section`/`read_round_section` are still called for every
+    name just listed, and an agent or round *directory* itself resolving
+    outside the run (not one of its files) is only ever caught there.
+    """
     ws = _ws(project, slug)
-    agents = drafts.agents(ws)
-    sections = sorted({s for a in agents for s in drafts.sections(ws, a)})
-    return {
-        "agents": agents,
-        "sections": sections,
-        "drafts": {a: {s: drafts.read_section(ws, a, s)
-                       for s in drafts.sections(ws, a)} for a in agents},
-        "rounds": {n: {s: drafts.read_round_section(ws, n, s)
-                       for s in drafts.round_sections(ws, n)}
-                   for n in drafts.rounds(ws)},
-        "curation": curation.read(ws),
-    }
+    try:
+        agents = drafts.agents(ws)
+        agent_sections = {a: drafts.sections(ws, a) for a in agents}
+        sections = sorted({s for secs in agent_sections.values() for s in secs})
+        return {
+            "agents": agents,
+            "sections": sections,
+            "drafts": {a: {s: drafts.read_section(ws, a, s) for s in secs}
+                       for a, secs in agent_sections.items()},
+            "rounds": {n: {s: drafts.read_round_section(ws, n, s)
+                           for s in drafts.round_sections(ws, n)}
+                       for n in drafts.rounds(ws)},
+            "curation": curation.read(ws),
+        }
+    except drafts.DraftError as exc:
+        raise ServiceError(str(exc)) from exc
 
 
 def keep_passage(project: Project, slug: str, text: str, agent: str, section: str,
                  actor: str = "human") -> dict:
     """Keep a passage from an agent's draft, with its provenance.
 
-    `agent` and `section` arrive from a web form. `curation.keep` only ever
-    stores them as text — it builds no path from them — but each is still
-    run through `_resolve_in_run`'s escape guard first, the same one
-    `_proposal_path` already applies to a gate's file, so a value crafted to
-    look like a path traversal is refused here rather than recorded as if
-    it were an ordinary name.
+    `agent` and `section` arrive from a web form and `curation.keep` stores
+    them only as text — it builds no path from them — but a value that
+    could never be a genuine name is still refused here, through
+    `drafts.check_name`, the same rule a reader enforces on the file side.
+    Path containment (`_resolve_in_run`) is deliberately not used for this:
+    it answers a different question and disagrees with `check_name` in both
+    directions — it would accept `"a/b"` or `"manuscript/drafts/claude"` as
+    containment-safe even though no reader would ever treat either as one
+    name, and it would refuse a blank value with "path escapes the run"
+    instead of `curation.keep`'s own, much clearer refusal for that exact
+    case. So a blank `agent`/`section` is left for `curation.keep` to
+    reject in its own words below; `check_name` only ever runs on a value
+    that has something in it.
     """
     ws = _ws(project, slug)
-    for raw in (agent, section):
-        try:
-            _resolve_in_run(ws, raw)
-        except ValueError as exc:
-            raise ServiceError(str(exc)) from exc
+    for name in (agent, section):
+        if name and str(name).strip():
+            try:
+                drafts.check_name(name)
+            except drafts.DraftError as exc:
+                raise ServiceError(str(exc)) from exc
     try:
         return curation.keep(ws, text, agent=agent, section=section, actor=actor)
     except curation.CurationError as exc:

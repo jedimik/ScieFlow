@@ -96,8 +96,69 @@ def test_source_dir_resolves_both_kinds(ws):
 @pytest.mark.parametrize("bad_source", [
     "agent:../../etc", "round:../../etc", "round:abc", "round:-1", "round:",
     "agent:", "claude", "", "agent:claude:extra", "file:/etc/passwd",
+    "round:١",  # Arabic-Indic "1" — isdigit() but not isascii()
 ])
 def test_a_source_that_is_not_a_draft_or_a_round_is_refused(ws, bad_source):
     """`source` arrives from a form and selects a directory to compile."""
     with pytest.raises(drafts.DraftError):
         drafts.source_dir(ws, bad_source)
+
+
+def test_a_symlink_escape_is_excluded_from_sections_listing(ws, tmp_path):
+    """The same escape `test_a_symlink_out_of_the_run_is_refused` catches at
+    `read_section` must not reach the listing that feeds it either — a
+    caller iterating `sections()` and calling `read_section` for each name
+    must never be handed a name that call would then refuse."""
+    secret = tmp_path / "secret.tex"
+    secret.write_text("not yours")
+    (ws / "manuscript" / "drafts" / "claude" / "sneaky.tex").symlink_to(secret)
+    assert "sneaky" not in drafts.sections(ws, "claude")
+
+
+def test_source_dir_refuses_a_symlinked_agent_directory_that_escapes(ws, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (ws / "manuscript" / "drafts" / "evil").symlink_to(outside)
+    with pytest.raises(drafts.DraftError):
+        drafts.source_dir(ws, "agent:evil")
+
+
+def test_source_dir_refuses_a_symlink_that_resolves_to_the_drafts_root(ws):
+    """Containment must refuse the root itself, not just anything below it —
+    a symlink that resolves back to `manuscript/drafts/` is no agent's
+    draft, the same way `web.files.resolve` refuses the run root unless
+    told otherwise."""
+    (ws / "manuscript" / "drafts" / "self").symlink_to(ws / "manuscript" / "drafts")
+    with pytest.raises(drafts.DraftError):
+        drafts.source_dir(ws, "agent:self")
+
+
+def test_a_symlink_cycle_is_a_draft_error_not_a_runtime_error(ws):
+    """`Path.resolve()` raises a bare `RuntimeError` on a symlink loop —
+    `_inside` must catch that itself rather than let it reach a caller that
+    only expects `DraftError`."""
+    loop = ws / "manuscript" / "drafts" / "claude" / "loop.tex"
+    loop.symlink_to(loop)
+    with pytest.raises(drafts.DraftError):
+        drafts.read_section(ws, "claude", "loop")
+
+
+def test_a_name_containing_a_nul_byte_is_refused(ws):
+    """`Path.resolve()` raises a bare `ValueError` ("embedded null byte") on
+    a NUL in a path component — refused as a name before that can happen."""
+    with pytest.raises(drafts.DraftError):
+        drafts.read_section(ws, "claude", "a\x00b")
+
+
+def test_a_non_ascii_digit_round_directory_does_not_crash_rounds(ws):
+    """`"²".isdigit()` is True but `int("²")` raises — the
+    function whose job is to *ignore* a non-round directory must not crash
+    on one instead."""
+    (ws / "manuscript" / "curation" / "rounds" / "²").mkdir(parents=True)
+    assert drafts.rounds(ws) == []
+
+
+def test_a_non_ascii_digit_round_directory_does_not_duplicate_a_real_round(ws):
+    (ws / "manuscript" / "curation" / "rounds" / "1").mkdir(parents=True)
+    (ws / "manuscript" / "curation" / "rounds" / "١").mkdir(parents=True)
+    assert drafts.rounds(ws) == [1]
