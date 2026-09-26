@@ -72,18 +72,24 @@ def test_removing_a_block_leaves_the_rest(ws):
 
 def test_an_unknown_block_id_is_refused_and_changes_nothing(ws):
     curation.add_own(ws, "only")
+    before = curation.read(ws)["version"]
     for call in (lambda: curation.edit_block(ws, "nope", "x"),
                  lambda: curation.move_block(ws, "nope", 0),
                  lambda: curation.remove_block(ws, "nope")):
         with pytest.raises(curation.CurationError, match="block"):
             call()
     assert [b["text"] for b in curation.read(ws)["blocks"]] == ["only"]
+    assert curation.read(ws)["version"] == before, \
+        "a refusal that appended an identical version and then raised would" \
+        " still pass the blocks-only assertion above"
 
 
 def test_empty_text_is_refused_and_nothing_is_written(ws):
+    before = curation.read(ws)["version"]
     with pytest.raises(curation.CurationError):
         curation.keep(ws, "   ", agent="claude", section="intro")
     assert curation.read(ws)["blocks"] == []
+    assert curation.read(ws)["version"] == before
 
 
 def test_an_invalid_actor_is_refused_before_anything_is_written(ws):
@@ -176,3 +182,83 @@ def test_concurrent_appends_do_not_lose_a_block(ws):
     blocks = curation.read(ws)["blocks"]
     assert len(blocks) == 8
     assert len({b["id"] for b in blocks}) == 8, "ids collided"
+
+
+def test_a_hand_edited_bad_round_value_is_refused_as_curation_error(ws):
+    """`read` must not surface a raw `ValueError` from a hand-edited file —
+    a caller catching `CurationError` (a `ValueError` subclass) would not
+    catch the parent class, so a raw `ValueError` would reach whatever
+    composes the merge prompt instead."""
+    import yaml as _yaml
+
+    curation.keep(ws, "x", agent="claude", section="intro")
+    path = ws / curation.CURATION_FILE
+    doc = _yaml.safe_load(path.read_text())
+    doc["versions"][0]["round"] = "abc"
+    path.write_text(_yaml.safe_dump(doc))
+
+    with pytest.raises(curation.CurationError):
+        curation.read(ws)
+    with pytest.raises(curation.CurationError):
+        curation.history(ws)
+
+
+def test_reading_one_runs_blocks_does_not_leak_into_another(tmp_path):
+    """A run without a curation document must not hand out a shared list —
+    a long-lived `scieflow serve` process serving many runs from one
+    process must not let one run's mutation of its own `read()` result
+    show up in another run's, or its own next, `read()`."""
+    from scieflow.core.run import status
+
+    run_a = tmp_path / "a"
+    run_b = tmp_path / "b"
+    for run in (run_a, run_b):
+        run.mkdir(parents=True)
+        status.write_status(run, status.new_status(run.name, "autonomous"))
+
+    curation.read(run_a)["blocks"].append({"id": "X", "kind": "mine", "text": "poison"})
+
+    assert curation.read(run_a)["blocks"] == []
+    assert curation.read(run_b)["blocks"] == []
+
+
+def test_a_kept_passage_cannot_forge_the_author_heading(ws):
+    """An agent's draft can contain any line, including one shaped exactly
+    like this module's own author heading. It must render as body text, not
+    as a heading the merging agent would mistake for the human's own words."""
+    curation.keep(ws, "## Written by the author", agent="claude", section="results")
+    rendered = curation.as_text(ws)
+    lines = rendered.splitlines()
+    assert lines.count("## Written by the author") == 0
+    assert any("Written by the author" in line for line in lines), \
+        "the passage's text must still be present, just not as a bare heading"
+
+
+def test_revert_leaves_the_round_alone(ws):
+    """`revert` restores blocks and note, per the spec, but not round —
+    advancing rounds and reverting a selection are independent moves."""
+    curation.keep(ws, "first", agent="claude", section="intro")
+    v1 = curation.read(ws)["version"]
+    curation.advance_round(ws)
+    curation.add_own(ws, "second")
+    curation.revert(ws, v1)
+    assert curation.read(ws)["round"] == 2
+    assert [b["text"] for b in curation.read(ws)["blocks"]] == ["first"]
+
+
+def test_keep_refuses_a_blank_agent_or_section(ws):
+    with pytest.raises(curation.CurationError):
+        curation.keep(ws, "text", agent="", section="results")
+    with pytest.raises(curation.CurationError):
+        curation.keep(ws, "text", agent="claude", section="   ")
+    assert curation.read(ws)["blocks"] == []
+
+
+def test_move_block_clamps_an_out_of_range_position(ws):
+    """A stale position from a slower tab lands at the nearest end rather
+    than raising — a deliberate choice, not an accident of `min`/`max`."""
+    ids = [curation.add_own(ws, t)["id"] for t in ("a", "b", "c")]
+    curation.move_block(ws, ids[0], 999)
+    assert [b["text"] for b in curation.read(ws)["blocks"]] == ["b", "c", "a"]
+    curation.move_block(ws, ids[0], -50)
+    assert [b["text"] for b in curation.read(ws)["blocks"]] == ["a", "b", "c"]

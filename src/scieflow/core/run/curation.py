@@ -31,7 +31,7 @@ from scieflow.core import events, store
 CURATION_FILE = "manuscript/curation/document.yml"
 KINDS = frozenset({"kept", "mine"})
 
-_EMPTY_SNAPSHOT = {"round": 1, "note": "", "blocks": []}
+_UNSET = object()
 
 
 class CurationError(ValueError):
@@ -69,58 +69,77 @@ def _require_block(blocks: list, block_id: str) -> int:
     raise CurationError(f"no block {block_id!r} in this curation document")
 
 
-def _snapshot_of(raw: dict) -> dict:
-    """The current version's round/note/blocks, from an already-loaded
-    document — never a second file read."""
-    if not raw:
-        return dict(_EMPTY_SNAPSHOT)
-    versions = list(raw.get("versions") or [])
-    current_n = raw.get("current", 0)
-    match = next((v for v in versions if v.get("n") == current_n), None)
+def _load(ws: Path, raw: dict | None = _UNSET) -> dict:
+    """Load, validate and coerce the on-disk document into one safe shape:
+    `{"current": int, "versions": [...]}`, with every version's `n` and
+    `round` as ints, `note` as a str, `blocks` as a list.
+
+    `read`, `history` and `_mutate`'s `bump` each used to re-implement
+    "read, wrap `yaml.YAMLError`, assert it's a mapping" on their own, which
+    is how a fourth case — a hand-edited `round: abc` — slipped through all
+    three and reached a caller as a raw `ValueError` instead of
+    `CurationError`. This is the one place that wraps a `yaml.YAMLError`, a
+    non-mapping document, and a bad `int()` coercion, so none of them can
+    surface as a stdlib error to whatever composes the merge prompt.
+
+    Pass `raw` when the document has already been read under the lock
+    (`_mutate`'s `bump`, which gets it from `store.update_yaml`) so this
+    does not read the file a second time — `read` and `history` still each
+    call this exactly once, so the single-read guarantee holds either way.
+    """
+    if raw is _UNSET:
+        try:
+            raw = store.read_yaml(_path(ws), default=None)
+        except yaml.YAMLError as exc:
+            raise CurationError(
+                f"{_path(ws)}: cannot parse the curation document: {exc}") from exc
+    if raw and not isinstance(raw, dict):
+        raise CurationError(
+            f"{_path(ws)}: curation document must be a mapping, got {type(raw).__name__}")
+    raw = raw or {}
+    try:
+        versions = [{**v, "n": int(v.get("n", 0)), "round": int(v.get("round", 1)),
+                    "note": str(v.get("note", "")), "blocks": list(v.get("blocks") or [])}
+                    for v in (raw.get("versions") or [])]
+        current = int(raw.get("current", 0) or 0)
+    except (TypeError, ValueError) as exc:
+        raise CurationError(f"{_path(ws)}: malformed curation document: {exc}") from exc
+    return {"current": current, "versions": versions}
+
+
+def _snapshot_of(loaded: dict) -> dict:
+    """A fresh `{"round", "note", "blocks"}` for the current version.
+
+    Always a new dict with a new `blocks` list, never a shared literal —
+    `read()` hands this straight to callers, and a caller mutating what it
+    got back (a long-lived `scieflow serve` process handling one request
+    after another) must not be able to leak a block into another run or
+    another call.
+    """
+    match = next((v for v in loaded["versions"] if v.get("n") == loaded["current"]), None)
     if match is None:
-        return dict(_EMPTY_SNAPSHOT)
-    return {"round": int(match.get("round", 1)), "note": str(match.get("note", "")),
-            "blocks": list(match.get("blocks") or [])}
+        return {"round": 1, "note": "", "blocks": []}
+    return {"round": match["round"], "note": match["note"], "blocks": list(match["blocks"])}
 
 
 def read(ws: Path) -> dict:
     """`{"round", "note", "blocks", "version"}` — from one read of the file.
 
     A run without a curation document reads as empty: round 1, no note, no
-    blocks, version 0. A `document.yml` that is not a mapping, or fails to
-    parse, is refused here as `CurationError` rather than surfacing as a raw
-    `yaml.YAMLError` or `AttributeError` to whatever composes the merge
-    prompt from this.
+    blocks, version 0.
 
     This returns `version`, singular — the current version *number*. The
     snapshot list itself is `versions`, on disk and from `history()`; a
     return value here using the same word for a count would give one key
     two meanings.
     """
-    try:
-        raw = store.read_yaml(_path(ws), default=None)
-    except yaml.YAMLError as exc:
-        raise CurationError(f"{_path(ws)}: cannot parse the curation document: {exc}") from exc
-    if raw and not isinstance(raw, dict):
-        raise CurationError(
-            f"{_path(ws)}: curation document must be a mapping, got {type(raw).__name__}")
-    snapshot = _snapshot_of(raw or {})
-    version = 0 if not raw else int((raw or {}).get("current", 0))
-    return {**snapshot, "version": version}
+    loaded = _load(ws)
+    return {**_snapshot_of(loaded), "version": loaded["current"]}
 
 
 def history(ws: Path) -> list[dict]:
     """Every version, oldest first — the order a merge-round narrative reads in."""
-    try:
-        raw = store.read_yaml(_path(ws), default=None)
-    except yaml.YAMLError as exc:
-        raise CurationError(f"{_path(ws)}: cannot parse the curation document: {exc}") from exc
-    if not raw:
-        return []
-    if not isinstance(raw, dict):
-        raise CurationError(
-            f"{_path(ws)}: curation document must be a mapping, got {type(raw).__name__}")
-    return sorted((raw.get("versions") or []), key=lambda v: v.get("n", 0))
+    return sorted(_load(ws)["versions"], key=lambda v: v.get("n", 0))
 
 
 def _mutate(ws: Path, actor: str,
@@ -140,12 +159,9 @@ def _mutate(ws: Path, actor: str,
     appended: dict = {}
 
     def bump(raw: dict) -> dict:
-        if raw and not isinstance(raw, dict):
-            raise CurationError(
-                f"{_path(ws)}: curation document must be a mapping, got {type(raw).__name__}")
-        raw = raw or {}
-        versions = list(raw.get("versions") or [])
-        snapshot = _snapshot_of(raw)
+        loaded = _load(ws, raw)
+        versions = list(loaded["versions"])
+        snapshot = _snapshot_of(loaded)
         round_, note, blocks = fn(snapshot)
         number = max((v.get("n", 0) for v in versions), default=0) + 1
         appended.update({"n": number, "at": _now(), "actor": actor,
@@ -315,6 +331,20 @@ def revert(ws: Path, version: int, actor: str = "human") -> dict:
     return _doc(appended)
 
 
+def _fenced(text: str) -> str:
+    """Indent every line of a block's body with `> `.
+
+    A passage is someone else's text, and nothing here reads it — but it can
+    still contain a line shaped exactly like one of this function's own
+    headings, such as `## Written by the author`. Indenting reserves the
+    heading shape for lines this function writes itself, so a kept passage
+    cannot forge the provenance framing the merging agent relies on.
+    """
+    if not text:
+        return text
+    return "\n".join(f"> {line}" for line in text.splitlines())
+
+
 def as_text(ws: Path) -> str:
     """Render the document for a merge prompt: each block under a heading
     naming where it came from, then the note.
@@ -327,12 +357,15 @@ def as_text(ws: Path) -> str:
     doc = read(ws)
     parts = []
     for block in doc["blocks"]:
-        if block.get("kind") == "kept":
+        kind = block.get("kind")
+        if kind not in KINDS:
+            parts.append(f"## Unrecognized block kind {kind!r} (not attributed)")
+        elif kind == "kept":
             parts.append(f"## Kept from {block.get('agent', '')} "
                          f"({block.get('section', '')}, round {block.get('round', '')})")
-        else:
+        else:  # kind == "mine"
             parts.append("## Written by the author")
-        parts.append(block.get("text", ""))
+        parts.append(_fenced(block.get("text", "")))
     if doc["note"]:
         parts.append("## Note")
         parts.append(doc["note"])
