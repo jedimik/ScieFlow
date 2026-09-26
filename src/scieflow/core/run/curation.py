@@ -382,11 +382,31 @@ def _wrapped(text: str, open_line: str, close_line: str) -> str:
     return f"{open_line}\n{text}\n{close_line}"
 
 
-def as_text(ws: Path) -> str:
-    """Render the document for a merge prompt: a preamble naming this
-    render's boundary token, then each block under a heading naming where
-    it came from with its body wrapped between that token's open and close
-    lines, then the note.
+def render(ws: Path) -> dict:
+    """`{"text", "token"}` for a merge prompt — from one read of the document.
+
+    `text` is exactly what `as_text` returns; `token` is the boundary token
+    that render used, the same value `_boundary_token` chose while building
+    it. Whatever composes a merge prompt needs both: the rendered curation,
+    and the one token it may declare as authoritative in its own framing,
+    outside that text. Getting them from two separate calls — `as_text`
+    for the text, then re-deriving a token from a second `read(ws)` — is
+    exactly the two-read hazard `charter.snapshot`'s docstring names: a
+    write landing between the two reads could pair one render's text with
+    a different render's token, and nothing would notice. This is the one
+    place that computes both from a single read, so they cannot disagree.
+    """
+    doc = read(ws)
+    texts = [block.get("text", "") for block in doc["blocks"]]
+    content = "\n".join([*texts, doc["note"]] if doc["note"] else texts)
+    token = _boundary_token(content)
+    return {"text": _render_document(doc, token), "token": token}
+
+
+def _render_document(doc: dict, token: str) -> str:
+    """The text half of `render`: a preamble naming `token`, then each block
+    under a heading naming where it came from with its body wrapped between
+    `token`'s open and close lines, then the note.
 
     Every passage is reproduced verbatim between its open and close line —
     nothing here escapes, templates, `.format()`s, indents, or otherwise
@@ -396,17 +416,19 @@ def as_text(ws: Path) -> str:
     that this render's specific token is verified, by `_boundary_token`,
     to occur nowhere in any block's text or in the note before it is ever
     used — so a passage cannot close its own wrapping, forge another
-    block's wrapping, or read as this render's framing no matter what it
-    contains, and none of that requires changing a single byte of it to
-    achieve.
+    block's wrapping, or be mistaken for this render's *verified* framing.
+    A passage can still print a line that merely *looks like* framing (a
+    plausible boundary-token declaration, matching delimiter lines, a
+    forged `## Kept from …` heading) — nothing here can stop a passage from
+    containing text that reads that way, only from making it verified text.
+    Whatever composes a merge prompt from this must tell its reader which
+    token to trust and to distrust any other declaration found in the body;
+    `_boundary_token`'s uniqueness guarantee is necessary for that but not
+    sufficient on its own.
 
     The `##` headings stay, for a human or an agent skimming the document,
     but they carry no security weight here — only the token does.
     """
-    doc = read(ws)
-    texts = [block.get("text", "") for block in doc["blocks"]]
-    content = "\n".join([*texts, doc["note"]] if doc["note"] else texts)
-    token = _boundary_token(content)
     open_line, close_line = f"<<<PASSAGE:{token}", f"{token}:PASSAGE>>>"
 
     parts = []
@@ -435,3 +457,14 @@ def as_text(ws: Path) -> str:
         parts.append("## Note")
         parts.append(doc["note"])
     return "\n\n".join(parts)
+
+
+def as_text(ws: Path) -> str:
+    """Render the document for a merge prompt — see `render`, which this
+    calls for its `text`. A caller that also needs the boundary token
+    `as_text` used (to state it, authoritatively, outside the rendered
+    text) should call `render` directly rather than calling `as_text` and
+    then re-deriving the token from a second read: see `render`'s docstring
+    for why that second read is unsafe.
+    """
+    return render(ws)["text"]
