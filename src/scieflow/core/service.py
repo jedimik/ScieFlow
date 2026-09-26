@@ -23,6 +23,7 @@ from scieflow.core import (
     events,
     gates,
     jobs,
+    preview,
     sandbox,
     sessions,
     store,
@@ -1043,3 +1044,93 @@ def curation_history(project: Project, slug: str) -> list[dict]:
         return curation.history(ws)
     except curation.CurationError as exc:
         raise ServiceError(str(exc)) from exc
+
+
+def _preview_dest(ws: Path, source: str) -> Path:
+    """Where `source`'s preview lives: its own directory under
+    `preview.PREVIEW_DIR`, so `agent:claude` and `round:1` never collide and
+    a rebuild reuses `latexmk`'s own aux files instead of starting cold.
+
+    `drafts.source_dir` is called here — its actual result thrown away —
+    purely to validate `source`'s grammar and refuse anything containing a
+    path separator, exactly as it does for every other draft reader. That
+    guard matters here specifically: unlike `assemble` (which validates
+    `source` itself before ever touching `dest`), `preview_of` calls this
+    function on every page load with no compile step first, so a `source`
+    of e.g. `"agent:../../../../etc"` — never rejected by a bare
+    `source.replace(":", "-")` — would otherwise let `preview_of` read a
+    file outside the run entirely.
+    """
+    drafts.source_dir(ws, source)
+    return Path(ws) / preview.PREVIEW_DIR / source.replace(":", "-")
+
+
+def compile_preview(project: Project, slug: str, source: str) -> dict:
+    """Compile one whole draft, as a job.
+
+    A job and not an inline call: `latexmk` takes seconds to minutes, and
+    this app runs one uvicorn process. It also gets the sandbox, the
+    timeline and a Cancel button for free this way.
+
+    A missing `latexmk` is refused here, before `preview.assemble` ever
+    runs, with a message the source view can show without failing the run
+    or the round it belongs to — the page keeps working from its source
+    view either way.
+    """
+    ws = _ws(project, slug)
+    if not preview.available():
+        raise ServiceError(
+            f"{preview.LATEXMK} is not installed, so a draft cannot be compiled here; "
+            "the source view still works (install texlive + latexmk for previews)")
+    try:
+        main = preview.assemble(ws, source, _preview_dest(ws, source))
+    except (preview.PreviewError, drafts.DraftError) as exc:
+        raise ServiceError(str(exc)) from exc
+
+    writable = sandbox.writable_for(project, run_dir=ws, coordinator=False)
+    return job_json(preview.run_compile(project, ws, main, writable))
+
+
+def preview_of(project: Project, slug: str, source: str) -> dict:
+    """What the workbench shows for `source`'s preview, without compiling
+    anything: whether a compile is even possible here, the PDF's path
+    relative to the run (for the existing artifact route to serve inline —
+    `application/pdf` is already in `files.INLINE_SAFE_TYPES`) once one
+    exists, the last compile job's state, and the compiler's own log.
+
+    Never raises for an absent preview: "not compiled yet" is the normal
+    state of every draft before its first compile, not an error, and this
+    is a read the page takes on every load — including with a malformed
+    `source` that was never compiled (and never will be), which is
+    refused the same way, not raised.
+    """
+    ws = _ws(project, slug)
+    if not preview.available():
+        return {"available": False, "pdf": None, "state": None,
+                "log": f"{preview.LATEXMK} is not installed, so drafts cannot be "
+                       "compiled here (install texlive + latexmk for previews)"}
+
+    try:
+        dest = _preview_dest(ws, source)
+    except drafts.DraftError:
+        return {"available": True, "pdf": None, "state": None, "log": ""}
+    pdf = dest / "main.pdf"
+    log_path = dest / "main.log"
+
+    matching = [j for j in jobs.list_jobs(project, ws)
+               if j.kind == "preview" and j.cwd == str(dest)]
+    state = matching[-1].state if matching else None
+
+    log_text = ""
+    if log_path.is_file():
+        try:
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            log_text = ""
+
+    return {
+        "available": True,
+        "pdf": str(pdf.relative_to(ws)) if pdf.is_file() else None,
+        "state": state,
+        "log": log_text,
+    }
