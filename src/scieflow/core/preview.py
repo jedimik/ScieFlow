@@ -25,6 +25,7 @@ same module objects everything else imports.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from datetime import date
 from pathlib import Path
@@ -38,12 +39,14 @@ LATEXMK = "latexmk"
 PREVIEW_DIR = "manuscript/curation/preview"
 TEMPLATE_DIR = Path(research.__file__).parent / "templates" / "paper"
 
-# The shipped template's own section order (`main.tex`'s `\input{sections/...}`
-# lines, top to bottom). A draft's sections that also appear here are put in
-# this order, so a preview reads the way a finished assembly would; a
-# section the template does not know about (a draft may add one) is not
-# dropped — it is appended afterwards, sorted, rather than silently omitted.
-TEMPLATE_SECTION_ORDER = ("abstract", "introduction", "methods", "results", "discussion")
+# `\input{sections/<name>}`, wherever it appears in the template — matched
+# and re-derived from the template's own text every time `assemble` runs,
+# rather than kept as a separate constant here that would go stale the
+# moment the template gains, loses or reorders a section.
+_SECTION_INPUT = re.compile(r"\\input\{sections/([^}]+)\}")
+
+_ABSTRACT_BEGIN = "\\begin{abstract}"
+_ABSTRACT_END = "\\end{abstract}"
 
 
 class PreviewError(ValueError):
@@ -56,7 +59,7 @@ def available() -> bool:
 
 def compile_argv() -> list[str]:
     """`latexmk` invoked exactly as the paper-draft skill's own Phase 6
-    verify step does — and no more.
+    verify step does, plus `-norc` — and no more.
 
     `-shell-escape` (in any spelling: `--shell-escape`, `-enable-write18`)
     is deliberately absent and must stay absent: the `.tex` being compiled
@@ -67,15 +70,18 @@ def compile_argv() -> list[str]:
     directly, rather than only checking that a compile succeeded — a check
     that would keep passing even after someone added the flag back to make
     some package work.
+
+    `-norc` closes a second hole in the same family: without it, `latexmk`
+    reads and executes a `.latexmkrc` (as Perl) from the compile directory,
+    among other locations — and the compile directory lives inside the run,
+    writable by the very agent whose `.tex` is untrusted, so that agent can
+    plant one. Verified empirically on this host: a `.latexmkrc` that writes
+    a file and exits runs to completion during an ordinary
+    `latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex`, with no
+    `-shell-escape` in sight — `-norc` stops `latexmk` from reading it at
+    all, system, user or local.
     """
-    return [LATEXMK, "-pdf", "-interaction=nonstopmode", "-halt-on-error", "main.tex"]
-
-
-def _ordered_sections(names: list[str]) -> list[str]:
-    present = set(names)
-    ordered = [s for s in TEMPLATE_SECTION_ORDER if s in present]
-    extra = sorted(present - set(TEMPLATE_SECTION_ORDER))
-    return ordered + extra
+    return [LATEXMK, "-norc", "-pdf", "-interaction=nonstopmode", "-halt-on-error", "main.tex"]
 
 
 def _placeholder_values(ws: Path) -> dict[str, str]:
@@ -114,18 +120,34 @@ def assemble(ws: Path, source: str, dest: Path) -> Path:
     `"round:<n>"` — exactly as every other draft reader resolves it, so a
     malformed or escaping `source` is refused there, by that shared rule,
     before this function ever touches a filesystem path built from it.
+    Which sections exist is then read with `drafts.sections`/
+    `round_sections`, not a raw glob of the directory `source_dir` returned:
+    those functions already skip a stem `check_name` would refuse and a
+    symlink resolving outside the directory, exactly as the workbench's own
+    listing of the same directory does — a raw glob here could disagree
+    with that listing and preview content the workbench itself would hide.
 
     The template's own `main.tex` cannot be copied verbatim: it
     `\\input`s `sections/<name>`, the *merged* output a completed run
     assembles, not `manuscript/drafts/<agent>/<name>` — a directory that
     generally has no `sections/` subdirectory of its own at all. So the
-    rewrite is done by line, not by regex over the whole file: every line
-    containing `\\input{sections/` is dropped, and one `\\input{<name>}`
-    line per section actually present is inserted at the position of the
-    first such line — in the template's own section order where a name
-    matches it, any extra sections afterwards — so a multi-section draft
-    reads in the conventional order rather than in whatever order the
-    filesystem happens to hand back.
+    rewrite maps the template line for line, in the template's own order,
+    rather than collapsing every section into one insertion point: each
+    `\\input{sections/<name>}` line becomes `\\input{<name>}` when that
+    section was actually copied, or is dropped entirely when it was not; a
+    section the template never mentions is appended after the template's
+    last section line, in whatever order `drafts.sections`/`round_sections`
+    already sorted it. Collapsing to one insertion point was tried first
+    and was wrong in a way no test caught: the template's *first*
+    `\\input{sections/...}` line is `\\input{sections/abstract}`, sitting
+    inside `\\begin{abstract}...\\end{abstract}` — `article`'s abstract
+    environment sets `\\small\\quotation` — so every section landed there
+    together, and a "preview" was the entire manuscript rendered small and
+    indented under an Abstract heading, for every draft, whether or not it
+    had an abstract section at all. The `\\begin{abstract}`/`\\end{abstract}`
+    pair itself is now dropped along with the section line when there is no
+    `abstract` section to put inside it, for the same reason: an empty
+    abstract environment is not what a draft without one should preview as.
 
     The bibliography trap: the template ends with
     `\\bibliographystyle{plainnat}` / `\\bibliography{references}`, and
@@ -138,18 +160,22 @@ def assemble(ws: Path, source: str, dest: Path) -> Path:
     right trade for a preview.
     """
     src = drafts.source_dir(ws, source)
-    tex_files = sorted(src.glob("*.tex"))
-    if not tex_files:
+    kind, _, rest = source.partition(":")
+    # `source_dir` above already validated this exact "agent:"/"round:"
+    # split (and refused anything else) while resolving `src`; re-splitting
+    # here is not a second copy of that validation, only the trivial
+    # dispatch to the matching listing function.
+    section_names = (drafts.sections(ws, rest) if kind == "agent"
+                     else drafts.round_sections(ws, int(rest)))
+    if not section_names:
         raise PreviewError(f"no sections to preview: {source!r} has no .tex files")
 
     ws = Path(ws)
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
 
-    section_names = []
-    for path in tex_files:
-        shutil.copyfile(path, dest / path.name)
-        section_names.append(path.stem)
+    for name in section_names:
+        shutil.copyfile(src / f"{name}.tex", dest / f"{name}.tex")
 
     run_preamble = ws / "manuscript" / "preamble.tex"
     preamble_src = run_preamble if run_preamble.is_file() else TEMPLATE_DIR / "preamble.tex"
@@ -160,20 +186,32 @@ def assemble(ws: Path, source: str, dest: Path) -> Path:
     if has_bib:
         shutil.copyfile(bib_src, dest / "references.bib")
 
-    ordered = _ordered_sections(section_names)
     template_lines = (TEMPLATE_DIR / "main.tex").read_text().splitlines(keepends=True)
-
     out_lines: list[str] = []
-    inserted_sections = False
+    seen_template_names: list[str] = []
+    last_input_at: int | None = None
     for line in template_lines:
-        if "\\input{sections/" in line:
-            if not inserted_sections:
-                out_lines.extend(f"\\input{{{name}}}\n" for name in ordered)
-                inserted_sections = True
+        stripped = line.strip()
+        if stripped in (_ABSTRACT_BEGIN, _ABSTRACT_END):
+            if "abstract" in section_names:
+                out_lines.append(line)
+            continue
+        match = _SECTION_INPUT.search(line)
+        if match:
+            name = match.group(1)
+            seen_template_names.append(name)
+            if name in section_names:
+                out_lines.append(f"\\input{{{name}}}\n")
+            last_input_at = len(out_lines)
             continue
         if not has_bib and ("\\bibliographystyle{" in line or "\\bibliography{" in line):
             continue
         out_lines.append(line)
+
+    extra = [name for name in section_names if name not in seen_template_names]
+    if extra:
+        insert_at = last_input_at if last_input_at is not None else len(out_lines)
+        out_lines[insert_at:insert_at] = [f"\\input{{{name}}}\n" for name in extra]
 
     text = "".join(out_lines)
     for placeholder, value in _placeholder_values(ws).items():
@@ -199,12 +237,17 @@ def run_compile(project, ws: Path, main: Path, writable: list[Path]) -> jobs.Job
     `pdflatex`'s own cache setup, with no hint that the sandbox is the
     cause. So `$HOME` (and, explicitly, `TEXMFVAR`/`TEXMFCONFIG`/
     `TEXMFHOME`, in case a host's texmf.cnf does not derive them from
-    `$HOME` alone) are pointed at a scratch directory *inside* `main`'s own
-    preview directory — already part of `writable` via `ws` — created here
-    so kpathsea never has to create it under load.
+    `$HOME` alone) are pointed at one scratch directory shared by every
+    source this run ever previews — `<ws>/manuscript/curation/preview/
+    .texmf-cache`, already inside `ws` and so already part of `writable` —
+    rather than one per source: kpathsea's own font/format cache is
+    designed to be shared, and a fresh tree per agent draft and per merge
+    round would otherwise pile up, unpruned, in the researcher's own run
+    directory for no benefit.
     """
     main = Path(main)
-    cache = main.parent / ".texmf-cache"
+    ws = Path(ws)
+    cache = ws / PREVIEW_DIR / ".texmf-cache"
     for sub in ("texmf-var", "texmf-config", "texmf-home"):
         (cache / sub).mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)

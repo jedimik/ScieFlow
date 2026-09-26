@@ -1056,10 +1056,18 @@ def _preview_dest(ws: Path, source: str) -> Path:
     path separator, exactly as it does for every other draft reader. That
     guard matters here specifically: unlike `assemble` (which validates
     `source` itself before ever touching `dest`), `preview_of` calls this
-    function on every page load with no compile step first, so a `source`
-    of e.g. `"agent:../../../../etc"` — never rejected by a bare
-    `source.replace(":", "-")` — would otherwise let `preview_of` read a
-    file outside the run entirely.
+    function on every page load with no compile step first, and a bare
+    `source.replace(":", "-")` does not refuse a path separator at all. A
+    `source` carrying an `"agent:"`/`"round:"` prefix before its `".."`
+    happens to be harmless on its own — the prefix becomes a literal,
+    nonexistent directory component (`"agent-.."`, never plain `".."`) that
+    blocks a real `is_file()`/`read_bytes()` lookup before any `".."` can
+    take effect, even though `Path.resolve()` computes an escaped-looking
+    path lexically. A colon-free `source` is not: nothing then stands
+    between its leading `".."` components and a real, kernel-honoured walk
+    out of `PREVIEW_DIR` — verified with a real decoy file in
+    `test_preview_of_refuses_a_traversing_source_without_raising` — which is
+    what this guard actually closes.
     """
     drafts.source_dir(ws, source)
     return Path(ws) / preview.PREVIEW_DIR / source.replace(":", "-")
@@ -1076,6 +1084,13 @@ def compile_preview(project: Project, slug: str, source: str) -> dict:
     runs, with a message the source view can show without failing the run
     or the round it belongs to — the page keeps working from its source
     view either way.
+
+    Refused too when a `kind="preview"` compile of this exact `source` is
+    already `running`: two `latexmk` processes writing the same `main.aux`
+    under one `cwd` is worse than making the second request wait. This is
+    the guard, not the whole fix — disabling the compile button while one
+    is in flight is the page's job (Task 6); this is what still holds if
+    two requests get past that anyway.
     """
     ws = _ws(project, slug)
     if not preview.available():
@@ -1083,7 +1098,14 @@ def compile_preview(project: Project, slug: str, source: str) -> dict:
             f"{preview.LATEXMK} is not installed, so a draft cannot be compiled here; "
             "the source view still works (install texlive + latexmk for previews)")
     try:
-        main = preview.assemble(ws, source, _preview_dest(ws, source))
+        dest = _preview_dest(ws, source)
+    except drafts.DraftError as exc:
+        raise ServiceError(str(exc)) from exc
+    if any(j.kind == "preview" and j.cwd == str(dest) and j.state == "running"
+           for j in jobs.list_jobs(project, ws)):
+        raise ServiceError(f"a compile of {source} is already running; wait for it to finish")
+    try:
+        main = preview.assemble(ws, source, dest)
     except (preview.PreviewError, drafts.DraftError) as exc:
         raise ServiceError(str(exc)) from exc
 
@@ -1091,46 +1113,77 @@ def compile_preview(project: Project, slug: str, source: str) -> dict:
     return job_json(preview.run_compile(project, ws, main, writable))
 
 
+LOG_TAIL_BYTES = 8_000        # what a person actually reads of a runaway error log
+
+
+def _log_tail(path: Path, limit: int = LOG_TAIL_BYTES) -> str:
+    """The last `limit` bytes of a compile log, not the whole file.
+
+    A stuck LaTeX error loop can grow `main.log` into the megabytes, and
+    every one of those bytes would otherwise be read into memory and handed
+    back on every page load, for content nobody reads past the last screen
+    of. Seeking past the head rather than reading the whole file and
+    slicing keeps this cheap regardless of the log's size. Never raises:
+    an unreadable log is reported as an empty one, the same as an absent
+    one.
+    """
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            if size > limit:
+                fh.seek(size - limit)
+            data = fh.read()
+    except OSError:
+        return ""
+    text = data.decode("utf-8", errors="replace")
+    return text if size <= limit else "… (log truncated)\n" + text
+
+
 def preview_of(project: Project, slug: str, source: str) -> dict:
     """What the workbench shows for `source`'s preview, without compiling
     anything: whether a compile is even possible here, the PDF's path
     relative to the run (for the existing artifact route to serve inline —
     `application/pdf` is already in `files.INLINE_SAFE_TYPES`) once one
-    exists, the last compile job's state, and the compiler's own log.
+    exists, the last compile job's state, and a tail of the compiler's own
+    log.
 
     Never raises for an absent preview: "not compiled yet" is the normal
-    state of every draft before its first compile, not an error, and this
-    is a read the page takes on every load — including with a malformed
-    `source` that was never compiled (and never will be), which is
-    refused the same way, not raised.
+    state of every draft before its first compile — most drafts, most of
+    the time — not an error, and this is a read the page takes on every
+    load, including with a malformed `source` that was never compiled (and
+    never will be), which is refused the same way, not raised.
+
+    A PDF from an earlier compile is still reported even when `latexmk` has
+    since been uninstalled: the file on disk is perfectly servable, and
+    losing that link just because the compiler went away would throw away
+    the one thing this feature produced.
     """
     ws = _ws(project, slug)
-    if not preview.available():
-        return {"available": False, "pdf": None, "state": None,
-                "log": f"{preview.LATEXMK} is not installed, so drafts cannot be "
-                       "compiled here (install texlive + latexmk for previews)"}
+    avail = preview.available()
 
     try:
         dest = _preview_dest(ws, source)
     except drafts.DraftError:
-        return {"available": True, "pdf": None, "state": None, "log": ""}
-    pdf = dest / "main.pdf"
-    log_path = dest / "main.log"
+        dest = None
 
+    pdf_rel = None
+    if dest is not None:
+        pdf = dest / "main.pdf"
+        if pdf.is_file():
+            pdf_rel = str(pdf.relative_to(ws))
+
+    if not avail:
+        return {"available": False, "pdf": pdf_rel, "state": None,
+                "log": f"{preview.LATEXMK} is not installed, so drafts cannot be "
+                       "compiled here (install texlive + latexmk for previews)"}
+
+    if dest is None:
+        return {"available": True, "pdf": None, "state": None, "log": ""}
+
+    log_path = dest / "main.log"
     matching = [j for j in jobs.list_jobs(project, ws)
                if j.kind == "preview" and j.cwd == str(dest)]
     state = matching[-1].state if matching else None
+    log_text = _log_tail(log_path) if log_path.is_file() else ""
 
-    log_text = ""
-    if log_path.is_file():
-        try:
-            log_text = log_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            log_text = ""
-
-    return {
-        "available": True,
-        "pdf": str(pdf.relative_to(ws)) if pdf.is_file() else None,
-        "state": state,
-        "log": log_text,
-    }
+    return {"available": True, "pdf": pdf_rel, "state": state, "log": log_text}

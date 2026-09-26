@@ -7,10 +7,11 @@ previewed instead, in a scratch dir, never touching the run's manuscript.
 """
 
 import shutil
+from datetime import date
 
 import pytest
 
-from scieflow.core import preview, service
+from scieflow.core import drafts, jobs, preview, service
 
 
 @pytest.fixture
@@ -36,6 +37,10 @@ def test_shell_escape_is_never_passed(drafted):
     assert "shell-escape" not in joined, "not in any spelling, not in any argument"
     assert argv[0] == preview.LATEXMK
     assert "-halt-on-error" in argv and "-interaction=nonstopmode" in argv
+    assert "-norc" in argv, (
+        "without -norc, latexmk executes a .latexmkrc from the compile "
+        "directory as Perl -- and that directory is writable by the same "
+        "agent whose .tex is untrusted")
 
 
 def test_assemble_builds_a_document_around_the_draft(drafted):
@@ -88,10 +93,38 @@ def test_a_draft_before_assembly_uses_the_shipped_template(drafted):
 
 
 def test_placeholders_get_plain_fallbacks(drafted):
-    """A preview must not require the author list to be settled."""
+    """A preview must not require the author list to be settled — and the
+    fallback must be real text, not merely an empty string where the
+    placeholder used to be."""
     text = preview.assemble(drafted, "agent:claude", drafted / "s").read_text()
+    assert "\\title{Draft preview}" in text
+    assert "\\author{r1}" in text, "falls back to the run's own slug"
+    assert f"\\date{{{date.today().isoformat()}}}" in text
     for placeholder in ("%%TITLE%%", "%%AUTHORS%%", "%%DATE%%"):
         assert placeholder not in text
+
+
+def test_only_the_abstract_section_lands_inside_the_abstract_environment(drafted):
+    """`article`'s abstract environment is `\\small\\quotation` — collapsing
+    every section into the template's first `\\input{sections/...}` line
+    (which sits inside it) rendered the whole manuscript that way, for
+    every draft, whether or not it had an abstract at all."""
+    (drafted / "manuscript" / "drafts" / "claude" / "abstract.tex").write_text(
+        "Short summary.\n")
+    text = preview.assemble(drafted, "agent:claude", drafted / "s").read_text()
+    start = text.index("\\begin{abstract}")
+    end = text.index("\\end{abstract}")
+    body = text[start:end]
+    assert "\\input{abstract}" in body
+    for section in ("introduction", "results"):
+        assert f"\\input{{{section}}}" not in body, (
+            f"{section} leaked into the abstract environment")
+
+
+def test_abstract_environment_is_dropped_when_there_is_no_abstract_section(drafted):
+    text = preview.assemble(drafted, "agent:claude", drafted / "s").read_text()
+    assert "\\begin{abstract}" not in text
+    assert "\\end{abstract}" not in text
 
 
 def test_a_source_with_no_sections_is_refused(project):
@@ -151,6 +184,8 @@ def test_the_compile_is_sandboxed_and_confined_to_its_run(project, drafted, monk
         seen["argv"] = argv
         seen["writable"] = kwargs.get("sandbox_writable")
         seen["kind"] = kwargs.get("kind")
+        seen["cwd"] = kwargs.get("cwd")
+        seen["env"] = kwargs.get("env")
         raise RuntimeError("stop here")
 
     monkeypatch.setattr(preview.jobs, "run_blocking", spy)
@@ -163,3 +198,67 @@ def test_the_compile_is_sandboxed_and_confined_to_its_run(project, drafted, monk
     assert seen["writable"] is not None, "a preview must not run unconfined"
     assert seen["writable"][0] == drafted, (
         "a preview is confined to the run it belongs to, like any dispatch")
+    assert seen["cwd"] == drafted / "manuscript" / "curation" / "preview" / "agent-claude", (
+        "the compile must run inside its own preview directory")
+    env_keys = {str(k).lower() for k in (seen["env"] or {})}
+    assert "shell_escape" not in env_keys and "openout_any" not in env_keys, (
+        "no channel new to this task should carry those settings, even by accident")
+
+
+def test_preview_dest_refuses_a_traversing_source(project):
+    """Pins the guard itself: delete it and the whole suite stays green,
+    because nothing else exercises `_preview_dest` with a bad `source`."""
+    ws = project.run_dir("r1")
+    with pytest.raises(drafts.DraftError):
+        service._preview_dest(ws, "agent:../../../../etc")
+
+
+def test_preview_of_refuses_a_traversing_source_without_raising(project, drafted):
+    """Not just "the output happens to look benign" -- proven against a real
+    decoy planted exactly where the unguarded path arithmetic lands. A
+    colon-free `source` (no "agent:"/"round:" prefix at all) leaves
+    `source.replace(":", "-")` untouched, so its leading ".." components are
+    real, kernel-honoured parent-directory references -- unlike a prefixed
+    one (e.g. `"agent-.."`), which is a literal, nonexistent directory name
+    that blocks a real `is_file()`/`read_bytes()` lookup before any ".."
+    ever takes effect (`Path.resolve()`'s lexical simplification looks like
+    an escape but is never what a real read call does; a real lookup also
+    needs every intermediate directory to actually exist, which is why this
+    uses `drafted` and pre-creates `PREVIEW_DIR` -- exactly the state any
+    run is in after its first compile of anything). Four ".." cancel
+    `PREVIEW_DIR`'s three segments plus the run itself, landing one level
+    *above* `ws` -- still inside the project, but outside every run's own
+    confinement."""
+    ws = drafted
+    (ws / preview.PREVIEW_DIR).mkdir(parents=True, exist_ok=True)
+    decoy_dir = ws.parent / "decoy"
+    decoy_dir.mkdir(parents=True)
+    (decoy_dir / "main.pdf").write_bytes(b"%PDF-not this run's")
+
+    source = "../../../../decoy"
+    view = service.preview_of(project, "r1", source)
+    assert view == {"available": True, "pdf": None, "state": None, "log": ""}, (
+        "a decoy file outside the run must never be reported as this run's preview")
+
+
+def test_preview_of_before_any_compile_is_the_normal_state(project, drafted):
+    """The state every draft is in on first page load."""
+    view = service.preview_of(project, "r1", "agent:claude")
+    assert view == {"available": True, "pdf": None, "state": None, "log": ""}
+
+
+def test_a_second_compile_of_the_same_source_is_refused_while_one_runs(project, drafted):
+    """Two `latexmk` processes writing the same `main.aux` under one `cwd`
+    is worse than making the second request wait; disabling the button
+    itself is Task 6's job."""
+    dest = drafted / "manuscript" / "curation" / "preview" / "agent-claude"
+    dest.mkdir(parents=True)
+    jobs_dir = jobs.jobs_dir(project, drafted)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    running = jobs.Job(id="01ARZ3NDEKTSV4RRFFQ69G5FAV", kind="preview", argv=["latexmk"],
+                       cwd=str(dest), run_dir=str(drafted), state="running",
+                       log=str(jobs_dir / "fake.log"))
+    jobs.save(running)
+
+    with pytest.raises(service.ServiceError, match="already running"):
+        service.compile_preview(project, "r1", "agent:claude")
