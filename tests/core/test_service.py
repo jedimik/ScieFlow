@@ -1,41 +1,8 @@
-import sys
 import time
-from pathlib import Path
 
 import pytest
 
 from scieflow.core import service
-from scieflow.core.project import Project
-from scieflow.core.run import status
-
-ROOT = Path(__file__).resolve().parents[2]
-STUB = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
-
-
-@pytest.fixture
-def project(tmp_path):
-    (tmp_path / "config").mkdir()
-    (tmp_path / "config" / "agents.yml").write_text(
-        f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1, family: claude, '
-        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n'
-        f'  stub2: {{cmd: "{STUB}", enabled: true, timeout_min: 1, family: claude, '
-        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n'
-        '  sleepy: {cmd: "sleep 300", enabled: true, timeout_min: 5}\n'
-        '  sleepy_turn: {cmd: "sleep 300", enabled: true, timeout_min: 5, '
-        'family: claude, session_cmd: "sleep 300", resume_cmd: "sleep 300"}\n'
-        f'  stub_disabled: {{cmd: "{STUB}", enabled: false, timeout_min: 1, family: claude, '
-        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n')
-    (tmp_path / "config" / "defaults.yml").write_text("approval: per-campaign\n")
-    (tmp_path / "schemas").mkdir()
-    for name in ("status", "gates", "status-research"):
-        (tmp_path / "schemas" / f"{name}.yml").write_text(
-            (ROOT / "schemas" / f"{name}.yml").read_text())
-    ws = tmp_path / "workspace" / "r1"
-    (ws / "logs").mkdir(parents=True)
-    # A real run always carries config.yml beside status.yml (run/init.py).
-    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
-    status.write_status(ws, status.new_status("r1", "autonomous"))
-    return Project(tmp_path)
 
 
 @pytest.fixture
@@ -579,3 +546,56 @@ def test_switching_to_the_same_agent_keeps_the_session(project):
     service.set_conversation_agent(project, "r1", "stub")
     doc = conversation.read(ws)
     assert doc["agent"] == "stub" and doc["session"] == "stub-session"
+
+
+def test_workbench_gathers_drafts_and_curation(project):
+    ws = project.run_dir("r1")
+    d = ws / "manuscript" / "drafts" / "claude"
+    d.mkdir(parents=True)
+    (d / "results.tex").write_text("\\section{Results} text")
+
+    view = service.workbench(project, "r1")
+    assert view["agents"] == ["claude"]
+    assert view["sections"] == ["results"]
+    assert "text" in view["drafts"]["claude"]["results"]
+    assert view["curation"]["blocks"] == []
+
+
+def test_keep_passage_records_provenance_through_the_service(project):
+    from scieflow.core.run import curation
+
+    ws = project.run_dir("r1")
+    (ws / "manuscript" / "drafts" / "claude").mkdir(parents=True)
+    service.keep_passage(project, "r1", "a passage", "claude", "results")
+    block = curation.read(ws)["blocks"][0]
+    assert block["agent"] == "claude" and block["section"] == "results"
+
+
+def test_keep_passage_refuses_an_agent_that_escapes_the_run(project):
+    with pytest.raises(service.ServiceError):
+        service.keep_passage(project, "r1", "a passage", "../../etc", "passwd")
+
+
+def test_the_curation_is_restorable_through_the_service(project):
+    from scieflow.core.run import curation
+
+    ws = project.run_dir("r1")
+    service.add_own_text(project, "r1", "keep me")
+    version = curation.read(ws)["version"]
+    service.remove_curation_block(project, "r1", curation.read(ws)["blocks"][0]["id"])
+
+    service.revert_curation(project, "r1", version)
+    assert [b["text"] for b in curation.read(ws)["blocks"]] == ["keep me"]
+    assert len(service.curation_history(project, "r1")) == curation.read(ws)["version"]
+
+
+def test_reverting_to_an_unknown_version_is_a_service_error(project):
+    with pytest.raises(service.ServiceError, match="version"):
+        service.revert_curation(project, "r1", 99)
+
+
+def test_curation_refusals_reach_the_caller_as_service_errors(project):
+    with pytest.raises(service.ServiceError):
+        service.add_own_text(project, "r1", "   ")
+    with pytest.raises(service.ServiceError, match="block"):
+        service.edit_curation_block(project, "r1", "nope", "text")

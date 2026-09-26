@@ -19,6 +19,7 @@ from scieflow.core import (
     agent_configure as acf,
     agent_run,
     config,
+    drafts,
     events,
     gates,
     jobs,
@@ -29,7 +30,7 @@ from scieflow.core import (
 )
 from scieflow.core.gates import ADOPTED, CHARTER_ADOPTION
 from scieflow.core.project import Project, ProjectError
-from scieflow.core.run import actions, budget, charter, conversation, status
+from scieflow.core.run import actions, budget, charter, conversation, curation, status
 
 RECENT_JOBS = 20
 RECENT_EVENTS = 50
@@ -753,3 +754,107 @@ def start_run(project: Project, slug: str, goal: str, agent: str = "", *,
     except ServiceError as exc:
         raise RunStartedError(canonical, str(exc)) from exc
     return {"run": run, "slug": canonical, "turn": said["turn"]}
+
+
+def workbench(project: Project, slug: str) -> dict:
+    """Everything the workbench page shows, in one read: what each agent
+    drafted, what each completed merge round produced, and the curation
+    document built from them — so a template does no I/O of its own."""
+    ws = _ws(project, slug)
+    agents = drafts.agents(ws)
+    sections = sorted({s for a in agents for s in drafts.sections(ws, a)})
+    return {
+        "agents": agents,
+        "sections": sections,
+        "drafts": {a: {s: drafts.read_section(ws, a, s)
+                       for s in drafts.sections(ws, a)} for a in agents},
+        "rounds": {n: {s: drafts.read_round_section(ws, n, s)
+                       for s in drafts.round_sections(ws, n)}
+                   for n in drafts.rounds(ws)},
+        "curation": curation.read(ws),
+    }
+
+
+def keep_passage(project: Project, slug: str, text: str, agent: str, section: str,
+                 actor: str = "human") -> dict:
+    """Keep a passage from an agent's draft, with its provenance.
+
+    `agent` and `section` arrive from a web form. `curation.keep` only ever
+    stores them as text — it builds no path from them — but each is still
+    run through `_resolve_in_run`'s escape guard first, the same one
+    `_proposal_path` already applies to a gate's file, so a value crafted to
+    look like a path traversal is refused here rather than recorded as if
+    it were an ordinary name.
+    """
+    ws = _ws(project, slug)
+    for raw in (agent, section):
+        try:
+            _resolve_in_run(ws, raw)
+        except ValueError as exc:
+            raise ServiceError(str(exc)) from exc
+    try:
+        return curation.keep(ws, text, agent=agent, section=section, actor=actor)
+    except curation.CurationError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def add_own_text(project: Project, slug: str, text: str, actor: str = "human") -> dict:
+    """Add the researcher's own words to the curation document."""
+    ws = _ws(project, slug)
+    try:
+        return curation.add_own(ws, text, actor=actor)
+    except curation.CurationError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def edit_curation_block(project: Project, slug: str, block_id: str, text: str,
+                        actor: str = "human") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return curation.edit_block(ws, block_id, text, actor=actor)
+    except curation.CurationError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def move_curation_block(project: Project, slug: str, block_id: str, position: int,
+                        actor: str = "human") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return curation.move_block(ws, block_id, position, actor=actor)
+    except curation.CurationError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def remove_curation_block(project: Project, slug: str, block_id: str,
+                          actor: str = "human") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return curation.remove_block(ws, block_id, actor=actor)
+    except curation.CurationError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def set_curation_note(project: Project, slug: str, note: str, actor: str = "human") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return curation.set_note(ws, note, actor=actor)
+    except curation.CurationError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def revert_curation(project: Project, slug: str, version: int, actor: str = "human") -> dict:
+    ws = _ws(project, slug)
+    try:
+        return curation.revert(ws, version, actor=actor)
+    except curation.CurationError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def curation_history(project: Project, slug: str) -> list[dict]:
+    """Every curation version, oldest first — reachable from the page so its
+    versioning is not only a CLI/file-format detail."""
+    ws = _ws(project, slug)
+    try:
+        return curation.history(ws)
+    except curation.CurationError as exc:
+        raise ServiceError(str(exc)) from exc
