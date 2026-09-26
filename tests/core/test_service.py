@@ -630,3 +630,18 @@ def test_workbench_turns_a_draft_error_into_a_service_error(project, monkeypatch
     monkeypatch.setattr(service.drafts, "read_section", boom)
     with pytest.raises(service.ServiceError):
         service.workbench(project, "r1")
+
+
+def test_workbench_turns_a_malformed_curation_document_into_a_service_error(project):
+    """`curation.read`, called inside the same `workbench` block as every
+    `drafts.*` call, raises `CurationError` on a document it cannot parse —
+    that must reach the caller as `ServiceError` too, not escape as the
+    bare `CurationError`."""
+    ws = project.run_dir("r1")
+    (ws / "manuscript" / "drafts" / "claude").mkdir(parents=True)
+    curation_dir = ws / "manuscript" / "curation"
+    curation_dir.mkdir(parents=True)
+    (curation_dir / "document.yml").write_text("current: not-a-number\nversions: []\n")
+
+    with pytest.raises(service.ServiceError):
+        service.workbench(project, "r1")

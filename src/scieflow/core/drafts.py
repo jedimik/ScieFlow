@@ -72,8 +72,17 @@ def _inside(root: Path, *parts: str) -> Path:
     as a result, exactly like `resolve()` refuses the run root unless
     `allow_root=True` — a symlink that resolves back to `root` (e.g. a
     `self -> ..` entry inside a drafts directory) is not anyone's draft.
+
+    Both `.resolve()` calls are wrapped, not just the second: `root` itself
+    can be a directory reached through a symlink cycle that has nothing to
+    do with any caller-supplied name — e.g. `manuscript/drafts` itself
+    symlinked into a loop — and that must not escape as a bare
+    `RuntimeError` any more than a cycle in one of `parts` would.
     """
-    base = Path(root).resolve()
+    try:
+        base = Path(root).resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise DraftError(f"cannot resolve {str(root)!r}: {exc}") from exc
     for part in parts:
         check_name(part)
     try:
@@ -135,10 +144,21 @@ def read_section(ws: Path, agent: str, section: str) -> str:
 
     The raw `section` (and `agent`) are validated as names before `.tex` is
     ever appended — see `check_name`.
+
+    Containment is checked against *that agent's own directory*
+    (`agent_dir`), not `DRAFTS_DIR` as a whole — the same scope
+    `_tex_stems` uses for `sections()`. A wider scope here would let a
+    symlink inside one agent's directory that points into a *different*
+    agent's directory pass this check while `sections()` (correctly)
+    hides it, so `read_section` could hand back another agent's text
+    under this agent's name — a false provenance the whole feature exists
+    to avoid, since a kept passage's only record of who wrote it is this
+    `agent` argument.
     """
     check_name(agent)
     check_name(section)
-    path = _inside(Path(ws) / DRAFTS_DIR, agent, f"{section}.tex")
+    agent_dir = _inside(Path(ws) / DRAFTS_DIR, agent)
+    path = _inside(agent_dir, f"{section}.tex")
     if not path.is_file():
         raise DraftError(f"no such section {section!r} for agent {agent!r}")
     return path.read_text(encoding="utf-8")
@@ -169,10 +189,17 @@ def round_sections(ws: Path, n: int) -> list[str]:
 
 
 def read_round_section(ws: Path, n: int, section: str) -> str:
-    """The raw source of one round's one section."""
+    """The raw source of one round's one section.
+
+    Containment is scoped to that round's own directory, not `ROUNDS_DIR`
+    as a whole — the same reasoning as `read_section`'s `agent_dir`: a
+    symlink inside round `1`'s directory must not be able to point into
+    round `2`'s and be served as round `1`'s content.
+    """
     check_name(str(n))
     check_name(section)
-    path = _inside(Path(ws) / ROUNDS_DIR, str(n), f"{section}.tex")
+    round_dir = _inside(Path(ws) / ROUNDS_DIR, str(n))
+    path = _inside(round_dir, f"{section}.tex")
     if not path.is_file():
         raise DraftError(f"no such section {section!r} in round {n!r}")
     return path.read_text(encoding="utf-8")

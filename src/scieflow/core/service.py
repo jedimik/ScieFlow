@@ -766,12 +766,16 @@ def workbench(project: Project, slug: str) -> dict:
     prior defect) let a file that appeared between the two listings land in
     `drafts` without ever showing up in `sections`.
 
-    `drafts.DraftError` is translated to `ServiceError` here like every
-    other `drafts.*`/`curation.*` call from this layer: the listing
+    Both `drafts.DraftError` and `curation.CurationError` are translated to
+    `ServiceError` here, as the brief requires and as every other
+    `drafts.*`/`curation.*` call from this layer already does: the listing
     functions (`sections`, `round_sections`) already filter out what they
     can, but `read_section`/`read_round_section` are still called for every
     name just listed, and an agent or round *directory* itself resolving
-    outside the run (not one of its files) is only ever caught there.
+    outside the run (not one of its files) is only ever caught there;
+    `curation.read`, called in this same block, raises `CurationError` on a
+    malformed `document.yml` and must not let that escape as anything but
+    a `ServiceError` either.
     """
     ws = _ws(project, slug)
     try:
@@ -788,7 +792,7 @@ def workbench(project: Project, slug: str) -> dict:
                        for n in drafts.rounds(ws)},
             "curation": curation.read(ws),
         }
-    except drafts.DraftError as exc:
+    except (drafts.DraftError, curation.CurationError) as exc:
         raise ServiceError(str(exc)) from exc
 
 

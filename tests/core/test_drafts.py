@@ -162,3 +162,58 @@ def test_a_non_ascii_digit_round_directory_does_not_duplicate_a_real_round(ws):
     (ws / "manuscript" / "curation" / "rounds" / "1").mkdir(parents=True)
     (ws / "manuscript" / "curation" / "rounds" / "١").mkdir(parents=True)
     assert drafts.rounds(ws) == [1]
+
+
+def test_a_symlink_cycle_at_the_drafts_directory_itself_is_a_draft_error(tmp_path):
+    """A cycle need not be in a caller-supplied name at all — `manuscript/
+    drafts` itself can be a symlink into a loop, and `_inside`'s *first*
+    `.resolve()` (on `root`, before any `part` is even considered) must
+    catch that the same way its second one catches a cycle in a name."""
+    ws = tmp_path / "workspace" / "r1"
+    manuscript = ws / "manuscript"
+    manuscript.mkdir(parents=True)
+    (manuscript / "a").symlink_to(manuscript / "b")
+    (manuscript / "b").symlink_to(manuscript / "a")
+    (manuscript / "drafts").symlink_to(manuscript / "a")
+    with pytest.raises(drafts.DraftError):
+        drafts.sections(ws, "claude")
+
+
+def test_a_symlink_cycle_at_the_rounds_directory_itself_is_a_draft_error(tmp_path):
+    ws = tmp_path / "workspace" / "r1"
+    curation_dir = ws / "manuscript" / "curation"
+    curation_dir.mkdir(parents=True)
+    (curation_dir / "a").symlink_to(curation_dir / "b")
+    (curation_dir / "b").symlink_to(curation_dir / "a")
+    (curation_dir / "rounds").symlink_to(curation_dir / "a")
+    with pytest.raises(drafts.DraftError):
+        drafts.round_sections(ws, 1)
+
+
+def test_a_symlink_into_another_agents_directory_is_refused_and_sections_agrees(ws):
+    """Provenance is the whole point of a kept passage — which agent wrote
+    these words. A symlink inside `claude`'s directory that resolves into
+    `codex`'s must be refused by `read_section` (never silently serve
+    codex's text as claude's), and `sections()` must already have hidden
+    it, so the two never disagree about what claude offers."""
+    codex_dir = ws / "manuscript" / "drafts" / "codex"
+    (codex_dir / "secret.tex").write_text("codex's secret content")
+    (ws / "manuscript" / "drafts" / "claude" / "foo.tex").symlink_to(
+        codex_dir / "secret.tex")
+
+    assert "foo" not in drafts.sections(ws, "claude")
+    with pytest.raises(drafts.DraftError):
+        drafts.read_section(ws, "claude", "foo")
+
+
+def test_a_symlink_into_another_rounds_directory_is_refused_and_listing_agrees(ws):
+    round1 = ws / "manuscript" / "curation" / "rounds" / "1"
+    round2 = ws / "manuscript" / "curation" / "rounds" / "2"
+    round1.mkdir(parents=True)
+    round2.mkdir(parents=True)
+    (round2 / "secret.tex").write_text("round 2's secret content")
+    (round1 / "foo.tex").symlink_to(round2 / "secret.tex")
+
+    assert "foo" not in drafts.round_sections(ws, 1)
+    with pytest.raises(drafts.DraftError):
+        drafts.read_round_section(ws, 1, "foo")
