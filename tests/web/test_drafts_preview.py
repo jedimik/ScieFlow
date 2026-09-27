@@ -181,11 +181,16 @@ def test_the_compiler_log_is_escaped_not_raw_html(client, drafted, monkeypatch):
     exercises, by forcing `service.preview_of` to hand back a log containing
     a real HTML tag and checking it comes out escaped.
 
-    A completed round is added alongside the agent draft so both calls to
-    the `preview_panel` macro in drafts.html render the malicious log --
-    the macro extraction means there is exactly one template site that
-    renders `p.log`, but this still proves both call sites reach it, rather
-    than trusting the refactor by inspection alone."""
+    A completed round is added alongside the agent draft so both the agent
+    panel and the round panel render the malicious log, and `count == 2`
+    checks that each one escaped it.
+
+    Deferred minor #20: `count == 2` does NOT structurally require the
+    `preview_panel` macro extraction -- the duplicated blocks it replaced
+    would have produced two escaped occurrences just the same. The number
+    proves both panels escape the log; it proves nothing about how many
+    template sites render it. (Nothing here needs to: the escaping is the
+    property worth pinning, and the macro is a readability change.)"""
     from scieflow.core import service
 
     d = drafted / "manuscript" / "curation" / "rounds" / "1"
@@ -236,3 +241,37 @@ def test_a_dead_previews_jobs_record_self_heals_the_disabled_button(client, proj
     assert '<button type="submit">Compile PDF</button>' in page.text
     assert '<button type="submit" disabled>Compile PDF</button>' not in page.text
     assert "already running" not in page.text and "already compiling" not in page.text
+
+
+def test_a_pdf_path_with_a_query_metacharacter_is_url_encoded(client, project):
+    """Deferred minor #18. `p.pdf` is `agent-<name>/main.pdf`, and `<name>` is
+    a directory name an AGENT chose -- not a value from a safe alphabet, which
+    is what the original justification for deferring this got wrong. An `&`
+    would end the `path` parameter early and a `#` would truncate it to a
+    fragment, so the iframe would load the wrong file or none. HTML-escaping
+    makes the attribute well-formed; only URL-encoding makes the query string
+    mean what it says.
+
+    FALSIFICATION: drop `| urlencode` and the raw `&` appears in `src`, and
+    the round-trip below stops resolving.
+    """
+    ws = project.run_dir("r1")
+    name = "a&b#c"
+    d = ws / "manuscript" / "drafts" / name
+    d.mkdir(parents=True)
+    (d / "results.tex").write_text("Yield was 95\\%.\n")
+    dest = ws / "manuscript" / "curation" / "preview" / f"agent-{name}"
+    dest.mkdir(parents=True)
+    (dest / "main.pdf").write_bytes(b"%PDF-1.4 fake")
+
+    page = client.get("/runs/r1/drafts")
+    assert page.status_code == 200
+    encoded = "manuscript/curation/preview/agent-a%26b%23c/main.pdf"
+    assert f'src="/runs/r1/file?path={encoded}"' in page.text, (
+        "the `&` and `#` must be percent-encoded, or the path parameter breaks")
+    assert "agent-a&b" not in page.text and "agent-a&amp;b" not in page.text
+
+    # And that URL, decoded the way a browser and Starlette decode it, really
+    # does resolve to this preview's PDF -- the encoding is not merely cosmetic.
+    served = client.get(f"/runs/r1/file?path={encoded}")
+    assert served.status_code == 200 and served.content.startswith(b"%PDF")

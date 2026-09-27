@@ -13,7 +13,15 @@
   <button type="submit"{% if busy %} disabled{% endif %}>Compile PDF</button>
 </form>
 {% if p.pdf %}
-<iframe class="preview-frame" src="/runs/{{ slug }}/file?path={{ p.pdf }}"
+{#- `| urlencode`, not autoescaping alone. `p.pdf` is a path built from
+   `<source>` -- `agent-<name>` or `round-<n>` -- and `<name>` is a directory
+   name an AGENT chose, not a value from a safe alphabet: an `&` in it would
+   end the `path` parameter early and a `#` would truncate it to a fragment,
+   so the iframe would silently load the wrong file or none. HTML-escaping
+   makes the attribute well-formed; it does not make the query string mean
+   what it says. #}
+<iframe class="preview-frame"
+        src="/runs/{{ slug }}/file?path={{ p.pdf | urlencode }}"
         title="{{ title }}"></iframe>
 {% endif %}
 {% if not p.available %}
