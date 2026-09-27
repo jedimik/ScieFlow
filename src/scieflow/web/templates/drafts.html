@@ -6,6 +6,11 @@
 {% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
 
 <h2>Drafts</h2>
+{% if preview_busy %}
+<p class="dim">A preview compile is already running for this run — Compile
+   buttons are disabled until it finishes. If it looks stuck, cancel it from
+   <a href="/runs/{{ slug }}">the run's job list</a>.</p>
+{% endif %}
 {% if not agents %}
 <p class="dim">No drafts yet. This run has not reached the drafting phase of
    the <code>paper-draft</code> workflow — that is what writes
@@ -14,13 +19,60 @@
 {% else %}
 <div class="drafts-grid">
   {% for agent in agents %}
+  {% set p = previews["agent:" ~ agent] %}
   <div class="draft-column">
     <h3>{{ agent }}</h3>
+    <form method="post" action="/runs/{{ slug }}/preview" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="source" value="agent:{{ agent }}">
+      <button type="submit"{% if preview_busy %} disabled{% endif %}>Compile PDF</button>
+    </form>
+    {% if p.pdf %}
+    <iframe class="preview-frame" src="/runs/{{ slug }}/file?path={{ p.pdf }}"
+            title="{{ agent }} preview"></iframe>
+    {% endif %}
+    {% if not p.available %}
+    <p class="dim">{{ p.log }}</p>
+    {% elif p.state == "failed" %}
+    <p class="state-failed">The last compile failed:</p>
+    <pre class="log">{{ p.log }}</pre>
+    {% endif %}
     {% for section in sections %}
       {% if section in drafts[agent] %}
       <h4>{{ section }}</h4>
       <pre class="draft" data-agent="{{ agent }}" data-section="{{ section }}">{{ drafts[agent][section] }}</pre>
       {% endif %}
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if rounds %}
+<h2>Merged rounds</h2>
+<div class="drafts-grid">
+  {% for n, round_content in rounds.items() %}
+  {% set p = previews["round:" ~ n] %}
+  <div class="draft-column">
+    <h3>Round {{ n }}</h3>
+    <form method="post" action="/runs/{{ slug }}/preview" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="source" value="round:{{ n }}">
+      <button type="submit"{% if preview_busy %} disabled{% endif %}>Compile PDF</button>
+    </form>
+    {% if p.pdf %}
+    <iframe class="preview-frame" src="/runs/{{ slug }}/file?path={{ p.pdf }}"
+            title="round {{ n }} preview"></iframe>
+    {% endif %}
+    {% if not p.available %}
+    <p class="dim">{{ p.log }}</p>
+    {% elif p.state == "failed" %}
+    <p class="state-failed">The last compile failed:</p>
+    <pre class="log">{{ p.log }}</pre>
+    {% endif %}
+    {% for section, text in round_content.items() %}
+    <h4>{{ section }}</h4>
+    <pre class="draft">{{ text }}</pre>
     {% endfor %}
   </div>
   {% endfor %}

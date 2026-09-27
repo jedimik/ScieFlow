@@ -45,5 +45,7 @@ textarea { width: 100%; font: inherit; }
 pre.draft { white-space: pre-wrap; background: #0b0d12; color: #d7dbe4;
             padding: .6rem .8rem; border-radius: 4px; max-height: 20rem;
             overflow: auto; }
+.preview-frame { width: 100%; height: 22rem; border: 1px solid var(--line);
+                 border-radius: 4px; background: #fff; }
 .curation-blocks { list-style: none; padding: 0; }
 .curation-block { border: 1px solid var(--line); padding: .6rem .8rem; margin: .5rem 0; }

@@ -327,11 +327,19 @@ def drafts_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
         view = service.workbench(project, slug)
     except service.ServiceError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # One `service.preview_of` call per previewable source (every drafting
+    # agent, plus every completed merge round) — not a second N+1 to add to
+    # the dashboard's carried-forward one, just the one call this page
+    # already needs per source it lists.
+    sources = [f"agent:{a}" for a in view["agents"]] + [f"round:{n}" for n in view["rounds"]]
+    previews = {source: service.preview_of(project, slug, source) for source in sources}
     return TEMPLATES.TemplateResponse(request, "drafts.html", {
         "slug": slug, "error": error,
         "conversation": service.conversation_state(project, slug),
         "conversational": service.conversational_agents(project),
         "history": service.curation_history(project, slug),
+        "previews": previews,
+        "preview_busy": service.preview_busy(project, slug),
         "csrf": auth.csrf_token(request),
         **view})
 
@@ -369,6 +377,31 @@ def curate(request: Request, slug: str, action: str = Form(...),
             service.merge_round(project, slug)
         else:
             return _drafts_back(slug, f"unknown action: {action}")
+    except service.ServiceError as exc:
+        return _drafts_back(slug, str(exc))
+    return _drafts_back(slug)
+
+
+@router.post("/runs/{slug}/preview", dependencies=MUTATE)
+def compile_preview(request: Request, slug: str, source: str = Form(...)):
+    """Compile one whole draft or completed round into a PDF.
+
+    `def`, not `async def`: `service.compile_preview` -> `preview.run_compile`
+    blocks on the whole `latexmk` run (seconds to minutes), and this app runs
+    a single uvicorn process — an `async def` handler doing that would freeze
+    every other request (`/healthz`, both SSE streams, the Cancel button) for
+    the run's entire compile, exactly the defect `tests/web/test_async_routes.py`
+    and this module's own docstring exist to keep out.
+
+    A refusal (missing `latexmk`, a malformed `source`, no sections to
+    compile, or another preview already running for this run) is a
+    `ServiceError`, handled the same way every other workbench mutation
+    handles one: post/redirect/get back to the drafts page with the message
+    visible, nothing left half-written.
+    """
+    project = _project(request)
+    try:
+        service.compile_preview(project, slug, source)
     except service.ServiceError as exc:
         return _drafts_back(slug, str(exc))
     return _drafts_back(slug)
