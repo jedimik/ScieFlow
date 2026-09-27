@@ -202,9 +202,60 @@ def test_the_compile_is_sandboxed_and_confined_to_its_run(project, drafted, monk
         "a preview is confined to the run it belongs to, like any dispatch")
     assert seen["cwd"] == drafted / "manuscript" / "curation" / "preview" / "agent-claude", (
         "the compile must run inside its own preview directory")
-    env_keys = {str(k).lower() for k in (seen["env"] or {})}
-    assert "shell_escape" not in env_keys and "openout_any" not in env_keys, (
-        "no channel new to this task should carry those settings, even by accident")
+    env = seen["env"] or {}
+    assert env.get("shell_escape") == "f", (
+        "kpathsea's shell_escape must be pinned off positively, not merely left "
+        "absent: `pdflatex` reads it from the environment, so an absence "
+        "assertion passes only while the host's own environment happens to be "
+        "clean and forbids the hardening as much as the weakening")
+    assert env.get("openout_any") == "p" and env.get("openin_any") == "p"
+
+
+def test_a_hostile_shell_escape_in_the_parent_environment_does_not_reach_the_child(
+        project, drafted, monkeypatch):
+    """C2, end to end. `compile_argv` keeps `-shell-escape` out of argv and
+    `-norc` keeps `latexmk` from reading a planted `.latexmkrc`, but neither
+    touches the environment, and `pdflatex` reads kpathsea's `shell_escape`
+    straight from it -- verified on this host, with `-norc` present:
+    `env shell_escape=t latexmk -norc -pdf ... main.tex` printed
+    `runsystem(touch pwned.txt)...executed.` and created the file.
+
+    FALSIFICATION: go back to `env = dict(os.environ)` and this fails --
+    `shell_escape` comes through as "t". The precondition is an operator
+    environment carrying it, which is exactly the workaround someone reaches
+    for when a package misbehaves.
+    """
+    monkeypatch.setenv("shell_escape", "t")
+    monkeypatch.setenv("openout_any", "a")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-not-travel")
+    seen = {}
+
+    def spy(prj, argv, **kwargs):
+        seen["env"] = kwargs.get("env")
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(preview.jobs, "run_blocking", spy)
+    monkeypatch.setattr(preview.shutil, "which", lambda name: "/usr/bin/latexmk")
+    with pytest.raises(RuntimeError):
+        service.compile_preview(project, "r1", "agent:claude")
+
+    env = seen["env"]
+    assert env["shell_escape"] == "f", "a hostile parent must not re-enable \\write18"
+    assert env["openout_any"] == "p"
+    assert "ANTHROPIC_API_KEY" not in env, (
+        "the serve process's model credentials have no business in a latexmk "
+        "environment; building the env explicitly is what keeps them out")
+
+
+def test_the_compile_environment_is_built_not_inherited():
+    """The whole environment, not just the three settings: anything the serve
+    process happens to carry must not travel unless `_INHERITED` names it."""
+    env = preview.compile_env("/tmp/cache-under-test",
+                              {"PATH": "/bin", "LANG": "C", "SECRET": "nope",
+                               "shell_escape": "t", "openin_any": "a"})
+    assert set(env) == {"PATH", "LANG", "HOME", "TEXMFVAR", "TEXMFCONFIG",
+                        "TEXMFHOME", "shell_escape", "openout_any", "openin_any"}
+    assert env["shell_escape"] == "f" and env["openin_any"] == "p"
 
 
 def test_preview_dest_refuses_a_traversing_source(project):

@@ -48,6 +48,27 @@ _SECTION_INPUT = re.compile(r"\\input\{sections/([^}]+)\}")
 _ABSTRACT_BEGIN = "\\begin{abstract}"
 _ABSTRACT_END = "\\end{abstract}"
 
+# The only variables the compile inherits from the serve process. Everything
+# else is set explicitly by `compile_env` or is simply absent — see its
+# docstring for why copying `os.environ` was a hole rather than a
+# convenience. `PATH` is needed to find `bwrap` and `latexmk`; `LANG` only
+# decides how the compiler's own messages are encoded in the log a human
+# then reads.
+_INHERITED = ("PATH", "LANG")
+
+# kpathsea settings pinned positively, not left to their absence. `latexmk`
+# passes none of these on the command line and `-norc` does not touch them:
+# they are read straight from the environment by `pdflatex` itself, so an
+# operator environment carrying `shell_escape=t` re-enabled `\write18` with
+# no `-shell-escape` anywhere in argv. Verified on this host, with `-norc`
+# present: `env shell_escape=t latexmk -norc -pdf ... main.tex` ran
+# `runsystem(touch pwned.txt)...executed.`
+_KPATHSEA_SAFE = {
+    "shell_escape": "f",     # \write18 off, whatever the parent said
+    "openout_any": "p",      # paranoid: no writing outside the compile dir
+    "openin_any": "p",       # paranoid: no reading dotfiles or arbitrary paths
+}
+
 
 class PreviewError(ValueError):
     """A draft or round cannot be assembled into a previewable document."""
@@ -222,6 +243,58 @@ def assemble(ws: Path, source: str, dest: Path) -> Path:
     return main
 
 
+def compile_cache(ws: Path) -> Path:
+    """The one shared kpathsea scratch tree this run's previews compile
+    against, created if absent. See `run_compile` for why it is shared.
+    """
+    cache = Path(ws) / PREVIEW_DIR / ".texmf-cache"
+    for sub in ("texmf-var", "texmf-config", "texmf-home"):
+        (cache / sub).mkdir(parents=True, exist_ok=True)
+    return cache
+
+
+def compile_env(cache: Path, parent: dict | None = None) -> dict[str, str]:
+    """The compile's *whole* environment, built explicitly — never a copy of
+    the serve process's.
+
+    `dict(os.environ)` was the hole, and it was not theoretical.
+    `compile_argv` keeps `-shell-escape` out of argv and `-norc` keeps
+    `latexmk` from reading a `.latexmkrc` the drafting agent could plant, but
+    neither touches the environment, and `pdflatex` reads kpathsea's
+    `shell_escape` straight from it. Verified on this host, with `-norc`
+    present and no `-shell-escape` anywhere:
+
+        $ env shell_escape=t latexmk -norc -pdf -interaction=nonstopmode \
+              -halt-on-error main.tex
+        runsystem(touch pwned.txt)...executed.
+
+    The precondition is an operator environment carrying `shell_escape=t` (or
+    `openout_any=a`) — rare, but it is exactly the workaround someone reaches
+    for when a package misbehaves, which is the scenario `compile_argv`'s own
+    docstring warns about. An agent-planted `texmf.cnf` under the redirected
+    `TEXMF*` was checked and is correctly *not* honoured, so the inherited
+    environment was the whole of it.
+
+    So the three kpathsea settings are pinned positively (`_KPATHSEA_SAFE`)
+    rather than relied on to be absent, and only `_INHERITED` comes across.
+    A welcome side effect: the serve process's model API keys stop being
+    handed to `latexmk` at all.
+
+    `parent` is the environment to inherit from, defaulting to this
+    process's — a parameter only so a test can hand in a hostile one without
+    mutating the real `os.environ`.
+    """
+    src = os.environ if parent is None else parent
+    cache = Path(cache)
+    env = {name: src[name] for name in _INHERITED if name in src}
+    env["HOME"] = str(cache)
+    env["TEXMFVAR"] = str(cache / "texmf-var")
+    env["TEXMFCONFIG"] = str(cache / "texmf-config")
+    env["TEXMFHOME"] = str(cache / "texmf-home")
+    env.update(_KPATHSEA_SAFE)
+    return env
+
+
 def run_compile(project, ws: Path, main: Path, writable: list[Path]) -> jobs.Job:
     """The compile, as a job confined to its own run.
 
@@ -251,18 +324,16 @@ def run_compile(project, ws: Path, main: Path, writable: list[Path]) -> jobs.Job
     later compile. If that per-run serialization is ever loosened, this
     cache needs to go back to being per-`main.parent` (as it was before),
     not stay shared.
+
+    The environment itself is `compile_env`'s job, not this function's: it is
+    built explicitly rather than copied from the serve process, because
+    `pdflatex` honours kpathsea's `shell_escape` from the environment whether
+    or not `-shell-escape` is in argv. See `compile_env`.
     """
     main = Path(main)
     ws = Path(ws)
-    cache = ws / PREVIEW_DIR / ".texmf-cache"
-    for sub in ("texmf-var", "texmf-config", "texmf-home"):
-        (cache / sub).mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
-    env["HOME"] = str(cache)
-    env["TEXMFVAR"] = str(cache / "texmf-var")
-    env["TEXMFCONFIG"] = str(cache / "texmf-config")
-    env["TEXMFHOME"] = str(cache / "texmf-home")
     return jobs.run_blocking(project, compile_argv(), kind="preview",
                              cwd=main.parent, run_dir=ws,
                              label=f"preview {main.parent.name}",
-                             sandbox_writable=writable, env=env)
+                             sandbox_writable=writable,
+                             env=compile_env(compile_cache(ws)))

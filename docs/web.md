@@ -261,15 +261,27 @@ a hyphen for the directory name — a preview of Claude's draft lands under
 `curation/preview/agent-claude/`, and a preview of round 1 under
 `curation/preview/round-1/`.
 
-The compile carries the same sandboxing as every other dispatch, plus two
+The compile carries the same sandboxing as every other dispatch, plus three
 rules of its own, because the `.tex` it compiles was written by an agent
-and so is untrusted input: `-shell-escape` is never passed, since
-`\write18` would otherwise turn a preview into arbitrary command execution,
-and `-norc` is passed alongside it, since without it `latexmk` would read
-and run a `.latexmkrc` (as Perl) from the compile directory — a directory
-that lives inside the very run the agent can write to. Either flag's
-absence, on its own, would turn a LaTeX preview into a way to run whatever
-an agent's draft asked for.
+and so is untrusted input:
+
+- `-shell-escape` is never passed, since `\write18` would otherwise turn a
+  preview into arbitrary command execution.
+- `-norc` is passed alongside it, since without it `latexmk` would read and
+  run a `.latexmkrc` (as Perl) from the compile directory — a directory that
+  lives inside the very run the agent can write to.
+- The compile's environment is **built explicitly**, not inherited from the
+  server process, and `shell_escape=f`, `openout_any=p` and `openin_any=p`
+  are set positively. Keeping the flag out of the argv is not enough on its
+  own: `pdflatex` reads kpathsea's `shell_escape` from the environment too,
+  so a server started in a shell that exported `shell_escape=t` — the
+  workaround someone reaches for when a package misbehaves — would re-enable
+  `\write18` with no `-shell-escape` in sight. Building the environment also
+  means the server's model API keys are never handed to `latexmk`; only
+  `PATH`, `LANG` and the preview's own `HOME`/`TEXMF*` cross over.
+
+No one of these, on its own, stops a LaTeX preview from running whatever an
+agent's draft asked for.
 
 Every form on these pages posts back to the same page
 (`303 See Other` on success, so a reload never repeats the action) or
