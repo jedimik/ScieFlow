@@ -294,13 +294,26 @@ def test_a_stale_running_record_does_not_block_a_new_compile(project, drafted, m
     nothing to correct it automatically except `jobs.reconcile`. Without
     calling that first, this refusal would wedge every future preview of
     the run shut forever, which is worse than the race it exists to
-    prevent."""
+    prevent.
+
+    The stale job is recorded against `dest` -- the exact preview
+    directory `"agent:claude"` itself compiles to -- not a different
+    source's. Recording it under a different source would still pass this
+    test even against the pre-`jobs.reconcile` code, because that code
+    gated on `cwd == dest` and would never have looked at a different
+    source's job in the first place; the test would then be passing for
+    the wrong reason, satisfied by the *old* code's own narrower scope
+    rather than by `reconcile` doing anything. Matching `dest` is what
+    makes `reconcile` the only thing standing between "refused forever"
+    and "compile proceeds" -- which is the regression this test exists to
+    guard.
+    """
     dead = subprocess.Popen(["true"])
     dead.wait()  # guaranteed not alive: reaped, not just exited
 
-    other_dest = drafted / "manuscript" / "curation" / "preview" / "round-1"
-    other_dest.mkdir(parents=True)
-    _save_fake_preview_job(project, drafted, other_dest, pid=dead.pid)
+    dest = drafted / "manuscript" / "curation" / "preview" / "agent-claude"
+    dest.mkdir(parents=True)
+    _save_fake_preview_job(project, drafted, dest, pid=dead.pid)
 
     def spy(prj, argv, **kwargs):
         raise RuntimeError("reached run_compile -- the stale record did not block it")
