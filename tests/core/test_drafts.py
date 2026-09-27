@@ -288,3 +288,39 @@ def test_an_agent_directory_named_with_a_control_character_is_excluded(ws):
     the reader would refuse is never offered."""
     (ws / "manuscript" / "drafts" / "bad\nname").mkdir()
     assert drafts.agents(ws) == ["claude", "codex"]
+
+
+@pytest.mark.parametrize("bad", [
+    "intro\u0085next",   # U+0085 NEL, category Cc — a line break to most readers
+    "intro next",   # U+2028 LINE SEPARATOR, category Zl
+    "intro next",   # U+2029 PARAGRAPH SEPARATOR, category Zp
+    "intro‮next",   # U+202E RIGHT-TO-LEFT OVERRIDE — reorders a heading on screen
+    "intro⁦next",   # U+2066 LEFT-TO-RIGHT ISOLATE
+])
+def test_a_non_ascii_line_breaker_or_bidi_override_in_a_name_is_refused(bad):
+    """The control-character rule was ASCII-only (`ch < "\\x20"`), so these all
+    passed and could split a provenance heading across lines, or visually
+    reorder one.
+
+    They cannot forge the merge prompt's framing — any forged region line must
+    itself contain the boundary base, which is exactly what makes
+    `curation.render` escalate the token away from it — but a name has no
+    business carrying them, and the display-reordering class is not covered by
+    the token at all."""
+    with pytest.raises(drafts.DraftError):
+        drafts.check_name(bad)
+
+
+@pytest.mark.parametrize("ok", [
+    "introducción",           # ordinary non-ASCII letters
+    "введение",
+    "مقدمة",   # Arabic
+    "zero‍width",        # U+200D ZWJ, category Cf — legitimate in Indic scripts
+    "zero‌width",        # U+200C ZWNJ, legitimate in Persian
+])
+def test_ordinary_non_ascii_and_joiners_stay_legal(ok):
+    """The rule refuses line breakers and bidi *overrides*, not the whole `Cf`
+    category: a joiner carries no line-breaking or reordering meaning, and
+    refusing every `Cf` would make section names unwritable in scripts that
+    need them."""
+    drafts.check_name(ok)

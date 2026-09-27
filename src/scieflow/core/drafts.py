@@ -22,6 +22,7 @@ prevents.
 
 from __future__ import annotations
 
+import unicodedata
 from pathlib import Path
 
 DRAFTS_DIR = "manuscript/drafts"
@@ -32,10 +33,32 @@ class DraftError(ValueError):
     """A draft, round or source that cannot be read as asked."""
 
 
+#: Characters that reorder a line on screen rather than breaking it. They are
+#: category `Cf`, but the rest of `Cf` — the joiners scripts like Persian and
+#: Devanagari genuinely need — carries no line-breaking or reordering meaning,
+#: so refusing the whole category would make legitimate section names
+#: unwritable. These nine are the overrides and isolates specifically.
+_BIDI_REORDERING = frozenset("\u202a\u202b\u202c\u202d\u202e"
+                             "\u2066\u2067\u2068\u2069")
+
+
+def _breaks_a_line(ch: str) -> bool:
+    """Whether `ch` can put a name's text onto a second line, or reorder it.
+
+    `Cc` covers NUL, newline, DEL and U+0085 (NEL, which most readers treat as
+    a line break and which an ASCII-only `ch < "\x20"` test misses); `Zl` and
+    `Zp` are U+2028 and U+2029. The bidi set is about display rather than
+    layout, and is included because a provenance heading is read by a person
+    as well as by an agent.
+    """
+    return unicodedata.category(ch) in {"Cc", "Zl", "Zp"} or ch in _BIDI_REORDERING
+
+
 def check_name(part: str) -> None:
     """Refuse `part` as a draft/round name: blank, whitespace-only,
-    containing a path separator or any control character (anything below
-    `0x20`, including NUL and newline, plus `0x7f`), or exactly `.`/`..`.
+    containing a path separator, any character that can break the name across
+    lines or reorder it on screen (see `_breaks_a_line` — this is a Unicode
+    rule, not an ASCII one), or exactly `.`/`..`.
 
     The control-character rule is not cosmetic. A drafting agent chooses
     these names — they are directory and file names it writes under
@@ -66,7 +89,7 @@ def check_name(part: str) -> None:
     `".tex"` (from `""`) or `"...tex"` (from `".."`) failing to exist.
     """
     if (not part or not part.strip() or "/" in part
-            or any(ch < "\x20" or ch == "\x7f" for ch in part)
+            or any(_breaks_a_line(ch) for ch in part)
             or part in {".", ".."}):
         raise DraftError(f"not a draft name: {part!r}")
 

@@ -437,3 +437,51 @@ def test_the_send_region_shows_the_current_round_number(client, project, drafted
     post(client, "/runs/r1/drafts", action="merge")
     assert curation.read(drafted)["round"] == 2
     assert "Send round 2" in client.get("/runs/r1/drafts").text
+
+
+def test_a_failed_merge_is_reported_even_if_the_round_moved_underneath(
+        client, project, monkeypatch):
+    """A failed merge must be reported from the turn's own job state, not from
+    whether the round number changed.
+
+    The route used to read `service.curation_round` before the call and compare
+    it against `merge_round`'s returned round. That has a window: a merge
+    completing in another tab between the two reads moves the round, and a
+    turn that genuinely failed then reads as success — no message, and the
+    researcher only finds out from the run's job list. `merge_round` already
+    decides success by `turn["job"]["state"] == MERGE_SUCCESS_STATE`, which is
+    the same predicate with no window, so the route uses that instead.
+
+    This fails against the before/after comparison: the stubbed round (99)
+    differs from the real one (1), which the old code read as "it advanced,
+    therefore it succeeded"."""
+    from scieflow.web import pages
+
+    def failed_turn_whose_round_moved(project_, slug):
+        return {"round": 99, "turn": {"job": {"state": "failed"}}}
+
+    monkeypatch.setattr(pages.service, "merge_round", failed_turn_whose_round_moved)
+    response = client.post(
+        "/runs/r1/drafts",
+        data={auth.CSRF_FIELD: client.cookies[auth.CSRF_COOKIE], "action": "merge"},
+        follow_redirects=True)
+    assert response.status_code == 200
+    assert "did not succeed" in response.text, (
+        "a failed turn was reported as a success because the round had moved")
+
+
+def test_a_successful_merge_is_not_reported_as_a_failure(client, project, monkeypatch):
+    """The mirror: a `done` turn must pass silently even if the round it
+    reports happens to equal the one already on disk."""
+    from scieflow.web import pages
+
+    def done_turn_reporting_the_same_round(project_, slug):
+        return {"round": 1, "turn": {"job": {"state": "done"}}}
+
+    monkeypatch.setattr(pages.service, "merge_round", done_turn_reporting_the_same_round)
+    response = client.post(
+        "/runs/r1/drafts",
+        data={auth.CSRF_FIELD: client.cookies[auth.CSRF_COOKIE], "action": "merge"},
+        follow_redirects=True)
+    assert response.status_code == 200
+    assert "did not succeed" not in response.text
