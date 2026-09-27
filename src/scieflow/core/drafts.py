@@ -110,6 +110,47 @@ def _inside(root: Path, *parts: str) -> Path:
     return candidate
 
 
+def _subdirs(directory: Path) -> list[str]:
+    """Names of the subdirectories directly inside `directory`, filtered
+    exactly as `_tex_stems` filters files.
+
+    `agents()` and `rounds()` used a bare `p.is_dir()` with no `check_name`
+    and no containment check, while `sections`/`read_section` resolve through
+    `_inside` and refuse both — so this module's own docstring promise ("a
+    listing here never offers a name `read_section` would go on to refuse")
+    held for files and not for directories. One `ln -s /anywhere
+    manuscript/drafts/x` inside a run, which any drafting agent can create,
+    therefore made `service.workbench` raise and `pages.drafts_page` 404 the
+    entire workbench, permanently, with no escape but deleting the symlink in
+    a terminal — precisely what AGENTS.md rule 4 exists to avoid. One stray
+    symlink now costs one hidden column instead.
+    """
+    try:
+        base = Path(directory).resolve()
+    except (OSError, RuntimeError, ValueError):
+        # `manuscript/drafts` itself symlinked into a cycle, say. A run with
+        # no readable listing reads as empty here, the same as a run that has
+        # not drafted at all; `sections`/`read_section` still raise for a
+        # name someone asks for by hand.
+        return []
+    if not base.is_dir():
+        return []
+    names = []
+    for entry in base.iterdir():
+        try:
+            check_name(entry.name)
+        except DraftError:
+            continue
+        try:
+            resolved = entry.resolve()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if base not in resolved.parents or not resolved.is_dir():
+            continue
+        names.append(entry.name)
+    return names
+
+
 def _tex_stems(directory: Path) -> list[str]:
     """Sorted `.tex` stems directly inside `directory` (already resolved and
     confined by the caller's own `_inside` call).
@@ -142,11 +183,13 @@ def _tex_stems(directory: Path) -> list[str]:
 
 def agents(ws: Path) -> list[str]:
     """Sorted subdirectories of `manuscript/drafts/` — one per agent that has
-    drafted. `[]` when the run has not drafted yet."""
-    drafts_dir = Path(ws) / DRAFTS_DIR
-    if not drafts_dir.is_dir():
-        return []
-    return sorted(p.name for p in drafts_dir.iterdir() if p.is_dir())
+    drafted. `[]` when the run has not drafted yet.
+
+    Filtered by `_subdirs`, so an entry `sections`/`read_section` would go on
+    to refuse — a name `check_name` rejects, or a symlink resolving outside
+    the drafts directory — is skipped here rather than listed and then
+    fatally re-refused. See `_subdirs` for what that cost before."""
+    return sorted(_subdirs(Path(ws) / DRAFTS_DIR))
 
 
 def sections(ws: Path, agent: str) -> list[str]:
@@ -189,12 +232,14 @@ def rounds(ws: Path) -> list[int]:
     `"²"` or `"١"` makes `str.isdigit()` true but `int()` raise, and a
     directory named that way exists only to be ignored, not to crash the
     one function whose job is ignoring it.
+
+    Filtered by `_subdirs` first, for the same reason `agents()` is: a
+    numeric-looking *symlink* out of the rounds directory would otherwise be
+    listed here and then refused by `read_round_section`, taking the whole
+    workbench page down with it.
     """
-    rounds_dir = Path(ws) / ROUNDS_DIR
-    if not rounds_dir.is_dir():
-        return []
-    return sorted(int(p.name) for p in rounds_dir.iterdir()
-                  if p.is_dir() and p.name.isascii() and p.name.isdigit())
+    return sorted(int(name) for name in _subdirs(Path(ws) / ROUNDS_DIR)
+                  if name.isascii() and name.isdigit())
 
 
 def round_sections(ws: Path, n: int) -> list[str]:

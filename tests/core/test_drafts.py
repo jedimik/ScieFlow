@@ -241,3 +241,50 @@ def test_a_symlink_into_another_rounds_directory_is_refused_and_listing_agrees(w
     assert "foo" not in drafts.round_sections(ws, 1)
     with pytest.raises(drafts.DraftError):
         drafts.read_round_section(ws, 1, "foo")
+
+
+def test_an_escaping_symlink_directory_is_excluded_from_the_agents_listing(ws, tmp_path):
+    """Nine symlink-shape tests covered *files*; none covered directories,
+    and `agents()`/`rounds()` had neither `check_name` nor a containment
+    check. One `ln -s /anywhere manuscript/drafts/x` — which any drafting
+    agent can create inside its own run — made `service.workbench` raise and
+    the whole workbench page 404, permanently. The listing must skip it and
+    leave every real agent in place."""
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (ws / "manuscript" / "drafts" / "evil").symlink_to(outside)
+    assert drafts.agents(ws) == ["claude", "codex"]
+
+
+def test_an_escaping_symlink_directory_is_excluded_from_the_rounds_listing(ws, tmp_path):
+    """The same hole in `rounds()`: a *numerically named* symlink out of the
+    rounds directory would be listed and then refused by
+    `read_round_section`."""
+    rounds_dir = ws / "manuscript" / "curation" / "rounds"
+    (rounds_dir / "1").mkdir(parents=True)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (rounds_dir / "2").symlink_to(outside)
+    assert drafts.rounds(ws) == [1]
+
+
+def test_a_symlink_directory_resolving_back_to_the_drafts_root_is_excluded(ws):
+    """`_inside` refuses a `self -> ..`-shaped entry (it is no agent's
+    directory), so the listing must not offer it either."""
+    (ws / "manuscript" / "drafts" / "self").symlink_to(ws / "manuscript" / "drafts")
+    assert drafts.agents(ws) == ["claude", "codex"]
+
+
+def test_a_symlink_cycle_among_the_drafts_does_not_crash_the_agents_listing(ws):
+    a = ws / "manuscript" / "drafts" / "loop-a"
+    b = ws / "manuscript" / "drafts" / "loop-b"
+    a.symlink_to(b)
+    b.symlink_to(a)
+    assert drafts.agents(ws) == ["claude", "codex"]
+
+
+def test_an_agent_directory_named_with_a_control_character_is_excluded(ws):
+    """The listing and `check_name` must agree in this direction too: a name
+    the reader would refuse is never offered."""
+    (ws / "manuscript" / "drafts" / "bad\nname").mkdir()
+    assert drafts.agents(ws) == ["claude", "codex"]

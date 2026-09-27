@@ -71,6 +71,26 @@ def test_the_page_shows_every_agents_draft(client, drafted):
     assert "per claude" in page.text and "per codex" in page.text
 
 
+def test_one_escaping_symlink_does_not_404_the_whole_workbench(client, drafted, tmp_path):
+    """The page's stake in the `agents()`/`rounds()` filtering fix. Before it,
+    `ln -s /anywhere manuscript/drafts/x` inside a run — which any drafting
+    agent can do — made `service.workbench` raise, which `drafts_page` turned
+    into a 404 for the entire workbench, for good: the only escape was
+    deleting the symlink in a terminal, which is what AGENTS.md rule 4 exists
+    to avoid. One stray symlink must cost one hidden column, not the page."""
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "results.tex").write_text("not this run's\n")
+    (drafted / "manuscript" / "drafts" / "escapee").symlink_to(outside)
+
+    page = client.get("/runs/r1/drafts")
+    assert page.status_code == 200, "one symlink must not 404 the workbench"
+    assert "claude" in page.text and "codex" in page.text, (
+        "the other agents' columns must still be there")
+    assert "escapee" not in page.text, "the escaping directory is hidden, not served"
+    assert "not this run" not in page.text
+
+
 def test_a_run_with_no_drafts_says_so(client, project):
     """REVIEW FOCUS 2: anyone opening the workbench before `paper-draft`
     Phase 3 has run has an empty `drafts/` directory. An empty shell with
