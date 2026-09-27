@@ -203,10 +203,16 @@
 </details>
 {% endif %}
 
-<h2>Send this round</h2>
-<p class="dim">The merging agent reads the current curation and writes the next
-   round's sections. It is the same agent this run's conversation is handed
-   to — pick it below if you need to change it.</p>
+<h2>Send round {{ curation.round }}</h2>
+{#- The round number, shown rather than left implicit: a merge turn that ran
+   and did not succeed leaves it where it was, and without the number on the
+   page a failed turn and a turn that never happened look identical. The
+   route's own message says so too; this is what the researcher checks
+   afterwards. #}
+<p class="dim">The merging agent reads the current curation and writes
+   <code>manuscript/curation/rounds/{{ curation.round }}/</code>. It is the
+   same agent this run's conversation is handed to — pick it below if you need
+   to change it. The round advances only once the turn actually succeeds.</p>
 {% if not conversation.agent %}
 <p class="dim">No agent is holding this conversation yet — choose one below
    before sending a round; there is nothing to merge to otherwise.</p>

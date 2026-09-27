@@ -374,7 +374,20 @@ def curate(request: Request, slug: str, action: str = Form(...),
         elif action == "revert":
             service.revert_curation(project, slug, _as_int(version))
         elif action == "merge":
-            service.merge_round(project, slug)
+            # `service.merge_round` makes its returned `round` the
+            # discriminator between "the turn succeeded" and "the turn ran and
+            # did not" -- its docstring says so, and a non-"done" turn is
+            # deliberately not raised, because it genuinely happened and cost
+            # budget. Discarding the return value made a merge that timed out,
+            # failed or was cancelled look exactly like one that never
+            # happened: no message, no new column, no number, and the only way
+            # to find out was the run's own job list.
+            before = service.curation_round(project, slug)
+            if service.merge_round(project, slug)["round"] == before:
+                return _drafts_back(
+                    slug, "the merge turn did not succeed, so this round has not "
+                          "advanced — it still cost budget; see this run's job "
+                          "list for what happened")
         else:
             return _drafts_back(slug, f"unknown action: {action}")
     except service.ServiceError as exc:

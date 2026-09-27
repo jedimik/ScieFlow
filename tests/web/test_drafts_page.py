@@ -397,3 +397,43 @@ def test_merging_an_empty_curation_is_refused_as_a_message_not_a_500(client, dra
     assert ("nothing to merge: keep a passage, write your own text, or leave a note"
             in response.text.lower())
     assert curation.read(drafted)["round"] == 1
+
+
+def test_a_merge_turn_that_runs_but_does_not_succeed_says_so_on_the_page(
+        client, project, drafted):
+    """`service.merge_round` deliberately does not raise for a turn that ran
+    and did not succeed — it genuinely happened, it is on the run's own
+    conversation and budget, and the round is left where it was. The route
+    discarded that return value and 303'd back with no error, so a merge that
+    timed out, failed or was cancelled looked exactly like one that never
+    happened: no message, no new column, no number. The researcher had to open
+    the run's job list to discover they had spent budget.
+
+    `stub` fails a merge turn deterministically — it answers only a prompt
+    carrying a literal `kind: conversation` line, which the merge prompt never
+    does — which is what `tests/core/test_merge_round.py::test_a_turn_that_
+    runs_but_does_not_succeed_does_not_advance_the_round` already relies on.
+    """
+    conversation.set_agent(project.run_dir("r1"), "stub")
+    curation.keep(drafted, "The catalyst degrades above 400 K.",
+                  agent="claude", section="results")
+
+    response = post(client, "/runs/r1/drafts", action="merge")
+    assert response.status_code == 200
+    assert curation.read(drafted)["round"] == 1, "the round must not advance"
+    assert conversation.read(drafted)["turns"], "the turn genuinely happened"
+    assert "did not succeed" in response.text, (
+        "a merge that ran and failed must not look like one that never ran")
+    assert "job list" in response.text, "and must say where to find out why"
+
+
+def test_the_send_region_shows_the_current_round_number(client, project, drafted, responder):
+    """With the round on the page, a failed turn is visible as a number that
+    did not move — which is the other half of the fix above."""
+    conversation.set_agent(project.run_dir("r1"), responder)
+    curation.keep(drafted, "kept", agent="claude", section="results")
+    assert "Send round 1" in client.get("/runs/r1/drafts").text
+
+    post(client, "/runs/r1/drafts", action="merge")
+    assert curation.read(drafted)["round"] == 2
+    assert "Send round 2" in client.get("/runs/r1/drafts").text

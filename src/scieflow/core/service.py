@@ -489,16 +489,28 @@ def merge_round(project: Project, slug: str) -> dict:
     without raising. `say` returns normally for a job that ran and then
     failed, timed out, or was cancelled (`jobs.FINAL` has five terminal
     states; only one of them means the agent actually answered), and
-    `rounds/<n>/` exists to hold that round's output — if the agent never
-    produced any, advancing would strand an empty round forever and point
-    the next curation at a round nothing will ever fill, a gap the
-    researcher did not create and cannot explain from the run alone. So a
-    non-`"done"` turn is not raised as an error (it genuinely happened, it
+    `rounds/<n>/` exists to hold that round's output, so advancing past a
+    turn that plainly did not happen would point the next curation at a
+    round nothing will ever fill.
+
+    What this gate does *not* prove is that the round has any content.
+    `"done"` means the process exited 0, not that it wrote a single `.tex`
+    file — an agent that answers cheerfully and writes nothing still
+    advances the round. (Checking the directory instead was considered and
+    is a larger change: the agent is told a path, not made to prove it used
+    it, and a round whose output is one section rather than all of them is
+    a judgement call, not a boolean.) So this narrows the empty-round
+    window to turns that visibly failed; it does not close it.
+
+    A non-`"done"` turn is not raised as an error (it genuinely happened, it
     is on the run's own conversation and budget, and the caller needs to
     see it) — it simply leaves the round where it was, and the *returned*
     `round` is how a caller tells the two cases apart: unchanged means the
     dispatched turn did not succeed, one higher means it did and this
-    round's output belongs in the directory just named to the agent.
+    round's output belongs in the directory just named to the agent. A
+    caller that discards this return value reports a failed merge as a
+    success — `pages.curate` compares it against `service.curation_round`
+    taken before the call, precisely for that reason.
 
     `curation.render` (not `curation.read` plus a second, separate render)
     supplies the round, the emptiness check's `blocks`/`note`, and the

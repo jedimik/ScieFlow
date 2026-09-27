@@ -227,8 +227,12 @@ chat panel uses — the workbench's own "Hand the conversation over" form
 posts to the run's `/runs/<slug>/say` route. A round only advances once
 that turn actually finishes successfully; a turn that fails, times out or
 is cancelled still costs budget and still lands on the timeline, but leaves
-the curation pointed at the same round rather than at an empty directory
-nothing will ever fill.
+the curation pointed at the same round. The page says so when that happens —
+"the merge turn did not succeed, so this round has not advanced" — and the
+"Send round *n*" heading carries the number, so a failed turn is visible as a
+number that did not move rather than as silence. (Success here means the
+agent's process exited cleanly, not that it wrote any sections: an agent that
+answers and writes nothing still advances the round.)
 
 The Compile PDF button on each draft or completed round assembles a
 throwaway document and compiles it with `latexmk`. A section's `.tex` file
