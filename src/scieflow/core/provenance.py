@@ -181,6 +181,22 @@ def _blob(repo: Path, data: str) -> str:
     return _git(repo, "hash-object", "-w", "--stdin", stdin=data)
 
 
+def _blob_file(repo: Path, path: Path) -> str:
+    """Hash `path`'s on-disk bytes into a blob, exactly as they are.
+
+    `--no-filters` and reading straight from the path (rather than piping
+    `path.read_bytes()` through `_blob`'s `--stdin`, which requires a `str`
+    because `_git`'s subprocess runs in text mode) makes this
+    encoding-agnostic by construction: a `.tex` file in latin-1 or UTF-16 is
+    ordinary in LaTeX work, and its content must land in history byte for
+    byte, not get silently dropped for failing a UTF-8 decode or mangled by
+    a round trip through `str`. `_blob` is kept alongside this for in-memory
+    content with no path of its own (Task 1's round-trip test exercises
+    it); `sync`'s projection uses this one for every on-disk artifact.
+    """
+    return _git(repo, "hash-object", "-w", "--no-filters", "--", str(path))
+
+
 def _tree(repo: Path, entries: list[tuple[str, str, str, str]]) -> str:
     """Build a tree from `(mode, kind, sha, name)` entries via `mktree -z`.
 
@@ -317,7 +333,13 @@ def ref_safe(name: str) -> bool:
     agent name costs that agent, never the whole sync (see `sync`).
     `check-ref-format` is run directly through `subprocess.run` with
     `check=False`, not through `_git` — it needs no repo, and must not turn
-    a merely-unsafe name into a `ProvenanceError`.
+    a merely-unsafe name into a `ProvenanceError`. It still runs with
+    `_env()`'s environment, not the process's own: it is the one git
+    subprocess in this module that would otherwise inherit `os.environ`
+    wholesale (a model API key included) for no reason — `check-ref-format`
+    reads no repo config and runs no hooks, so this is defence in depth,
+    not a fix for a found exploit, and it keeps "every git subprocess in
+    this module gets its environment from `_env()`" true without exception.
     """
     try:
         drafts.check_name(name)
@@ -329,6 +351,7 @@ def ref_safe(name: str) -> bool:
         result = subprocess.run(
             [GIT, "check-ref-format", f"refs/heads/draft/{name}"],
             capture_output=True, text=True, timeout=_TIMEOUT_S, check=False,
+            env=_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -348,13 +371,21 @@ def _raw_agent_names(ws: Path) -> set[str]:
     `<R>-on-<A>.json` filenames directly under `reviews/` and under each
     `review/draft-round-<N>/`. Never `config/agents.yml` — an agent's
     presence here is evidence it acted, not configuration.
+
+    The `manuscript/drafts/` subdirectories go through `drafts.agents(ws)`
+    rather than a bare `iterdir()`/`is_dir()` — `drafts.agents` (via its own
+    `_subdirs`) already resolves each entry and refuses one that resolves
+    outside `manuscript/drafts/`, which a bare `is_dir()` does not: it
+    follows a symlink exactly like a real directory. Without this, an
+    agent-created `manuscript/drafts/evil -> /etc` would surface `"evil"` as
+    a discovered agent and — since every artifact read in `sync()` still
+    has to be individually contained (see `put`) — the *name* leaking here
+    was a smaller half of a two-part hole; this file uses the same
+    already-hardened primitive the rest of the codebase uses for exactly
+    this directory, instead of re-deriving the same containment check.
     """
     ws = Path(ws)
-    names: set[str] = set()
-
-    drafts_dir = ws / "manuscript" / "drafts"
-    if drafts_dir.is_dir():
-        names.update(p.name for p in drafts_dir.iterdir() if p.is_dir())
+    names: set[str] = set(drafts.agents(ws))
 
     for sub in ("findings", "gaps"):
         directory = ws / sub
@@ -390,46 +421,70 @@ def agents(ws: Path) -> list[str]:
     return sorted(name for name in _raw_agent_names(Path(ws)) if ref_safe(name))
 
 
-def _read_source(path: Path) -> bytes | None:
-    """Raw bytes of `path`, or `None` when it is not a readable regular
-    file — a directory where a file is expected, a dangling symlink (which
-    `Path.is_file()` follows and reports `False` for), or a file this
-    process cannot read. `None` is a skip, never an exception: one odd
-    workspace entry costs that entry, not the sync."""
-    if not path.is_file():
-        return None
-    try:
-        return path.read_bytes()
-    except OSError:
-        return None
+def _round_dir_number(name: str) -> tuple[bool, int | None]:
+    """`(looks_like_a_round, number)` for a round-directory name (already
+    stripped of any `round-`/`draft-round-` prefix).
+
+    `looks_like_a_round` is `False` for anything that isn't ASCII digits at
+    all — that directory simply isn't a round of anything, silently, the
+    same as before this function existed. When it *is* digit-shaped,
+    `number` is `None` unless `name` is the canonical decimal spelling of
+    it (`str(int(name)) == name`): a bare `.isdigit()` test would let
+    `"01"` and `"1"` both parse as round 1 and collapse onto the same
+    target path, with the winner decided by directory-scan order — not
+    guaranteed stable, so which content wins could flip between syncs and
+    produce a spurious commit purely from scan-order noise. A digit-shaped
+    but non-canonical name is therefore reported by the caller, not
+    silently picked or dropped. `drafts.rounds()` gets away with a bare
+    `int()` because it only ever reads; this module writes, so a
+    non-canonical name has to cost that round, not create nondeterminism.
+    """
+    if not (name.isascii() and name.isdigit()):
+        return False, None
+    return True, (int(name) if str(int(name)) == name else None)
 
 
-def _tree_from_paths(repo: Path, files: dict[str, bytes]) -> str:
-    """Build a tree object from a flat map of `{target/path: content}`.
+def _tree_from_paths(repo: Path, files: dict[str, Path]) -> str:
+    """Build a tree object from a flat map of `{target/path: source path}`.
 
     `files` keys are full paths relative to the branch root (e.g.
     `"merge_2/sections/results.tex"`); `mktree` only knows how to build one
     flat level of entries from `(mode, kind, sha, name)` tuples, so a nested
     target path has to become a nested tree first. This groups the flat map
-    by its first path component, recurses on the remainder for everything
-    that shares that component, and folds each recursive result in as a
-    `tree` entry alongside any entries that were already leaves at this
-    level — which builds every subtree (and hashes it, via `mktree`) before
-    the tree that references it, i.e. deepest first, simply because a
-    child's `mktree` call has to return before its parent's entry can be
-    constructed. An empty `files` produces the well-known empty tree, the
-    same way `_tree(repo, [])` does, since that's just `entries == []` here
-    too.
+    by its first path component — everything with no remaining `/` is a
+    leaf (blobbed via `_blob_file`) at this level, everything else is
+    grouped by that first component and recursed on the remainder — and
+    folds each recursive result in as a `tree` entry alongside the leaves.
+    Recursing before building this level's own entry list means every
+    subtree is built (and hashed, via `mktree`) before the tree that
+    references it, i.e. deepest first, simply because a child's `mktree`
+    call has to return before its parent's entry tuple can be constructed.
+    An empty `files` produces the well-known empty tree, the same way
+    `_tree(repo, [])` does, since that's just `entries == []` here too.
+
+    A name used as both a leaf and a group at the same level — `files ==
+    {"a": ..., "a/b": ...}` — would `mktree` into two entries both named
+    `"a"`, which `fsck --strict` flags as `duplicateEntries`; nothing in
+    today's path table can produce this, but a future table row silently
+    could, so it is refused here rather than left for `fsck` to someday
+    notice.
     """
-    groups: dict[str, dict[str, bytes]] = {}
-    entries: list[tuple[str, str, str, str]] = []
-    for path, data in files.items():
+    leaves: dict[str, Path] = {}
+    groups: dict[str, dict[str, Path]] = {}
+    for path, source in files.items():
         head, sep, rest = path.partition("/")
         if not sep:
-            blob = _blob(repo, data.decode("utf-8"))
-            entries.append(("100644", "blob", blob, head))
+            leaves[head] = source
         else:
-            groups.setdefault(head, {})[rest] = data
+            groups.setdefault(head, {})[rest] = source
+    collision = set(leaves) & set(groups)
+    if collision:
+        raise ProvenanceError(
+            f"path used as both a file and a directory: {sorted(collision)!r}")
+    entries: list[tuple[str, str, str, str]] = []
+    for name, source in leaves.items():
+        blob = _blob_file(repo, source)
+        entries.append(("100644", "blob", blob, name))
     for name, sub_files in groups.items():
         subtree = _tree_from_paths(repo, sub_files)
         entries.append(("040000", "tree", subtree, name))
@@ -444,44 +499,90 @@ def sync(ws: Path) -> dict:
     anything is written. Each branch's full target tree is built from
     scratch every time (see `_tree_from_paths`) and compared against that
     branch's current tip — or, for a branch that does not exist yet,
-    against the empty tree the root commit holds — so a branch is committed
-    only when it would actually change, and the branch is parented on its
-    existing tip, or on `EMPTY_ROOT_REF` when it is new.
+    against the root's empty tree — so a branch is committed only when it
+    would actually change, and is parented on its existing tip, or on
+    `EMPTY_ROOT_REF` when it is new. `main` is the one exception to "skip an
+    empty new branch": it is always given a first commit, even an honestly
+    empty one, the moment a repo exists, because every later reader
+    compares branches by ref and `main` simply not existing yet is a harder
+    special case to handle in each of those readers than committing one
+    empty `main` here.
 
-    An artifact whose source is not a readable regular file, or is not
-    valid UTF-8 text, is skipped and reported in `skipped` rather than
-    failing the sync; so is an agent name `ref_safe` refuses. Both `emit`
-    calls are guarded: a run directory without `status.yml` (most of this
-    module's callers in tests, and plausibly in production before a run has
-    written one) must not turn a successful sync into a failure just
-    because the event log couldn't be annotated.
+    Every artifact this function reads is required, by the nested `put`
+    helper, to resolve to a real path inside `ws` before it is opened —
+    this is what stops an agent-created symlink (a drafting directory such
+    as `manuscript/drafts/<agent>`, or any single artifact file the path
+    table names) from smuggling host content outside the run into a
+    committed, exportable repo. A source that does not exist at all is an
+    optional artifact the run simply hasn't written yet and is silently
+    skipped, not reported; a source that *does* exist in some irregular
+    shape — a directory where a file is expected, a symlink that is
+    dangling or resolves outside `ws`, or a file this process cannot open —
+    is a genuine anomaly and lands in `skipped["artifacts"]` as a
+    run-relative path, never the absolute host path (which would otherwise
+    leak into `events.jsonl` forever, exactly the class of leak `_git`'s own
+    docstring avoids for argument lists). An agent name `ref_safe` refuses
+    is recorded by name in `skipped["agents"]`. A round directory whose name
+    is digit-shaped but not the canonical decimal spelling of its number
+    (`"01"` alongside `"1"`) is refused and reported the same way, so which
+    one wins never depends on directory-scan order.
 
-    Returns `{"commits": {ref: sha, ...}, "agents": [...], "skipped": [...]}`.
+    Both `emit` calls are independently guarded: a run directory without
+    `status.yml` (most of this module's callers in tests, and plausibly in
+    production before a run has written one) must not turn a successful
+    sync into a failure just because the event log couldn't be annotated,
+    and a failure emitting one event must not suppress the other.
+
+    Returns `{"commits": {ref: sha, ...}, "agents": [...], "skipped":
+    {"agents": [...], "artifacts": [...]}}`.
     """
     ws = Path(ws)
+    ws_resolved = ws.resolve()
     if not available():
         raise ProvenanceError("git is not available on this host")
     repo = ensure_repo(ws)
 
     raw = _raw_agent_names(ws)
     safe_agents = sorted(name for name in raw if ref_safe(name))
-    skipped: list[str] = sorted(name for name in raw if name not in safe_agents)
+    skipped: dict[str, list[str]] = {
+        "agents": sorted(name for name in raw if name not in safe_agents),
+        "artifacts": [],
+    }
 
-    branches: dict[str, dict[str, bytes]] = {"refs/heads/main": {}}
+    branches: dict[str, dict[str, Path]] = {"refs/heads/main": {}}
     for name in safe_agents:
         branches[f"refs/heads/draft/{name}"] = {}
 
     def put(ref: str, target: str, source: Path) -> None:
-        data = _read_source(source)
-        if data is None:
-            skipped.append(str(source))
+        """Add `source` at `target` on `ref`'s tree, or record why not.
+
+        `source.is_symlink() or source.exists()` is "is there anything at
+        all here" — `.exists()` alone follows a symlink and reads `False`
+        for a dangling one, which would make a dangling symlink
+        indistinguishable from a genuinely absent optional artifact. Once
+        something is confirmed present, everything else that can go wrong
+        (wrong shape, escapes `ws`, unreadable) is a reportable skip.
+        """
+        if not (source.is_symlink() or source.exists()):
+            return
+        if not source.is_file():
+            skipped["artifacts"].append(str(source.relative_to(ws)))
             return
         try:
-            data.decode("utf-8")
-        except UnicodeDecodeError:
-            skipped.append(str(source))
+            resolved = source.resolve()
+        except (OSError, RuntimeError):
+            skipped["artifacts"].append(str(source.relative_to(ws)))
             return
-        branches[ref][target] = data
+        if not resolved.is_relative_to(ws_resolved):
+            skipped["artifacts"].append(str(source.relative_to(ws)))
+            return
+        try:
+            with resolved.open("rb"):
+                pass
+        except OSError:
+            skipped["artifacts"].append(str(source.relative_to(ws)))
+            return
+        branches[ref][target] = resolved
 
     # outline/outline.md -> main: outline.md
     put("refs/heads/main", "outline.md", ws / "outline" / "outline.md")
@@ -491,10 +592,14 @@ def sync(ws: Path) -> dict:
     rounds_dir = ws / "manuscript" / "curation" / "rounds"
     if rounds_dir.is_dir():
         for round_dir in rounds_dir.iterdir():
-            if not (round_dir.is_dir() and round_dir.name.isascii()
-                    and round_dir.name.isdigit()):
+            if not round_dir.is_dir():
                 continue
-            n = int(round_dir.name)
+            looks_like_round, n = _round_dir_number(round_dir.name)
+            if not looks_like_round:
+                continue
+            if n is None:
+                skipped["artifacts"].append(str(round_dir.relative_to(ws)))
+                continue
             round_numbers.append(n)
             for tex in round_dir.glob("*.tex"):
                 put("refs/heads/main", f"merge_{n}/sections/{tex.stem}.tex", tex)
@@ -509,10 +614,14 @@ def sync(ws: Path) -> dict:
     review_dir = ws / "review"
     if review_dir.is_dir():
         for round_dir in review_dir.glob("round-*"):
-            suffix = round_dir.name[len("round-"):]
-            if not (round_dir.is_dir() and suffix.isascii() and suffix.isdigit()):
+            if not round_dir.is_dir():
                 continue
-            n = int(suffix)
+            looks_like_round, n = _round_dir_number(round_dir.name[len("round-"):])
+            if not looks_like_round:
+                continue
+            if n is None:
+                skipped["artifacts"].append(str(round_dir.relative_to(ws)))
+                continue
             for fname in ("review.md", "response.md"):
                 put("refs/heads/main", f"review_{n}/{fname}", round_dir / fname)
 
@@ -541,20 +650,24 @@ def sync(ws: Path) -> dict:
         for round_dir in review_dir.glob("draft-round-*"):
             if not round_dir.is_dir():
                 continue
-            suffix = round_dir.name[len("draft-round-"):]
-            if not (suffix.isascii() and suffix.isdigit()):
+            looks_like_round, n = _round_dir_number(round_dir.name[len("draft-round-"):])
+            if not looks_like_round:
                 continue
-            n = int(suffix)
+            if n is None:
+                skipped["artifacts"].append(str(round_dir.relative_to(ws)))
+                continue
             for f in round_dir.iterdir():
-                name = f.name
-                if name.endswith(".json") and "-on-" in name:
+                fname = f.name
+                if fname.endswith(".json") and "-on-" in fname:
                     reviewer, sep, _author = f.stem.partition("-on-")
                     if sep and reviewer in safe_agents:
-                        put(f"refs/heads/draft/{reviewer}", f"review_{n}/{name}", f)
-                elif name.startswith("response-") and name.endswith(".md"):
+                        put(f"refs/heads/draft/{reviewer}", f"review_{n}/{fname}", f)
+                elif fname.startswith("response-") and fname.endswith(".md"):
                     author = f.stem[len("response-"):]
                     if author in safe_agents:
-                        put(f"refs/heads/draft/{author}", f"review_{n}/{name}", f)
+                        put(f"refs/heads/draft/{author}", f"review_{n}/{fname}", f)
+
+    skipped["artifacts"].sort()
 
     root = _ref_sha(repo, EMPTY_ROOT_REF)
     root_tree = _git(repo, "rev-parse", f"{EMPTY_ROOT_REF}^{{tree}}")
@@ -566,11 +679,19 @@ def sync(ws: Path) -> dict:
         if tip is not None:
             baseline = _git(repo, "rev-parse", f"{ref}^{{tree}}")
             parent = tip
+            if tree == baseline:
+                continue
         else:
-            baseline = root_tree
             parent = root
-        if tree == baseline:
-            continue
+            # Ruling 2: `main` always gets committed on its first sync, even
+            # from an empty tree, so it exists as soon as the repo does. A
+            # brand-new agent branch stays exempt: an agent is only ever
+            # discovered because *some* artifact of theirs exists, so an
+            # empty `draft/<agent>` here would only mean every one of their
+            # artifacts failed containment — already visible in
+            # `skipped["artifacts"]` — and doesn't need an empty commit too.
+            if ref != "refs/heads/main" and tree == root_tree:
+                continue
         message = f"sync {ref.removeprefix('refs/heads/')}"
         commit = _commit(repo, tree, [parent], message)
         _update_ref(repo, ref, commit)
@@ -579,8 +700,12 @@ def sync(ws: Path) -> dict:
     try:
         if commits:
             events.emit(ws, "provenance.synced", refs=list(commits), agents=safe_agents)
-        if skipped:
-            events.emit(ws, "provenance.skipped", skipped=list(skipped))
+    except Exception:
+        pass
+    try:
+        if skipped["agents"] or skipped["artifacts"]:
+            events.emit(ws, "provenance.skipped",
+                        agents=skipped["agents"], artifacts=skipped["artifacts"])
     except Exception:
         pass
 

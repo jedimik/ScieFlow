@@ -297,6 +297,25 @@ def test_an_ordinary_agent_name_is_a_safe_ref(name):
     assert provenance.ref_safe(name) is True
 
 
+def test_ref_safe_does_not_leak_the_parent_environment(monkeypatch):
+    """Fix round 1, item 2: `check-ref-format` is a git subprocess like any
+    other in this module, so it must run with `_env()`'s environment, not
+    `os.environ` — a hostile parent (a model API key) must never reach it."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-not-travel")
+    seen_env = {}
+    real_run = provenance.subprocess.run
+
+    def spy(argv, **kwargs):
+        if argv[:2] == [provenance.GIT, "check-ref-format"]:
+            seen_env.update(kwargs.get("env") or {})
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(provenance.subprocess, "run", spy)
+    provenance.ref_safe("claude")
+    assert seen_env, "check-ref-format was not called via subprocess.run as expected"
+    assert "ANTHROPIC_API_KEY" not in seen_env
+
+
 def test_an_unsafe_agent_directory_is_skipped_not_fatal(ws):
     """One bad directory costs that directory, never the whole history."""
     _write(ws / "manuscript" / "drafts" / "claude" / "results.tex", "fine\n")
@@ -305,8 +324,69 @@ def test_an_unsafe_agent_directory_is_skipped_not_fatal(ws):
 
     assert provenance.agents(ws) == ["claude"]
     result = provenance.sync(ws)
-    assert "a..b" in result["skipped"]
+    assert "a..b" in result["skipped"]["agents"]
     assert "refs/heads/draft/claude" in result["commits"]
+
+
+def test_a_symlinked_agent_directory_does_not_leak_host_content(ws, tmp_path):
+    """CRITICAL (fix round 1): an agent chooses this directory's name, and
+    `manuscript/drafts/evil -> /outside` must not surface `evil` as a
+    discovered agent, or copy the symlink target's content into the
+    committed, exportable repo. `drafts.agents()` on the identical
+    workspace already refuses this; discovery has to go through it (or the
+    same resolve-and-contain check) rather than a bare `is_dir()`."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.tex").write_text("HOST SECRET CONTENT\n")
+    _write(ws / "manuscript" / "drafts" / "claude" / "results.tex", "real draft\n")
+    (ws / "manuscript" / "drafts" / "evil").symlink_to(outside)
+
+    assert provenance.agents(ws) == ["claude"]
+    result = provenance.sync(ws)
+    repo = provenance.repo_path(ws)
+    assert provenance._ref_sha(repo, "refs/heads/draft/evil") is None
+    for ref in ("refs/heads/main", "refs/heads/draft/claude"):
+        listing = provenance._git(repo, "ls-tree", "-r", "--name-only", ref)
+        assert "secret.tex" not in listing
+    assert result["commits"], "the sync still committed what it safely could"
+
+
+def test_a_symlinked_artifact_file_is_skipped_not_copied(ws, tmp_path):
+    """CRITICAL (fix round 1): a symlink at any single artifact path (not
+    just a whole agent directory) that resolves outside `ws` must be
+    skipped, reported by its run-relative path, and never read — this is
+    `put`'s containment check, the second half of the same hole."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "id_rsa").write_text("-----BEGIN PRIVATE KEY-----\n")
+    _write(ws / "manuscript" / "drafts" / "claude" / "results.tex", "real\n")
+    (ws / "findings").mkdir(parents=True)
+    (ws / "findings" / "claude.json").symlink_to(outside / "id_rsa")
+
+    result = provenance.sync(ws)
+    repo = provenance.repo_path(ws)
+    listing = provenance._git(repo, "ls-tree", "-r", "--name-only", "refs/heads/draft/claude")
+    assert "findings.json" not in listing
+    assert "findings/claude.json" in result["skipped"]["artifacts"]
+    assert result["commits"], "the sync still committed what it safely could"
+
+
+def test_a_non_canonical_round_directory_is_refused(ws):
+    """Ruling 3: `round-01` and `round-1` (or `1` and `01` under
+    `manuscript/curation/rounds/`) must not collapse onto the same target
+    with the winner decided by directory-scan order — that would make a
+    committed tree nondeterministic across syncs."""
+    _write(ws / "manuscript" / "drafts" / "claude" / "results.tex", "fine\n")
+    _write(ws / "manuscript" / "curation" / "rounds" / "01" / "results.tex", "v1\n")
+    _write(ws / "review" / "round-01" / "review.md", "the review\n")
+
+    result = provenance.sync(ws)
+    repo = provenance.repo_path(ws)
+    listing = provenance._git(repo, "ls-tree", "-r", "--name-only", "refs/heads/main")
+    assert "merge_1/sections/results.tex" not in listing
+    assert "review_1/review.md" not in listing
+    assert "manuscript/curation/rounds/01" in result["skipped"]["artifacts"]
+    assert "review/round-01" in result["skipped"]["artifacts"]
 
 
 def test_sync_lays_out_main_exactly_as_the_spec_says(drafted):
@@ -400,6 +480,87 @@ def test_sync_emits_an_event_naming_what_it_did(drafted):
     provenance.sync(drafted)
     kinds = [e["type"] for e in events.read(drafted)]
     assert "provenance.synced" in kinds
+
+
+def test_sync_emits_a_skipped_event_when_something_is_skipped(ws):
+    """Fix round 1, item 4: only `provenance.synced` had a test; nothing
+    asserted `provenance.skipped` is ever actually emitted."""
+    from scieflow.core import events
+    from scieflow.core.run import status
+
+    status.write_status(ws, status.new_status("r1", "autonomous"))
+    _write(ws / "manuscript" / "drafts" / "claude" / "results.tex", "fine\n")
+    (ws / "manuscript" / "drafts" / "a..b").mkdir(parents=True)
+    _write(ws / "manuscript" / "drafts" / "a..b" / "results.tex", "hostile\n")
+
+    provenance.sync(ws)
+    kinds = [e["type"] for e in events.read(ws)]
+    assert "provenance.skipped" in kinds
+
+
+def test_a_failed_synced_emission_does_not_suppress_the_skipped_emission(ws, monkeypatch):
+    """Fix round 1, item 3: the two `emit` calls must be independently
+    guarded. A single `try` around both means a failure emitting
+    `provenance.synced` also silently swallows `provenance.skipped`,
+    burying the one record that the event log itself failed."""
+    from scieflow.core import events
+
+    _write(ws / "manuscript" / "drafts" / "claude" / "results.tex", "fine\n")
+    (ws / "manuscript" / "drafts" / "a..b").mkdir(parents=True)
+    _write(ws / "manuscript" / "drafts" / "a..b" / "results.tex", "hostile\n")
+
+    calls = []
+    real_emit = events.emit
+
+    def flaky_emit(ws_, type_, **kwargs):
+        calls.append(type_)
+        if type_ == "provenance.synced":
+            raise RuntimeError("boom")
+        return real_emit(ws_, type_, **kwargs)
+
+    monkeypatch.setattr(provenance.events, "emit", flaky_emit)
+    provenance.sync(ws)  # must not raise
+    assert "provenance.skipped" in calls, "the second emit must still be attempted"
+
+
+def test_a_non_utf8_source_is_committed_byte_exact(ws):
+    """Ruling 1: hashing by path (`--no-filters`) makes an artifact's
+    encoding irrelevant. A latin-1 `.tex` file is ordinary in LaTeX work; it
+    must land in history exactly as written, not get silently dropped for
+    failing a UTF-8 decode."""
+    raw = "R\xe9sultats en fran\xe7ais\n".encode("latin-1")
+    with pytest.raises(UnicodeDecodeError):
+        raw.decode("utf-8")
+    path = ws / "manuscript" / "drafts" / "claude" / "results.tex"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(raw)
+
+    provenance.sync(ws)
+    repo = provenance.repo_path(ws)
+    blob_sha = provenance._git(
+        repo, "rev-parse", "refs/heads/draft/claude:sections/results.tex")
+    out = subprocess.run(
+        ["git", "--git-dir", str(repo), "cat-file", "-p", blob_sha],
+        capture_output=True, check=True,
+    )
+    assert out.stdout == raw
+
+
+def test_a_name_used_as_both_a_file_and_a_directory_is_refused(ws):
+    """Fix round 1, item 1: `mktree` would otherwise happily produce two
+    entries both named `"a"` — `fsck --strict`'s `duplicateEntries` — which
+    nothing in today's path table can trigger, but a future table row
+    silently could. Uses a real, readable, non-directory stand-in file for
+    both entries: this must fail on the collision itself, not incidentally
+    on `hash-object` refusing a directory."""
+    repo = provenance.ensure_repo(ws)
+    probe = ws / "probe.txt"
+    probe.write_text("x\n")
+    with pytest.raises(provenance.ProvenanceError, match="both a file and a directory"):
+        provenance._tree_from_paths(repo, {
+            "a": probe,
+            "a/b": probe,
+        })
 
 
 def test_an_unexpected_workspace_shape_costs_that_entry_only(ws):
