@@ -65,7 +65,18 @@
     {{ preview_panel(slug, csrf, "round:" ~ n, p, preview_busy, "round " ~ n ~ " preview") }}
     {% for section, text in round_content.items() %}
     <h4>{{ section }}</h4>
-    <pre class="draft">{{ text }}</pre>
+    {#- `round:<n>` in `data-agent`, not a bare number: the spec has a round's
+       output become the next round's left-hand pane, so a passage kept here
+       needs provenance the curation list can show honestly and that cannot
+       read as an agent's name. It is the same `agent:`/`round:` grammar
+       `drafts.source_dir` already uses (and which already reserves it -- a
+       draft directory literally named `round:1` carries a second colon and is
+       refused there). Without these two attributes the capture handler walked
+       up, found no `dataset.agent`, and left the keep form holding the
+       PREVIOUS selection's provenance -- so keeping from a round either
+       refused for want of text or silently stored a duplicate of an earlier
+       passage under an earlier agent's name. #}
+    <pre class="draft" data-agent="round:{{ n }}" data-section="{{ section }}">{{ text }}</pre>
     {% endfor %}
   </div>
   {% endfor %}
@@ -76,15 +87,32 @@
 <p class="dim">Select a passage above, or write your own below, to add it here.
    Every kept passage remembers which agent and section it came from.</p>
 
+{#- Two forms, not one. A single shared textarea meant the selection handler's
+   `form.text.value = chosen` destroyed whatever had been typed for "Add as
+   your own words": type a paragraph, glance at a draft to check a detail,
+   lose it. The keep form's textarea is the selection's own scratch space and
+   is safe to overwrite; the own-words textarea is never written to by script. #}
 <form method="post" action="/runs/{{ slug }}/drafts" id="keep-form">
   <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="action" value="keep">
   <input type="hidden" name="agent" value="">
   <input type="hidden" name="section" value="">
   <textarea name="text" rows="4"
-            placeholder="Select text in a draft above, or type your own words here"></textarea>
+            placeholder="Select text in a draft or a merged round above"></textarea>
   <div class="actions">
-    <button type="submit" name="action" value="keep">Keep this passage</button>
-    <button type="submit" name="action" value="mine">Add as your own words</button>
+    <span class="dim" id="keep-provenance">Select text in a draft or a merged
+      round above to keep it.</span>
+    <button type="submit">Keep this passage</button>
+  </div>
+</form>
+
+<form method="post" action="/runs/{{ slug }}/drafts" id="own-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="action" value="mine">
+  <textarea name="text" rows="4"
+            placeholder="Your own words — no agent is credited for these"></textarea>
+  <div class="actions">
+    <button type="submit">Add as your own words</button>
   </div>
 </form>
 
@@ -96,7 +124,11 @@
   <li class="curation-block">
     <div class="dim">
       {% if block.kind == "kept" %}
-      from {{ block.agent }} / {{ block.section }}
+        {%- if block.agent is string and block.agent.startswith("round:") %}
+        from merged round {{ block.agent[6:] }} / {{ block.section }}
+        {%- else %}
+        from {{ block.agent }} / {{ block.section }}
+        {%- endif %}
       {% else %}
       your own words
       {% endif %}
@@ -208,17 +240,43 @@
 // A kept passage is a quotation, not a pointer: we post the TEXT plus which
 // agent and section it came from. Every round rewrites the sections, so an
 // offset would come to point at different words.
+//
+// A merged round's panes carry `data-agent="round:<n>"`, so a round's output
+// is selectable exactly like an agent's draft -- that is what closes the
+// convergence loop. Everything below is written so the form's three fields
+// (text, agent, section) only ever move together: a selection that is not
+// inside a provenance-bearing pane CLEARS them rather than leaving the
+// previous selection's provenance attached to new text, which is how keeping
+// from an unlabelled pane used to store a silent duplicate under the wrong
+// agent's name.
+function keepProvenance() {
+  const form = document.getElementById('keep-form');
+  const label = document.getElementById('keep-provenance');
+  const agent = form.agent.value, section = form.section.value;
+  if (!agent) {
+    label.textContent = 'Select text in a draft or a merged round above to keep it.';
+  } else if (agent.indexOf('round:') === 0) {
+    label.textContent = 'from merged round ' + agent.slice(6) + ' / ' + section;
+  } else {
+    label.textContent = 'from ' + agent + ' / ' + section;
+  }
+}
 document.addEventListener('selectionchange', function () {
   const sel = document.getSelection();
   const chosen = sel ? sel.toString() : '';
   if (!chosen.trim()) { return; }
   let node = sel.anchorNode;
-  while (node && !(node.dataset && node.dataset.agent)) { node = node.parentElement; }
-  if (!node) { return; }
+  if (node && node.nodeType === 3) { node = node.parentElement; }
+  // A selection made while editing a textarea (a curation block, the note,
+  // your own words) is not a curation gesture; leave the keep form alone.
+  if (node && node.closest && node.closest('form')) { return; }
+  let pane = node;
+  while (pane && !(pane.dataset && pane.dataset.agent)) { pane = pane.parentElement; }
   const form = document.getElementById('keep-form');
-  form.text.value = chosen;
-  form.agent.value = node.dataset.agent;
-  form.section.value = node.dataset.section;
+  form.text.value = pane ? chosen : '';
+  form.agent.value = pane ? pane.dataset.agent : '';
+  form.section.value = pane ? pane.dataset.section : '';
+  keepProvenance();
 });
 </script>
 {% endblock %}

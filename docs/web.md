@@ -191,6 +191,15 @@ reference to whatever the source happens to say next. Capturing it needs no
 editor framework: the page listens for the browser's own text selection and
 posts it verbatim, with the agent and section it was taken from.
 
+A completed merge round's sections are selectable in exactly the same way,
+which is what closes the loop: round 1's output is round 2's left-hand pane.
+A passage kept from one is recorded against `round:<n>` rather than an
+agent, and the curation list says "from merged round 1 / results" so the
+provenance never reads as though an agent had written it. The keep box and
+the "Add as your own words" box are separate fields, so a selection never
+overwrites text you were in the middle of typing, and the keep box states
+which draft or round the pending passage would be credited to.
+
 Your own words go in beside the kept passages as a block that claims no
 provenance — there is no agent or section to credit them to. A separate
 note, staged alongside the blocks rather than folded into them, is not a

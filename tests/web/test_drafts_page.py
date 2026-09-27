@@ -260,6 +260,74 @@ def test_selection_capture_posts_the_agent_and_section(client, drafted):
     assert 'name="agent"' in page.text and 'name="section"' in page.text
 
 
+@pytest.fixture
+def merged(drafted):
+    """`drafted` plus one completed merge round, the state the convergence
+    loop's second round starts from."""
+    round1 = drafted / "manuscript" / "curation" / "rounds" / "1"
+    round1.mkdir(parents=True)
+    (round1 / "results.tex").write_text("Merged: yield was 95\\% in both drafts.\n")
+    return drafted
+
+
+def test_a_merged_rounds_output_is_selectable_like_a_draft(client, merged):
+    """The spec has a round's output "become the next round's left-hand
+    pane". The round panes carried neither `data-agent` nor `data-section`,
+    so the capture handler walked up, found no `dataset.agent` and returned —
+    round 2's curation could only ever be built from round 1's *inputs*, and
+    the only workaround was pasting round text into "Add as your own words",
+    which records agent prose as the author's own: the exact provenance lie
+    this feature exists to prevent."""
+    page = client.get("/runs/r1/drafts")
+    assert page.status_code == 200
+    assert 'data-agent="round:1"' in page.text, (
+        "a merged round's pane must carry its provenance, or it cannot be kept from")
+    assert 'data-section="results"' in page.text
+
+
+def test_keeping_from_a_round_records_the_round_as_the_source(client, merged):
+    """And the page then says so honestly, as a round rather than as an agent
+    named `round:1`."""
+    response = post(client, "/runs/r1/drafts", **{
+        "action": "keep", "text": "Merged: yield was 95\\% in both drafts.",
+        "agent": "round:1", "section": "results"})
+    assert response.status_code in (200, 303)
+    block = curation.read(merged)["blocks"][0]
+    assert block["agent"] == "round:1" and block["section"] == "results"
+
+    page = client.get("/runs/r1/drafts")
+    assert "merged round 1" in page.text, (
+        "the curation list must name a round as a round, not as an agent")
+
+
+def test_the_selection_handler_never_writes_the_own_words_textarea(client, drafted):
+    """The textarea clobber: one shared textarea meant a qualifying selection
+    ran `form.text.value = chosen` over whatever had been typed for "Add as
+    your own words". Two forms now, and the script only ever touches the keep
+    form's fields."""
+    page = client.get("/runs/r1/drafts")
+    assert 'id="keep-form"' in page.text and 'id="own-form"' in page.text
+    script = page.text.split("<script>")[-1]
+    assert "own-form" not in script, (
+        "nothing in the capture handler may reach the own-words form")
+    assert script.count("getElementById('keep-form')") >= 1
+
+
+def test_a_selection_outside_any_pane_clears_the_pending_provenance(client, drafted):
+    """The handler used to `return` when it found no `dataset.agent`, leaving
+    the keep form holding the PREVIOUS selection's provenance — so a keep
+    from an unlabelled region silently stored a duplicate of an earlier
+    passage under an earlier agent's name, with nothing to tell the
+    researcher which had happened. The three fields now move together, and
+    the page states the pending provenance."""
+    page = client.get("/runs/r1/drafts")
+    script = page.text.split("<script>")[-1]
+    assert "form.agent.value = pane ?" in script, (
+        "provenance must be set from the found pane or cleared, never left stale")
+    assert 'id="keep-provenance"' in page.text, (
+        "the page must say what provenance a keep would record")
+
+
 def test_a_reflected_error_is_escaped(client, drafted):
     """`?error=` is attacker-supplied query text landing on a brand new
     page; nothing else in this test module covers it, and it is reached by
