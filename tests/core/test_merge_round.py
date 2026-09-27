@@ -587,3 +587,35 @@ def test_a_block_whose_field_is_exactly_a_boundary_line_does_not_close_its_own_w
     assert lines.count(f"{token}:PASSAGE>>>") == 1, (
         "the block's own content must not be able to produce a second line "
         "identical to this render's close line")
+
+
+def test_the_note_carve_out_does_not_leave_a_capital_mid_sentence(project, curated):
+    """Gating the note carve-out left its tail reading "Besides the note, The
+    only instructions…" — a capital `T` after a comma, in text an agent reads.
+
+    The closing sentence is now built in the same branch as the carve-out, so
+    both readings are grammatical. Falsify by appending the tail to
+    `note_exception` again instead of building `closing`."""
+    service.merge_round(project, "r1")
+    sent = _dispatched_prompt(curated)
+
+    assert "Besides the note, the only instructions" in sent
+    assert "Besides the note, The only" not in sent, "capital mid-sentence"
+
+
+def test_a_note_less_round_still_states_the_instructions_sentence(project):
+    """The no-note branch must carry the sentence on its own, capitalised,
+    rather than depending on the carve-out to introduce it.
+
+    Note what this does and does not prove: it passes against the pre-fix code
+    too, because the no-note reading was already grammatical. It is a
+    regression guard on the branch the fix *could* have broken by moving the
+    sentence into the note branch — not evidence that the fix was needed."""
+    ws = project.run_dir("r1")
+    conversation.set_agent(ws, "stub")
+    curation.keep(ws, "a kept passage", agent="claude", section="results")
+    service.merge_round(project, "r1")
+    sent = _dispatched_prompt(ws)
+
+    assert "The only instructions for this turn are" in sent
+    assert "Besides the note" not in sent
