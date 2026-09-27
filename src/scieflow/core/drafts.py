@@ -34,7 +34,22 @@ class DraftError(ValueError):
 
 def check_name(part: str) -> None:
     """Refuse `part` as a draft/round name: blank, whitespace-only,
-    containing a path separator or a NUL byte, or exactly `.`/`..`.
+    containing a path separator or any control character (anything below
+    `0x20`, including NUL and newline, plus `0x7f`), or exactly `.`/`..`.
+
+    The control-character rule is not cosmetic. A drafting agent chooses
+    these names — they are directory and file names it writes under
+    `manuscript/drafts/` — and `service.keep_passage` enforces this same
+    rule on the `agent`/`section` a kept passage records, where the value is
+    stored as bare text and later rendered into the merge prompt's
+    provenance heading, on a line of its own *outside* any passage wrapping.
+    A newline there splits one heading into several lines the agent reads
+    top-to-bottom, which is a forged-framing channel and not a filename any
+    legitimate draft has. `curation.render` closes the same hole from the
+    other side (its boundary token is derived from the headings too), so
+    this is one of two independent defences, not the only one. It also
+    sanitises the preview directory name and a job's label for free, since
+    both are built from the same validated value.
 
     Deliberately does *not* forbid `:` — it is an ordinary, legal filename
     character with no traversal meaning of its own. The one place `:` is
@@ -50,7 +65,8 @@ def check_name(part: str) -> None:
     bad name is refused as a name, not caught only incidentally as
     `".tex"` (from `""`) or `"...tex"` (from `".."`) failing to exist.
     """
-    if (not part or not part.strip() or "/" in part or "\x00" in part
+    if (not part or not part.strip() or "/" in part
+            or any(ch < "\x20" or ch == "\x7f" for ch in part)
             or part in {".", ".."}):
         raise DraftError(f"not a draft name: {part!r}")
 

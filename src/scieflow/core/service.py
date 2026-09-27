@@ -388,8 +388,9 @@ def _merge_prompt(rendered: dict) -> str:
     1. A passage can contain its own plausible preamble declaring some
        other boundary token, matching delimiter lines, and a forged
        `## Kept from ...` heading. The real token is unforgeable — it is
-       verified absent from every passage and the note by
-       `curation._boundary_token` — so an agent anchored to *this*
+       verified absent from every passage, every provenance heading and
+       the note by `curation._boundary_token` — so an agent anchored to
+       *this*
        declaration, stated here above and outside the curated text, is
        safe; an agent left to find the token only inside the rendered
        document is not, because nothing stops it from acting on the

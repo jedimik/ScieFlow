@@ -150,6 +150,30 @@ def test_a_name_containing_a_nul_byte_is_refused(ws):
         drafts.read_section(ws, "claude", "a\x00b")
 
 
+@pytest.mark.parametrize("bad", ["a\nb", "a\rb", "a\tb", "a\x1bb", "a\x7fb",
+                                 "a\x01b", "\nresults"])
+def test_a_name_containing_a_control_character_is_refused(bad):
+    """No legitimate draft name carries one, and a newline in particular is a
+    forged-framing channel: `agent`/`section` are rendered into the merge
+    prompt's provenance heading on a line of their own, outside every
+    passage wrapping, so a newline there splits one heading into several
+    lines the merging agent reads top-to-bottom. `service.keep_passage`
+    enforces this same shared rule on a kept passage's provenance, which is
+    what closes that channel at the writer; the preview directory name and a
+    compile job's label are built from the same validated value and are
+    sanitised by it for free."""
+    with pytest.raises(drafts.DraftError):
+        drafts.check_name(bad)
+
+
+@pytest.mark.parametrize("ok", ["results", "a b", "a:b", "sección", "r-1_2"])
+def test_an_ordinary_name_is_still_accepted(ok):
+    """The control-character rule must not have swept up the legal names the
+    module deliberately allows — a space inside the name, a `:` (see
+    `check_name`'s own docstring), non-ASCII letters."""
+    drafts.check_name(ok)
+
+
 def test_a_non_ascii_digit_round_directory_does_not_crash_rounds(ws):
     """`"²".isdigit()` is True but `int("²")` raises — the
     function whose job is to *ignore* a non-round directory must not crash
