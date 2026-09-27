@@ -219,7 +219,9 @@ Pass every argument as its own list element and never build a shell string — t
 
 `_tree(repo, entries)` formats each entry as `f"{mode} {kind} {sha}\t{name}"`, joins with `"\n"`, and pipes it to `_git(repo, "mktree", stdin=...)`. An empty `entries` list must still produce the empty tree — pass an empty string as stdin rather than skipping the call.
 
-`_commit(repo, tree, parents, message)` is `_git(repo, "commit-tree", tree, *chain(("-p", p) for p in parents), "-m", message)`. Set deterministic authorship through the environment so a commit is reproducible and does not depend on the user's git config being present: `GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME` of `"ScieFlow"`, an email of `"provenance@scieflow.local"`, and leave the dates to git. A missing global `user.email` would otherwise make `commit-tree` fail on a fresh machine — build the env explicitly rather than inheriting, the way `preview.compile_env` does.
+`_commit(repo, tree, parents, message)` is `_git(repo, "commit-tree", tree, *chain(("-p", p) for p in parents), "-m", message)`.
+
+**`_git` owns the environment, not `_commit`.** Build it once inside `_git` for every call rather than only for commits: `PATH` and `LANG` inherited, plus `GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME` of `"ScieFlow"` and both email variables set to `"provenance@scieflow.local"`, with the dates left to git. Two reasons this belongs in the runner: a missing global `user.email` makes `commit-tree` fail on a fresh machine, and constructing the env in one place means no later call site can accidentally inherit the serve process's environment — the same discipline `preview.compile_env` applies for `latexmk`. Do not copy `os.environ`.
 
 `_update_ref(repo, ref, sha)` is `_git(repo, "update-ref", ref, sha)`.
 
@@ -482,7 +484,10 @@ def test_two_concurrent_syncs_leave_a_usable_repo(drafted):
         t.join()
 
     repo = provenance.repo_path(drafted)
-    assert provenance._git(repo, "fsck", "--no-progress") == "" or True
+    # `fsck` exits non-zero on a corrupt object store and `_git` turns that
+    # into ProvenanceError, so this call IS the assertion — there is nothing
+    # to compare its output against.
+    provenance._git(repo, "fsck", "--no-progress")
     assert provenance._ref_sha(repo, "refs/heads/main"), "main is missing after concurrent syncs"
     listing = provenance._git(repo, "ls-tree", "-r", "--name-only", "refs/heads/main")
     assert "merge_2/sections/results.tex" in listing, f"tree incomplete; errors={errors}"
