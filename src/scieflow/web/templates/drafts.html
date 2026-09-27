@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block title %}{{ slug }} drafts — ScieFlow{% endblock %}
+{% block nav %}<a href="/runs/{{ slug }}">← {{ slug }}</a>{% endblock %}
+{% block content %}
+{% macro preview_panel(slug, csrf, source, p, busy, title) %}
+{#- One rendering of a Compile form plus its result, for one previewable
+   source (a draft or a completed round) -- called once per agent column
+   and once per round column below so the two grids can never silently
+   diverge from each other again. #}
+<form method="post" action="/runs/{{ slug }}/preview" class="inline">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="source" value="{{ source }}">
+  <button type="submit"{% if busy %} disabled{% endif %}>Compile PDF</button>
+</form>
+{% if p.pdf %}
+{#- `| urlencode`, not autoescaping alone. `p.pdf` is a path built from
+   `<source>` -- `agent-<name>` or `round-<n>` -- and `<name>` is a directory
+   name an AGENT chose, not a value from a safe alphabet: an `&` in it would
+   end the `path` parameter early and a `#` would truncate it to a fragment,
+   so the iframe would silently load the wrong file or none. HTML-escaping
+   makes the attribute well-formed; it does not make the query string mean
+   what it says. #}
+<iframe class="preview-frame"
+        src="/runs/{{ slug }}/file?path={{ p.pdf | urlencode }}"
+        title="{{ title }}"></iframe>
+{% endif %}
+{% if not p.available %}
+<p class="dim">{{ p.log }}</p>
+{% elif p.state == "failed" %}
+<p class="state-failed">The last compile failed:</p>
+<pre class="log">{{ p.log }}</pre>
+{% endif %}
+{% endmacro %}
+<h1>{{ slug }} — draft workbench</h1>
+{% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
+
+<h2>Drafts</h2>
+{% if preview_busy %}
+<p class="dim">A preview compile is already running for this run — Compile
+   buttons are disabled until it finishes. If it looks stuck, cancel it from
+   <a href="/runs/{{ slug }}">the run's job list</a>.</p>
+{% endif %}
+{% if not agents %}
+<p class="dim">No drafts yet. This run has not reached the drafting phase of
+   the <code>paper-draft</code> workflow — that is what writes
+   <code>manuscript/drafts/&lt;agent&gt;/</code>. Come back once it has, or
+   run it now from the run page.</p>
+{% else %}
+<div class="drafts-grid">
+  {% for agent in agents %}
+  {% set p = previews["agent:" ~ agent] %}
+  <div class="draft-column">
+    <h3>{{ agent }}</h3>
+    {{ preview_panel(slug, csrf, "agent:" ~ agent, p, preview_busy, agent ~ " preview") }}
+    {% for section in sections %}
+      {% if section in drafts[agent] %}
+      <h4>{{ section }}</h4>
+      <pre class="draft" data-agent="{{ agent }}" data-section="{{ section }}">{{ drafts[agent][section] }}</pre>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if rounds %}
+<h2>Merged rounds</h2>
+<div class="drafts-grid">
+  {% for n, round_content in rounds.items() %}
+  {% set p = previews["round:" ~ n] %}
+  <div class="draft-column">
+    <h3>Round {{ n }}</h3>
+    {{ preview_panel(slug, csrf, "round:" ~ n, p, preview_busy, "round " ~ n ~ " preview") }}
+    {% for section, text in round_content.items() %}
+    <h4>{{ section }}</h4>
+    {#- `round:<n>` in `data-agent`, not a bare number: the spec has a round's
+       output become the next round's left-hand pane, so a passage kept here
+       needs provenance the curation list can show honestly and that cannot
+       read as an agent's name. It is the same `agent:`/`round:` grammar
+       `drafts.source_dir` already uses (and which already reserves it -- a
+       draft directory literally named `round:1` carries a second colon and is
+       refused there). Without these two attributes the capture handler walked
+       up, found no `dataset.agent`, and left the keep form holding the
+       PREVIOUS selection's provenance -- so keeping from a round either
+       refused for want of text or silently stored a duplicate of an earlier
+       passage under an earlier agent's name. #}
+    <pre class="draft" data-agent="round:{{ n }}" data-section="{{ section }}">{{ text }}</pre>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<h2>Curation</h2>
+<p class="dim">Select a passage above, or write your own below, to add it here.
+   Every kept passage remembers which agent and section it came from.</p>
+
+{#- Two forms, not one. A single shared textarea meant the selection handler's
+   `form.text.value = chosen` destroyed whatever had been typed for "Add as
+   your own words": type a paragraph, glance at a draft to check a detail,
+   lose it. The keep form's textarea is the selection's own scratch space and
+   is safe to overwrite; the own-words textarea is never written to by script. #}
+<form method="post" action="/runs/{{ slug }}/drafts" id="keep-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="action" value="keep">
+  <input type="hidden" name="agent" value="">
+  <input type="hidden" name="section" value="">
+  <textarea name="text" rows="4"
+            placeholder="Select text in a draft or a merged round above"></textarea>
+  <div class="actions">
+    <span class="dim" id="keep-provenance">Select text in a draft or a merged
+      round above to keep it.</span>
+    <button type="submit">Keep this passage</button>
+  </div>
+</form>
+
+<form method="post" action="/runs/{{ slug }}/drafts" id="own-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="action" value="mine">
+  <textarea name="text" rows="4"
+            placeholder="Your own words — no agent is credited for these"></textarea>
+  <div class="actions">
+    <button type="submit">Add as your own words</button>
+  </div>
+</form>
+
+{% if not curation.blocks %}
+<p class="dim">Nothing kept yet.</p>
+{% else %}
+<ol class="curation-blocks">
+  {% for block in curation.blocks %}
+  <li class="curation-block">
+    <div class="dim">
+      {% if block.kind == "kept" %}
+        {%- if block.agent is string and block.agent.startswith("round:") %}
+        from merged round {{ block.agent[6:] }} / {{ block.section }}
+        {%- else %}
+        from {{ block.agent }} / {{ block.section }}
+        {%- endif %}
+      {% else %}
+      your own words
+      {% endif %}
+    </div>
+    <form method="post" action="/runs/{{ slug }}/drafts" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="action" value="edit">
+      <input type="hidden" name="block" value="{{ block.id }}">
+      <textarea name="text" rows="2">{{ block.text }}</textarea>
+      <button type="submit">Save edit</button>
+    </form>
+    <div class="actions">
+      <form method="post" action="/runs/{{ slug }}/drafts" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <input type="hidden" name="action" value="move">
+        <input type="hidden" name="block" value="{{ block.id }}">
+        <input type="hidden" name="position" value="{{ loop.index0 - 1 }}">
+        <button type="submit" {% if loop.first %}disabled{% endif %}>↑ move up</button>
+      </form>
+      <form method="post" action="/runs/{{ slug }}/drafts" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <input type="hidden" name="action" value="move">
+        <input type="hidden" name="block" value="{{ block.id }}">
+        <input type="hidden" name="position" value="{{ loop.index0 + 1 }}">
+        <button type="submit" {% if loop.last %}disabled{% endif %}>↓ move down</button>
+      </form>
+      <form method="post" action="/runs/{{ slug }}/drafts" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <input type="hidden" name="action" value="remove">
+        <input type="hidden" name="block" value="{{ block.id }}">
+        <button type="submit">Remove</button>
+      </form>
+    </div>
+  </li>
+  {% endfor %}
+</ol>
+{% endif %}
+
+<h2>Staging note</h2>
+<p class="dim">A note for this merge round — what you want the merging agent to
+   pay attention to, or what changed since last time.</p>
+<form method="post" action="/runs/{{ slug }}/drafts">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="action" value="note">
+  <textarea name="note" rows="2" placeholder="Note for this merge round">{{ curation.note }}</textarea>
+  <button type="submit">Save note</button>
+</form>
+
+{% if history|length > 1 %}
+<details>
+  <summary class="dim">{{ history|length }} versions</summary>
+  <table>
+    {% for version in history %}
+    <tr>
+      <td class="dim">v{{ version.n }}</td>
+      <td class="dim">{{ version.get("at", "")[11:19] }}</td>
+      <td class="dim">{{ version.get("actor", "") }}</td>
+      <td>{{ version.note }}</td>
+      <td>
+        {% if version.n != curation.version %}
+        <form method="post" action="/runs/{{ slug }}/drafts" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="action" value="revert">
+          <input type="hidden" name="version" value="{{ version.n }}">
+          <button type="submit">Restore</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</details>
+{% endif %}
+
+<h2>Send round {{ curation.round }}</h2>
+{#- The round number, shown rather than left implicit: a merge turn that ran
+   and did not succeed leaves it where it was, and without the number on the
+   page a failed turn and a turn that never happened look identical. The
+   route's own message says so too; this is what the researcher checks
+   afterwards. #}
+<p class="dim">The merging agent reads the current curation and writes
+   <code>manuscript/curation/rounds/{{ curation.round }}/</code>. It is the
+   same agent this run's conversation is handed to — pick it below if you need
+   to change it. The round advances only once the turn actually succeeds.</p>
+{% if not conversation.agent %}
+<p class="dim">No agent is holding this conversation yet — choose one below
+   before sending a round; there is nothing to merge to otherwise.</p>
+{% elif not conversation.can_converse %}
+<p class="state-failed">{{ conversation.agent }} cannot host a conversation:
+   its configuration has no session commands, so every turn would start over.
+   Choose another agent below.</p>
+{% elif conversation.session_lost %}
+<p class="state-failed">{{ conversation.agent }}'s last turn reported no session
+   id, and none was ever recorded — the next message will start a fresh
+   context rather than resuming what came before.</p>
+{% endif %}
+<form method="post" action="/runs/{{ slug }}/say" class="actions">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <select name="agent">
+    {% for name in conversational %}
+    <option {% if name == conversation.agent %}selected{% endif %}>{{ name }}</option>
+    {% endfor %}
+  </select>
+  <button name="action" value="agent" {% if conversation.busy %}disabled{% endif %}>
+    Hand the conversation over</button>
+</form>
+<form method="post" action="/runs/{{ slug }}/drafts" class="actions">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <button name="action" value="merge"
+          {% if conversation.busy or not conversation.can_converse %}disabled{% endif %}>
+    Send this round to the merging agent</button>
+</form>
+
+<script>
+// A kept passage is a quotation, not a pointer: we post the TEXT plus which
+// agent and section it came from. Every round rewrites the sections, so an
+// offset would come to point at different words.
+//
+// A merged round's panes carry `data-agent="round:<n>"`, so a round's output
+// is selectable exactly like an agent's draft -- that is what closes the
+// convergence loop. Everything below is written so the form's three fields
+// (text, agent, section) only ever move together: a selection that is not
+// inside a provenance-bearing pane CLEARS them rather than leaving the
+// previous selection's provenance attached to new text, which is how keeping
+// from an unlabelled pane used to store a silent duplicate under the wrong
+// agent's name.
+function keepProvenance() {
+  const form = document.getElementById('keep-form');
+  const label = document.getElementById('keep-provenance');
+  const agent = form.agent.value, section = form.section.value;
+  if (!agent) {
+    label.textContent = 'Select text in a draft or a merged round above to keep it.';
+  } else if (agent.indexOf('round:') === 0) {
+    label.textContent = 'from merged round ' + agent.slice(6) + ' / ' + section;
+  } else {
+    label.textContent = 'from ' + agent + ' / ' + section;
+  }
+}
+document.addEventListener('selectionchange', function () {
+  const sel = document.getSelection();
+  const chosen = sel ? sel.toString() : '';
+  if (!chosen.trim()) { return; }
+  let node = sel.anchorNode;
+  if (node && node.nodeType === 3) { node = node.parentElement; }
+  // A selection made while editing a textarea (a curation block, the note,
+  // your own words) is not a curation gesture; leave the keep form alone.
+  if (node && node.closest && node.closest('form')) { return; }
+  let pane = node;
+  while (pane && !(pane.dataset && pane.dataset.agent)) { pane = pane.parentElement; }
+  const form = document.getElementById('keep-form');
+  form.text.value = pane ? chosen : '';
+  form.agent.value = pane ? pane.dataset.agent : '';
+  form.section.value = pane ? pane.dataset.section : '';
+  keepProvenance();
+});
+</script>
+{% endblock %}

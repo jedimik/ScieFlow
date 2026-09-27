@@ -251,6 +251,11 @@ could actually take it: enabled, and configured to both start and resume a
 session — the rest are refused the moment `set_conversation_agent` is asked
 for them, so they are not offered as if they would work.
 
+The [draft workbench](web.md#the-draft-workbench)'s merge round is one more
+caller of this same mechanism, not a second one: sending a round to the
+merging agent is exactly this `say`, with the same hand-over control
+picking which agent it goes to.
+
 If a turn's own dispatch fails or is cancelled before the dispatch even
 starts (an unknown agent, one that cannot converse, an exhausted budget), the
 message is refused before anything is written: no human turn, no `turn.sent`

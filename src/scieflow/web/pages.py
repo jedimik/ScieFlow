@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from scieflow.core import jobs as jobs_mod
@@ -288,6 +288,136 @@ def edit_charter(request: Request, slug: str, action: str = Form("set"),
     except service.ServiceError as exc:
         return _back(slug, str(exc))
     return _back(slug)
+
+
+def _drafts_back(slug: str, error: str = "") -> RedirectResponse:
+    """Post/redirect/get for the workbench, mirroring `_back` above but
+    landing on `/runs/{slug}/drafts` instead of the run page — the page a
+    workbench mutation should redisplay is the workbench itself."""
+    target = f"/runs/{slug}/drafts"
+    if error:
+        target += "?error=" + quote(error)
+    return RedirectResponse(target, status_code=303)
+
+
+def _as_int(value: str) -> int:
+    """A form string as an `int`, as `service.ServiceError` rather than a
+    bare `ValueError` reaching the user as a 500 — `position` and `version`
+    both arrive as text from a hidden form field, and both can be anything
+    a stale tab or a hand-crafted request cares to send."""
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise service.ServiceError(f"not a number: {value!r}") from exc
+
+
+@router.get("/runs/{slug}/drafts", response_class=HTMLResponse)
+def drafts_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
+    """`view` (from `service.workbench`) is spread last so its own `agents`
+    key — the draft *authors* — wins over anything with the same name added
+    here, and is what the drafts panel and its empty-state check read. The
+    merging-agent selector needs a different list — agents that can actually
+    hold a conversation, which need not have drafted anything at all — so
+    that one is passed under its own name, `conversational`, rather than
+    `agents`: a shared key here would let one of the two silently shadow the
+    other depending on dict order, which is exactly the defect this
+    docstring exists to keep from coming back."""
+    project = _project(request)
+    try:
+        view = service.workbench(project, slug)
+    except service.ServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # One `service.preview_of` call per previewable source (every drafting
+    # agent, plus every completed merge round) — not a second N+1 to add to
+    # the dashboard's carried-forward one, just the one call this page
+    # already needs per source it lists.
+    sources = [f"agent:{a}" for a in view["agents"]] + [f"round:{n}" for n in view["rounds"]]
+    previews = {source: service.preview_of(project, slug, source) for source in sources}
+    return TEMPLATES.TemplateResponse(request, "drafts.html", {
+        "slug": slug, "error": error,
+        "conversation": service.conversation_state(project, slug),
+        "conversational": service.conversational_agents(project),
+        "history": service.curation_history(project, slug),
+        "previews": previews,
+        "preview_busy": service.preview_busy(project, slug),
+        "csrf": auth.csrf_token(request),
+        **view})
+
+
+@router.post("/runs/{slug}/drafts", dependencies=MUTATE)
+def curate(request: Request, slug: str, action: str = Form(...),
+           text: str = Form(""), agent: str = Form(""), section: str = Form(""),
+           block: str = Form(""), position: str = Form("0"), note: str = Form(""),
+           version: str = Form("0")):
+    """Every workbench mutation, dispatched on `action` — the same shape
+    `edit_charter` and `say` already use, which keeps the mutating-route
+    inventory and its guard cases one entry wide.
+
+    `def`, not `async def`: `merge_round` dispatches a whole agent turn and
+    would otherwise block this app's single event loop for its entire
+    `timeout_min`. `tests/web/test_async_routes.py` enforces it.
+    """
+    project = _project(request)
+    try:
+        if action == "keep":
+            service.keep_passage(project, slug, text, agent, section)
+        elif action == "mine":
+            service.add_own_text(project, slug, text)
+        elif action == "edit":
+            service.edit_curation_block(project, slug, block, text)
+        elif action == "move":
+            service.move_curation_block(project, slug, block, _as_int(position))
+        elif action == "remove":
+            service.remove_curation_block(project, slug, block)
+        elif action == "note":
+            service.set_curation_note(project, slug, note)
+        elif action == "revert":
+            service.revert_curation(project, slug, _as_int(version))
+        elif action == "merge":
+            # `service.merge_round` makes its returned `round` the
+            # discriminator between "the turn succeeded" and "the turn ran and
+            # did not" -- its docstring says so, and a non-"done" turn is
+            # deliberately not raised, because it genuinely happened and cost
+            # budget. Discarding the return value made a merge that timed out,
+            # failed or was cancelled look exactly like one that never
+            # happened: no message, no new column, no number, and the only way
+            # to find out was the run's own job list.
+            before = service.curation_round(project, slug)
+            if service.merge_round(project, slug)["round"] == before:
+                return _drafts_back(
+                    slug, "the merge turn did not succeed, so this round has not "
+                          "advanced — it still cost budget; see this run's job "
+                          "list for what happened")
+        else:
+            return _drafts_back(slug, f"unknown action: {action}")
+    except service.ServiceError as exc:
+        return _drafts_back(slug, str(exc))
+    return _drafts_back(slug)
+
+
+@router.post("/runs/{slug}/preview", dependencies=MUTATE)
+def compile_preview(request: Request, slug: str, source: str = Form(...)):
+    """Compile one whole draft or completed round into a PDF.
+
+    `def`, not `async def`: `service.compile_preview` -> `preview.run_compile`
+    blocks on the whole `latexmk` run (seconds to minutes), and this app runs
+    a single uvicorn process — an `async def` handler doing that would freeze
+    every other request (`/healthz`, both SSE streams, the Cancel button) for
+    the run's entire compile, exactly the defect `tests/web/test_async_routes.py`
+    and this module's own docstring exist to keep out.
+
+    A refusal (missing `latexmk`, a malformed `source`, no sections to
+    compile, or another preview already running for this run) is a
+    `ServiceError`, handled the same way every other workbench mutation
+    handles one: post/redirect/get back to the drafts page with the message
+    visible, nothing left half-written.
+    """
+    project = _project(request)
+    try:
+        service.compile_preview(project, slug, source)
+    except service.ServiceError as exc:
+        return _drafts_back(slug, str(exc))
+    return _drafts_back(slug)
 
 
 @router.post("/runs/{slug}/say", dependencies=MUTATE)

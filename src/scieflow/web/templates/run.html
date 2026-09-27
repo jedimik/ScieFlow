@@ -4,7 +4,8 @@
 {% block content %}
 <h1>{{ slug }}</h1>
 {% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
-<p><a href="/runs/{{ slug }}/files">browse this run's files →</a></p>
+<p><a href="/runs/{{ slug }}/files">browse this run's files →</a> ·
+   <a href="/runs/{{ slug }}/drafts">the draft workbench →</a></p>
 <p class="dim">
   id {{ (detail.status or {}).get("id", "—") }} ·
   iteration {{ (detail.status or {}).get("iteration", "—") }} ·

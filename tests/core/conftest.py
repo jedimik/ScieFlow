@@ -1,5 +1,14 @@
+import sys
+from pathlib import Path
+
 import pytest
 import yaml
+
+from scieflow.core.project import Project
+from scieflow.core.run import status
+
+ROOT = Path(__file__).resolve().parents[2]
+STUB = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
 
 REGISTRY = {
     "agents": {
@@ -59,3 +68,29 @@ def write_ws():
 @pytest.fixture
 def default_assignments():
     return dict(ASSIGNMENTS)
+
+
+@pytest.fixture
+def project(tmp_path):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "agents.yml").write_text(
+        f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1, family: claude, '
+        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n'
+        f'  stub2: {{cmd: "{STUB}", enabled: true, timeout_min: 1, family: claude, '
+        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n'
+        '  sleepy: {cmd: "sleep 300", enabled: true, timeout_min: 5}\n'
+        '  sleepy_turn: {cmd: "sleep 300", enabled: true, timeout_min: 5, '
+        'family: claude, session_cmd: "sleep 300", resume_cmd: "sleep 300"}\n'
+        f'  stub_disabled: {{cmd: "{STUB}", enabled: false, timeout_min: 1, family: claude, '
+        f'session_cmd: "{STUB}", resume_cmd: "{STUB} {{session}}"}}\n')
+    (tmp_path / "config" / "defaults.yml").write_text("approval: per-campaign\n")
+    (tmp_path / "schemas").mkdir()
+    for name in ("status", "gates", "status-research"):
+        (tmp_path / "schemas" / f"{name}.yml").write_text(
+            (ROOT / "schemas" / f"{name}.yml").read_text())
+    ws = tmp_path / "workspace" / "r1"
+    (ws / "logs").mkdir(parents=True)
+    # A real run always carries config.yml beside status.yml (run/init.py).
+    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
+    status.write_status(ws, status.new_status("r1", "autonomous"))
+    return Project(tmp_path)

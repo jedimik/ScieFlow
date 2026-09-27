@@ -288,3 +288,75 @@ def test_streams_need_a_session(project):
 
 def test_unknown_run_stream_is_404(client):
     assert client.get("/api/v1/runs/nope/events/stream").status_code == 404
+
+
+def test_the_server_keeps_answering_while_a_preview_compiles(live, project):
+    """A `latexmk` run takes seconds to minutes. The compile is a job for
+    exactly that reason, and the handler is `def` -- so it runs in Starlette's
+    threadpool and the one event loop stays free. Same proof as the turn and
+    cancel tests above: a real socket, a compile genuinely in flight, and
+    `/healthz` still fast. A `TestClient` cannot exercise this; see this
+    module's docstring.
+
+    The stand-in `latexmk` sleeps, so this test does not need a TeX
+    installation to prove the property that matters here.
+
+    `preview.compile_argv()` reads the module-global `LATEXMK`, so this test
+    reassigns `preview.LATEXMK` to the fake script's own path -- not just to
+    the string "latexmk" -- and points `preview.shutil.which` at the same
+    path for that one name; patching `preview.shutil.which` reaches the
+    server thread too, since it patches the real `shutil` module process
+    wide, which is what makes the substitution work at all.
+
+    The fake script lives inside the run's own directory (`ws`), not
+    `project.root`: `preview.run_compile` dispatches through
+    `sandbox.wrap`, which mounts a fresh, empty `tmpfs` over `/tmp` and then
+    re-binds only the dispatch's `writable` grants (the run directory, plus
+    any allowlist) over that -- so on a host with bubblewrap installed (this
+    one), a script placed anywhere else under `/tmp` (which is where
+    `project.root` lives, via pytest's `tmp_path`) is invisible to the
+    sandboxed process and fails instantly with "No such file or directory",
+    finishing far too fast for this test to prove anything. Verified
+    directly against `service.compile_preview` while developing this test.
+    """
+    import shutil as shutil_mod
+
+    from scieflow.core import preview
+    from scieflow.web.auth import CSRF_COOKIE
+
+    ws = project.run_dir("r1")
+    d = ws / "manuscript" / "drafts" / "claude"
+    d.mkdir(parents=True)
+    (d / "results.tex").write_text("text\n")
+
+    fake = ws / "slow-latexmk"
+    fake.write_text("#!/bin/sh\nsleep 3\n")
+    fake.chmod(0o755)
+    original_which = shutil_mod.which
+    original_latexmk = preview.LATEXMK
+    preview.shutil.which = lambda name: str(fake) if name == preview.LATEXMK else original_which(name)
+    preview.LATEXMK = str(fake)
+    try:
+        done = threading.Event()
+
+        def compile_it():
+            live.post("/runs/r1/preview", data={"source": "agent:claude"},
+                      headers={"x-csrf-token": live.cookies[CSRF_COOKIE]}, timeout=30.0)
+            done.set()
+
+        worker = threading.Thread(target=compile_it, daemon=True)
+        worker.start()
+        time.sleep(0.5)
+        assert not done.is_set(), "the compile finished too fast to prove anything"
+
+        start = time.monotonic()
+        health = live.get("/healthz")
+        elapsed = time.monotonic() - start
+        assert health.status_code == 200
+        assert elapsed < 2.0, f"/healthz took {elapsed:.1f}s -- the event loop was blocked"
+
+        worker.join(timeout=20.0)
+        assert done.is_set(), "the compile never completed"
+    finally:
+        preview.shutil.which = original_which
+        preview.LATEXMK = original_latexmk
