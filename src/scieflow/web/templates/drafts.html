@@ -107,8 +107,8 @@
     {% for version in history %}
     <tr>
       <td class="dim">v{{ version.n }}</td>
-      <td class="dim">{{ version.at[11:19] }}</td>
-      <td class="dim">{{ version.actor }}</td>
+      <td class="dim">{{ version.get("at", "")[11:19] }}</td>
+      <td class="dim">{{ version.get("actor", "") }}</td>
       <td>{{ version.note }}</td>
       <td>
         {% if version.n != curation.version %}
@@ -130,10 +130,22 @@
 <p class="dim">The merging agent reads the current curation and writes the next
    round's sections. It is the same agent this run's conversation is handed
    to — pick it below if you need to change it.</p>
+{% if not conversation.agent %}
+<p class="dim">No agent is holding this conversation yet — choose one below
+   before sending a round; there is nothing to merge to otherwise.</p>
+{% elif not conversation.can_converse %}
+<p class="state-failed">{{ conversation.agent }} cannot host a conversation:
+   its configuration has no session commands, so every turn would start over.
+   Choose another agent below.</p>
+{% elif conversation.session_lost %}
+<p class="state-failed">{{ conversation.agent }}'s last turn reported no session
+   id, and none was ever recorded — the next message will start a fresh
+   context rather than resuming what came before.</p>
+{% endif %}
 <form method="post" action="/runs/{{ slug }}/say" class="actions">
   <input type="hidden" name="csrf_token" value="{{ csrf }}">
   <select name="agent">
-    {% for name in agents %}
+    {% for name in conversational %}
     <option {% if name == conversation.agent %}selected{% endif %}>{{ name }}</option>
     {% endfor %}
   </select>

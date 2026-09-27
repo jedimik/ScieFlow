@@ -313,6 +313,15 @@ def _as_int(value: str) -> int:
 
 @router.get("/runs/{slug}/drafts", response_class=HTMLResponse)
 def drafts_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
+    """`view` (from `service.workbench`) is spread last so its own `agents`
+    key — the draft *authors* — wins over anything with the same name added
+    here, and is what the drafts panel and its empty-state check read. The
+    merging-agent selector needs a different list — agents that can actually
+    hold a conversation, which need not have drafted anything at all — so
+    that one is passed under its own name, `conversational`, rather than
+    `agents`: a shared key here would let one of the two silently shadow the
+    other depending on dict order, which is exactly the defect this
+    docstring exists to keep from coming back."""
     project = _project(request)
     try:
         view = service.workbench(project, slug)
@@ -321,7 +330,7 @@ def drafts_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
     return TEMPLATES.TemplateResponse(request, "drafts.html", {
         "slug": slug, "error": error,
         "conversation": service.conversation_state(project, slug),
-        "agents": service.conversational_agents(project),
+        "conversational": service.conversational_agents(project),
         "history": service.curation_history(project, slug),
         "csrf": auth.csrf_token(request),
         **view})
