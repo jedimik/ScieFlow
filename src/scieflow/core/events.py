@@ -27,6 +27,7 @@ TYPES = frozenset({
     "charter.set", "charter.reverted",
     "turn.sent", "turn.received", "turn.session_lost",
     "curation.changed", "curation.round",
+    "provenance.synced", "provenance.skipped",
     "integration.call", "sync.pushed", "sync.pulled",
 })
 

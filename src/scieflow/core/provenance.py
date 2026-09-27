@@ -33,6 +33,8 @@ import subprocess
 from itertools import chain
 from pathlib import Path
 
+from scieflow.core import drafts, events
+
 REPO_DIR = "provenance.git"
 EMPTY_ROOT_REF = "refs/heads/_root"
 GIT = "git"
@@ -294,3 +296,292 @@ def ensure_repo(ws: Path) -> Path:
         _update_ref(repo, EMPTY_ROOT_REF, root_commit)
 
     return repo
+
+
+def ref_safe(name: str) -> bool:
+    """Whether `name` can be a branch component and a git argument.
+
+    An agent chooses these — they are directory names it writes under
+    `manuscript/drafts/` — and they become `refs/heads/draft/<name>`. Three
+    separate hazards, so three checks:
+
+    * `drafts.check_name` first, for the path-shaped and control-character
+      cases it already owns (a newline in a ref would be its own problem).
+    * a leading `-`, because `git diff -x main` reads `-x` as a flag, not a
+      ref. `check-ref-format` accepts it.
+    * `git check-ref-format` last, for git's own rules — `a..b`, `a.lock`,
+      `x y`, `a~1`, `a^b`, `a:b`, `HEAD@{0}`. Asking git is the only way to
+      stay right when git's rules change.
+
+    Returns `False` for any of the three rather than raising: an unsafe
+    agent name costs that agent, never the whole sync (see `sync`).
+    `check-ref-format` is run directly through `subprocess.run` with
+    `check=False`, not through `_git` — it needs no repo, and must not turn
+    a merely-unsafe name into a `ProvenanceError`.
+    """
+    try:
+        drafts.check_name(name)
+    except drafts.DraftError:
+        return False
+    if name.startswith("-"):
+        return False
+    try:
+        result = subprocess.run(
+            [GIT, "check-ref-format", f"refs/heads/draft/{name}"],
+            capture_output=True, text=True, timeout=_TIMEOUT_S, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _raw_agent_names(ws: Path) -> set[str]:
+    """Every agent name a run's own artifacts imply, unfiltered by
+    `ref_safe`.
+
+    `agents()` filters this through `ref_safe` and sorts it; `sync()` also
+    needs the unfiltered set, so a name that fails `ref_safe` can be
+    reported in `skipped` instead of silently vanishing.
+
+    Sources, unioned: subdirectories of `manuscript/drafts/`; stems of
+    `findings/*.json` and `gaps/*.json`; and the `<R>`/`<A>` components of
+    `<R>-on-<A>.json` filenames directly under `reviews/` and under each
+    `review/draft-round-<N>/`. Never `config/agents.yml` — an agent's
+    presence here is evidence it acted, not configuration.
+    """
+    ws = Path(ws)
+    names: set[str] = set()
+
+    drafts_dir = ws / "manuscript" / "drafts"
+    if drafts_dir.is_dir():
+        names.update(p.name for p in drafts_dir.iterdir() if p.is_dir())
+
+    for sub in ("findings", "gaps"):
+        directory = ws / sub
+        if directory.is_dir():
+            names.update(p.stem for p in directory.glob("*.json") if p.is_file())
+
+    def add_on_pairs(directory: Path) -> None:
+        if not directory.is_dir():
+            return
+        for p in directory.glob("*-on-*.json"):
+            if not p.is_file():
+                continue
+            reviewer, sep, author = p.stem.partition("-on-")
+            if sep:
+                names.add(reviewer)
+                names.add(author)
+
+    add_on_pairs(ws / "reviews")
+    review_dir = ws / "review"
+    if review_dir.is_dir():
+        for round_dir in review_dir.glob("draft-round-*"):
+            add_on_pairs(round_dir)
+
+    return names
+
+
+def agents(ws: Path) -> list[str]:
+    """Agent names discovered from a run's own artifacts, sorted, filtered
+    to those safe to use as a branch name.
+
+    See `_raw_agent_names` for discovery sources and `ref_safe` for the
+    filter. A name `ref_safe` refuses is simply absent — never fatal."""
+    return sorted(name for name in _raw_agent_names(Path(ws)) if ref_safe(name))
+
+
+def _read_source(path: Path) -> bytes | None:
+    """Raw bytes of `path`, or `None` when it is not a readable regular
+    file — a directory where a file is expected, a dangling symlink (which
+    `Path.is_file()` follows and reports `False` for), or a file this
+    process cannot read. `None` is a skip, never an exception: one odd
+    workspace entry costs that entry, not the sync."""
+    if not path.is_file():
+        return None
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _tree_from_paths(repo: Path, files: dict[str, bytes]) -> str:
+    """Build a tree object from a flat map of `{target/path: content}`.
+
+    `files` keys are full paths relative to the branch root (e.g.
+    `"merge_2/sections/results.tex"`); `mktree` only knows how to build one
+    flat level of entries from `(mode, kind, sha, name)` tuples, so a nested
+    target path has to become a nested tree first. This groups the flat map
+    by its first path component, recurses on the remainder for everything
+    that shares that component, and folds each recursive result in as a
+    `tree` entry alongside any entries that were already leaves at this
+    level — which builds every subtree (and hashes it, via `mktree`) before
+    the tree that references it, i.e. deepest first, simply because a
+    child's `mktree` call has to return before its parent's entry can be
+    constructed. An empty `files` produces the well-known empty tree, the
+    same way `_tree(repo, [])` does, since that's just `entries == []` here
+    too.
+    """
+    groups: dict[str, dict[str, bytes]] = {}
+    entries: list[tuple[str, str, str, str]] = []
+    for path, data in files.items():
+        head, sep, rest = path.partition("/")
+        if not sep:
+            blob = _blob(repo, data.decode("utf-8"))
+            entries.append(("100644", "blob", blob, head))
+        else:
+            groups.setdefault(head, {})[rest] = data
+    for name, sub_files in groups.items():
+        subtree = _tree_from_paths(repo, sub_files)
+        entries.append(("040000", "tree", subtree, name))
+    return _tree(repo, entries)
+
+
+def sync(ws: Path) -> dict:
+    """Project `ws`'s artifacts onto `main` and a `draft/<agent>` branch per
+    discovered agent, committing only what changed since the last sync.
+
+    `ensure_repo` first, so a missing or corrupt repo is made usable before
+    anything is written. Each branch's full target tree is built from
+    scratch every time (see `_tree_from_paths`) and compared against that
+    branch's current tip — or, for a branch that does not exist yet,
+    against the empty tree the root commit holds — so a branch is committed
+    only when it would actually change, and the branch is parented on its
+    existing tip, or on `EMPTY_ROOT_REF` when it is new.
+
+    An artifact whose source is not a readable regular file, or is not
+    valid UTF-8 text, is skipped and reported in `skipped` rather than
+    failing the sync; so is an agent name `ref_safe` refuses. Both `emit`
+    calls are guarded: a run directory without `status.yml` (most of this
+    module's callers in tests, and plausibly in production before a run has
+    written one) must not turn a successful sync into a failure just
+    because the event log couldn't be annotated.
+
+    Returns `{"commits": {ref: sha, ...}, "agents": [...], "skipped": [...]}`.
+    """
+    ws = Path(ws)
+    if not available():
+        raise ProvenanceError("git is not available on this host")
+    repo = ensure_repo(ws)
+
+    raw = _raw_agent_names(ws)
+    safe_agents = sorted(name for name in raw if ref_safe(name))
+    skipped: list[str] = sorted(name for name in raw if name not in safe_agents)
+
+    branches: dict[str, dict[str, bytes]] = {"refs/heads/main": {}}
+    for name in safe_agents:
+        branches[f"refs/heads/draft/{name}"] = {}
+
+    def put(ref: str, target: str, source: Path) -> None:
+        data = _read_source(source)
+        if data is None:
+            skipped.append(str(source))
+            return
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            skipped.append(str(source))
+            return
+        branches[ref][target] = data
+
+    # outline/outline.md -> main: outline.md
+    put("refs/heads/main", "outline.md", ws / "outline" / "outline.md")
+
+    # manuscript/curation/rounds/<n>/<section>.tex -> main: merge_<n>/sections/<section>.tex
+    round_numbers: list[int] = []
+    rounds_dir = ws / "manuscript" / "curation" / "rounds"
+    if rounds_dir.is_dir():
+        for round_dir in rounds_dir.iterdir():
+            if not (round_dir.is_dir() and round_dir.name.isascii()
+                    and round_dir.name.isdigit()):
+                continue
+            n = int(round_dir.name)
+            round_numbers.append(n)
+            for tex in round_dir.glob("*.tex"):
+                put("refs/heads/main", f"merge_{n}/sections/{tex.stem}.tex", tex)
+
+    # manuscript/curation/document.yml -> main: merge_<n>/curation.yml, highest n present
+    if round_numbers:
+        highest = max(round_numbers)
+        put("refs/heads/main", f"merge_{highest}/curation.yml",
+            ws / "manuscript" / "curation" / "document.yml")
+
+    # review/round-<N>/{review,response}.md -> main: review_<N>/{review,response}.md
+    review_dir = ws / "review"
+    if review_dir.is_dir():
+        for round_dir in review_dir.glob("round-*"):
+            suffix = round_dir.name[len("round-"):]
+            if not (round_dir.is_dir() and suffix.isascii() and suffix.isdigit()):
+                continue
+            n = int(suffix)
+            for fname in ("review.md", "response.md"):
+                put("refs/heads/main", f"review_{n}/{fname}", round_dir / fname)
+
+    # findings/<agent>.json, gaps/<agent>.json, manuscript/drafts/<agent>/<section>.tex
+    # -> draft/<agent>: findings.json, gaps.json, sections/<section>.tex
+    for name in safe_agents:
+        ref = f"refs/heads/draft/{name}"
+        put(ref, "findings.json", ws / "findings" / f"{name}.json")
+        put(ref, "gaps.json", ws / "gaps" / f"{name}.json")
+        agent_dir = ws / "manuscript" / "drafts" / name
+        if agent_dir.is_dir():
+            for tex in agent_dir.glob("*.tex"):
+                put(ref, f"sections/{tex.stem}.tex", tex)
+
+    # reviews/<R>-on-<A>.json -> draft/<R>: reviews/<R>-on-<A>.json
+    reviews_dir = ws / "reviews"
+    if reviews_dir.is_dir():
+        for f in reviews_dir.glob("*-on-*.json"):
+            reviewer, sep, _author = f.stem.partition("-on-")
+            if sep and reviewer in safe_agents:
+                put(f"refs/heads/draft/{reviewer}", f"reviews/{f.name}", f)
+
+    # review/draft-round-<N>/<R>-on-<A>.json -> draft/<R>: review_<N>/<R>-on-<A>.json
+    # review/draft-round-<N>/response-<A>.md -> draft/<A>: review_<N>/response-<A>.md
+    if review_dir.is_dir():
+        for round_dir in review_dir.glob("draft-round-*"):
+            if not round_dir.is_dir():
+                continue
+            suffix = round_dir.name[len("draft-round-"):]
+            if not (suffix.isascii() and suffix.isdigit()):
+                continue
+            n = int(suffix)
+            for f in round_dir.iterdir():
+                name = f.name
+                if name.endswith(".json") and "-on-" in name:
+                    reviewer, sep, _author = f.stem.partition("-on-")
+                    if sep and reviewer in safe_agents:
+                        put(f"refs/heads/draft/{reviewer}", f"review_{n}/{name}", f)
+                elif name.startswith("response-") and name.endswith(".md"):
+                    author = f.stem[len("response-"):]
+                    if author in safe_agents:
+                        put(f"refs/heads/draft/{author}", f"review_{n}/{name}", f)
+
+    root = _ref_sha(repo, EMPTY_ROOT_REF)
+    root_tree = _git(repo, "rev-parse", f"{EMPTY_ROOT_REF}^{{tree}}")
+
+    commits: dict[str, str] = {}
+    for ref, files in branches.items():
+        tree = _tree_from_paths(repo, files)
+        tip = _ref_sha(repo, ref)
+        if tip is not None:
+            baseline = _git(repo, "rev-parse", f"{ref}^{{tree}}")
+            parent = tip
+        else:
+            baseline = root_tree
+            parent = root
+        if tree == baseline:
+            continue
+        message = f"sync {ref.removeprefix('refs/heads/')}"
+        commit = _commit(repo, tree, [parent], message)
+        _update_ref(repo, ref, commit)
+        commits[ref] = commit
+
+    try:
+        if commits:
+            events.emit(ws, "provenance.synced", refs=list(commits), agents=safe_agents)
+        if skipped:
+            events.emit(ws, "provenance.skipped", skipped=list(skipped))
+    except Exception:
+        pass
+
+    return {"commits": commits, "agents": safe_agents, "skipped": skipped}
