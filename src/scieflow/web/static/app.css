@@ -40,3 +40,10 @@ textarea { width: 100%; font: inherit; }
 .turn pre { white-space: pre-wrap; margin: .25rem 0; }
 .turn.human pre { border-left: 3px solid var(--link); padding-left: .75rem; }
 .turn.agent pre { border-left: 3px solid var(--warn); padding-left: .75rem; }
+.drafts-grid { display: flex; gap: 1rem; flex-wrap: wrap; }
+.draft-column { flex: 1 1 20rem; min-width: 0; }
+pre.draft { white-space: pre-wrap; background: #0b0d12; color: #d7dbe4;
+            padding: .6rem .8rem; border-radius: 4px; max-height: 20rem;
+            overflow: auto; }
+.curation-blocks { list-style: none; padding: 0; }
+.curation-block { border: 1px solid var(--line); padding: .6rem .8rem; margin: .5rem 0; }

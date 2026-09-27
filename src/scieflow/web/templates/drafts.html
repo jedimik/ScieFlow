@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}{{ slug }} drafts — ScieFlow{% endblock %}
+{% block nav %}<a href="/runs/{{ slug }}">← {{ slug }}</a>{% endblock %}
+{% block content %}
+<h1>{{ slug }} — draft workbench</h1>
+{% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
+
+<h2>Drafts</h2>
+{% if not agents %}
+<p class="dim">No drafts yet. This run has not reached the drafting phase of
+   the <code>paper-draft</code> workflow — that is what writes
+   <code>manuscript/drafts/&lt;agent&gt;/</code>. Come back once it has, or
+   run it now from the run page.</p>
+{% else %}
+<div class="drafts-grid">
+  {% for agent in agents %}
+  <div class="draft-column">
+    <h3>{{ agent }}</h3>
+    {% for section in sections %}
+      {% if section in drafts[agent] %}
+      <h4>{{ section }}</h4>
+      <pre class="draft" data-agent="{{ agent }}" data-section="{{ section }}">{{ drafts[agent][section] }}</pre>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<h2>Curation</h2>
+<p class="dim">Select a passage above, or write your own below, to add it here.
+   Every kept passage remembers which agent and section it came from.</p>
+
+<form method="post" action="/runs/{{ slug }}/drafts" id="keep-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="agent" value="">
+  <input type="hidden" name="section" value="">
+  <textarea name="text" rows="4"
+            placeholder="Select text in a draft above, or type your own words here"></textarea>
+  <div class="actions">
+    <button type="submit" name="action" value="keep">Keep this passage</button>
+    <button type="submit" name="action" value="mine">Add as your own words</button>
+  </div>
+</form>
+
+{% if not curation.blocks %}
+<p class="dim">Nothing kept yet.</p>
+{% else %}
+<ol class="curation-blocks">
+  {% for block in curation.blocks %}
+  <li class="curation-block">
+    <div class="dim">
+      {% if block.kind == "kept" %}
+      from {{ block.agent }} / {{ block.section }}
+      {% else %}
+      your own words
+      {% endif %}
+    </div>
+    <form method="post" action="/runs/{{ slug }}/drafts" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="action" value="edit">
+      <input type="hidden" name="block" value="{{ block.id }}">
+      <textarea name="text" rows="2">{{ block.text }}</textarea>
+      <button type="submit">Save edit</button>
+    </form>
+    <div class="actions">
+      <form method="post" action="/runs/{{ slug }}/drafts" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <input type="hidden" name="action" value="move">
+        <input type="hidden" name="block" value="{{ block.id }}">
+        <input type="hidden" name="position" value="{{ loop.index0 - 1 }}">
+        <button type="submit" {% if loop.first %}disabled{% endif %}>↑ move up</button>
+      </form>
+      <form method="post" action="/runs/{{ slug }}/drafts" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <input type="hidden" name="action" value="move">
+        <input type="hidden" name="block" value="{{ block.id }}">
+        <input type="hidden" name="position" value="{{ loop.index0 + 1 }}">
+        <button type="submit" {% if loop.last %}disabled{% endif %}>↓ move down</button>
+      </form>
+      <form method="post" action="/runs/{{ slug }}/drafts" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <input type="hidden" name="action" value="remove">
+        <input type="hidden" name="block" value="{{ block.id }}">
+        <button type="submit">Remove</button>
+      </form>
+    </div>
+  </li>
+  {% endfor %}
+</ol>
+{% endif %}
+
+<h2>Staging note</h2>
+<p class="dim">A note for this merge round — what you want the merging agent to
+   pay attention to, or what changed since last time.</p>
+<form method="post" action="/runs/{{ slug }}/drafts">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="action" value="note">
+  <textarea name="note" rows="2" placeholder="Note for this merge round">{{ curation.note }}</textarea>
+  <button type="submit">Save note</button>
+</form>
+
+{% if history|length > 1 %}
+<details>
+  <summary class="dim">{{ history|length }} versions</summary>
+  <table>
+    {% for version in history %}
+    <tr>
+      <td class="dim">v{{ version.n }}</td>
+      <td class="dim">{{ version.at[11:19] }}</td>
+      <td class="dim">{{ version.actor }}</td>
+      <td>{{ version.note }}</td>
+      <td>
+        {% if version.n != curation.version %}
+        <form method="post" action="/runs/{{ slug }}/drafts" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="action" value="revert">
+          <input type="hidden" name="version" value="{{ version.n }}">
+          <button type="submit">Restore</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</details>
+{% endif %}
+
+<h2>Send this round</h2>
+<p class="dim">The merging agent reads the current curation and writes the next
+   round's sections. It is the same agent this run's conversation is handed
+   to — pick it below if you need to change it.</p>
+<form method="post" action="/runs/{{ slug }}/say" class="actions">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <select name="agent">
+    {% for name in agents %}
+    <option {% if name == conversation.agent %}selected{% endif %}>{{ name }}</option>
+    {% endfor %}
+  </select>
+  <button name="action" value="agent" {% if conversation.busy %}disabled{% endif %}>
+    Hand the conversation over</button>
+</form>
+<form method="post" action="/runs/{{ slug }}/drafts" class="actions">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <button name="action" value="merge"
+          {% if conversation.busy or not conversation.can_converse %}disabled{% endif %}>
+    Send this round to the merging agent</button>
+</form>
+
+<script>
+// A kept passage is a quotation, not a pointer: we post the TEXT plus which
+// agent and section it came from. Every round rewrites the sections, so an
+// offset would come to point at different words.
+document.addEventListener('selectionchange', function () {
+  const sel = document.getSelection();
+  const chosen = sel ? sel.toString() : '';
+  if (!chosen.trim()) { return; }
+  let node = sel.anchorNode;
+  while (node && !(node.dataset && node.dataset.agent)) { node = node.parentElement; }
+  if (!node) { return; }
+  const form = document.getElementById('keep-form');
+  form.text.value = chosen;
+  form.agent.value = node.dataset.agent;
+  form.section.value = node.dataset.section;
+});
+</script>
+{% endblock %}

@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from scieflow.core import jobs as jobs_mod
@@ -288,6 +288,81 @@ def edit_charter(request: Request, slug: str, action: str = Form("set"),
     except service.ServiceError as exc:
         return _back(slug, str(exc))
     return _back(slug)
+
+
+def _drafts_back(slug: str, error: str = "") -> RedirectResponse:
+    """Post/redirect/get for the workbench, mirroring `_back` above but
+    landing on `/runs/{slug}/drafts` instead of the run page — the page a
+    workbench mutation should redisplay is the workbench itself."""
+    target = f"/runs/{slug}/drafts"
+    if error:
+        target += "?error=" + quote(error)
+    return RedirectResponse(target, status_code=303)
+
+
+def _as_int(value: str) -> int:
+    """A form string as an `int`, as `service.ServiceError` rather than a
+    bare `ValueError` reaching the user as a 500 — `position` and `version`
+    both arrive as text from a hidden form field, and both can be anything
+    a stale tab or a hand-crafted request cares to send."""
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise service.ServiceError(f"not a number: {value!r}") from exc
+
+
+@router.get("/runs/{slug}/drafts", response_class=HTMLResponse)
+def drafts_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
+    project = _project(request)
+    try:
+        view = service.workbench(project, slug)
+    except service.ServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return TEMPLATES.TemplateResponse(request, "drafts.html", {
+        "slug": slug, "error": error,
+        "conversation": service.conversation_state(project, slug),
+        "agents": service.conversational_agents(project),
+        "history": service.curation_history(project, slug),
+        "csrf": auth.csrf_token(request),
+        **view})
+
+
+@router.post("/runs/{slug}/drafts", dependencies=MUTATE)
+def curate(request: Request, slug: str, action: str = Form(...),
+           text: str = Form(""), agent: str = Form(""), section: str = Form(""),
+           block: str = Form(""), position: str = Form("0"), note: str = Form(""),
+           version: str = Form("0")):
+    """Every workbench mutation, dispatched on `action` — the same shape
+    `edit_charter` and `say` already use, which keeps the mutating-route
+    inventory and its guard cases one entry wide.
+
+    `def`, not `async def`: `merge_round` dispatches a whole agent turn and
+    would otherwise block this app's single event loop for its entire
+    `timeout_min`. `tests/web/test_async_routes.py` enforces it.
+    """
+    project = _project(request)
+    try:
+        if action == "keep":
+            service.keep_passage(project, slug, text, agent, section)
+        elif action == "mine":
+            service.add_own_text(project, slug, text)
+        elif action == "edit":
+            service.edit_curation_block(project, slug, block, text)
+        elif action == "move":
+            service.move_curation_block(project, slug, block, _as_int(position))
+        elif action == "remove":
+            service.remove_curation_block(project, slug, block)
+        elif action == "note":
+            service.set_curation_note(project, slug, note)
+        elif action == "revert":
+            service.revert_curation(project, slug, _as_int(version))
+        elif action == "merge":
+            service.merge_round(project, slug)
+        else:
+            return _drafts_back(slug, f"unknown action: {action}")
+    except service.ServiceError as exc:
+        return _drafts_back(slug, str(exc))
+    return _drafts_back(slug)
 
 
 @router.post("/runs/{slug}/say", dependencies=MUTATE)
