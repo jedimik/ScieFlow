@@ -168,8 +168,14 @@ Linked from every run's own page, `/runs/<slug>/drafts` is where you read
 what several agents each drafted for the same manuscript, decide which
 passages actually deserve to survive, and send that decision back for the
 next round. Before a run's `paper-draft` workflow has reached its drafting
-phase — the point where `manuscript/drafts/<agent>/` first exists — the page
-says so and shows nothing else.
+phase — the point where `manuscript/drafts/<agent>/` first exists — only the
+drafts grid is replaced, by a message naming `paper-draft`; the curation
+panel, the staging note, the version history and the "Send this round"
+controls (including the agent hand-over and the merge button) all still
+render and still work. Writing your own text and sending it as a round
+before any agent has drafted anything is a real, supported path, not an
+oversight: `merge_round` only refuses when there is neither a kept passage
+nor a note, and neither of those requires an agent draft to exist.
 
 A kept passage is a quotation, not a pointer. Selecting text in one of the
 drafts shown on the page posts the text itself, plus which agent wrote it
@@ -249,6 +255,11 @@ workspace/<slug>/manuscript/
   curation/rounds/<n>/<section>.tex   each merge round's output
   curation/preview/<source>/          throwaway preview builds
 ```
+
+`<source>` there is `agent:<name>` or `round:<n>` with the colon turned into
+a hyphen for the directory name — a preview of Claude's draft lands under
+`curation/preview/agent-claude/`, and a preview of round 1 under
+`curation/preview/round-1/`.
 
 The compile carries the same sandboxing as every other dispatch, plus two
 rules of its own, because the `.tex` it compiles was written by an agent
