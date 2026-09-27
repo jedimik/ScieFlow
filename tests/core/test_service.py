@@ -662,3 +662,44 @@ def test_workbench_turns_a_malformed_curation_document_into_a_service_error(proj
 
     with pytest.raises(service.ServiceError):
         service.workbench(project, "r1")
+
+
+CURATING = [
+    ("add_own_text", ("text",)),
+    ("edit_curation_block", ("block-id", "text")),
+    ("move_curation_block", ("block-id", 0)),
+    ("remove_curation_block", ("block-id",)),
+    ("set_curation_note", ("note",)),
+    ("revert_curation", (1,)),
+    ("curation_history", ()),
+    ("curation_round", ()),
+]
+
+
+@pytest.mark.parametrize("name,args", CURATING, ids=[n for n, _ in CURATING])
+def test_every_curating_wrapper_translates_a_curation_error(project, name, args):
+    """The translate rule lived in seven byte-for-byte identical bodies and
+    now lives in `_curating`. This pins it for each public entry point at
+    once, so collapsing them cannot quietly drop one — a `CurationError`
+    escaping to a route would render as a 500 instead of the page's own
+    refusal message.
+
+    Driven by a malformed `document.yml`, the one condition every one of these
+    hits on its very first read, rather than by monkeypatching each callee.
+    """
+    ws = project.run_dir("r1")
+    curation_dir = ws / "manuscript" / "curation"
+    curation_dir.mkdir(parents=True)
+    (curation_dir / "document.yml").write_text("current: not-a-number\nversions: []\n")
+
+    with pytest.raises(service.ServiceError):
+        getattr(service, name)(project, "r1", *args)
+
+
+def test_curation_round_reads_the_documents_round(project):
+    from scieflow.core.run import curation
+
+    ws = project.run_dir("r1")
+    assert service.curation_round(project, "r1") == 1
+    curation.advance_round(ws)
+    assert service.curation_round(project, "r1") == 2

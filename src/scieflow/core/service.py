@@ -985,66 +985,71 @@ def keep_passage(project: Project, slug: str, text: str, agent: str, section: st
         raise ServiceError(str(exc)) from exc
 
 
-def add_own_text(project: Project, slug: str, text: str, actor: str = "human") -> dict:
-    """Add the researcher's own words to the curation document."""
+def _curating(project: Project, slug: str, fn, *args, **kwargs):
+    """Resolve the run, call one `curation.*` function on it, and translate
+    `CurationError` to `ServiceError`.
+
+    Seven wrappers below had byte-for-byte identical bodies, differing only
+    in the callee — which is seven places for the translate rule to be got
+    wrong, and seven places to remember when it changes. The rule lives here
+    now; each public function stays exactly as it was named and typed,
+    because the routes and the tests are the vocabulary.
+
+    `keep_passage` deliberately does *not* go through this: it runs
+    `drafts.check_name` on the provenance first, and that check raises
+    `DraftError`, not `CurationError`.
+    """
     ws = _ws(project, slug)
     try:
-        return curation.add_own(ws, text, actor=actor)
+        return fn(ws, *args, **kwargs)
     except curation.CurationError as exc:
         raise ServiceError(str(exc)) from exc
+
+
+def add_own_text(project: Project, slug: str, text: str, actor: str = "human") -> dict:
+    """Add the researcher's own words to the curation document."""
+    return _curating(project, slug, curation.add_own, text, actor=actor)
 
 
 def edit_curation_block(project: Project, slug: str, block_id: str, text: str,
                         actor: str = "human") -> dict:
-    ws = _ws(project, slug)
-    try:
-        return curation.edit_block(ws, block_id, text, actor=actor)
-    except curation.CurationError as exc:
-        raise ServiceError(str(exc)) from exc
+    return _curating(project, slug, curation.edit_block, block_id, text, actor=actor)
 
 
 def move_curation_block(project: Project, slug: str, block_id: str, position: int,
                         actor: str = "human") -> dict:
-    ws = _ws(project, slug)
-    try:
-        return curation.move_block(ws, block_id, position, actor=actor)
-    except curation.CurationError as exc:
-        raise ServiceError(str(exc)) from exc
+    return _curating(project, slug, curation.move_block, block_id, position, actor=actor)
 
 
 def remove_curation_block(project: Project, slug: str, block_id: str,
                           actor: str = "human") -> dict:
-    ws = _ws(project, slug)
-    try:
-        return curation.remove_block(ws, block_id, actor=actor)
-    except curation.CurationError as exc:
-        raise ServiceError(str(exc)) from exc
+    return _curating(project, slug, curation.remove_block, block_id, actor=actor)
 
 
 def set_curation_note(project: Project, slug: str, note: str, actor: str = "human") -> dict:
-    ws = _ws(project, slug)
-    try:
-        return curation.set_note(ws, note, actor=actor)
-    except curation.CurationError as exc:
-        raise ServiceError(str(exc)) from exc
+    return _curating(project, slug, curation.set_note, note, actor=actor)
 
 
 def revert_curation(project: Project, slug: str, version: int, actor: str = "human") -> dict:
-    ws = _ws(project, slug)
-    try:
-        return curation.revert(ws, version, actor=actor)
-    except curation.CurationError as exc:
-        raise ServiceError(str(exc)) from exc
+    return _curating(project, slug, curation.revert, version, actor=actor)
 
 
 def curation_history(project: Project, slug: str) -> list[dict]:
     """Every curation version, oldest first — reachable from the page so its
     versioning is not only a CLI/file-format detail."""
-    ws = _ws(project, slug)
-    try:
-        return curation.history(ws)
-    except curation.CurationError as exc:
-        raise ServiceError(str(exc)) from exc
+    return _curating(project, slug, curation.history)
+
+
+def curation_round(project: Project, slug: str) -> int:
+    """The round the curation document is on, on its own.
+
+    `merge_round` makes its returned `round` the discriminator between a turn
+    that succeeded and one that ran and did not, which a caller can only use
+    by knowing the round *before* the call. `workbench` also carries this, but
+    reads every agent's draft and every round's sections to do it — far too
+    much I/O for one integer a mutating route needs before dispatching a turn.
+    """
+    return _curating(project, slug, curation.read)["round"]
 
 
 def _preview_dest(ws: Path, source: str) -> Path:
