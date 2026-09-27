@@ -1221,13 +1221,24 @@ def preview_busy(project: Project, slug: str) -> bool:
     every *other* draft's button clickable while a compile is running, only
     for each of those clicks to bounce off `compile_preview`'s refusal.
 
-    Not reconciled first (unlike `compile_preview`, which calls
-    `jobs.reconcile` before its own check): this is a page read, not a
-    gate — a stale `"running"` record after a crash makes the buttons look
-    disabled one page load longer than reality, never the other way round,
-    and the actual click still goes through `compile_preview`'s own,
-    reconciled check.
+    Reconciled first, via `jobs.reconcile` — and this is not optional the
+    way it might look. `jobs.reconcile` has exactly one caller anywhere in
+    `src/` before this function existed: `compile_preview` itself, and
+    `compile_preview` has exactly one caller: the preview route. Once this
+    function's `disabled` attribute can take that route's button out of the
+    click path, a crashed, OOM-killed or host-restart-orphaned job stuck at
+    `state == "running"` would never be repaired again — not "one page load
+    longer than reality" (an earlier, wrong version of this docstring said
+    exactly that), but *indefinitely*, because the only code path that ever
+    corrects a stale "running" record is the one this function now disables.
+    Before Compile buttons could disable, clicking Compile past a stale
+    record repaired it for free, with no human involved; skipping the
+    reconcile here would silently remove that self-healing. The extra cost
+    is one more pass over job records this page already reads in full for
+    every other source's `preview_of` call, writing only when a record is
+    genuinely stale.
     """
     ws = _ws(project, slug)
+    jobs.reconcile(project, ws)
     return any(j.kind == "preview" and j.state == "running"
               for j in jobs.list_jobs(project, ws))

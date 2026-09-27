@@ -2,6 +2,27 @@
 {% block title %}{{ slug }} drafts — ScieFlow{% endblock %}
 {% block nav %}<a href="/runs/{{ slug }}">← {{ slug }}</a>{% endblock %}
 {% block content %}
+{% macro preview_panel(slug, csrf, source, p, busy, title) %}
+{#- One rendering of a Compile form plus its result, for one previewable
+   source (a draft or a completed round) -- called once per agent column
+   and once per round column below so the two grids can never silently
+   diverge from each other again. #}
+<form method="post" action="/runs/{{ slug }}/preview" class="inline">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="source" value="{{ source }}">
+  <button type="submit"{% if busy %} disabled{% endif %}>Compile PDF</button>
+</form>
+{% if p.pdf %}
+<iframe class="preview-frame" src="/runs/{{ slug }}/file?path={{ p.pdf }}"
+        title="{{ title }}"></iframe>
+{% endif %}
+{% if not p.available %}
+<p class="dim">{{ p.log }}</p>
+{% elif p.state == "failed" %}
+<p class="state-failed">The last compile failed:</p>
+<pre class="log">{{ p.log }}</pre>
+{% endif %}
+{% endmacro %}
 <h1>{{ slug }} — draft workbench</h1>
 {% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
 
@@ -22,21 +43,7 @@
   {% set p = previews["agent:" ~ agent] %}
   <div class="draft-column">
     <h3>{{ agent }}</h3>
-    <form method="post" action="/runs/{{ slug }}/preview" class="inline">
-      <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <input type="hidden" name="source" value="agent:{{ agent }}">
-      <button type="submit"{% if preview_busy %} disabled{% endif %}>Compile PDF</button>
-    </form>
-    {% if p.pdf %}
-    <iframe class="preview-frame" src="/runs/{{ slug }}/file?path={{ p.pdf }}"
-            title="{{ agent }} preview"></iframe>
-    {% endif %}
-    {% if not p.available %}
-    <p class="dim">{{ p.log }}</p>
-    {% elif p.state == "failed" %}
-    <p class="state-failed">The last compile failed:</p>
-    <pre class="log">{{ p.log }}</pre>
-    {% endif %}
+    {{ preview_panel(slug, csrf, "agent:" ~ agent, p, preview_busy, agent ~ " preview") }}
     {% for section in sections %}
       {% if section in drafts[agent] %}
       <h4>{{ section }}</h4>
@@ -55,21 +62,7 @@
   {% set p = previews["round:" ~ n] %}
   <div class="draft-column">
     <h3>Round {{ n }}</h3>
-    <form method="post" action="/runs/{{ slug }}/preview" class="inline">
-      <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <input type="hidden" name="source" value="round:{{ n }}">
-      <button type="submit"{% if preview_busy %} disabled{% endif %}>Compile PDF</button>
-    </form>
-    {% if p.pdf %}
-    <iframe class="preview-frame" src="/runs/{{ slug }}/file?path={{ p.pdf }}"
-            title="round {{ n }} preview"></iframe>
-    {% endif %}
-    {% if not p.available %}
-    <p class="dim">{{ p.log }}</p>
-    {% elif p.state == "failed" %}
-    <p class="state-failed">The last compile failed:</p>
-    <pre class="log">{{ p.log }}</pre>
-    {% endif %}
+    {{ preview_panel(slug, csrf, "round:" ~ n, p, preview_busy, "round " ~ n ~ " preview") }}
     {% for section, text in round_content.items() %}
     <h4>{{ section }}</h4>
     <pre class="draft">{{ text }}</pre>
