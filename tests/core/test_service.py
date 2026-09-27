@@ -672,7 +672,6 @@ CURATING = [
     ("set_curation_note", ("note",)),
     ("revert_curation", (1,)),
     ("curation_history", ()),
-    ("curation_round", ()),
 ]
 
 
@@ -694,12 +693,3 @@ def test_every_curating_wrapper_translates_a_curation_error(project, name, args)
 
     with pytest.raises(service.ServiceError):
         getattr(service, name)(project, "r1", *args)
-
-
-def test_curation_round_reads_the_documents_round(project):
-    from scieflow.core.run import curation
-
-    ws = project.run_dir("r1")
-    assert service.curation_round(project, "r1") == 1
-    curation.advance_round(ws)
-    assert service.curation_round(project, "r1") == 2
