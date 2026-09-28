@@ -28,6 +28,7 @@ attribute is the same module object everything else imports.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from itertools import chain
@@ -133,7 +134,7 @@ def _env(parent: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def _git(repo: Path, *args: str, stdin: str | None = None,
-         extra_env: dict[str, str] | None = None) -> str:
+         extra_env: dict[str, str] | None = None, errors: str = "strict") -> str:
     """Run `git --git-dir <repo> <args>`, with `stdin` (if given) piped in as
     text, and return stdout with trailing whitespace stripped.
 
@@ -150,6 +151,17 @@ def _git(repo: Path, *args: str, stdin: str | None = None,
     commit, so that one caller does not need its own environment-building
     logic.
 
+    `errors` is the text-decoding error handler `subprocess.run` applies to
+    this process's stdout/stderr (it is `text=True` throughout, so this is
+    the same `errors=` a plain `bytes.decode` would take). Every caller but
+    `diff` leaves it at the default `"strict"`: a malformed byte from `git`
+    itself would be a bug worth surfacing. `diff` passes `"replace"`,
+    because its output can legitimately embed a round's own artifact bytes
+    — including a non-UTF-8 `.tex` file's changed lines (see
+    `test_a_non_utf8_source_is_committed_byte_exact`) — and a page rendering
+    a diff must not 500 over a byte it didn't write; `service._log_tail`
+    makes the identical choice for a compile log.
+
     The exception message names only the git subcommand (`args[0]`), never
     the rest of `args`: a failing `commit-tree` call carries an
     agent-influenced commit message as one of those arguments, and that
@@ -164,7 +176,7 @@ def _git(repo: Path, *args: str, stdin: str | None = None,
     try:
         result = subprocess.run(
             argv, capture_output=True, text=True, timeout=_TIMEOUT_S,
-            input=stdin, env=env,
+            input=stdin, env=env, errors=errors,
         )
     except FileNotFoundError as exc:
         raise ProvenanceError(f"git not found: {exc}") from exc
@@ -726,3 +738,211 @@ def sync(ws: Path) -> dict:
         pass
 
     return {"commits": commits, "agents": safe_agents, "skipped": skipped}
+
+
+#: The maximum length, in characters, of `diff()`'s returned `text` — a big
+#: diff (a giant generated `.tex` file, or many rounds at once) must not be
+#: read whole into a page. Truncation is stated in the text itself, never
+#: silent (see `diff`).
+DIFF_LIMIT = 200_000
+
+_MERGE_DIR_RE = re.compile(r"^merge_(\d+)$")
+_REVIEW_DIR_RE = re.compile(r"^review_(\d+)$")
+
+
+def _branch_tip(repo: Path, ref: str) -> tuple[str, str] | None:
+    """`(sha, committer-date-iso)` for `ref`'s current tip, or `None` if
+    `ref` does not exist.
+
+    Read once per branch and shared by every point that branch contributes
+    (see `points`) — `%cI` is the committer date in strict ISO 8601, and a
+    NUL separates it from the sha so neither field can bleed into the
+    other regardless of what `%H` or `%cI` ever produce.
+    """
+    if _ref_sha(repo, ref) is None:
+        return None
+    out = _git(repo, "log", "-1", "--format=%H%x00%cI", ref)
+    sha, _, at = out.partition("\x00")
+    return sha, at
+
+
+def _ls_tree_names(repo: Path, treeish: str) -> list[str]:
+    """Top-level entry names of `treeish` (non-recursive), or `[]` if it
+    doesn't resolve to a tree at all — e.g. a round that turns out to have
+    no `sections` subdirectory, or a branch with an empty tree."""
+    try:
+        out = _git(repo, "ls-tree", "--name-only", treeish)
+    except ProvenanceError:
+        return []
+    return out.splitlines() if out else []
+
+
+def _numbered_dirs(names: list[str], pattern: re.Pattern[str]) -> list[int]:
+    """Every `pattern`-matching name in `names`, as its captured number,
+    sorted newest (highest) first."""
+    numbers = (int(match.group(1)) for name in names if (match := pattern.match(name)))
+    return sorted(numbers, reverse=True)
+
+
+def _draft_branches(repo: Path) -> list[str]:
+    """Agent names with a `draft/<agent>` branch actually present in the
+    repo, sorted.
+
+    Read from the repo's own refs via `for-each-ref`, not from
+    `agents(ws)` — `points` reflects what is *committed*, per its own
+    contract, and a workspace can drift from what was last synced (an
+    agent's directory removed after the fact, say). A repo with no
+    `draft/*` branches at all yields `[]`, not an error.
+    """
+    try:
+        out = _git(repo, "for-each-ref", "--format=%(refname:short)",
+                   "refs/heads/draft/*")
+    except ProvenanceError:
+        return []
+    return sorted(line.removeprefix("draft/") for line in out.splitlines() if line)
+
+
+def _main_points(repo: Path) -> list[dict]:
+    """Points contributed by `refs/heads/main`: one per `merge_<n>`
+    directory (plus a finer `merge_<n>/sections` point when that round has
+    a `sections` subdirectory — the same depth as a draft's `sections`
+    point, so the two are comparable in one `diff` call), one per
+    `review_<N>` directory, and one for `outline.md` when present.
+    Newest round first; `outline.md` last, since it predates every round.
+    """
+    ref = "refs/heads/main"
+    tip = _branch_tip(repo, ref)
+    if tip is None:
+        return []
+    sha, at = tip
+    names = _ls_tree_names(repo, ref)
+
+    points_: list[dict] = []
+    for n in _numbered_dirs(names, _MERGE_DIR_RE):
+        points_.append({"ref": f"main:merge_{n}", "label": f"Merge round {n}",
+                        "kind": "merge", "commit": sha, "at": at})
+        sub = _ls_tree_names(repo, f"{ref}:merge_{n}")
+        if "sections" in sub:
+            points_.append({"ref": f"main:merge_{n}/sections",
+                            "label": f"Merge round {n} sections",
+                            "kind": "merge", "commit": sha, "at": at})
+    for n in _numbered_dirs(names, _REVIEW_DIR_RE):
+        points_.append({"ref": f"main:review_{n}", "label": f"Review round {n}",
+                        "kind": "review", "commit": sha, "at": at})
+    if "outline.md" in names:
+        points_.append({"ref": "main:outline.md", "label": "Outline",
+                        "kind": "outline", "commit": sha, "at": at})
+    return points_
+
+
+def _draft_points(repo: Path, agent: str) -> list[dict]:
+    """Points contributed by `refs/heads/draft/<agent>`: one for
+    `sections` (that agent's current draft) when present, and one per
+    `review_<N>` directory. `sections` first — it is the current state,
+    the most recent thing to look at — then reviews newest round first.
+    """
+    short = f"draft/{agent}"
+    ref = f"refs/heads/{short}"
+    tip = _branch_tip(repo, ref)
+    if tip is None:
+        return []
+    sha, at = tip
+    names = _ls_tree_names(repo, ref)
+
+    points_: list[dict] = []
+    if "sections" in names:
+        points_.append({"ref": f"{short}:sections", "label": f"{agent}'s draft",
+                        "kind": "draft", "commit": sha, "at": at})
+    for n in _numbered_dirs(names, _REVIEW_DIR_RE):
+        points_.append({"ref": f"{short}:review_{n}", "label": f"Review round {n} ({agent})",
+                        "kind": "review", "commit": sha, "at": at})
+    return points_
+
+
+def points(ws: Path) -> list[dict]:
+    """Every point a run's provenance repo currently holds — a round's
+    merge or review on `main`, an agent's current draft `sections`, or a
+    per-round review on that agent's branch — as
+    `{"ref": "<branch>:<tree path>", "label": str, "kind": "merge"|"review"
+    |"draft"|"outline", "commit": "<sha>", "at": "<iso>"}`.
+
+    A point is exactly the `<branch>:<tree path>` string `diff` accepts,
+    and the whole whitelist `diff`'s `a`/`b` are checked against (see
+    `diff`) — so this is the *only* place that vocabulary is produced.
+
+    Reads the repo, never the workspace: nothing here calls `ensure_repo`
+    or `sync`, so asking for points is not itself a write, and a ref this
+    function doesn't find (because it was never synced, or a rebuild
+    hasn't happened yet) simply contributes nothing rather than raising.
+    A workspace whose repo doesn't exist at all — never synced — is the
+    same ordinary case as one synced with no branches: `[]`, not an error.
+
+    Sorted `main` before the draft branches (agents sorted by name), and
+    newest-round-first within each branch, so a panel listing these
+    top-down reads as the most recent work first.
+    """
+    ws = Path(ws)
+    repo = repo_path(ws)
+    if not repo.is_dir():
+        return []
+
+    result = _main_points(repo)
+    for agent in _draft_branches(repo):
+        result.extend(_draft_points(repo, agent))
+    return result
+
+
+def _point_treeish(point: str) -> str:
+    """`<branch>:<tree path>` -> `refs/heads/<branch>:<tree path>`, the
+    tree-ish `git diff` actually takes. Only ever called on a `point`
+    already proven to equal one `points()` returned — see `diff`."""
+    branch, _, path = point.partition(":")
+    return f"refs/heads/{branch}:{path}"
+
+
+def diff(ws: Path, a: str, b: str) -> dict:
+    """A textual `git diff --no-color` between two points, as
+    `{"text": str, "truncated": bool, "a": str, "b": str}`.
+
+    `a` and `b` reach a `git` subprocess, so each is checked for whole-
+    string equality against `points(ws)` *before* that subprocess ever
+    runs — not prefix-matched, not sanitised, not merely checked for
+    `..`. An unvalidated ref could be argument-shaped
+    (`--output=/tmp/x`, `-x`) rather than merely path-shaped, which no
+    containment or traversal check would catch; only a whitelist of
+    exactly the strings this module itself produced closes that. A
+    syntactically real ref that simply isn't a point — `refs/heads/main`,
+    as opposed to the point `main:merge_2` — is refused identically, since
+    the check is equality against a known-good set, not a general
+    ref-format or existence check.
+
+    Both points are resolved to a `refs/heads/<branch>:<tree path>`
+    tree-ish (see `_point_treeish`) and diffed directly — `git diff`
+    accepts two tree-ish arguments and compares them recursively, which is
+    exactly what lets a draft's `sections` be compared against a round's
+    `merge_<n>/sections` despite living on different branches.
+
+    The result is truncated to `DIFF_LIMIT` characters with the
+    truncation stated in the text itself, never silent. Decoding uses
+    `errors="replace"` (see `_git`) so a diff embedding a non-UTF-8
+    artifact's changed lines can't turn into a crash instead of a page —
+    git itself already keeps raw bytes out of a *binary* file's diff,
+    reporting `Binary files ... differ` instead of emitting them.
+    """
+    ws = Path(ws)
+    allowed = {point["ref"] for point in points(ws)}
+    if a not in allowed:
+        raise ProvenanceError(f"not a point: {a!r}")
+    if b not in allowed:
+        raise ProvenanceError(f"not a point: {b!r}")
+
+    repo = repo_path(ws)
+    text = _git(repo, "diff", "--no-color", _point_treeish(a), _point_treeish(b),
+               errors="replace")
+
+    truncated = False
+    if len(text) > DIFF_LIMIT:
+        text = text[:DIFF_LIMIT] + f"\n… (diff truncated at {DIFF_LIMIT} characters)\n"
+        truncated = True
+
+    return {"text": text, "truncated": truncated, "a": a, "b": b}

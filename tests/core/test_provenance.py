@@ -634,3 +634,194 @@ def test_two_concurrent_syncs_leave_a_usable_repo(drafted):
     assert provenance._ref_sha(repo, "refs/heads/main"), "main is missing after concurrent syncs"
     listing = provenance._git(repo, "ls-tree", "-r", "--name-only", "refs/heads/main")
     assert "merge_2/sections/results.tex" in listing, f"tree incomplete; errors={errors}"
+
+
+# ---------------------------------------------------------------------------
+# Task 3: points() and diff()
+# ---------------------------------------------------------------------------
+
+
+def test_points_lists_what_the_run_has(drafted):
+    provenance.sync(drafted)
+    refs = [p["ref"] for p in provenance.points(drafted)]
+    assert "main:merge_1" in refs
+    assert "main:merge_2" in refs
+    assert "main:review_1" in refs
+    assert "draft/claude:sections" in refs
+    assert "draft/codex:sections" in refs
+    for point in provenance.points(drafted):
+        assert point["commit"] and point["at"] and point["label"]
+
+
+def test_a_run_with_no_history_has_no_points(ws):
+    """REVIEW FOCUS 2: an ordinary state — the panel says so rather than
+    raising or rendering an empty shell."""
+    provenance.sync(ws)
+    assert provenance.points(ws) == []
+
+
+def test_a_run_whose_repo_was_never_synced_has_no_points(ws):
+    """`points` is a pure reader: it must not create a repo (that's
+    `sync`'s/`ensure_repo`'s job) just to answer "what's here" about one
+    that was never built."""
+    assert provenance.points(ws) == []
+    assert not provenance.repo_path(ws).exists()
+
+
+def test_points_are_stable_across_syncs(drafted):
+    provenance.sync(drafted)
+    before = [p["ref"] for p in provenance.points(drafted)]
+    provenance.sync(drafted)
+    assert [p["ref"] for p in provenance.points(drafted)] == before
+
+
+def test_points_are_stable_after_the_repo_is_rebuilt(drafted):
+    """Task 2's deleted-repo test ended with a forward reference to this
+    task's own deliverable (`points()`) and had to drop it. This closes
+    that gap: the repo is derived, so after losing and rebuilding it,
+    `points()` must report the same refs it did before — the reader-side
+    half of "the repo is derived and rebuildable" that Task 2 could not
+    cover itself."""
+    provenance.sync(drafted)
+    before = {p["ref"] for p in provenance.points(drafted)}
+    assert before, "the fixture must produce at least one point to make this test meaningful"
+
+    shutil.rmtree(provenance.repo_path(drafted))
+    assert not provenance.repo_path(drafted).exists()
+
+    provenance.sync(drafted)
+    after = {p["ref"] for p in provenance.points(drafted)}
+    assert after == before
+
+
+def test_a_round_to_round_diff_shows_only_what_changed(drafted):
+    provenance.sync(drafted)
+    result = provenance.diff(drafted, "main:merge_1", "main:merge_2")
+    assert "-merged v1" in result["text"]
+    assert "+merged v2" in result["text"]
+    assert result["truncated"] is False
+
+
+def test_a_draft_against_a_round_diff_works(drafted):
+    provenance.sync(drafted)
+    result = provenance.diff(drafted, "draft/claude:sections", "main:merge_1/sections")
+    assert "claude's results" in result["text"]
+    assert "merged v1" in result["text"]
+
+
+@pytest.mark.parametrize("hostile", [
+    "--output=/tmp/pwned",
+    "-x",
+    "main:merge_1 --output=/tmp/pwned",
+    "../../etc/passwd",
+    "main:../../../etc",
+    "refs/heads/main",          # a real ref, but not a point `points()` returned
+    "",
+])
+def test_a_ref_that_is_not_a_listed_point_is_refused(drafted, hostile):
+    """The whitelist is whole-string equality against `points()`. An
+    argument-shaped value is the case a containment check would miss."""
+    provenance.sync(drafted)
+    with pytest.raises(provenance.ProvenanceError, match="not a point"):
+        provenance.diff(drafted, hostile, "main:merge_2")
+    with pytest.raises(provenance.ProvenanceError, match="not a point"):
+        provenance.diff(drafted, "main:merge_2", hostile)
+
+
+def test_no_file_is_created_by_a_hostile_ref(drafted, tmp_path):
+    provenance.sync(drafted)
+    target = tmp_path / "pwned"
+    with pytest.raises(provenance.ProvenanceError):
+        provenance.diff(drafted, f"--output={target}", "main:merge_2")
+    assert not target.exists(), "git was handed an option as a ref"
+
+
+def test_a_large_diff_is_truncated_and_says_so(drafted):
+    """REVIEW FOCUS 3: a big diff must not be read whole into a page."""
+    big = "x" * (provenance.DIFF_LIMIT + 5000) + "\n"
+    (drafted / "manuscript" / "curation" / "rounds" / "2" / "results.tex").write_text(big)
+    provenance.sync(drafted)
+    result = provenance.diff(drafted, "main:merge_1", "main:merge_2")
+    assert result["truncated"] is True
+    assert len(result["text"]) <= provenance.DIFF_LIMIT + 200
+    assert "truncated" in result["text"].lower()
+
+
+def test_a_binary_file_in_a_round_is_never_committed_or_reachable_by_diff(drafted):
+    """REVIEW FOCUS 3, corrected: the brief's original version of this test
+    (`test_a_binary_artifact_diffs_without_dumping_bytes`) wrote a
+    `figure.pdf` into a round directory and asserted the diff mentions it.
+    But `sync`'s projection globs only text patterns for a round
+    (`glob("*.tex")` for sections, plus the named `curation.yml`) — a
+    `figure.pdf` under `rounds/2/` is never picked up by any path-table
+    entry, so neither substring in that assertion could ever appear, and
+    that test would fail against a correct implementation. The real,
+    stronger guarantee is that such a file never reaches the committed
+    tree at all, and therefore can never reach a diff."""
+    round_dir = drafted / "manuscript" / "curation" / "rounds" / "2"
+    (round_dir / "figure.pdf").write_bytes(b"%PDF-1.7\n" + bytes(range(256)) * 20)
+    (round_dir / "extra.tex").write_text("extra section\n")
+
+    provenance.sync(drafted)
+    repo = provenance.repo_path(drafted)
+    listing = provenance._git(repo, "ls-tree", "-r", "--name-only", "refs/heads/main")
+    assert "merge_2/sections/extra.tex" in listing
+    assert "figure.pdf" not in listing
+    assert not any("figure.pdf" in line for line in listing.splitlines())
+    # The exact set, not just an absence-of-substring check: a regression
+    # that iterated every file in the round (not just `*.tex`) would still
+    # commit the PDF's bytes, just under a renamed `figure.tex` entry —
+    # invisible to a check that only greps for the literal name "figure.pdf".
+    sections = provenance._git(
+        repo, "ls-tree", "--name-only", "refs/heads/main:merge_2/sections")
+    assert set(sections.splitlines()) == {"results.tex", "extra.tex"}
+
+    result = provenance.diff(drafted, "main:merge_1", "main:merge_2")
+    assert "\x00" not in result["text"], "raw bytes reached the diff text"
+    assert "figure.pdf" not in result["text"]
+
+
+def test_points_reflects_the_repo_even_if_the_workspace_drifts(drafted):
+    """`points` reads the repo, not the workspace, so it reports what is
+    actually committed — not what the run's files currently look like.
+    Every workspace trace of "claude" (not just its draft directory —
+    `agents(ws)` would otherwise still re-derive "claude" from its
+    `findings`/`gaps`/`reviews` entries) is removed after the sync, so
+    `agents(ws)` itself would no longer name "claude" at all; the
+    already-committed `draft/claude` branch must still show up, which
+    means discovering draft branches has to come from the repo's own
+    `refs/heads/draft/*`, not from re-scanning the workspace."""
+    provenance.sync(drafted)
+    before = {p["ref"] for p in provenance.points(drafted)}
+    assert "draft/claude:sections" in before
+
+    shutil.rmtree(drafted / "manuscript" / "drafts" / "claude")
+    (drafted / "findings" / "claude.json").unlink()
+    (drafted / "gaps" / "claude.json").unlink()
+    (drafted / "reviews" / "claude-on-codex.json").unlink()
+    (drafted / "review" / "draft-round-1" / "claude-on-codex.json").unlink()
+    assert provenance.agents(drafted) == ["codex"], (
+        "the fixture must no longer imply \"claude\" from the workspace "
+        "for this test to isolate repo-vs-workspace behaviour")
+
+    after = {p["ref"] for p in provenance.points(drafted)}
+    assert after == before, "points must reflect the repo, not today's workspace"
+
+
+def test_a_non_utf8_change_does_not_crash_the_diff(ws):
+    """`_git`'s stdout decode must not raise on a byte a legitimately
+    non-UTF-8 `.tex` file (see `test_a_non_utf8_source_is_committed_byte_
+    exact`) can put straight into a diff hunk. `diff` passes
+    `errors="replace"` to `_git` for exactly this — a malformed byte is
+    substituted, not a crash."""
+    _write(ws / "manuscript" / "curation" / "rounds" / "1" / "results.tex", "v1\n")
+    round2 = ws / "manuscript" / "curation" / "rounds" / "2"
+    round2.mkdir(parents=True)
+    (round2 / "results.tex").write_bytes(
+        "R\xe9sultats en fran\xe7ais\n".encode("latin-1"))
+
+    provenance.sync(ws)
+    result = provenance.diff(ws, "main:merge_1", "main:merge_2")
+    assert result["truncated"] is False
+    assert "results.tex" in result["text"]
+    assert "�" in result["text"], "a malformed byte should be replaced, not raise"
