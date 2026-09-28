@@ -1,0 +1,583 @@
+# Review package: 7b5a10f..5b98066
+
+## Commits
+5b98066 feat(core): project a run's artifacts onto main and per-agent branches
+
+## Files changed
+ src/scieflow/core/events.py     |   1 +
+ src/scieflow/core/provenance.py | 291 ++++++++++++++++++++++++++++++++++++++++
+ tests/core/test_provenance.py   | 203 ++++++++++++++++++++++++++++
+ 3 files changed, 495 insertions(+)
+
+## Diff
+diff --git a/src/scieflow/core/events.py b/src/scieflow/core/events.py
+index ddc267d..0a2f450 100644
+--- a/src/scieflow/core/events.py
++++ b/src/scieflow/core/events.py
+@@ -20,20 +20,21 @@ ACTORS = frozenset({"human", "agent", "system"})
+ TYPES = frozenset({
+     "run.created", "run.resumed",
+     "phase.pending", "phase.started", "phase.done", "phase.failed",
+     "iteration.advanced", "checkpoint", "budget.recorded",
+     "job.queued", "job.started", "job.finished", "job.failed", "job.timeout",
+     "job.cancelled", "job.lost", "job.refused", "sandbox.disabled",
+     "gate.opened", "gate.answered", "gate.withdrawn",
+     "charter.set", "charter.reverted",
+     "turn.sent", "turn.received", "turn.session_lost",
+     "curation.changed", "curation.round",
++    "provenance.synced", "provenance.skipped",
+     "integration.call", "sync.pushed", "sync.pulled",
+ })
+ 
+ 
+ def _run_id(ws: Path) -> str:
+     st = store.read_yaml(Path(ws) / "status.yml") or {}
+     return str(st.get("id") or Path(ws).name)
+ 
+ 
+ def emit(ws: Path, type_: str, actor: str = "system", **data) -> dict:
+diff --git a/src/scieflow/core/provenance.py b/src/scieflow/core/provenance.py
+index dc0705f..55b14c4 100644
+--- a/src/scieflow/core/provenance.py
++++ b/src/scieflow/core/provenance.py
+@@ -26,20 +26,22 @@ attribute is the same module object everything else imports.
+ """
+ 
+ from __future__ import annotations
+ 
+ import os
+ import shutil
+ import subprocess
+ from itertools import chain
+ from pathlib import Path
+ 
++from scieflow.core import drafts, events
++
+ REPO_DIR = "provenance.git"
+ EMPTY_ROOT_REF = "refs/heads/_root"
+ GIT = "git"
+ _TIMEOUT_S = 30
+ 
+ #: The commit identity every write in this repo is attributed to. A run's
+ #: writes are made by ScieFlow orchestrating agents, not by whatever human
+ #: happens to be running the serve process, and a fresh machine may have no
+ #: global `user.email` at all — which makes `commit-tree` fail outright with
+ #: no writable identity configured (confirmed: with these four omitted and
+@@ -287,10 +289,299 @@ def ensure_repo(ws: Path) -> Path:
+         # goes through `_git` like every other call — one environment
+         # builder, with no second call site that could drift from it.
+         _git(repo, "init", "--bare", "--quiet")
+ 
+     if _ref_sha(repo, EMPTY_ROOT_REF) is None:
+         empty_tree = _tree(repo, [])
+         root_commit = _commit(repo, empty_tree, [], "empty root", when=_ROOT_COMMIT_DATE)
+         _update_ref(repo, EMPTY_ROOT_REF, root_commit)
+ 
+     return repo
++
++
++def ref_safe(name: str) -> bool:
++    """Whether `name` can be a branch component and a git argument.
++
++    An agent chooses these — they are directory names it writes under
++    `manuscript/drafts/` — and they become `refs/heads/draft/<name>`. Three
++    separate hazards, so three checks:
++
++    * `drafts.check_name` first, for the path-shaped and control-character
++      cases it already owns (a newline in a ref would be its own problem).
++    * a leading `-`, because `git diff -x main` reads `-x` as a flag, not a
++      ref. `check-ref-format` accepts it.
++    * `git check-ref-format` last, for git's own rules — `a..b`, `a.lock`,
++      `x y`, `a~1`, `a^b`, `a:b`, `HEAD@{0}`. Asking git is the only way to
++      stay right when git's rules change.
++
++    Returns `False` for any of the three rather than raising: an unsafe
++    agent name costs that agent, never the whole sync (see `sync`).
++    `check-ref-format` is run directly through `subprocess.run` with
++    `check=False`, not through `_git` — it needs no repo, and must not turn
++    a merely-unsafe name into a `ProvenanceError`.
++    """
++    try:
++        drafts.check_name(name)
++    except drafts.DraftError:
++        return False
++    if name.startswith("-"):
++        return False
++    try:
++        result = subprocess.run(
++            [GIT, "check-ref-format", f"refs/heads/draft/{name}"],
++            capture_output=True, text=True, timeout=_TIMEOUT_S, check=False,
++        )
++    except (OSError, subprocess.TimeoutExpired):
++        return False
++    return result.returncode == 0
++
++
++def _raw_agent_names(ws: Path) -> set[str]:
++    """Every agent name a run's own artifacts imply, unfiltered by
++    `ref_safe`.
++
++    `agents()` filters this through `ref_safe` and sorts it; `sync()` also
++    needs the unfiltered set, so a name that fails `ref_safe` can be
++    reported in `skipped` instead of silently vanishing.
++
++    Sources, unioned: subdirectories of `manuscript/drafts/`; stems of
++    `findings/*.json` and `gaps/*.json`; and the `<R>`/`<A>` components of
++    `<R>-on-<A>.json` filenames directly under `reviews/` and under each
++    `review/draft-round-<N>/`. Never `config/agents.yml` — an agent's
++    presence here is evidence it acted, not configuration.
++    """
++    ws = Path(ws)
++    names: set[str] = set()
++
++    drafts_dir = ws / "manuscript" / "drafts"
++    if drafts_dir.is_dir():
++        names.update(p.name for p in drafts_dir.iterdir() if p.is_dir())
++
++    for sub in ("findings", "gaps"):
++        directory = ws / sub
++        if directory.is_dir():
++            names.update(p.stem for p in directory.glob("*.json") if p.is_file())
++
++    def add_on_pairs(directory: Path) -> None:
++        if not directory.is_dir():
++            return
++        for p in directory.glob("*-on-*.json"):
++            if not p.is_file():
++                continue
++            reviewer, sep, author = p.stem.partition("-on-")
++            if sep:
++                names.add(reviewer)
++                names.add(author)
++
++    add_on_pairs(ws / "reviews")
++    review_dir = ws / "review"
++    if review_dir.is_dir():
++        for round_dir in review_dir.glob("draft-round-*"):
++            add_on_pairs(round_dir)
++
++    return names
++
++
++def agents(ws: Path) -> list[str]:
++    """Agent names discovered from a run's own artifacts, sorted, filtered
++    to those safe to use as a branch name.
++
++    See `_raw_agent_names` for discovery sources and `ref_safe` for the
++    filter. A name `ref_safe` refuses is simply absent — never fatal."""
++    return sorted(name for name in _raw_agent_names(Path(ws)) if ref_safe(name))
++
++
++def _read_source(path: Path) -> bytes | None:
++    """Raw bytes of `path`, or `None` when it is not a readable regular
++    file — a directory where a file is expected, a dangling symlink (which
++    `Path.is_file()` follows and reports `False` for), or a file this
++    process cannot read. `None` is a skip, never an exception: one odd
++    workspace entry costs that entry, not the sync."""
++    if not path.is_file():
++        return None
++    try:
++        return path.read_bytes()
++    except OSError:
++        return None
++
++
++def _tree_from_paths(repo: Path, files: dict[str, bytes]) -> str:
++    """Build a tree object from a flat map of `{target/path: content}`.
++
++    `files` keys are full paths relative to the branch root (e.g.
++    `"merge_2/sections/results.tex"`); `mktree` only knows how to build one
++    flat level of entries from `(mode, kind, sha, name)` tuples, so a nested
++    target path has to become a nested tree first. This groups the flat map
++    by its first path component, recurses on the remainder for everything
++    that shares that component, and folds each recursive result in as a
++    `tree` entry alongside any entries that were already leaves at this
++    level — which builds every subtree (and hashes it, via `mktree`) before
++    the tree that references it, i.e. deepest first, simply because a
++    child's `mktree` call has to return before its parent's entry can be
++    constructed. An empty `files` produces the well-known empty tree, the
++    same way `_tree(repo, [])` does, since that's just `entries == []` here
++    too.
++    """
++    groups: dict[str, dict[str, bytes]] = {}
++    entries: list[tuple[str, str, str, str]] = []
++    for path, data in files.items():
++        head, sep, rest = path.partition("/")
++        if not sep:
++            blob = _blob(repo, data.decode("utf-8"))
++            entries.append(("100644", "blob", blob, head))
++        else:
++            groups.setdefault(head, {})[rest] = data
++    for name, sub_files in groups.items():
++        subtree = _tree_from_paths(repo, sub_files)
++        entries.append(("040000", "tree", subtree, name))
++    return _tree(repo, entries)
++
++
++def sync(ws: Path) -> dict:
++    """Project `ws`'s artifacts onto `main` and a `draft/<agent>` branch per
++    discovered agent, committing only what changed since the last sync.
++
++    `ensure_repo` first, so a missing or corrupt repo is made usable before
++    anything is written. Each branch's full target tree is built from
++    scratch every time (see `_tree_from_paths`) and compared against that
++    branch's current tip — or, for a branch that does not exist yet,
++    against the empty tree the root commit holds — so a branch is committed
++    only when it would actually change, and the branch is parented on its
++    existing tip, or on `EMPTY_ROOT_REF` when it is new.
++
++    An artifact whose source is not a readable regular file, or is not
++    valid UTF-8 text, is skipped and reported in `skipped` rather than
++    failing the sync; so is an agent name `ref_safe` refuses. Both `emit`
++    calls are guarded: a run directory without `status.yml` (most of this
++    module's callers in tests, and plausibly in production before a run has
++    written one) must not turn a successful sync into a failure just
++    because the event log couldn't be annotated.
++
++    Returns `{"commits": {ref: sha, ...}, "agents": [...], "skipped": [...]}`.
++    """
++    ws = Path(ws)
++    if not available():
++        raise ProvenanceError("git is not available on this host")
++    repo = ensure_repo(ws)
++
++    raw = _raw_agent_names(ws)
++    safe_agents = sorted(name for name in raw if ref_safe(name))
++    skipped: list[str] = sorted(name for name in raw if name not in safe_agents)
++
++    branches: dict[str, dict[str, bytes]] = {"refs/heads/main": {}}
++    for name in safe_agents:
++        branches[f"refs/heads/draft/{name}"] = {}
++
++    def put(ref: str, target: str, source: Path) -> None:
++        data = _read_source(source)
++        if data is None:
++            skipped.append(str(source))
++            return
++        try:
++            data.decode("utf-8")
++        except UnicodeDecodeError:
++            skipped.append(str(source))
++            return
++        branches[ref][target] = data
++
++    # outline/outline.md -> main: outline.md
++    put("refs/heads/main", "outline.md", ws / "outline" / "outline.md")
++
++    # manuscript/curation/rounds/<n>/<section>.tex -> main: merge_<n>/sections/<section>.tex
++    round_numbers: list[int] = []
++    rounds_dir = ws / "manuscript" / "curation" / "rounds"
++    if rounds_dir.is_dir():
++        for round_dir in rounds_dir.iterdir():
++            if not (round_dir.is_dir() and round_dir.name.isascii()
++                    and round_dir.name.isdigit()):
++                continue
++            n = int(round_dir.name)
++            round_numbers.append(n)
++            for tex in round_dir.glob("*.tex"):
++                put("refs/heads/main", f"merge_{n}/sections/{tex.stem}.tex", tex)
++
++    # manuscript/curation/document.yml -> main: merge_<n>/curation.yml, highest n present
++    if round_numbers:
++        highest = max(round_numbers)
++        put("refs/heads/main", f"merge_{highest}/curation.yml",
++            ws / "manuscript" / "curation" / "document.yml")
++
++    # review/round-<N>/{review,response}.md -> main: review_<N>/{review,response}.md
++    review_dir = ws / "review"
++    if review_dir.is_dir():
++        for round_dir in review_dir.glob("round-*"):
++            suffix = round_dir.name[len("round-"):]
++            if not (round_dir.is_dir() and suffix.isascii() and suffix.isdigit()):
++                continue
++            n = int(suffix)
++            for fname in ("review.md", "response.md"):
++                put("refs/heads/main", f"review_{n}/{fname}", round_dir / fname)
++
++    # findings/<agent>.json, gaps/<agent>.json, manuscript/drafts/<agent>/<section>.tex
++    # -> draft/<agent>: findings.json, gaps.json, sections/<section>.tex
++    for name in safe_agents:
++        ref = f"refs/heads/draft/{name}"
++        put(ref, "findings.json", ws / "findings" / f"{name}.json")
++        put(ref, "gaps.json", ws / "gaps" / f"{name}.json")
++        agent_dir = ws / "manuscript" / "drafts" / name
++        if agent_dir.is_dir():
++            for tex in agent_dir.glob("*.tex"):
++                put(ref, f"sections/{tex.stem}.tex", tex)
++
++    # reviews/<R>-on-<A>.json -> draft/<R>: reviews/<R>-on-<A>.json
++    reviews_dir = ws / "reviews"
++    if reviews_dir.is_dir():
++        for f in reviews_dir.glob("*-on-*.json"):
++            reviewer, sep, _author = f.stem.partition("-on-")
++            if sep and reviewer in safe_agents:
++                put(f"refs/heads/draft/{reviewer}", f"reviews/{f.name}", f)
++
++    # review/draft-round-<N>/<R>-on-<A>.json -> draft/<R>: review_<N>/<R>-on-<A>.json
++    # review/draft-round-<N>/response-<A>.md -> draft/<A>: review_<N>/response-<A>.md
++    if review_dir.is_dir():
++        for round_dir in review_dir.glob("draft-round-*"):
++            if not round_dir.is_dir():
++                continue
++            suffix = round_dir.name[len("draft-round-"):]
++            if not (suffix.isascii() and suffix.isdigit()):
++                continue
++            n = int(suffix)
++            for f in round_dir.iterdir():
++                name = f.name
++                if name.endswith(".json") and "-on-" in name:
++                    reviewer, sep, _author = f.stem.partition("-on-")
++                    if sep and reviewer in safe_agents:
++                        put(f"refs/heads/draft/{reviewer}", f"review_{n}/{name}", f)
++                elif name.startswith("response-") and name.endswith(".md"):
++                    author = f.stem[len("response-"):]
++                    if author in safe_agents:
++                        put(f"refs/heads/draft/{author}", f"review_{n}/{name}", f)
++
++    root = _ref_sha(repo, EMPTY_ROOT_REF)
++    root_tree = _git(repo, "rev-parse", f"{EMPTY_ROOT_REF}^{{tree}}")
++
++    commits: dict[str, str] = {}
++    for ref, files in branches.items():
++        tree = _tree_from_paths(repo, files)
++        tip = _ref_sha(repo, ref)
++        if tip is not None:
++            baseline = _git(repo, "rev-parse", f"{ref}^{{tree}}")
++            parent = tip
++        else:
++            baseline = root_tree
++            parent = root
++        if tree == baseline:
++            continue
++        message = f"sync {ref.removeprefix('refs/heads/')}"
++        commit = _commit(repo, tree, [parent], message)
++        _update_ref(repo, ref, commit)
++        commits[ref] = commit
++
++    try:
++        if commits:
++            events.emit(ws, "provenance.synced", refs=list(commits), agents=safe_agents)
++        if skipped:
++            events.emit(ws, "provenance.skipped", skipped=list(skipped))
++    except Exception:
++        pass
++
++    return {"commits": commits, "agents": safe_agents, "skipped": skipped}
+diff --git a/tests/core/test_provenance.py b/tests/core/test_provenance.py
+index 02a70ea..0fc6dc3 100644
+--- a/tests/core/test_provenance.py
++++ b/tests/core/test_provenance.py
+@@ -236,10 +236,213 @@ def test_a_symlinked_repo_path_is_rebuilt_not_raised(ws):
+ 
+ 
+ def test_a_git_failure_never_leaks_the_full_argument_list(ws):
+     """A failing `commit-tree` carries an agent-influenced commit message
+     as one of its arguments; the exception must not repeat it."""
+     repo = provenance.ensure_repo(ws)
+     secret_message = "SENSITIVE-MESSAGE-MUST-NOT-APPEAR-IN-ERROR"
+     with pytest.raises(provenance.ProvenanceError) as exc_info:
+         provenance._git(repo, "commit-tree", "0" * 40, "-m", secret_message)
+     assert secret_message not in str(exc_info.value)
++
++
++def _write(path, text="x"):
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text(text)
++
++
++@pytest.fixture
++def drafted(ws):
++    """A run that drafted with two agents and merged twice."""
++    _write(ws / "outline" / "outline.md", "# Outline\n")
++    _write(ws / "findings" / "claude.json", '{"n": 1}')
++    _write(ws / "findings" / "codex.json", '{"n": 2}')
++    _write(ws / "gaps" / "claude.json", '{"gap": "a"}')
++    _write(ws / "manuscript" / "drafts" / "claude" / "results.tex", "claude's results\n")
++    _write(ws / "manuscript" / "drafts" / "codex" / "results.tex", "codex's results\n")
++    _write(ws / "reviews" / "claude-on-codex.json", '{"verdict": "ok"}')
++    _write(ws / "review" / "draft-round-1" / "claude-on-codex.json", '{"round": 1}')
++    _write(ws / "review" / "draft-round-1" / "response-codex.md", "codex responds\n")
++    _write(ws / "review" / "round-1" / "review.md", "the review\n")
++    _write(ws / "manuscript" / "curation" / "rounds" / "1" / "results.tex", "merged v1\n")
++    _write(ws / "manuscript" / "curation" / "rounds" / "2" / "results.tex", "merged v2\n")
++    _write(ws / "manuscript" / "curation" / "document.yml", "round: 2\nblocks: []\n")
++    return ws
++
++
++def test_agents_are_discovered_from_artifacts_not_from_config(drafted):
++    assert provenance.agents(drafted) == ["claude", "codex"]
++
++
++def test_a_run_that_used_one_agent_gets_one_agent(ws):
++    _write(ws / "manuscript" / "drafts" / "solo" / "intro.tex", "alone\n")
++    assert provenance.agents(ws) == ["solo"]
++
++
++def test_a_run_with_nothing_has_no_agents(ws):
++    assert provenance.agents(ws) == []
++
++
++@pytest.mark.parametrize("name", ["a..b", "a.lock", "x y", "a~1", "-x", "HEAD@{0}", "a^b", "a:b"])
++def test_a_name_that_is_not_a_safe_ref_is_refused(name):
++    """REVIEW FOCUS 1. These are directory names an *agent* chose, and they
++    become branch names. Verified against git 2.43.0: the first four are
++    refused by `check-ref-format`, and `-x` passes the format check but would
++    be read as a flag in an argument position. `drafts.check_name` catches
++    none of them."""
++    assert provenance.ref_safe(name) is False
++
++
++@pytest.mark.parametrize("name", ["claude", "codex", "gpt-5", "agent_2", "café"])
++def test_an_ordinary_agent_name_is_a_safe_ref(name):
++    assert provenance.ref_safe(name) is True
++
++
++def test_an_unsafe_agent_directory_is_skipped_not_fatal(ws):
++    """One bad directory costs that directory, never the whole history."""
++    _write(ws / "manuscript" / "drafts" / "claude" / "results.tex", "fine\n")
++    (ws / "manuscript" / "drafts" / "a..b").mkdir(parents=True)
++    _write(ws / "manuscript" / "drafts" / "a..b" / "results.tex", "hostile\n")
++
++    assert provenance.agents(ws) == ["claude"]
++    result = provenance.sync(ws)
++    assert "a..b" in result["skipped"]
++    assert "refs/heads/draft/claude" in result["commits"]
++
++
++def test_sync_lays_out_main_exactly_as_the_spec_says(drafted):
++    provenance.sync(drafted)
++    repo = provenance.repo_path(drafted)
++    listing = provenance._git(repo, "ls-tree", "-r", "--name-only", "refs/heads/main")
++    assert set(listing.splitlines()) == {
++        "outline.md",
++        "merge_1/sections/results.tex",
++        "merge_2/sections/results.tex",
++        "merge_2/curation.yml",
++        "review_1/review.md",
++    }
++
++
++def test_sync_lays_out_an_agent_branch_exactly_as_the_spec_says(drafted):
++    provenance.sync(drafted)
++    repo = provenance.repo_path(drafted)
++    claude = provenance._git(repo, "ls-tree", "-r", "--name-only", "refs/heads/draft/claude")
++    assert set(claude.splitlines()) == {
++        "findings.json",
++        "gaps.json",
++        "sections/results.tex",
++        "reviews/claude-on-codex.json",
++        "review_1/claude-on-codex.json",
++    }
++    codex = provenance._git(repo, "ls-tree", "-r", "--name-only", "refs/heads/draft/codex")
++    assert set(codex.splitlines()) == {
++        "findings.json",
++        "sections/results.tex",
++        "review_1/response-codex.md",
++    }, "a response belongs to its author, a review to its reviewer"
++
++
++def test_every_branch_descends_from_the_empty_root(drafted):
++    """Without a common ancestor, `git diff draft/claude main` is not a
++    comparison of two histories."""
++    provenance.sync(drafted)
++    repo = provenance.repo_path(drafted)
++    root = provenance._ref_sha(repo, provenance.EMPTY_ROOT_REF)
++    for ref in ("refs/heads/main", "refs/heads/draft/claude", "refs/heads/draft/codex"):
++        base = provenance._git(repo, "merge-base", ref, root)
++        assert base == root, f"{ref} does not descend from the root commit"
++
++
++def test_syncing_twice_commits_once(drafted):
++    first = provenance.sync(drafted)
++    second = provenance.sync(drafted)
++    assert first["commits"], "the first sync must commit something"
++    assert second["commits"] == {}, "an unchanged workspace must not produce a commit"
++
++
++def test_a_changed_artifact_commits_again_on_that_branch_only(drafted):
++    provenance.sync(drafted)
++    repo = provenance.repo_path(drafted)
++    before_main = provenance._ref_sha(repo, "refs/heads/main")
++    before_codex = provenance._ref_sha(repo, "refs/heads/draft/codex")
++
++    (drafted / "manuscript" / "drafts" / "claude" / "results.tex").write_text("revised\n")
++    result = provenance.sync(drafted)
++
++    assert list(result["commits"]) == ["refs/heads/draft/claude"]
++    assert provenance._ref_sha(repo, "refs/heads/main") == before_main
++    assert provenance._ref_sha(repo, "refs/heads/draft/codex") == before_codex
++
++
++def test_a_deleted_repo_is_rebuilt_with_the_history_it_can_still_derive(drafted):
++    """The repo is derived, so losing it costs history and nothing else. This
++    is what makes best-effort committing correct: the next read reconstructs
++    whatever the workspace still supports."""
++    import shutil as shutil_mod
++
++    provenance.sync(drafted)
++    repo = provenance.repo_path(drafted)
++    before = set(provenance._git(repo, "ls-tree", "-r", "--name-only",
++                                 "refs/heads/main").splitlines())
++    shutil_mod.rmtree(repo)
++    assert not repo.exists()
++
++    provenance.sync(drafted)
++    after = set(provenance._git(repo, "ls-tree", "-r", "--name-only",
++                                "refs/heads/main").splitlines())
++    assert after == before, "the rebuilt history does not match what the workspace holds"
++
++
++def test_sync_emits_an_event_naming_what_it_did(drafted):
++    from scieflow.core import events
++    from scieflow.core.run import status
++
++    status.write_status(drafted, status.new_status("r1", "autonomous"))
++    provenance.sync(drafted)
++    kinds = [e["type"] for e in events.read(drafted)]
++    assert "provenance.synced" in kinds
++
++
++def test_an_unexpected_workspace_shape_costs_that_entry_only(ws):
++    """REVIEW FOCUS 4: `findings/claude.json` as a *directory*, and a dangling
++    symlink where a section should be. Neither may fail the sync."""
++    (ws / "findings" / "claude.json").mkdir(parents=True)
++    _write(ws / "manuscript" / "drafts" / "claude" / "results.tex", "real\n")
++    (ws / "manuscript" / "drafts" / "claude" / "ghost.tex").symlink_to(ws / "nowhere.tex")
++
++    result = provenance.sync(ws)
++    repo = provenance.repo_path(ws)
++    listing = provenance._git(repo, "ls-tree", "-r", "--name-only", "refs/heads/draft/claude")
++    assert "sections/results.tex" in listing
++    assert "ghost.tex" not in listing
++    assert "findings.json" not in listing
++    assert result["commits"], "the sync still committed what it could read"
++
++
++def test_two_concurrent_syncs_leave_a_usable_repo(drafted):
++    """REVIEW FOCUS 5: `update-ref` is atomic per ref, so the outcome is
++    last-writer-wins, never a corrupt repo or a partial tree."""
++    import threading
++
++    provenance.ensure_repo(drafted)
++    errors = []
++
++    def run():
++        try:
++            provenance.sync(drafted)
++        except Exception as exc:          # noqa: BLE001 — the test is about not corrupting
++            errors.append(exc)
++
++    threads = [threading.Thread(target=run) for _ in range(4)]
++    for t in threads:
++        t.start()
++    for t in threads:
++        t.join()
++
++    repo = provenance.repo_path(drafted)
++    # `fsck` exits non-zero on a corrupt object store and `_git` turns that
++    # into ProvenanceError, so this call IS the assertion — there is nothing
++    # to compare its output against.
++    provenance._git(repo, "fsck", "--no-progress")
++    assert provenance._ref_sha(repo, "refs/heads/main"), "main is missing after concurrent syncs"
++    listing = provenance._git(repo, "ls-tree", "-r", "--name-only", "refs/heads/main")
++    assert "merge_2/sections/results.tex" in listing, f"tree incomplete; errors={errors}"

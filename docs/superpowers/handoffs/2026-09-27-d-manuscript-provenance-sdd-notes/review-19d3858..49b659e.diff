@@ -1,0 +1,285 @@
+# Review package: 19d3858..49b659e
+
+## Commits
+49b659e fix(tests): tighten three provenance-panel assertions that passed for the wrong reason
+d83d38d feat(web): read the manuscript's history and diff it on the workbench
+
+## Files changed
+ src/scieflow/web/pages.py              |  42 +++++++++++-
+ src/scieflow/web/templates/drafts.html |  36 +++++++++++
+ tests/web/test_provenance_panel.py     | 113 +++++++++++++++++++++++++++++++++
+ 3 files changed, 189 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/src/scieflow/web/pages.py b/src/scieflow/web/pages.py
+index 53fba0c..e1ea88d 100644
+--- a/src/scieflow/web/pages.py
++++ b/src/scieflow/web/pages.py
+@@ -304,47 +304,85 @@ def _as_int(value: str) -> int:
+     """A form string as an `int`, as `service.ServiceError` rather than a
+     bare `ValueError` reaching the user as a 500 — `position` and `version`
+     both arrive as text from a hidden form field, and both can be anything
+     a stale tab or a hand-crafted request cares to send."""
+     try:
+         return int(value)
+     except (TypeError, ValueError) as exc:
+         raise service.ServiceError(f"not a number: {value!r}") from exc
+ 
+ 
++def _manuscript_diff(project, slug: str, a: str, b: str) -> dict | None:
++    """The diff panel's data: `None` when there is nothing to diff yet (`a`
++    or `b` empty — the common case, before the GET form has ever been
++    submitted), otherwise `service.manuscript_diff`'s result, or `{"error":
++    str(exc)}` when the ref pair is rejected.
++
++    `ServiceError` is caught here, not left to `drafts_page` — a hostile or
++    stale `diff_a`/`diff_b` (an old point from before a rebuild, or a
++    `--flag`-shaped string trying to reach `git` as an argument) is an
++    ordinary, expected outcome of a GET query parameter a user or a stale
++    tab can send, not a reason to 404 or 500 the whole workbench page.
++    """
++    if not a or not b:
++        return None
++    try:
++        return service.manuscript_diff(project, slug, a, b)
++    except service.ServiceError as exc:
++        return {"error": str(exc)}
++
++
+ @router.get("/runs/{slug}/drafts", response_class=HTMLResponse)
+-def drafts_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
++def drafts_page(request: Request, slug: str, error: str = "",
++                diff_a: str = "", diff_b: str = "") -> HTMLResponse:
+     """`view` (from `service.workbench`) is spread last so its own `agents`
+     key — the draft *authors* — wins over anything with the same name added
+     here, and is what the drafts panel and its empty-state check read. The
+     merging-agent selector needs a different list — agents that can actually
+     hold a conversation, which need not have drafted anything at all — so
+     that one is passed under its own name, `conversational`, rather than
+     `agents`: a shared key here would let one of the two silently shadow the
+     other depending on dict order, which is exactly the defect this
+-    docstring exists to keep from coming back."""
++    docstring exists to keep from coming back.
++
++    The same care applies to `provenance` (the manuscript's own git history,
++    from `service.manuscript_history`) versus `history` (already taken —
++    `service.curation_history`, the curation *document's* version list,
++    which the existing version panel renders). The two are unrelated lists
++    that happen to both describe "versions of something on this page", so
++    they get two names, never one: a shared key here would let one silently
++    shadow the other depending on dict order, exactly as `agents`/
++    `conversational` above, and this is the specific collision a Task-5 fix
++    round on the C plan was spent on.
++
++    `diff_a`/`diff_b` are plain query parameters, not a new route — both the
++    history and diff panels are read-only, driven by this same `GET`, so a
++    point-selection control is a GET form and needs no CSRF field."""
+     project = _project(request)
+     try:
+         view = service.workbench(project, slug)
+     except service.ServiceError as exc:
+         raise HTTPException(status_code=404, detail=str(exc)) from exc
+     # One `service.preview_of` call per previewable source (every drafting
+     # agent, plus every completed merge round) — not a second N+1 to add to
+     # the dashboard's carried-forward one, just the one call this page
+     # already needs per source it lists.
+     sources = [f"agent:{a}" for a in view["agents"]] + [f"round:{n}" for n in view["rounds"]]
+     previews = {source: service.preview_of(project, slug, source) for source in sources}
+     return TEMPLATES.TemplateResponse(request, "drafts.html", {
+         "slug": slug, "error": error,
+         "conversation": service.conversation_state(project, slug),
+         "conversational": service.conversational_agents(project),
+         "history": service.curation_history(project, slug),
++        "provenance": service.manuscript_history(project, slug),
++        "diff": _manuscript_diff(project, slug, diff_a, diff_b),
++        "diff_a": diff_a, "diff_b": diff_b,
+         "previews": previews,
+         "preview_busy": service.preview_busy(project, slug),
+         "csrf": auth.csrf_token(request),
+         **view})
+ 
+ 
+ @router.post("/runs/{slug}/drafts", dependencies=MUTATE)
+ def curate(request: Request, slug: str, action: str = Form(...),
+            text: str = Form(""), agent: str = Form(""), section: str = Form(""),
+            block: str = Form(""), position: str = Form("0"), note: str = Form(""),
+diff --git a/src/scieflow/web/templates/drafts.html b/src/scieflow/web/templates/drafts.html
+index d8293cf..d987673 100644
+--- a/src/scieflow/web/templates/drafts.html
++++ b/src/scieflow/web/templates/drafts.html
+@@ -84,20 +84,56 @@
+        PREVIOUS selection's provenance -- so keeping from a round either
+        refused for want of text or silently stored a duplicate of an earlier
+        passage under an earlier agent's name. #}
+     <pre class="draft" data-agent="round:{{ n }}" data-section="{{ section }}">{{ text }}</pre>
+     {% endfor %}
+   </div>
+   {% endfor %}
+ </div>
+ {% endif %}
+ 
++<h2>Manuscript history</h2>
++{% if not provenance.available or not provenance.points %}
++<p class="dim">{{ provenance.reason }}</p>
++{% else %}
++<ul class="provenance-points">
++  {% for point in provenance.points if not point.get("parent") %}
++  <li><code>{{ point.ref }}</code> — {{ point.label }}
++    <span class="dim">{{ point.at[:19] }}</span></li>
++  {% endfor %}
++</ul>
++<form method="get" action="/runs/{{ slug }}/drafts" class="actions">
++  <select name="diff_a">
++    {% for point in provenance.points %}
++    <option value="{{ point.ref }}"{% if point.ref == diff_a %} selected{% endif %}>{{ point.label }}</option>
++    {% endfor %}
++  </select>
++  <span class="dim">vs</span>
++  <select name="diff_b">
++    {% for point in provenance.points %}
++    <option value="{{ point.ref }}"{% if point.ref == diff_b %} selected{% endif %}>{{ point.label }}</option>
++    {% endfor %}
++  </select>
++  <button type="submit">Compare</button>
++</form>
++{% endif %}
++{% if diff %}
++{% if diff.error %}
++<p class="state-failed">{{ diff.error }}</p>
++{% else %}
++{% if diff.truncated %}
++<p class="dim">The diff was too large and has been truncated.</p>
++{% endif %}
++<pre class="diff">{{ diff.text }}</pre>
++{% endif %}
++{% endif %}
++
+ <h2>Curation</h2>
+ <p class="dim">Select a passage above, or write your own below, to add it here.
+    Every kept passage remembers which agent and section it came from.</p>
+ 
+ {#- Two forms, not one. A single shared textarea meant the selection handler's
+    `form.text.value = chosen` destroyed whatever had been typed for "Add as
+    your own words": type a paragraph, glance at a draft to check a detail,
+    lose it. The keep form's textarea is the selection's own scratch space and
+    is safe to overwrite; the own-words textarea is never written to by script. #}
+ <form method="post" action="/runs/{{ slug }}/drafts" id="keep-form">
+diff --git a/tests/web/test_provenance_panel.py b/tests/web/test_provenance_panel.py
+new file mode 100644
+index 0000000..00aa348
+--- /dev/null
++++ b/tests/web/test_provenance_panel.py
+@@ -0,0 +1,113 @@
++"""The manuscript-history panel and its diff view, on the workbench page."""
++
++import pytest
++
++
++@pytest.fixture
++def merged(project):
++    """A run with two merge rounds, so there is something to diff."""
++    ws = project.run_dir("r1")
++    for n, text in ((1, "merged v1\n"), (2, "merged v2\n")):
++        d = ws / "manuscript" / "curation" / "rounds" / str(n)
++        d.mkdir(parents=True)
++        (d / "results.tex").write_text(text)
++    return ws
++
++
++def test_the_panel_lists_the_rounds(client, merged):
++    page = client.get("/runs/r1/drafts")
++    assert page.status_code == 200
++    assert "main:merge_1" in page.text
++    assert "main:merge_2" in page.text
++
++
++def test_a_run_with_no_history_says_so(client, project):
++    page = client.get("/runs/r1/drafts")
++    assert page.status_code == 200
++    assert "no history yet" in page.text.lower()
++    assert "main:merge" not in page.text
++
++
++def test_the_panel_says_so_when_git_is_missing(client, merged, monkeypatch):
++    from scieflow.core import provenance
++
++    monkeypatch.setattr(provenance.shutil, "which", lambda name: None)
++    page = client.get("/runs/r1/drafts")
++    assert page.status_code == 200
++    assert "git is not installed" in page.text
++    assert "merged v2" in page.text or "Compile" in page.text, (
++        "the rest of the workbench must still render")
++
++
++def test_a_diff_is_rendered_when_two_points_are_given(client, merged):
++    """`"merged v1"`/`"merged v2"` alone would also pass with the diff panel
++    entirely absent — the "Merged rounds" panes above already render each
++    round's own text verbatim. Assert on the diff's own shape instead: the
++    unified-diff `-`/`+` line prefixes, which only `git diff`'s own output
++    (not a round pane) can produce."""
++    page = client.get("/runs/r1/drafts?diff_a=main:merge_1&diff_b=main:merge_2")
++    assert page.status_code == 200
++    assert "-merged v1" in page.text and "+merged v2" in page.text
++    assert "diff --git" in page.text
++
++
++def test_a_hostile_diff_ref_comes_back_as_a_message_not_a_500(client, merged):
++    """`"not a point"` alone would also pass on a page with no diff feature
++    at all: this app already carries the unrelated phrase "a quotation, not
++    a pointer" in `drafts.html`'s own script comment, and `"not a point"` is
++    a substring of `"not a pointer"`. Assert the *whole* refusal message
++    `service.manuscript_diff` actually raises — `provenance.diff`'s
++    `f"not a point: {a!r}"`, HTML-escaped as this page always renders it —
++    so this can only match the real error path, never that unrelated prose.
++    """
++    from markupsafe import escape
++
++    hostile = "--output=/tmp/pwned"
++    page = client.get(f"/runs/r1/drafts?diff_a={hostile}&diff_b=main:merge_2")
++    assert page.status_code == 200
++    assert str(escape(f"not a point: {hostile!r}")) in page.text
++    import pathlib
++    assert not pathlib.Path("/tmp/pwned").exists()
++
++
++def test_no_diff_panel_without_diff_params(client, merged):
++    """The counterpart to the `{% if False %}` probe used to falsify the
++    tests above: without this, disabling the diff-rendering block would
++    change nothing observable, and the block-disabled probe on the tests
++    above would prove nothing."""
++    page = client.get("/runs/r1/drafts")
++    assert page.status_code == 200
++    assert '<pre class="diff">' not in page.text
++
++
++def test_the_curation_version_panel_still_works(client, merged):
++    """`history` (the curation's versions) and `provenance` (the manuscript's)
++    are different lists. A shared context key would let one shadow the other
++    — the defect a whole fix round went to in the C plan."""
++    from scieflow.core.run import curation
++
++    curation.add_own(merged, "a passage of my own")
++    page = client.get("/runs/r1/drafts")
++    assert "a passage of my own" in page.text
++    assert "main:merge_1" in page.text, "the provenance panel is also present"
++
++
++def test_diff_text_is_escaped_not_raw_html(client, merged):
++    """A diff carries agent-written text straight into HTML.
++
++    `"&lt;script&gt;"` appearing *anywhere* on the page is not enough: the
++    poisoned round 2 content is also rendered verbatim (auto-escaped, same
++    as everywhere else) by the pre-existing "Merged rounds" panel, so that
++    assertion alone would pass even with the diff panel's rendering block
++    disabled entirely. Scope the check to the diff panel's own `<pre>` block
++    so it can only pass because the diff panel itself escaped the text.
++    """
++    (merged / "manuscript" / "curation" / "rounds" / "2" / "results.tex").write_text(
++        '<script>alert("xss")</script>\n')
++    page = client.get("/runs/r1/drafts?diff_a=main:merge_1&diff_b=main:merge_2")
++    assert "<script>alert" not in page.text
++    start = page.text.index('<pre class="diff">')
++    end = page.text.index("</pre>", start)
++    diff_block = page.text[start:end]
++    assert "<script>alert" not in diff_block
++    assert "&lt;script&gt;" in diff_block

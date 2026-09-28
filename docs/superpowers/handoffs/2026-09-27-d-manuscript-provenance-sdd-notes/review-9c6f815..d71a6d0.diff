@@ -1,0 +1,106 @@
+# Review package: 9c6f815..d71a6d0
+
+## Commits
+d71a6d0 fix(core): catch a symlink cycle in an ancestor of the workspace
+
+## Files changed
+ src/scieflow/core/provenance.py | 18 +++++++++++++++++-
+ tests/core/test_provenance.py   | 27 +++++++++++++++++++++++++++
+ 2 files changed, 44 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/src/scieflow/core/provenance.py b/src/scieflow/core/provenance.py
+index 83cc75b..ad0acca 100644
+--- a/src/scieflow/core/provenance.py
++++ b/src/scieflow/core/provenance.py
+@@ -530,21 +530,37 @@ def sync(ws: Path) -> dict:
+     Both `emit` calls are independently guarded: a run directory without
+     `status.yml` (most of this module's callers in tests, and plausibly in
+     production before a run has written one) must not turn a successful
+     sync into a failure just because the event log couldn't be annotated,
+     and a failure emitting one event must not suppress the other.
+ 
+     Returns `{"commits": {ref: sha, ...}, "agents": [...], "skipped":
+     {"agents": [...], "artifacts": [...]}}`.
+     """
+     ws = Path(ws)
+-    ws_resolved = ws.resolve()
++    try:
++        ws_resolved = ws.resolve()
++    except (OSError, RuntimeError) as exc:
++        # A symlink cycle in an *ancestor* of `ws` (not `ws` itself, and not
++        # any artifact under it — those are `put`'s problem) makes
++        # `.resolve()` raise a bare `RuntimeError`, and a sufficiently deep
++        # or looping chain can also raise `OSError`. Left unguarded, this
++        # would be the one place in the module where a caller sees
++        # something other than `ProvenanceError` — every other resolve in
++        # this codebase either runs inside `_git` (which already turns a
++        # failure into `ProvenanceError`) or inside `drafts._subdirs`
++        # (which already catches exactly these two). `sync` needs the same
++        # discipline, since Task 4's `manuscript_history` is specified to
++        # never raise for an ordinary state and catches `ProvenanceError`
++        # specifically — an uncaught `RuntimeError` here would 500 that
++        # page instead of degrading.
++        raise ProvenanceError(f"cannot resolve workspace {str(ws)!r}: {exc}") from exc
+     if not available():
+         raise ProvenanceError("git is not available on this host")
+     repo = ensure_repo(ws)
+ 
+     raw = _raw_agent_names(ws)
+     safe_agents = sorted(name for name in raw if ref_safe(name))
+     skipped: dict[str, list[str]] = {
+         "agents": sorted(name for name in raw if name not in safe_agents),
+         "artifacts": [],
+     }
+diff --git a/tests/core/test_provenance.py b/tests/core/test_provenance.py
+index 09475a9..571bfa1 100644
+--- a/tests/core/test_provenance.py
++++ b/tests/core/test_provenance.py
+@@ -309,20 +309,47 @@ def test_ref_safe_does_not_leak_the_parent_environment(monkeypatch):
+         if argv[:2] == [provenance.GIT, "check-ref-format"]:
+             seen_env.update(kwargs.get("env") or {})
+         return real_run(argv, **kwargs)
+ 
+     monkeypatch.setattr(provenance.subprocess, "run", spy)
+     provenance.ref_safe("claude")
+     assert seen_env, "check-ref-format was not called via subprocess.run as expected"
+     assert "ANTHROPIC_API_KEY" not in seen_env
+ 
+ 
++def test_a_symlink_cycle_in_an_ancestor_of_the_workspace_is_a_provenance_error(tmp_path):
++    """Fix round 2: `ws.resolve()` (added in fix round 1, as the
++    containment boundary for `put`) runs before `ensure_repo` or any `_git`
++    call gets a chance to turn a failure into `ProvenanceError` — so a
++    symlink cycle in an *ancestor* of the workspace (not an artifact under
++    it) must be caught right there, or it reaches the caller as a bare
++    `RuntimeError`. Pre-fix `5b98066` has no such call and instead fails
++    inside `ensure_repo`'s `_git(repo, "init", ...)`, which already wraps
++    the failure as `ProvenanceError` — so this is a regression window that
++    exists only in the fix-round-1 code between the module docstring's
++    "every caller has exactly one exception to handle" contract and this
++    one new line.
++
++    `loop_a`/`loop_b` are a genuine two-node cycle, not merely a long
++    chain: nothing can be created under `ws` (there is no real directory to
++    create it in), so this calls `sync` directly on the unusable `Path`
++    rather than going through the `ws` fixture."""
++    loop_a = tmp_path / "loop_a"
++    loop_b = tmp_path / "loop_b"
++    loop_a.symlink_to(loop_b)
++    loop_b.symlink_to(loop_a)
++    ws = loop_a / "workspace" / "r1"
++
++    with pytest.raises(provenance.ProvenanceError):
++        provenance.sync(ws)
++
++
+ def test_an_unsafe_agent_directory_is_skipped_not_fatal(ws):
+     """One bad directory costs that directory, never the whole history."""
+     _write(ws / "manuscript" / "drafts" / "claude" / "results.tex", "fine\n")
+     (ws / "manuscript" / "drafts" / "a..b").mkdir(parents=True)
+     _write(ws / "manuscript" / "drafts" / "a..b" / "results.tex", "hostile\n")
+ 
+     assert provenance.agents(ws) == ["claude"]
+     result = provenance.sync(ws)
+     assert "a..b" in result["skipped"]["agents"]
+     assert "refs/heads/draft/claude" in result["commits"]
