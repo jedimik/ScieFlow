@@ -573,13 +573,18 @@ def manuscript_history(project: Project, slug: str) -> dict:
     nothing yet, and a repo that had to be rebuilt all come back as data the
     page can render. Syncs first, so opening the page catches up anything the
     workflow wrote since the last merge round — a sync failure here (a
-    corrupt repo `ensure_repo` couldn't rebuild, a symlink cycle in an
-    ancestor of the workspace) degrades to the same "no history yet" shape
+    corrupt repo `ensure_repo` cannot rebuild, or a git invocation that fails
+    partway through `sync`) degrades to the same "no history yet" shape
     rather than raising, for the same reason.
 
     Only a genuinely malformed `slug` raises `ServiceError`, via `_ws` — that
     is a caller error (an unknown or unsafe run name), not an ordinary state
-    of a real run's manuscript history.
+    of a real run's manuscript history. `_ws` also intercepts, upstream of
+    this function's own body, the case where an ancestor of the workspace
+    is a cyclic symlink: `ws.is_dir()` can never be `True` through such a
+    cycle, so `_ws` raises `ServiceError("no run workspace/...")` before
+    `provenance.sync` is ever reached, rather than that case surfacing as
+    the "no history yet" degradation below.
     """
     ws = _ws(project, slug)
     if not provenance.available():
