@@ -6,6 +6,7 @@ this host at 2.43.0 — because the whole point of the module is what git
 actually does with the trees it is handed.
 """
 
+import re
 import shutil
 import subprocess
 
@@ -653,6 +654,56 @@ def test_points_lists_what_the_run_has(drafted):
         assert point["commit"] and point["at"] and point["label"]
 
 
+def test_points_are_a_closed_set_in_a_stated_order(drafted):
+    """Fix round 1, Important 2: the brief states an ordering and
+    `points`'s own docstring claims it, but nothing before this asserted
+    it, and `test_points_lists_what_the_run_has`'s `in`-only checks hold
+    under any deterministic order — reordering the `_main_points` loops,
+    or running the draft-branch loop before `main`, would silently reverse
+    a panel Task 5 renders, with every existing test still green. This
+    pins the full ordered list in one assertion: `main` before the draft
+    branches (agents sorted by name), newest round first within each
+    branch, each `merge_<n>` immediately followed by its `merge_<n>/
+    sections` sub-point when the round has one, and `outline.md` last on
+    `main` since it predates every round."""
+    provenance.sync(drafted)
+    refs = [p["ref"] for p in provenance.points(drafted)]
+    assert refs == [
+        "main:merge_2",
+        "main:merge_2/sections",
+        "main:merge_1",
+        "main:merge_1/sections",
+        "main:review_1",
+        "main:outline.md",
+        "draft/claude:sections",
+        "draft/claude:review_1",
+        "draft/codex:sections",
+        "draft/codex:review_1",
+    ]
+
+
+def test_a_sub_point_names_its_parent_point(drafted):
+    """Fix round 1, Important 3: 20 rounds means 40 points, 20 of them
+    sub-points indistinguishable in shape from the round-level point they
+    refine (same `kind`, `commit`, `at` — only a `/sections` suffix on
+    `ref` and a trailing " sections" on `label` set them apart). A `parent`
+    field lets a consumer filter to top-level points without suffix-
+    parsing `ref` itself. `diff`'s whitelist is untouched — every point,
+    sub-point included, is still just one entry in a flat set of valid
+    `ref` values."""
+    provenance.sync(drafted)
+    by_ref = {p["ref"]: p for p in provenance.points(drafted)}
+    assert by_ref["main:merge_1/sections"]["parent"] == "main:merge_1"
+    assert by_ref["main:merge_2/sections"]["parent"] == "main:merge_2"
+    for ref in ("main:merge_1", "main:merge_2", "main:review_1", "main:outline.md",
+                "draft/claude:sections", "draft/claude:review_1",
+                "draft/codex:sections", "draft/codex:review_1"):
+        assert by_ref[ref].get("parent") is None, f"{ref} is not a sub-point"
+    # the sub-point must still be a plain member of diff's whitelist
+    result = provenance.diff(drafted, "main:merge_1/sections", "main:merge_2/sections")
+    assert result["text"] is not None
+
+
 def test_a_run_with_no_history_has_no_points(ws):
     """REVIEW FOCUS 2: an ordinary state — the panel says so rather than
     raising or rendering an empty shell."""
@@ -703,10 +754,26 @@ def test_a_round_to_round_diff_shows_only_what_changed(drafted):
 
 
 def test_a_draft_against_a_round_diff_works(drafted):
+    """Fix round 1, Important 1: the two substring checks below both also
+    pass against a *coarse*, path-disjoint comparison
+    (`draft/claude:sections` vs `main:merge_1`, no `/sections` on the
+    second side) — that diff reads as "delete every line of the draft,
+    add every line of the round" and still contains both substrings, since
+    they appear as a deletion and an addition respectively either way.
+    That coarse comparison is exactly the wrong answer this sub-point
+    exists to avoid (see the module's points()/`_main_points` docstrings),
+    so this test needs to assert the *hunk shape* — a single real,
+    line-level diff — not just substring presence, or it cannot tell a
+    meaningful comparison from a meaningless one."""
     provenance.sync(drafted)
     result = provenance.diff(drafted, "draft/claude:sections", "main:merge_1/sections")
-    assert "claude's results" in result["text"]
-    assert "merged v1" in result["text"]
+    assert "-claude's results" in result["text"]
+    assert "+merged v1" in result["text"]
+    assert "deleted file" not in result["text"], (
+        "the two sides were compared at different depths")
+    assert "new file" not in result["text"], (
+        "the two sides were compared at different depths")
+    assert result["text"].count("diff --git") == 1
 
 
 @pytest.mark.parametrize("hostile", [
@@ -747,6 +814,50 @@ def test_a_large_diff_is_truncated_and_says_so(drafted):
     assert "truncated" in result["text"].lower()
 
 
+def test_a_large_diff_truncates_on_a_line_boundary(drafted):
+    """Fix round 1, Minor 2: cutting at character `DIFF_LIMIT` lands
+    wherever that offset happens to fall inside a line, leaving a
+    fragment no diff parser or renderer can make sense of. Many short,
+    distinctly-numbered lines (21 bytes each, which does not evenly
+    divide `DIFF_LIMIT`) make a mid-line cut near-certain unless the
+    truncation itself seeks back to the last newline; the last surviving
+    content line must then be one of the exact lines written, never a
+    partial one."""
+    lines = "".join(f"line-{i:07d}-fill\n" for i in range(20000))  # 21 bytes/line
+    (drafted / "manuscript" / "curation" / "rounds" / "2" / "results.tex").write_text(lines)
+    provenance.sync(drafted)
+    result = provenance.diff(drafted, "main:merge_1", "main:merge_2")
+    assert result["truncated"] is True
+
+    body, sep, _notice = result["text"].rpartition("\n… ")
+    assert sep, "the truncation notice must be present and findable"
+    last_line = body.rsplit("\n", 1)[-1]
+    assert re.fullmatch(r"[-+]line-\d{7}-fill", last_line), (
+        f"truncation landed mid-line: {last_line!r}")
+
+
+def test_git_always_pins_utf8_decoding(ws, monkeypatch):
+    """Fix round 1, Minor 1: `errors=` alone only decides what happens to
+    a byte that fails to decode — it says nothing about which codec is
+    tried first. Left to `subprocess.run`'s default, that codec follows
+    `locale.getpreferredencoding()`, so the exact same git output would
+    decode differently (or wrongly, without raising) on a host whose
+    locale isn't UTF-8. `_git` must pin `encoding="utf-8"` explicitly on
+    every call, not just the diff-specific `errors=`."""
+    seen_encodings = []
+    real_run = provenance.subprocess.run
+
+    def spy(argv, **kwargs):
+        if argv and argv[0] == provenance.GIT and "--git-dir" in argv:
+            seen_encodings.append(kwargs.get("encoding"))
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(provenance.subprocess, "run", spy)
+    provenance.ensure_repo(ws)
+    assert seen_encodings, "no _git-routed subprocess call was observed"
+    assert all(enc == "utf-8" for enc in seen_encodings)
+
+
 def test_a_binary_file_in_a_round_is_never_committed_or_reachable_by_diff(drafted):
     """REVIEW FOCUS 3, corrected: the brief's original version of this test
     (`test_a_binary_artifact_diffs_without_dumping_bytes`) wrote a
@@ -779,6 +890,26 @@ def test_a_binary_file_in_a_round_is_never_committed_or_reachable_by_diff(drafte
     result = provenance.diff(drafted, "main:merge_1", "main:merge_2")
     assert "\x00" not in result["text"], "raw bytes reached the diff text"
     assert "figure.pdf" not in result["text"]
+
+
+def test_draft_branch_discovery_is_not_confused_by_a_same_named_tag(drafted):
+    """Fix round 1, Minor 3: `%(refname:short)` shortens ambiguously — a
+    tag whose name collides with a branch's suffix (`refs/tags/draft/
+    claude` alongside `refs/heads/draft/claude`) makes git report the
+    branch's "short" name as `heads/draft/claude` instead of
+    `draft/claude` (verified directly against this host's git), and a
+    bare `removeprefix("draft/")` against that would silently fail to
+    strip it — dropping the agent's points entirely rather than reporting
+    them under the wrong name. `%(refname:lstrip=3)` strips exactly
+    `refs/heads/draft/` from the ref's real name and is unaffected by
+    anything else in the repo."""
+    provenance.sync(drafted)
+    repo = provenance.repo_path(drafted)
+    claude_sha = provenance._ref_sha(repo, "refs/heads/draft/claude")
+    provenance._git(repo, "tag", "draft/claude", claude_sha)
+
+    refs = [p["ref"] for p in provenance.points(drafted)]
+    assert "draft/claude:sections" in refs
 
 
 def test_points_reflects_the_repo_even_if_the_workspace_drifts(drafted):

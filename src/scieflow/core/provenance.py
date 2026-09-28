@@ -162,6 +162,15 @@ def _git(repo: Path, *args: str, stdin: str | None = None,
     a diff must not 500 over a byte it didn't write; `service._log_tail`
     makes the identical choice for a compile log.
 
+    `encoding="utf-8"` is pinned alongside it, deliberately, rather than
+    left for `subprocess.run` to pick via `locale.getpreferredencoding()`:
+    `errors=` alone only decides what happens to a byte that fails to
+    decode, not which codec is used to try. On a host whose locale isn't
+    UTF-8, an unpinned encoding would decode multi-byte git output
+    differently there than everywhere else this module runs — silently
+    wrong content rather than a raised error, which is the one thing
+    `errors="replace"` cannot catch.
+
     The exception message names only the git subcommand (`args[0]`), never
     the rest of `args`: a failing `commit-tree` call carries an
     agent-influenced commit message as one of those arguments, and that
@@ -176,7 +185,7 @@ def _git(repo: Path, *args: str, stdin: str | None = None,
     try:
         result = subprocess.run(
             argv, capture_output=True, text=True, timeout=_TIMEOUT_S,
-            input=stdin, env=env, errors=errors,
+            input=stdin, env=env, errors=errors, encoding="utf-8",
         )
     except FileNotFoundError as exc:
         raise ProvenanceError(f"git not found: {exc}") from exc
@@ -793,13 +802,23 @@ def _draft_branches(repo: Path) -> list[str]:
     contract, and a workspace can drift from what was last synced (an
     agent's directory removed after the fact, say). A repo with no
     `draft/*` branches at all yields `[]`, not an error.
+
+    `%(refname:lstrip=3)` strips exactly the `refs/heads/draft/` prefix
+    (three path components) from each ref's real name — not
+    `%(refname:short)` plus `removeprefix("draft/")`, which shortens
+    ambiguously: a same-named tag (`refs/tags/draft/claude`) would make
+    git's "short" form of the *branch* `heads/draft/claude` instead of
+    `draft/claude`, and `removeprefix` would then silently fail to strip
+    it, dropping that agent's points entirely rather than reporting them
+    under the wrong name. `lstrip=3` operates on the real ref name and
+    never depends on what else happens to exist in the repo.
     """
     try:
-        out = _git(repo, "for-each-ref", "--format=%(refname:short)",
+        out = _git(repo, "for-each-ref", "--format=%(refname:lstrip=3)",
                    "refs/heads/draft/*")
     except ProvenanceError:
         return []
-    return sorted(line.removeprefix("draft/") for line in out.splitlines() if line)
+    return sorted(line for line in out.splitlines() if line)
 
 
 def _main_points(repo: Path) -> list[dict]:
@@ -809,6 +828,14 @@ def _main_points(repo: Path) -> list[dict]:
     point, so the two are comparable in one `diff` call), one per
     `review_<N>` directory, and one for `outline.md` when present.
     Newest round first; `outline.md` last, since it predates every round.
+
+    The finer `merge_<n>/sections` point carries a `parent` field naming
+    the round-level point it refines (`f"main:merge_{n}"`); every other
+    point has no `parent` key at all. Nothing here uses `parent` — `diff`'s
+    whitelist stays a flat set of every `ref` `points()` returns, sub-point
+    included — it exists purely so a consumer that renders these as a list
+    (Task 5's panel) can tell a genuinely separate point from a same-round
+    refinement of one already shown, without suffix-parsing `ref` itself.
     """
     ref = "refs/heads/main"
     tip = _branch_tip(repo, ref)
@@ -825,7 +852,8 @@ def _main_points(repo: Path) -> list[dict]:
         if "sections" in sub:
             points_.append({"ref": f"main:merge_{n}/sections",
                             "label": f"Merge round {n} sections",
-                            "kind": "merge", "commit": sha, "at": at})
+                            "kind": "merge", "parent": f"main:merge_{n}",
+                            "commit": sha, "at": at})
     for n in _numbered_dirs(names, _REVIEW_DIR_RE):
         points_.append({"ref": f"main:review_{n}", "label": f"Review round {n}",
                         "kind": "review", "commit": sha, "at": at})
@@ -864,7 +892,9 @@ def points(ws: Path) -> list[dict]:
     merge or review on `main`, an agent's current draft `sections`, or a
     per-round review on that agent's branch — as
     `{"ref": "<branch>:<tree path>", "label": str, "kind": "merge"|"review"
-    |"draft"|"outline", "commit": "<sha>", "at": "<iso>"}`.
+    |"draft"|"outline", "commit": "<sha>", "at": "<iso>"}`, plus a
+    `"parent"` key (naming another point's `ref`) on the one kind of point
+    that refines another already in this list — see `_main_points`.
 
     A point is exactly the `<branch>:<tree path>` string `diff` accepts,
     and the whole whitelist `diff`'s `a`/`b` are checked against (see
@@ -922,9 +952,11 @@ def diff(ws: Path, a: str, b: str) -> dict:
     exactly what lets a draft's `sections` be compared against a round's
     `merge_<n>/sections` despite living on different branches.
 
-    The result is truncated to `DIFF_LIMIT` characters with the
-    truncation stated in the text itself, never silent. Decoding uses
-    `errors="replace"` (see `_git`) so a diff embedding a non-UTF-8
+    The result is truncated to at most `DIFF_LIMIT` characters, cut at the
+    last line boundary at or before the limit (never mid-line) so the
+    returned text stays a well-formed, parseable prefix of the real diff,
+    with the truncation stated in the text itself, never silent. Decoding
+    uses `errors="replace"` (see `_git`) so a diff embedding a non-UTF-8
     artifact's changed lines can't turn into a crash instead of a page —
     git itself already keeps raw bytes out of a *binary* file's diff,
     reporting `Binary files ... differ` instead of emitting them.
@@ -942,7 +974,15 @@ def diff(ws: Path, a: str, b: str) -> dict:
 
     truncated = False
     if len(text) > DIFF_LIMIT:
-        text = text[:DIFF_LIMIT] + f"\n… (diff truncated at {DIFF_LIMIT} characters)\n"
+        # Cut at the last newline at or before the limit, not wherever
+        # character `DIFF_LIMIT` happens to fall — a diff truncated
+        # mid-line ends on a fragment no diff parser or renderer can make
+        # sense of, where a line-boundary cut is a plain prefix of a real
+        # diff, just a shorter one.
+        cut = text.rfind("\n", 0, DIFF_LIMIT)
+        if cut == -1:
+            cut = DIFF_LIMIT
+        text = text[:cut] + f"\n… (diff truncated at {DIFF_LIMIT} characters)\n"
         truncated = True
 
     return {"text": text, "truncated": truncated, "a": a, "b": b}
