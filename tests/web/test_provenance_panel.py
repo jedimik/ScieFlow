@@ -40,17 +40,44 @@ def test_the_panel_says_so_when_git_is_missing(client, merged, monkeypatch):
 
 
 def test_a_diff_is_rendered_when_two_points_are_given(client, merged):
+    """`"merged v1"`/`"merged v2"` alone would also pass with the diff panel
+    entirely absent — the "Merged rounds" panes above already render each
+    round's own text verbatim. Assert on the diff's own shape instead: the
+    unified-diff `-`/`+` line prefixes, which only `git diff`'s own output
+    (not a round pane) can produce."""
     page = client.get("/runs/r1/drafts?diff_a=main:merge_1&diff_b=main:merge_2")
     assert page.status_code == 200
-    assert "merged v1" in page.text and "merged v2" in page.text
+    assert "-merged v1" in page.text and "+merged v2" in page.text
+    assert "diff --git" in page.text
 
 
 def test_a_hostile_diff_ref_comes_back_as_a_message_not_a_500(client, merged):
-    page = client.get("/runs/r1/drafts?diff_a=--output=/tmp/pwned&diff_b=main:merge_2")
+    """`"not a point"` alone would also pass on a page with no diff feature
+    at all: this app already carries the unrelated phrase "a quotation, not
+    a pointer" in `drafts.html`'s own script comment, and `"not a point"` is
+    a substring of `"not a pointer"`. Assert the *whole* refusal message
+    `service.manuscript_diff` actually raises — `provenance.diff`'s
+    `f"not a point: {a!r}"`, HTML-escaped as this page always renders it —
+    so this can only match the real error path, never that unrelated prose.
+    """
+    from markupsafe import escape
+
+    hostile = "--output=/tmp/pwned"
+    page = client.get(f"/runs/r1/drafts?diff_a={hostile}&diff_b=main:merge_2")
     assert page.status_code == 200
-    assert "not a point" in page.text
+    assert str(escape(f"not a point: {hostile!r}")) in page.text
     import pathlib
     assert not pathlib.Path("/tmp/pwned").exists()
+
+
+def test_no_diff_panel_without_diff_params(client, merged):
+    """The counterpart to the `{% if False %}` probe used to falsify the
+    tests above: without this, disabling the diff-rendering block would
+    change nothing observable, and the block-disabled probe on the tests
+    above would prove nothing."""
+    page = client.get("/runs/r1/drafts")
+    assert page.status_code == 200
+    assert '<pre class="diff">' not in page.text
 
 
 def test_the_curation_version_panel_still_works(client, merged):
@@ -66,9 +93,21 @@ def test_the_curation_version_panel_still_works(client, merged):
 
 
 def test_diff_text_is_escaped_not_raw_html(client, merged):
-    """A diff carries agent-written text straight into HTML."""
+    """A diff carries agent-written text straight into HTML.
+
+    `"&lt;script&gt;"` appearing *anywhere* on the page is not enough: the
+    poisoned round 2 content is also rendered verbatim (auto-escaped, same
+    as everywhere else) by the pre-existing "Merged rounds" panel, so that
+    assertion alone would pass even with the diff panel's rendering block
+    disabled entirely. Scope the check to the diff panel's own `<pre>` block
+    so it can only pass because the diff panel itself escaped the text.
+    """
     (merged / "manuscript" / "curation" / "rounds" / "2" / "results.tex").write_text(
         '<script>alert("xss")</script>\n')
     page = client.get("/runs/r1/drafts?diff_a=main:merge_1&diff_b=main:merge_2")
     assert "<script>alert" not in page.text
-    assert "&lt;script&gt;" in page.text
+    start = page.text.index('<pre class="diff">')
+    end = page.text.index("</pre>", start)
+    diff_block = page.text[start:end]
+    assert "<script>alert" not in diff_block
+    assert "&lt;script&gt;" in diff_block
