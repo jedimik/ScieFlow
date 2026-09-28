@@ -24,6 +24,7 @@ from scieflow.core import (
     gates,
     jobs,
     preview,
+    provenance,
     sandbox,
     sessions,
     store,
@@ -549,8 +550,77 @@ def merge_round(project: Project, slug: str) -> dict:
 
     turn = say(project, slug, _merge_prompt(rendered))
     if turn["job"]["state"] == MERGE_SUCCESS_STATE:
-        return {"round": curation.advance_round(ws), "turn": turn}
+        advanced = curation.advance_round(ws)
+        # Best-effort: a sync failure must not fail a round that genuinely
+        # happened and cost budget. The repo is derived, so the next page
+        # load rebuilds whatever this missed — and because rounds are
+        # preserved as paths rather than commit boundaries, a skipped sync
+        # costs nothing but a commit. Kept to `ProvenanceError` specifically
+        # — a bare `except Exception` here would swallow a programming error
+        # in the sync for the life of the feature.
+        try:
+            provenance.sync(ws)
+        except provenance.ProvenanceError as exc:
+            events.emit(ws, "provenance.skipped", "system", why=str(exc))
+        return {"round": advanced, "turn": turn}
     return {"round": rendered["round"], "turn": turn}
+
+
+def manuscript_history(project: Project, slug: str) -> dict:
+    """The run's provenance points, and why there are none when there are none.
+
+    Never raises for an ordinary state: `git` absent, a run that has produced
+    nothing yet, and a repo that had to be rebuilt all come back as data the
+    page can render. Syncs first, so opening the page catches up anything the
+    workflow wrote since the last merge round — a sync failure here (a
+    corrupt repo `ensure_repo` couldn't rebuild, a symlink cycle in an
+    ancestor of the workspace) degrades to the same "no history yet" shape
+    rather than raising, for the same reason.
+
+    Only a genuinely malformed `slug` raises `ServiceError`, via `_ws` — that
+    is a caller error (an unknown or unsafe run name), not an ordinary state
+    of a real run's manuscript history.
+    """
+    ws = _ws(project, slug)
+    if not provenance.available():
+        return {"available": False, "points": [],
+                "reason": "git is not installed, so this run has no manuscript history; "
+                          "the drafts and rounds above are unaffected"}
+    try:
+        provenance.sync(ws)
+        points = provenance.points(ws)
+    except provenance.ProvenanceError as exc:
+        return {"available": True, "points": [], "reason": f"no history yet: {exc}"}
+    reason = "" if points else ("no history yet — it appears once an agent has drafted "
+                                "or a merge round has completed")
+    return {"available": True, "points": points, "reason": reason}
+
+
+def manuscript_diff(project: Project, slug: str, a: str, b: str) -> dict:
+    """A textual diff between two of the run's provenance points.
+
+    `a` and `b` must be exactly one of the `ref` strings `manuscript_history`
+    returned for this run — `provenance.diff` checks whole-string equality
+    against its own whitelist and refuses anything else, including a
+    syntactically real but unlisted ref, as `ProvenanceError`, translated to
+    `ServiceError` here.
+
+    The returned `text` is capped at `provenance.DIFF_LIMIT` characters — but
+    that cap bounds the *response*, not the memory this call uses getting
+    there: `provenance._git` runs with `capture_output=True`, so git's whole
+    diff is buffered into this process before the cap is ever applied, and
+    only a 30-second subprocess timeout bounds how long that can run for. An
+    agent-written multi-hundred-megabyte `.tex` file would be read into
+    memory whole before this function ever sees it truncated. Fixing that
+    would mean replumbing `_git` to stream, which is out of scope here; this
+    docstring exists so the gap doesn't go unrecorded now that this function
+    is the boundary an HTTP route calls.
+    """
+    ws = _ws(project, slug)
+    try:
+        return provenance.diff(ws, a, b)
+    except provenance.ProvenanceError as exc:
+        raise ServiceError(str(exc)) from exc
 
 
 def open_gates(project: Project, slug: str | None = None) -> list[dict]:
