@@ -91,6 +91,42 @@
 </div>
 {% endif %}
 
+<h2>Manuscript history</h2>
+{% if not provenance.available or not provenance.points %}
+<p class="dim">{{ provenance.reason }}</p>
+{% else %}
+<ul class="provenance-points">
+  {% for point in provenance.points if not point.get("parent") %}
+  <li><code>{{ point.ref }}</code> — {{ point.label }}
+    <span class="dim">{{ point.at[:19] }}</span></li>
+  {% endfor %}
+</ul>
+<form method="get" action="/runs/{{ slug }}/drafts" class="actions">
+  <select name="diff_a">
+    {% for point in provenance.points %}
+    <option value="{{ point.ref }}"{% if point.ref == diff_a %} selected{% endif %}>{{ point.label }}</option>
+    {% endfor %}
+  </select>
+  <span class="dim">vs</span>
+  <select name="diff_b">
+    {% for point in provenance.points %}
+    <option value="{{ point.ref }}"{% if point.ref == diff_b %} selected{% endif %}>{{ point.label }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Compare</button>
+</form>
+{% endif %}
+{% if diff %}
+{% if diff.error %}
+<p class="state-failed">{{ diff.error }}</p>
+{% else %}
+{% if diff.truncated %}
+<p class="dim">The diff was too large and has been truncated.</p>
+{% endif %}
+<pre class="diff">{{ diff.text }}</pre>
+{% endif %}
+{% endif %}
+
 <h2>Curation</h2>
 <p class="dim">Select a passage above, or write your own below, to add it here.
    Every kept passage remembers which agent and section it came from.</p>

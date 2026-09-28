@@ -693,3 +693,72 @@ def test_every_curating_wrapper_translates_a_curation_error(project, name, args)
 
     with pytest.raises(service.ServiceError):
         getattr(service, name)(project, "r1", *args)
+
+
+def test_manuscript_history_reports_no_history_for_a_fresh_run(project):
+    view = service.manuscript_history(project, "r1")
+    assert view["available"] is True
+    assert view["points"] == []
+    assert "no history" in view["reason"].lower()
+
+
+def test_manuscript_history_lists_points_after_a_round(project):
+    ws = project.run_dir("r1")
+    d = ws / "manuscript" / "curation" / "rounds" / "1"
+    d.mkdir(parents=True)
+    (d / "results.tex").write_text("merged\n")
+
+    view = service.manuscript_history(project, "r1")
+    assert view["available"] is True
+    assert "main:merge_1" in [p["ref"] for p in view["points"]]
+
+
+def test_manuscript_history_degrades_when_git_is_missing(project, monkeypatch):
+    from scieflow.core import provenance
+
+    monkeypatch.setattr(provenance.shutil, "which", lambda name: None)
+    view = service.manuscript_history(project, "r1")
+    assert view["available"] is False
+    assert view["points"] == []
+    assert "git" in view["reason"].lower(), "the page must be able to say why"
+
+
+def test_manuscript_diff_refuses_a_ref_that_is_not_a_point(project):
+    ws = project.run_dir("r1")
+    d = ws / "manuscript" / "curation" / "rounds" / "1"
+    d.mkdir(parents=True)
+    (d / "results.tex").write_text("merged\n")
+    service.manuscript_history(project, "r1")
+
+    with pytest.raises(service.ServiceError, match="not a point"):
+        service.manuscript_diff(project, "r1", "--output=/tmp/x", "main:merge_1")
+
+
+def test_manuscript_diff_translates_a_provenance_error(project, monkeypatch):
+    """Covers a `ProvenanceError` origin other than the whitelist refusal
+    `test_manuscript_diff_refuses_a_ref_that_is_not_a_point` already covers.
+    Calling `manuscript_diff` with no prior sync would take that *same*
+    "not a point" path — via an empty `points()` whitelist rather than a
+    populated one refusing an unlisted ref — so this instead drives a
+    distinct origin: a git invocation failing partway through
+    `provenance.diff` itself, to prove the translation is unconditional on
+    where inside `provenance.diff` the error comes from.
+
+    FALSIFICATION: remove the `except provenance.ProvenanceError` clause in
+    `manuscript_diff` and this fails with the raised `ProvenanceError`
+    propagating instead of `ServiceError`.
+    """
+    from scieflow.core import provenance
+
+    def boom(ws, a, b):
+        raise provenance.ProvenanceError("git diff failed: fatal: bad revision")
+
+    monkeypatch.setattr(service.provenance, "diff", boom)
+
+    with pytest.raises(service.ServiceError, match="git diff failed"):
+        service.manuscript_diff(project, "r1", "main:merge_1", "main:merge_2")
+
+
+def test_manuscript_history_refuses_an_unknown_run(project):
+    with pytest.raises(service.ServiceError):
+        service.manuscript_history(project, "nope")
