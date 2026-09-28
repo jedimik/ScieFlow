@@ -39,6 +39,53 @@ def test_the_panel_says_so_when_git_is_missing(client, merged, monkeypatch):
         "the rest of the workbench must still render")
 
 
+def test_a_hostile_agent_name_is_escaped_in_the_history_panel(client, project):
+    """`diff.text` has its own escaping test, but `point.ref`/`point.label`
+    reach HTML too, and are not inert: `provenance._draft_points` embeds an
+    agent-chosen directory name into both (`f"{short}:sections"` and
+    `f"{agent}'s draft"`), and this template's own comment a few lines above
+    the drafts grid already says an agent name is "not a value from a safe
+    alphabet". Two sinks, not one: `point.ref`/`point.label` reach the page
+    as body text (`<li><code>{{ point.ref }}</code> — {{ point.label }}`)
+    *and* as an attribute value (`<option value="{{ point.ref }}">`, twice,
+    once per `<select>`) — a raw `"` in the latter would break out of
+    `value="…"` and hand an attacker attribute-injection, which a body-text
+    check alone would never catch.
+
+    `check_name`/`ref_safe` forbid `/` (a path separator) and control
+    characters, but not `"` or `<`/`>` — confirmed directly: `git
+    check-ref-format` and `drafts.check_name` both accept this payload as a
+    branch/directory name, so it is a genuine agent name this feature must
+    render safely, not a value the upstream validation already excludes.
+    """
+    from markupsafe import escape
+
+    name = 'evil"><script>alert(1)'
+    ws = project.run_dir("r1")
+    d = ws / "manuscript" / "drafts" / name
+    d.mkdir(parents=True)
+    (d / "results.tex").write_text("hostile draft\n")
+
+    page = client.get("/runs/r1/drafts")
+    assert page.status_code == 200
+
+    ref = f"draft/{name}:sections"
+    label = f"{name}'s draft"
+
+    # Nowhere on the page does the raw payload survive unescaped.
+    assert '"><script>alert(1)' not in page.text
+    assert "<script>alert(1)" not in page.text
+
+    # Body text (the <li> row) carries the escaped ref and label.
+    assert str(escape(ref)) in page.text
+    assert str(escape(label)) in page.text
+
+    # The attribute sink specifically: a raw '"' here would break out of
+    # value="…" — assert the option's whole value attribute round-trips
+    # escaped, not just that the escaped text appears somewhere on the page.
+    assert f'value="{escape(ref)}"' in page.text
+
+
 def test_a_diff_is_rendered_when_two_points_are_given(client, merged):
     """`"merged v1"`/`"merged v2"` alone would also pass with the diff panel
     entirely absent — the "Merged rounds" panes above already render each
