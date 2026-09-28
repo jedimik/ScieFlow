@@ -537,7 +537,23 @@ def sync(ws: Path) -> dict:
     {"agents": [...], "artifacts": [...]}}`.
     """
     ws = Path(ws)
-    ws_resolved = ws.resolve()
+    try:
+        ws_resolved = ws.resolve()
+    except (OSError, RuntimeError) as exc:
+        # A symlink cycle in an *ancestor* of `ws` (not `ws` itself, and not
+        # any artifact under it — those are `put`'s problem) makes
+        # `.resolve()` raise a bare `RuntimeError`, and a sufficiently deep
+        # or looping chain can also raise `OSError`. Left unguarded, this
+        # would be the one place in the module where a caller sees
+        # something other than `ProvenanceError` — every other resolve in
+        # this codebase either runs inside `_git` (which already turns a
+        # failure into `ProvenanceError`) or inside `drafts._subdirs`
+        # (which already catches exactly these two). `sync` needs the same
+        # discipline, since Task 4's `manuscript_history` is specified to
+        # never raise for an ordinary state and catches `ProvenanceError`
+        # specifically — an uncaught `RuntimeError` here would 500 that
+        # page instead of degrading.
+        raise ProvenanceError(f"cannot resolve workspace {str(ws)!r}: {exc}") from exc
     if not available():
         raise ProvenanceError("git is not available on this host")
     repo = ensure_repo(ws)

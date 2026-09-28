@@ -316,6 +316,33 @@ def test_ref_safe_does_not_leak_the_parent_environment(monkeypatch):
     assert "ANTHROPIC_API_KEY" not in seen_env
 
 
+def test_a_symlink_cycle_in_an_ancestor_of_the_workspace_is_a_provenance_error(tmp_path):
+    """Fix round 2: `ws.resolve()` (added in fix round 1, as the
+    containment boundary for `put`) runs before `ensure_repo` or any `_git`
+    call gets a chance to turn a failure into `ProvenanceError` — so a
+    symlink cycle in an *ancestor* of the workspace (not an artifact under
+    it) must be caught right there, or it reaches the caller as a bare
+    `RuntimeError`. Pre-fix `5b98066` has no such call and instead fails
+    inside `ensure_repo`'s `_git(repo, "init", ...)`, which already wraps
+    the failure as `ProvenanceError` — so this is a regression window that
+    exists only in the fix-round-1 code between the module docstring's
+    "every caller has exactly one exception to handle" contract and this
+    one new line.
+
+    `loop_a`/`loop_b` are a genuine two-node cycle, not merely a long
+    chain: nothing can be created under `ws` (there is no real directory to
+    create it in), so this calls `sync` directly on the unusable `Path`
+    rather than going through the `ws` fixture."""
+    loop_a = tmp_path / "loop_a"
+    loop_b = tmp_path / "loop_b"
+    loop_a.symlink_to(loop_b)
+    loop_b.symlink_to(loop_a)
+    ws = loop_a / "workspace" / "r1"
+
+    with pytest.raises(provenance.ProvenanceError):
+        provenance.sync(ws)
+
+
 def test_an_unsafe_agent_directory_is_skipped_not_fatal(ws):
     """One bad directory costs that directory, never the whole history."""
     _write(ws / "manuscript" / "drafts" / "claude" / "results.tex", "fine\n")
