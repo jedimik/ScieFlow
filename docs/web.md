@@ -322,9 +322,9 @@ main (branch)
   outline.md                 the paper's outline, once written
   merge_1/                   the workbench's first merge round
     sections/<section>.tex     that round's merged sections
-    curation.yml                the curation as it stood for that round
+    curation.yml                see the caveat below
   merge_2/ …                 later merge rounds, same shape
-  review_1/                  paper-review's first draft round
+  review_1/                  paper-review's first review round
     review.md, response.md
   review_2/ …
 
@@ -332,7 +332,7 @@ draft/<agent> (branch)        one branch per agent the run actually used
   findings.json, gaps.json
   sections/<section>.tex     that agent's own draft, never a merged one
   reviews/<agent>-on-<other>.json
-  review_1/                  paper-review's first draft round, this agent's side
+  review_1/                  paper-draft's first cross-review round
     <agent>-on-<other>.json
     response-<agent>.md
   review_2/ …
@@ -350,11 +350,13 @@ live file.
 
 `merge_N/` and `review_N/` are deliberately two different counters, not one
 shared `round_N/`: a merge round comes from the workbench's own curation
-rounds, a review round from `paper-review`'s draft-review cycle, and the two
-advance independently. Naming them apart is what makes `main:merge_2` and
-`main:review_2` two unrelated things rather than a collision waiting to
-happen the day the counts diverge — which they will, since nothing keeps
-them in step.
+rounds, while `review_N/` means the review cycle for whichever branch it is
+on. On `main`, that is `paper-review`'s review-and-response cycle. On
+`draft/<agent>`, it is `paper-draft`'s adversarial cross-review between
+authors before the merged manuscript exists. Naming them apart is what makes
+`main:merge_2`, `main:review_2` and `draft/claude:review_2` different things
+rather than a collision waiting to happen the day the counts diverge — which
+they will, since nothing keeps them in step.
 
 **Branch names are never configured — they come from the agents a run
 actually used**, discovered from its own artifacts: the subdirectories of
@@ -401,9 +403,10 @@ deleted, every file under `main:merge_1` shown as newly added, with no
 line-level comparison ever happening. Pointing both sides at `sections/`
 puts them at the same depth, so git matches `results.tex` against
 `results.tex` and produces the line-level diff you actually came for. The
-workbench's own diff form never lets you make this mistake — its point
-picker only ever offers points at compatible depths — but the same
-mismatch is there to walk into if you build the `git diff` command by hand.
+workbench's diff form offers every point, so it can show the same
+path-disjoint comparison if you choose points at different depths. Treat a
+paired `deleted file` and `new file` with no line-level comparison as that
+shape of mistake, then compare matching subtrees instead.
 
 **The repo is derived, never authoritative.** Everything in it is rebuilt
 from the workspace's own files — `findings/`, `gaps/`, `manuscript/drafts/`,

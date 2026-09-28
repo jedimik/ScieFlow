@@ -47,6 +47,11 @@ new is produced; this reads what is there and gives it a history.
    merge rounds, `review_N/` for `paper-review`'s draft rounds. They are different counters
    and will not stay in step.
 
+   **Correction, 2026-09-28:** `review_N/` is branch-specific in the implementation.
+   On `main` it comes from `paper-review`; on `draft/<agent>` it comes from
+   `paper-draft`'s adversarial cross-review. The user docs describe the implemented
+   layout in [Manuscript history: the provenance repo](../../web.md#manuscript-history-the-provenance-repo).
+
 ## The layout
 
 The load-bearing decision, and the one everything else follows from. A single rule:
@@ -78,6 +83,11 @@ draft/claude (branch)
 
 draft/codex (branch)            — the same shape, codex's own material
 ```
+
+**Correction, 2026-09-28:** there is one live `manuscript/curation/document.yml`,
+so `curation.yml` is written under whichever `merge_N/` is highest at sync time,
+not as a durable current-tip file under every merge round. The user docs carry the
+implemented caveat in [Manuscript history: the provenance repo](../../web.md#manuscript-history-the-provenance-repo).
 
 `merge_N/` appears only on `main`: a merge round produces one merged manuscript, not
 per-agent output. `curation.yml` is included in it because "which passages were kept, from
