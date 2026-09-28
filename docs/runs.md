@@ -181,6 +181,13 @@ integrations. Agents add free-form `note.<name>` events alongside the prose in
 `log.md`. `actor` is `human`, `agent` or `system` — so an answer an agent gave
 itself can never look like the user's.
 
+This is the run's own history — what happened and when, as events. A
+`paper-draft` or `paper-review` run's manuscript has a second, narrower
+history of its own: a real git repository recording what each drafting agent
+proposed and what each merge or review round produced, readable and
+diffable from the browser. See [Manuscript history: the provenance
+repo](web.md#manuscript-history-the-provenance-repo).
+
 ## Jobs
 
 Every long-running thing — an agent dispatch, a sweep, a sync — runs as a job
