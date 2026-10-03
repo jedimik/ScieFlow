@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import shutil
 import tempfile
 import threading
@@ -1513,8 +1514,81 @@ def _panel(name: str, builder, ws: Path) -> dict:
         return {"reason": f"this panel could not be built: {type(exc).__name__}: {exc}"}
 
 
-# Panel name -> builder(ws) -> dict. Tickets 19-21 add entries here.
-_PANELS = {"inventory": _inventory}
+def _manuscript(ws: Path) -> dict:
+    """Panel 2: where the manuscript stands, from `provenance.points` only.
+
+    NEVER `provenance.sync` (nor `ensure_repo`, which creates): the drafts page
+    syncs on every GET at ~0.8s of git subprocesses even when nothing changed,
+    and `points()` alone is ~0.06s. So a repo that does not exist yet is
+    reported, not built. Disk is read only for the section lists (cheap, no git).
+
+    `state` is one of `no_git`, `no_repo`, `no_points`, `no_merge`, `ok`, and
+    `reason` is the sentence for every state but `ok`.
+    """
+    def out(state: str, reason: str = "", **more) -> dict:
+        return {"state": state, "reason": reason, "round": None, "present": [],
+                "drafted": [], "missing": [], "changed": None, "changed_note": "",
+                "compared": [], "behind": None, **more}
+
+    if not provenance.available():
+        return out("no_git", "git is not installed, so there is no manuscript history "
+                             "for this run; the drafts and rounds are unaffected")
+    if not provenance.repo_path(ws).is_dir():
+        return out("no_repo", "manuscript history has not been recorded yet — it appears "
+                              "after the first merge round or workbench visit")
+    points = provenance.points(ws)
+    if not points:
+        return out("no_points", "the history repository exists but holds no points yet — "
+                                "history appears after the first merge round or workbench visit")
+    merges = sorted(((int(m.group(1)), p["ref"]) for p in points
+                     if p.get("kind") == "merge" and "parent" not in p
+                     and (m := re.fullmatch(r"main:merge_(\d+)", p.get("ref", "")))),
+                    reverse=True)
+    if not merges:
+        return out("no_merge", "history holds drafts but no merge round yet")
+
+    n, ref = merges[0]
+    try:
+        present = drafts.round_sections(ws, n)
+    except drafts.DraftError:
+        present = []
+    drafted: set[str] = set()
+    for agent in drafts.agents(ws):
+        try:
+            drafted.update(drafts.sections(ws, agent))
+        except drafts.DraftError:
+            continue
+    on_disk = drafts.rounds(ws)
+    result = out("ok", round=n, present=present, drafted=sorted(drafted),
+                 missing=sorted(drafted - set(present)),
+                 behind=on_disk[-1] if on_disk and on_disk[-1] > n else None)
+
+    if len(merges) < 2:
+        result["changed_note"] = "first merge round — nothing earlier to compare with"
+        return result
+    prev_ref = merges[1][1]
+    result["compared"] = [ref, prev_ref]
+    try:
+        patch = provenance.diff(ws, ref, prev_ref)
+    except provenance.ProvenanceError:
+        result["changed_note"] = "the last two merge rounds could not be compared"
+        return result
+    # Headers read `diff --git a/<path> b/<path>`; git quotes unusual names.
+    names = []
+    for line in patch["text"].splitlines():
+        if line.startswith("diff --git "):
+            rest = line[len("diff --git "):]
+            half = (len(rest) - 1) // 2
+            names.append(rest[2:half] if rest[:half].startswith("a/") and rest[half] == " "
+                         else rest)
+    result["changed"] = sorted({n.removeprefix("sections/") for n in names})
+    if patch["truncated"]:
+        result["changed_note"] = "the diff was truncated, so this list may be incomplete"
+    return result
+
+
+# Panel name -> builder(ws) -> dict. Tickets 20-21 add entries here.
+_PANELS = {"inventory": _inventory, "manuscript": _manuscript}
 
 
 def run_overview(project: Project, slug: str) -> dict:

@@ -955,3 +955,122 @@ def test_run_overview_degrades_the_panel_on_an_unexpected_failure(project, monke
 def test_run_overview_refuses_an_unknown_run(project):
     with pytest.raises(service.ServiceError):
         service.run_overview(project, "nope")
+
+
+# --- run_overview (panel 2: where the manuscript stands) -------------------
+
+def _two_merge_rounds(ws):
+    """Drafts by two agents in three sections; round 1 has one section, round 2
+    has two; round 2 changes results.tex and adds intro.tex."""
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _touch(ws, "manuscript", "drafts", "kim", "results.tex")
+    _touch(ws, "manuscript", "drafts", "lee", "methods.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "1", "results.tex", text="v1\n")
+    _touch(ws, "manuscript", "curation", "rounds", "2", "results.tex", text="v2\n")
+    _touch(ws, "manuscript", "curation", "rounds", "2", "intro.tex", text="new\n")
+
+
+def _synced(project):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _two_merge_rounds(ws)
+    provenance.sync(ws)                       # set-up only; the panel must not do this
+    return ws
+
+
+def test_manuscript_panel_reports_round_sections_and_changed_files(project):
+    _synced(project)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["state"] == "ok" and ms["reason"] == ""
+    assert ms["round"] == 2
+    assert ms["present"] == ["intro", "results"]
+    assert ms["drafted"] == ["intro", "methods", "results"]
+    assert ms["missing"] == ["methods"]
+    assert ms["changed"] == ["intro.tex", "results.tex"]
+    assert ms["compared"] == ["main:merge_2", "main:merge_1"]
+
+
+def test_manuscript_panel_one_round_has_nothing_to_compare(project):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "curation", "rounds", "1", "results.tex")
+    provenance.sync(ws)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["round"] == 1 and ms["changed"] is None
+    assert "first merge round" in ms["changed_note"]
+
+
+def test_manuscript_panel_never_syncs_even_with_history_present(project, monkeypatch):
+    """The panel this guard was built for. A counter, not a raise: `_panel`
+    swallows exceptions, so only a call count cannot be hidden."""
+    _synced(project)
+    calls = []
+    monkeypatch.setattr(service.provenance, "sync", lambda *a, **k: calls.append(a))
+    assert service.run_overview(project, "r1")["manuscript"]["state"] == "ok"
+    assert calls == []
+
+
+def test_manuscript_panel_never_creates_the_repo(project):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _two_merge_rounds(ws)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["state"] == "no_repo"
+    assert not provenance.repo_path(ws).exists(), "reading must not create history"
+
+
+def test_manuscript_panel_three_no_history_states_are_distinct(project, monkeypatch):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _two_merge_rounds(ws)
+    no_repo = service.run_overview(project, "r1")["manuscript"]
+
+    provenance.ensure_repo(ws)                 # a repo with no branches: artifacts, no points
+    no_points = service.run_overview(project, "r1")["manuscript"]
+
+    monkeypatch.setattr(provenance.shutil, "which", lambda name: None)
+    no_git = service.run_overview(project, "r1")["manuscript"]
+
+    assert (no_git["state"], no_repo["state"], no_points["state"]) == (
+        "no_git", "no_repo", "no_points")
+    assert len({no_git["reason"], no_repo["reason"], no_points["reason"]}) == 3
+    assert "git" in no_git["reason"] and "not installed" in no_git["reason"]
+    for ms in (no_repo, no_points):
+        assert "after the first merge round or workbench visit" in ms["reason"]
+    for ms in (no_git, no_repo, no_points):
+        low = ms["reason"].lower()
+        assert "create" not in low and "sync" not in low, "must not offer the 0.8s stall"
+        assert ms["round"] is None
+
+
+def test_manuscript_panel_draft_history_without_a_merge_says_so(project):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    provenance.sync(ws)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["state"] == "no_merge" and "no merge round" in ms["reason"]
+
+
+def test_manuscript_panel_says_when_history_is_behind_the_disk(project):
+    ws = _synced(project)
+    _touch(ws, "manuscript", "curation", "rounds", "3", "results.tex")   # merged, not yet synced
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["round"] == 2 and ms["behind"] == 3
+
+
+def test_manuscript_panel_a_failed_compare_degrades_that_line_only(project, monkeypatch):
+    _synced(project)
+
+    def boom(ws, a, b):
+        raise service.provenance.ProvenanceError("git diff failed")
+
+    monkeypatch.setattr(service.provenance, "diff", boom)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["round"] == 2 and ms["changed"] is None
+    assert "could not be compared" in ms["changed_note"]

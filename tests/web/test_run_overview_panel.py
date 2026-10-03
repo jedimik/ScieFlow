@@ -115,3 +115,81 @@ def test_empty_directories_render_their_own_reason(client, project):
 def test_the_band_adds_no_post_form(client, project):
     assert 'id="overview"' in client.get("/runs/r1").text
     assert "<form" not in _band(client.get("/runs/r1"))
+
+
+# --- panel 2: where the manuscript stands ----------------------------------
+
+def _merged(project, hostile=None):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _touch(ws, "manuscript", "drafts", "kim", "results.tex")
+    if hostile:
+        _touch(ws, "manuscript", "drafts", "kim", f"{hostile}.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "1", "results.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "2", "results.tex", )
+    (ws / "manuscript" / "curation" / "rounds" / "2" / "results.tex").write_text("changed\n")
+    provenance.sync(ws)
+    return ws
+
+
+def _manuscript(page):
+    band = _band(page)
+    start = band.index('id="ov-manuscript"')
+    return band[start:band.find('id="ov-', start + 1) if 'id="ov-' in band[start + 1:] else None]
+
+
+def test_the_manuscript_panel_names_the_round_and_links_the_workbench(client, project):
+    _merged(project)
+    panel = _manuscript(client.get("/runs/r1"))
+    assert "Merge round 2" in panel
+    assert "missing from the merge: intro" in panel
+    assert "results.tex" in panel
+    assert 'href="/runs/r1/drafts"' in panel
+
+
+def test_the_manuscript_panel_renders_each_no_history_state_distinctly(client, project, monkeypatch):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "curation", "rounds", "1", "results.tex")
+    no_repo = _manuscript(client.get("/runs/r1"))
+    provenance.ensure_repo(ws)
+    no_points = _manuscript(client.get("/runs/r1"))
+    monkeypatch.setattr(provenance.shutil, "which", lambda name: None)
+    no_git = _manuscript(client.get("/runs/r1"))
+
+    assert "git is not installed" in no_git
+    assert "has not been recorded yet" in no_repo
+    assert "no points yet" in no_points
+    assert len({no_git, no_repo, no_points}) == 3
+    for panel in (no_git, no_repo, no_points):
+        assert "create" not in panel.lower()
+        assert "<form" not in panel and "/drafts" not in panel, "no offer to go build history"
+    assert "after the first merge round or workbench visit" in no_repo
+    assert "after the first merge round or workbench visit" in no_points
+
+
+def test_the_manuscript_panel_escapes_a_hostile_section_name(client, project):
+    section = 'sec"><img src=x onerror=alert(2)>'
+    _merged(project, hostile=section)
+    from scieflow.core import provenance
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "curation", "rounds", "2", f"{section}.tex")
+    provenance.sync(ws)
+    page = client.get("/runs/r1")
+    assert page.status_code == 200
+    assert "<img src=x" not in page.text
+    assert str(escape(section)) in _manuscript(page)
+
+
+def test_the_manuscript_panel_never_syncs_on_a_page_get(client, project, monkeypatch):
+    from scieflow.core import service
+
+    _merged(project)
+    calls = []
+    monkeypatch.setattr(service.provenance, "sync", lambda *a, **k: calls.append(a))
+    page = client.get("/runs/r1")
+    assert "Merge round 2" in _manuscript(page), "the panel must have rendered history"
+    assert calls == []

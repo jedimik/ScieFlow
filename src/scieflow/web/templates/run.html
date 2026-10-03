@@ -64,6 +64,23 @@
     </tr>
   </table>
   {% endif %}
+
+  {% set ms = overview.manuscript %}
+  <div id="ov-manuscript">
+  <h3>Where the manuscript stands</h3>
+  {% if ms.reason %}
+    <p class="dim">{{ ms.reason }}</p>
+  {% else %}
+    <p>Merge round {{ ms.round }}: {% if ms.present %}{{ ms.present|join(", ") }}{% else %}<span class="dim">no sections</span>{% endif %}.
+      {% if ms.missing %}Drafted but missing from the merge: {{ ms.missing|join(", ") }}.{% else %}<span class="dim">Every drafted section is in the merge.</span>{% endif %}
+      {% if ms.behind %}<span class="dim">Round {{ ms.behind }} is on disk but not in the history yet.</span>{% endif %}</p>
+    <p>{% if ms.changed is not none %}
+        {% if ms.changed %}Changed since {{ ms.compared[1] }}: {{ ms.changed|join(", ") }}.{% else %}<span class="dim">No files changed since {{ ms.compared[1] }}.</span>{% endif %}
+      {% endif %}
+      {% if ms.changed_note %}<span class="dim">{{ ms.changed_note }}</span>{% endif %}
+      <a href="/runs/{{ slug }}/drafts">Open the workbench for the full diff</a></p>
+  {% endif %}
+  </div>
 </section>
 
 <h2>The agreed plan</h2>
