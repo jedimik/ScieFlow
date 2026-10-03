@@ -8,6 +8,7 @@ for anything a caller should show the user.
 from __future__ import annotations
 
 import hashlib
+import logging
 import shutil
 import tempfile
 import threading
@@ -1496,14 +1497,20 @@ def _inventory(ws: Path) -> dict:
     return out
 
 
-def _panel(builder, ws: Path) -> dict:
+def _panel(name: str, builder, ws: Path) -> dict:
     """Run one panel's builder; an unexpected exception becomes that panel's
     `reason` and nothing else. Isolation lives here, so a panel added later
-    cannot forget it — `run_overview` never calls a builder directly."""
+    cannot forget it — `run_overview` never calls a builder directly (a test
+    walks its AST and fails if it does).
+
+    The reason names the exception class (a bare `KeyError('x')` would render
+    as `'x'`), and the traceback is logged, because nothing else reports a
+    bug swallowed here: this repo runs no CI over the suite."""
     try:
         return builder(ws)
     except Exception as exc:  # noqa: BLE001 - the contract is "never raises"
-        return {"reason": f"this panel could not be built: {exc}"}
+        logging.getLogger(__name__).exception("overview panel %s failed", name)
+        return {"reason": f"this panel could not be built: {type(exc).__name__}: {exc}"}
 
 
 # Panel name -> builder(ws) -> dict. Tickets 19-21 add entries here.
@@ -1531,4 +1538,4 @@ def run_overview(project: Project, slug: str) -> dict:
     "review": {"state": absent|empty|present|unreadable, "reason", ...}}}`.
     """
     ws = _ws(project, slug)
-    return {name: _panel(builder, ws) for name, builder in _PANELS.items()}
+    return {name: _panel(name, _PANELS[name], ws) for name in _PANELS}

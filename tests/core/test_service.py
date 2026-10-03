@@ -894,6 +894,30 @@ def test_run_overview_one_failing_panel_does_not_take_the_others_down(project, m
     assert view["inventory"]["drafts"]["agents"][0]["agent"] == "kim"
 
 
+def test_run_overview_a_panel_failure_names_its_exception_class(project, monkeypatch, caplog):
+    def boom(ws):
+        return {}["x"]
+
+    monkeypatch.setitem(service._PANELS, "boom", boom)
+    with caplog.at_level("ERROR", logger=service.__name__):
+        view = service.run_overview(project, "r1")
+    assert "KeyError" in view["boom"]["reason"]
+    assert any("overview panel boom failed" in r.getMessage() and r.exc_info
+               for r in caplog.records), "the traceback must be logged"
+
+
+def test_run_overview_calls_nothing_but_ws_and_panel():
+    """A builder called directly from run_overview loses isolation, and a
+    direct call that fails only on some run states would pass every other
+    test and 500 the page. Check the call graph, not the output shape."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(service.run_overview))
+    called = [ast.unparse(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)]
+    assert sorted(set(called)) == ["_panel", "_ws"], called
+
+
 import os as _os
 
 _ROOT = hasattr(_os, "geteuid") and _os.geteuid() == 0
