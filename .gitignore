@@ -39,3 +39,6 @@ pipelines/*/stages/*/env/
 *.yaml.lock
 *.json.lock
 *.jsonl.lock
+
+# Local ticket backlogs written by /to-tickets
+.scratch/
