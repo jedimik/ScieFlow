@@ -46,18 +46,10 @@ def _percent(fraction: float | None) -> int:
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request) -> HTMLResponse:
     project = _project(request)
-    runs = service.list_runs(project)
-    detail = {}
-    for run in runs:
-        try:
-            full = service.run_detail(project, run["slug"])
-        except service.ServiceError:
-            continue
-        detail[run["slug"]] = {
-            "remaining": {dim: _percent(value)
-                          for dim, value in (full["remaining"] or {}).items()},
-            "stopped": (full["status"] or {}).get("stopped"),
-        }
+    runs = service.list_runs_with_budget(project)
+    detail = {run["slug"]: {"remaining": {dim: _percent(value)
+                                          for dim, value in (run["remaining"] or {}).items()}}
+              for run in runs}
     return TEMPLATES.TemplateResponse(request, "dashboard.html", {
         "runs": runs,
         "detail": detail,

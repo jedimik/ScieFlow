@@ -14,6 +14,8 @@ import threading
 from dataclasses import asdict
 from pathlib import Path
 
+import yaml
+
 from scieflow.core import (
     agent_config,
     agent_configure as acf,
@@ -87,6 +89,28 @@ def job_json(job: jobs.Job) -> dict:
 
 def list_runs(project: Project) -> list[dict]:
     return [asdict(r) for r in workspace.list_runs(project.root)]
+
+
+def list_runs_with_budget(project: Project) -> list[dict]:
+    """`list_runs`, each run also carrying `remaining`: the budget fraction
+    left per dimension, or None when the run has no readable budget.
+
+    The run list's whole read cost: `describe` reads `status.yml` and
+    `config.yml` (and already carries `stopped_reason`), and this adds one
+    small read of `budget.yml`. No event log, gate, proposal preview or job
+    listing — that is `run_detail`, for one run's page. Pinned by
+    tests/web/test_dashboard_reads.py.
+    """
+    out = []
+    for run in workspace.list_runs(project.root):
+        ws = _ws(project, run.slug)
+        try:
+            b = budget.read_budget(ws)
+            remaining = budget.remaining_fraction(b) if b else None
+        except (OSError, yaml.YAMLError, ValueError, KeyError, TypeError, AttributeError):
+            remaining = None       # a damaged budget must not take the list down
+        out.append({**asdict(run), "remaining": remaining})
+    return out
 
 
 def run_detail(project: Project, slug: str) -> dict:
