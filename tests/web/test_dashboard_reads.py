@@ -44,6 +44,10 @@ def counted(monkeypatch):
     reads: Counter = Counter()
     listings: Counter = Counter()
 
+    # Deliberately NOT counted: os.stat, exists() and is_dir() (metadata, not
+    # reads). A raw os.open + os.read would also bypass these hooks (mutation-
+    # proven: 8 tests stayed green). Nothing here reads that way, but this pin
+    # is not total.
     def key(path):
         try:
             parts = Path(os.fspath(path)).parts
@@ -160,3 +164,41 @@ def test_a_stopped_run_is_reported_from_describe(project):
 def test_a_damaged_budget_lists_as_no_budget(project):
     (project.run_dir("r1") / "budget.yml").write_text("a: [unclosed\n")
     assert service.list_runs_with_budget(project)[0]["remaining"] is None
+
+
+@pytest.fixture
+def vanish_after_listing(monkeypatch, many_runs):
+    """Delete r2's directory for real right after `workspace.list_runs` has
+    listed it: the window `dvc_sync pull --force` opens by swapping a run
+    directory out while the dashboard loads."""
+    import shutil
+
+    from scieflow.core import workspace
+
+    real = workspace.list_runs
+
+    def listing_then_gone(root=None):
+        runs = real(root)
+        shutil.rmtree(many_runs.run_dir("r2"))
+        return runs
+
+    monkeypatch.setattr(workspace, "list_runs", listing_then_gone)
+
+
+def test_a_run_that_vanishes_after_listing_stays_listed_without_budget(vanish_after_listing,
+                                                                       many_runs):
+    runs = {r["slug"]: r for r in service.list_runs_with_budget(many_runs)}
+    assert set(runs) == {"r1", "r2", "r3"}
+    assert runs["r2"]["remaining"] is None
+    assert runs["r1"]["remaining"] is not None
+
+
+def test_the_dashboard_survives_a_run_vanishing_after_listing(vanish_after_listing, client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "r1" in response.text and "r3" in response.text
+
+
+def test_open_gates_with_no_slugs_scans_nothing(project):
+    assert service.open_gates(project) != []         # there is one to find
+    assert service.open_gates(project, slugs=[]) == []

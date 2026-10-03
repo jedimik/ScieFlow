@@ -103,12 +103,15 @@ def list_runs_with_budget(project: Project) -> list[dict]:
     """
     out = []
     for run in workspace.list_runs(project.root):
-        ws = _ws(project, run.slug)
         try:
-            b = budget.read_budget(ws)
+            b = budget.read_budget(_ws(project, run.slug))
             remaining = budget.remaining_fraction(b) if b else None
-        except (OSError, yaml.YAMLError, ValueError, KeyError, TypeError, AttributeError):
-            remaining = None       # a damaged budget must not take the list down
+        except (ServiceError, OSError, yaml.YAMLError, ValueError, KeyError, TypeError,
+                AttributeError):
+            # A damaged budget, or a run directory that vanished since it was
+            # listed (a `dvc_sync pull --force` swaps directories), must not
+            # take the list down: still listed, budget unreadable.
+            remaining = None
         out.append({**asdict(run), "remaining": remaining})
     return out
 
@@ -675,7 +678,12 @@ def open_gates(project: Project, slug: str | None = None, *,
         slugs = [r["slug"] for r in list_runs(project)]
     out = []
     for name in slugs:
-        ws = _ws(project, name)
+        try:
+            ws = _ws(project, name)
+        except ServiceError:
+            if slug:
+                raise          # asked for one run by name: say it does not exist
+            continue           # listed a moment ago, gone now: it has no open gates
         for g in _with_proposal_preview(ws, gates.list_gates(ws, "open")):
             out.append({**g, "slug": name})
     return out
