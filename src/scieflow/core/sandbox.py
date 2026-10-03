@@ -53,7 +53,28 @@ def _validate_writable(writable: list[Path]) -> None:
                 f"writable grant must be a directory, not a file: {path}")
 
 
-def wrap(argv: list[str], *, writable: list[Path], cwd: Path) -> list[str]:
+def masks_for(writable: list[Path], *, run_dir: Path | None) -> list[Path]:
+    """Paths to hide inside an agent dispatch's grant: the run's provenance repo.
+
+    The repo holds manuscript history and is derived, so a corrupt one is
+    rebuilt — which loses that history silently. Masking it makes the loss
+    impossible rather than merely unmotivated. Only a grant that IS the run
+    directory is masked: a coordinator's workspace-root grant is not (that would
+    need enumerating runs at wrap time), and allowlisted paths never are,
+    because a masked mountpoint materialises on the host and would litter an
+    empty `provenance.git` under each. Pure: decided from the arguments alone.
+    """
+    if run_dir is None:
+        return []
+    from scieflow.core.provenance import REPO_DIR
+    run = Path(run_dir).resolve()
+    if run not in [Path(entry).resolve() for entry in writable]:
+        return []
+    return [run / REPO_DIR]
+
+
+def wrap(argv: list[str], *, writable: list[Path], cwd: Path,
+         mask: list[Path] | None = None) -> list[str]:
     """`argv` rewritten to run under bubblewrap, writable only where granted.
 
     As a side effect, creates any missing writable directories on the host:
@@ -61,6 +82,13 @@ def wrap(argv: list[str], *, writable: list[Path], cwd: Path) -> list[str]:
     path or a brand-new run may not have been created yet — which would
     otherwise surface as a cryptic bwrap error. This is part of the contract and
     every caller depends on it.
+
+    Each `mask` path is overlaid with an empty tmpfs, so writes there are
+    discarded. It is a tmpfs rather than a read-only bind because bwrap refuses
+    to bind a source that does not exist, and the repo usually does not yet on a
+    fresh run. The mountpoint then materialises as an empty directory on the
+    host, which `provenance.ensure_repo` discards and re-inits. The mask comes
+    after the writable binds because bwrap applies operations in order.
     """
     _validate_writable(writable)
     if not available():
@@ -71,6 +99,8 @@ def wrap(argv: list[str], *, writable: list[Path], cwd: Path) -> list[str]:
         resolved = Path(path).resolve()
         resolved.mkdir(parents=True, exist_ok=True)
         out += ["--bind", str(resolved), str(resolved)]
+    for path in mask or []:
+        out += ["--tmpfs", str(Path(path).resolve())]
     out += ["--chdir", str(Path(cwd).resolve()),
             "--unshare-pid", "--die-with-parent", "--"]
     return out + list(argv)

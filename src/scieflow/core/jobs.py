@@ -154,7 +154,8 @@ def start(project: Project, argv: list[str], *, kind: str, cwd: Path,
     with open(job.log, "w") as out, open(job.err, "w") as err:
         try:
             # The job records the command that was asked for; the wrapper is plumbing.
-            launch = (sandbox.wrap(argv, writable=sandbox_writable, cwd=cwd)
+            launch = (sandbox.wrap(argv, writable=sandbox_writable, cwd=cwd,
+                                   mask=sandbox.masks_for(sandbox_writable, run_dir=run_dir))
                       if sandbox_writable is not None else list(argv))
             proc = subprocess.Popen(
                 launch, cwd=cwd, stdout=out, stderr=err, text=True, env=env,
