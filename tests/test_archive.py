@@ -114,7 +114,11 @@ def test_relative_link_escaping_the_archive_is_refused(tmp_path):
 @pytest.mark.parametrize(
     "junk",
     ["tmp/a.txt", ".snakemake/log", "pytest-01/t.py", "runtime/host/bin/python",
-     "scratch/clone/x", "sub/.uv-cache/x", "mpl-cache/f"],
+     "scratch/clone/x", "sub/.uv-cache/x", "mpl-cache/f",
+     # The manuscript provenance repo is derived from artifacts the archive
+     # already carries, so it is rebuildable; `sub/` pins that the match is by
+     # basename at any depth, not only at the run root.
+     "provenance.git/HEAD", "sub/provenance.git/objects/ab/cdef"],
 )
 def test_rebuildable_dirs_are_skipped(tmp_path, junk):
     run = make_run(tmp_path)
@@ -149,6 +153,22 @@ def test_workspace_size_counts_archived_bytes_only(tmp_path):
     run = make_run(tmp_path)
     expected = len("phase: done\n") + len("transcript\n") + 4096
     assert archive.workspace_size(run) == expected
+
+
+def test_workspace_size_ignores_the_provenance_repo(tmp_path):
+    """The space estimate and the zip must agree on what is archived.
+
+    Both route through `_collect`, so a tree the zip skips must not be counted
+    here either — otherwise `ensure_space` reserves room for bytes that are
+    never written.
+    """
+    run = make_run(tmp_path)
+    before = archive.workspace_size(run)
+    objects = run / "provenance.git" / "objects" / "ab"
+    objects.mkdir(parents=True)
+    (objects / "cdef").write_bytes(os.urandom(2048))
+    (run / "provenance.git" / "HEAD").write_text("ref: refs/heads/main\n")
+    assert archive.workspace_size(run) == before
 
 
 def test_verify_zip_returns_member_count(tmp_path):
@@ -288,3 +308,18 @@ def test_skip_rules_can_be_turned_off_for_non_run_trees(tmp_path):
     archive.build_zip(tree_dir, dest, skip_rebuildable=False)
     with zipfile.ZipFile(dest) as zf:
         assert "tmp/slug/chats/s.jsonl" in zf.namelist()
+
+
+def test_skip_rules_off_still_packs_a_provenance_repo(tmp_path):
+    """The run-archive skip set must not leak into callers that turn it off.
+
+    Chat bundles pack with `skip_rebuildable=False` and must keep every byte
+    they are given, whatever a directory happens to be called.
+    """
+    tree_dir = tmp_path / "bundle"
+    (tree_dir / "provenance.git" / "objects").mkdir(parents=True)
+    (tree_dir / "provenance.git" / "objects" / "ab").write_bytes(b"object")
+    dest = tmp_path / "b.zip"
+    archive.build_zip(tree_dir, dest, skip_rebuildable=False)
+    with zipfile.ZipFile(dest) as zf:
+        assert "provenance.git/objects/ab" in zf.namelist()
