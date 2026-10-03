@@ -16,6 +16,57 @@
      — {{ detail.status.stopped.get("detail", "") }}</p>
 {% endif %}
 
+{# Overview band: read-only, every name below is agent-chosen text and relies on
+   autoescape — nothing here may use |safe. One `{% set %}` block per panel; later
+   panels add their own keys to `overview`. #}
+<section id="overview" class="overview">
+  <h2>What this run has produced</h2>
+  {% set inv = overview.inventory %}
+  {% if inv.reason %}
+    <p class="dim">{{ inv.reason }}</p>
+  {% else %}
+  <table>
+    {% for key, label in (("findings", "Findings"), ("gaps", "Gaps")) %}
+    <tr>
+      <th>{{ label }}</th>
+      <td>{% if inv[key].names %}{{ inv[key].names|length }} —
+        {% for name in inv[key].names %}{{ name }}{% if not loop.last %}, {% endif %}{% endfor %}
+        {% else %}<span class="dim">{{ inv[key].reason }}</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    <tr>
+      <th>Drafts</th>
+      <td>
+      {% if inv.drafts.agents %}
+        <table>
+          <tr><th></th>{% for section in inv.drafts.sections %}<th>{{ section }}</th>{% endfor %}</tr>
+          {% for row in inv.drafts.agents %}
+          <tr><td>{{ row.agent }}</td>
+            {% for section in inv.drafts.sections %}
+            <td>{% if section in row.sections %}yes{% else %}<span class="dim">—</span>{% endif %}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </table>
+      {% else %}<span class="dim">{{ inv.drafts.reason }}</span>{% endif %}
+      </td>
+    </tr>
+    <tr>
+      <th>Merge rounds</th>
+      <td>{% if inv.merge.rounds %}
+        {% for r in inv.merge.rounds %}Merge round {{ r.n }} ({{ r.sections|length }} sections){% if not loop.last %}, {% endif %}{% endfor %}
+        {% else %}<span class="dim">{{ inv.merge.reason }}</span>{% endif %}</td>
+    </tr>
+    <tr>
+      <th>Review rounds</th>
+      <td>{% if inv.review.rounds %}
+        {% for r in inv.review.rounds %}Review round {{ r.n }}{% if r.kind == "cross-review" %} (cross-review){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+        {% else %}<span class="dim">{{ inv.review.reason }}</span>{% endif %}</td>
+    </tr>
+  </table>
+  {% endif %}
+</section>
+
 <h2>The agreed plan</h2>
 {% if not charter.text %}
   <p class="dim">No charter yet. Whatever you write here is put at the top of

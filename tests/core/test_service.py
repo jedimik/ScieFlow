@@ -782,3 +782,102 @@ def test_manuscript_history_keeps_readable_points_when_sync_fails(project, monke
     monkeypatch.setattr(service.provenance, "sync", boom)
     view = service.manuscript_history(project, "r1")
     assert "main:merge_1" in [p["ref"] for p in view["points"]]
+
+
+# --- run_overview (panel 1: what exists on disk) ---------------------------
+
+def _touch(ws, *parts, text="x\n"):
+    path = ws.joinpath(*parts)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def test_run_overview_fresh_run_is_absent_everywhere_with_reasons(project):
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert inv["drafts"]["state"] == "absent"
+    assert "Phase 3" in inv["drafts"]["reason"]
+    assert inv["merge"]["state"] == "absent"
+    assert inv["review"]["state"] == "absent"
+    for key in ("findings", "gaps", "drafts", "merge", "review"):
+        assert inv[key]["reason"], key
+
+
+def test_run_overview_an_empty_directory_is_not_an_absent_one(project):
+    ws = project.run_dir("r1")
+    (ws / "manuscript" / "drafts").mkdir(parents=True)
+    (ws / "findings").mkdir()
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert inv["drafts"]["state"] == "empty"
+    assert inv["findings"]["state"] == "empty"
+    assert inv["gaps"]["state"] == "absent"
+    assert inv["drafts"]["reason"] != service.run_overview(
+        project, "r1")["inventory"]["gaps"]["reason"]
+
+
+def test_run_overview_mid_phase_uses_the_agents_the_run_wrote(project):
+    ws = project.run_dir("r1")
+    _touch(ws, "findings", "zed.json")
+    _touch(ws, "findings", "amy.json")
+    _touch(ws, "gaps", "amy.json")
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert inv["findings"] == {**inv["findings"], "state": "present",
+                               "names": ["amy", "zed"]}
+    assert inv["gaps"]["names"] == ["amy"]
+    assert inv["drafts"]["state"] == "absent"
+
+
+def test_run_overview_drafts_without_a_merge(project):
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _touch(ws, "manuscript", "drafts", "kim", "results.tex")
+    _touch(ws, "manuscript", "drafts", "lee", "intro.tex")
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert inv["drafts"]["state"] == "present"
+    assert inv["drafts"]["agents"] == [
+        {"agent": "kim", "sections": ["intro", "results"]},
+        {"agent": "lee", "sections": ["intro"]}]
+    assert inv["drafts"]["sections"] == ["intro", "results"]
+    assert inv["merge"]["state"] == "absent"
+
+
+def test_run_overview_a_complete_run(project):
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "2", "intro.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "10", "intro.tex")
+    _touch(ws, "review", "round-1", "review.md")
+    _touch(ws, "review", "draft-round-1", "kim-on-lee.json")
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert [r["n"] for r in inv["merge"]["rounds"]] == [2, 10]
+    assert inv["merge"]["rounds"][0]["sections"] == ["intro"]
+    assert {(r["kind"], r["n"]) for r in inv["review"]["rounds"]} == {
+        ("review", 1), ("cross-review", 1)}
+
+
+def test_run_overview_never_reaches_provenance_sync(project, monkeypatch):
+    """The seam ticket 19 wires provenance into. `sync` costs ~0.8s of git
+    subprocesses per call; only `points()` may ever be used here."""
+    def boom(*a, **k):
+        raise AssertionError("run_overview must not call provenance.sync")
+
+    monkeypatch.setattr(service.provenance, "sync", boom)
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "1", "intro.tex")
+    service.run_overview(project, "r1")
+
+
+def test_run_overview_degrades_the_panel_on_an_unexpected_failure(project, monkeypatch):
+    def boom(ws):
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(service.drafts, "agents", boom)
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert "disk went away" in inv["reason"]
+
+
+def test_run_overview_refuses_an_unknown_run(project):
+    with pytest.raises(service.ServiceError):
+        service.run_overview(project, "nope")

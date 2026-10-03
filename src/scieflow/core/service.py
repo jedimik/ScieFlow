@@ -1408,3 +1408,117 @@ def preview_busy(project: Project, slug: str) -> bool:
     jobs.reconcile(project, ws)
     return any(j.kind == "preview" and j.state == "running"
               for j in jobs.list_jobs(project, ws))
+
+
+def _listing(directory: Path) -> tuple[str, list[str]]:
+    """`(state, entries)` for a directory: `absent`, `empty`, `present` or
+    `unreadable`. Absent and empty are different facts — a run before the
+    phase that creates the directory has not failed, a run whose directory is
+    empty has started and produced nothing — so callers get both."""
+    try:
+        if not directory.is_dir():
+            return "absent", []
+        entries = sorted(p.name for p in directory.iterdir())
+    except (OSError, RuntimeError):
+        return "unreadable", []
+    return ("present" if entries else "empty"), entries
+
+
+def _numbered(entries: list[str], prefix: str) -> list[int]:
+    return sorted(int(e[len(prefix):]) for e in entries
+                  if e.startswith(prefix) and e[len(prefix):].isascii()
+                  and e[len(prefix):].isdigit())
+
+
+def _inventory(ws: Path) -> dict:
+    """Panel 1: what exists on disk, from the run's own artifacts. Every name
+    in it is agent-chosen and therefore untrusted text."""
+    def names(sub: str, noun: str) -> dict:
+        state, entries = _listing(ws / sub)
+        stems = sorted(e[:-5] for e in entries
+                       if e.endswith(".json") and (ws / sub / e).is_file())
+        if state == "present" and not stems:
+            state = "empty"
+        reason = {"absent": f"no {sub}/ directory yet — no agent has written {noun}",
+                  "empty": f"{sub}/ exists but holds no {noun} yet",
+                  "unreadable": f"{sub}/ could not be read"}.get(state, "")
+        return {"state": state, "names": stems, "reason": reason}
+
+    out: dict = {"reason": "", "findings": names("findings", "findings"),
+                 "gaps": names("gaps", "gaps")}
+
+    state, _ = _listing(ws / drafts.DRAFTS_DIR)
+    agents = drafts.agents(ws) if state in ("present", "empty") else []
+    if state == "present" and not agents:
+        state = "empty"
+    grid = []
+    for agent in agents:
+        try:
+            grid.append({"agent": agent, "sections": drafts.sections(ws, agent)})
+        except drafts.DraftError:
+            continue                       # vanished or became unsafe mid-read
+    out["drafts"] = {
+        "state": state, "agents": grid,
+        "sections": sorted({s for row in grid for s in row["sections"]}),
+        "reason": {"absent": "no drafts yet — manuscript/drafts/ appears when "
+                             "paper-draft Phase 3 starts",
+                   "empty": "manuscript/drafts/ exists but no agent has drafted into it yet",
+                   "unreadable": "manuscript/drafts/ could not be read"}.get(state, "")}
+
+    state, _ = _listing(ws / drafts.ROUNDS_DIR)
+    numbers = drafts.rounds(ws) if state in ("present", "empty") else []
+    if state == "present" and not numbers:
+        state = "empty"
+    merges = []
+    for n in numbers:
+        try:
+            merges.append({"n": n, "sections": drafts.round_sections(ws, n)})
+        except drafts.DraftError:
+            continue
+    out["merge"] = {
+        "state": state, "rounds": merges,
+        "reason": {"absent": "no merge round yet — manuscript/curation/rounds/ appears "
+                             "at the first merge",
+                   "empty": "manuscript/curation/rounds/ exists but no merge round has completed",
+                   "unreadable": "manuscript/curation/rounds/ could not be read"}.get(state, "")}
+
+    state, entries = _listing(ws / "review")
+    reviews = ([{"n": n, "kind": "cross-review"} for n in _numbered(entries, "draft-round-")]
+               + [{"n": n, "kind": "review"} for n in _numbered(entries, "round-")])
+    if state == "present" and not reviews:
+        state = "empty"
+    out["review"] = {
+        "state": state, "rounds": reviews,
+        "reason": {"absent": "no review round yet — review/ appears when drafts are "
+                             "cross-reviewed",
+                   "empty": "review/ exists but holds no review round",
+                   "unreadable": "review/ could not be read"}.get(state, "")}
+    return out
+
+
+def run_overview(project: Project, slug: str) -> dict:
+    """What the run has produced, one entry per panel, each with its own
+    `reason`. The template renders a reason; it never branches on an error.
+
+    Never raises for an ordinary state: a fresh run, a run mid-phase, one with
+    drafts and no merge, and one with a directory that is absent, empty or
+    unreadable all come back as data. A panel that fails for an unexpected
+    reason degrades that panel alone (`reason` set, the rest intact), so
+    tickets 19-21 add their panels as further keys without one failure taking
+    the band down.
+
+    Read-only, and must never call `provenance.sync`: the drafts page does
+    that on every GET at ~0.8s of git subprocesses, and a second page must not
+    inherit the cost. A panel needing history uses `provenance.points` only.
+
+    Only a malformed or unknown `slug` raises `ServiceError`, via `_ws`.
+
+    Shape: `{"inventory": {"reason", "findings"|"gaps"|"drafts"|"merge"|
+    "review": {"state": absent|empty|present|unreadable, "reason", ...}}}`.
+    """
+    ws = _ws(project, slug)
+    try:
+        inventory = _inventory(ws)
+    except (OSError, RuntimeError, ValueError, drafts.DraftError) as exc:
+        inventory = {"reason": f"the run's files could not be listed: {exc}"}
+    return {"inventory": inventory}

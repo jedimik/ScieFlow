@@ -235,6 +235,7 @@ def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
         "charter": service.run_charter(project, slug),
         "conversation": service.conversation_state(project, slug),
         "agents": service.conversational_agents(project),
+        "overview": service.run_overview(project, slug),
         "error": error,
         "csrf": auth.csrf_token(request),
     })
