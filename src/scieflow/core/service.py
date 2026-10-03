@@ -1515,6 +1515,43 @@ def _panel(name: str, builder, ws: Path) -> dict:
         return {"reason": f"this panel could not be built: {type(exc).__name__}: {exc}"}
 
 
+_ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11, "\\": 92, '"': 34}
+
+
+def _header_path(rest: str) -> str | None:
+    """The file path from a `diff --git a/<p> b/<p>` header (after the prefix).
+    Both sides name the same path (no renames between two trees), and git
+    quotes it C-style - `"a/x\\".tex"`, octal bytes for non-ASCII - when it
+    holds unusual characters; that form is decoded here. Returns None for a
+    header that cannot be parsed, so the caller shows nothing for it rather
+    than raw header text."""
+    if rest.startswith('"'):
+        out = bytearray()
+        i = 1
+        while i < len(rest) and rest[i] != '"':
+            ch = rest[i]
+            if ch != "\\":
+                out += ch.encode()
+                i += 1
+            elif rest[i + 1:i + 2] in _ESCAPES:
+                out.append(_ESCAPES[rest[i + 1]])
+                i += 2
+            elif rest[i + 1:i + 4].isdigit() and len(rest[i + 1:i + 4]) == 3:
+                out.append(int(rest[i + 1:i + 4], 8) & 0xFF)
+                i += 4
+            else:
+                return None
+        if i >= len(rest):
+            return None
+        path = out.decode("utf-8", errors="replace")
+    else:
+        half = (len(rest) - 1) // 2
+        if not rest[:half].startswith("a/") or rest[half:half + 1] != " ":
+            return None
+        path = rest[:half]
+    return path[2:] if path.startswith("a/") else None
+
+
 def _manuscript(ws: Path) -> dict:
     """Panel 2: where the manuscript stands, from `provenance.points` only.
 
@@ -1578,10 +1615,9 @@ def _manuscript(ws: Path) -> dict:
     names = []
     for line in patch["text"].splitlines():
         if line.startswith("diff --git "):
-            rest = line[len("diff --git "):]
-            half = (len(rest) - 1) // 2
-            names.append(rest[2:half] if rest[:half].startswith("a/") and rest[half] == " "
-                         else rest)
+            name = _header_path(line[len("diff --git "):])
+            if name is not None:
+                names.append(name)
     result["changed"] = sorted({n.removeprefix("sections/") for n in names})
     if patch["truncated"]:
         result["changed_note"] = "the diff was truncated, so this list may be incomplete"
@@ -1669,7 +1705,7 @@ def _progress(ws: Path) -> dict:
     is listed as still waiting and never timed against now.
     """
     log = ws / events.EVENTS_FILE
-    out: dict = {"reason": "", "complete": True, "notes": [], "phases": [],
+    out: dict = {"reason": "", "complete": True, "notes": [], "warnings": [], "phases": [],
                  "outside_phase": {}, "gates": {"longest": None, "waiting": []},
                  "checkpoints": 0, "iterations": 0}
     if not log.is_file():
@@ -1735,7 +1771,9 @@ def _progress(ws: Path) -> dict:
                     if d is not None:
                         r["seconds"] = (r["seconds"] or 0) + d
                 else:
-                    orphans += 1
+                    # Marked done straight from pending: a supported path, not
+                    # a damaged log. Zero duration, no note.
+                    r["seconds"] = r["seconds"] or 0
                 if current == name:
                     current = None
         elif kind == "budget.recorded":
@@ -1777,11 +1815,13 @@ def _progress(ws: Path) -> dict:
         {"gate": gid, "kind": gkind, "since": _utc_text(raw, when)}
         for gid, (gkind, when, raw) in gate_open.items() if gid not in gate_done]
     if skew:
-        notes.append(f"{skew} interval(s) ended before they started (clock out of order), shown as 0s")
+        # A clock disagreeing is not a log that is missing lines: not `notes`.
+        out["warnings"].append(
+            f"{skew} interval(s) ended before they started (clock out of order), shown as 0s")
     if bad_ts:
         notes.append(f"{bad_ts} event(s) had an unreadable timestamp")
     if orphans:
-        notes.append(f"{orphans} event(s) closed something the log never shows opening")
+        notes.append(f"{orphans} gate answer(s) with no matching opening in the log")
     if bad_spend:
         notes.append(f"{bad_spend} spend figure(s) were not numbers and were ignored")
     out["notes"] = notes

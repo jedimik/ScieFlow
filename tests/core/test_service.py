@@ -1257,7 +1257,7 @@ def test_progress_never_yields_a_negative_duration(project):
     pr = _progress(project)
     assert pr["gates"]["longest"]["seconds"] == 0
     assert pr["phases"][0]["seconds"] == 0
-    assert pr["complete"] is False and any("out of order" in n for n in pr["notes"])
+    assert pr["complete"] is True and any("out of order" in w for w in pr["warnings"])
 
 
 def test_progress_a_duplicated_event_is_counted_once(project):
@@ -1280,16 +1280,59 @@ def test_progress_a_truncated_log_shows_what_it_can_and_says_so(project):
     assert pr["complete"] is False and any("unreadable" in n for n in pr["notes"])
 
 
-def test_progress_a_close_with_no_open_says_the_log_is_incomplete(project):
+def test_progress_a_gate_answer_with_no_opening_says_the_log_is_incomplete(project):
     ws = _fresh(project)
     _ev(ws, "gate.answered", _at(30), gate="g9", kind="question")
-    _ev(ws, "phase.done", _at(30), phase="p", iteration=1)
     pr = _progress(project)
     assert pr["gates"]["longest"] is None
-    assert pr["phases"][0]["seconds"] is None, "no start, so no invented duration"
-    assert pr["complete"] is False
+    assert pr["complete"] is False and any("gate" in n for n in pr["notes"])
 
 
+def test_progress_a_phase_marked_done_from_pending_is_not_an_incomplete_log(project):
+    """Marking a pending phase done directly is supported (web UI and
+    actions.mark_phase), so a done with no started is a healthy log."""
+    ws = _fresh(project)
+    _ev(ws, "phase.done", _at(30), phase="p", iteration=1)
+    pr = _progress(project)
+    row = pr["phases"][0]
+    assert row["phase"] == "p" and row["seconds"] == 0 and row["running"] is False
+    assert pr["complete"] is True and pr["notes"] == [] and pr["warnings"] == []
+
+
+def test_progress_an_unreadable_line_still_says_incomplete_beside_a_direct_done(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.done", _at(30), phase="p", iteration=1)
+    with (ws / "events.jsonl").open("a") as f:
+        f.write("{not json\n")
+    pr = _progress(project)
+    assert pr["complete"] is False and any("unreadable" in n for n in pr["notes"])
+
+
+def test_progress_clock_skew_is_a_warning_not_incompleteness(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(100), phase="p", iteration=1)
+    _ev(ws, "phase.done", _at(10), phase="p", iteration=1)
+    pr = _progress(project)
+    assert pr["complete"] is True and pr["notes"] == []
+    assert any("out of order" in w for w in pr["warnings"])
+
+
+def test_manuscript_panel_decodes_git_quoted_file_names(project):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    odd = 'sec"x'
+    for n, text in ((1, "a\n"), (2, "b\n")):
+        _touch(ws, "manuscript", "curation", "rounds", str(n), f"{odd}.tex", text=text)
+        _touch(ws, "manuscript", "curation", "rounds", str(n), "caf\u00e9.tex", text=text)
+    provenance.sync(ws)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["changed"] == ["café.tex", 'sec"x.tex']
+
+
+def test_header_path_returns_none_for_an_unparseable_header():
+    assert service._header_path("garbage") is None
+    assert service._header_path('"a/unterminated') is None
 def test_progress_an_absent_log_is_a_reason_not_zeros(project):
     ws = _fresh(project)
     pr = _progress(project)

@@ -314,3 +314,10 @@ def test_the_progress_panel_with_no_log_says_so(client, project):
     _clean(project)
     panel = _progress(client.get("/runs/r1"))
     assert "no event log" in panel
+
+
+def test_the_progress_panel_does_not_cry_wolf_on_a_phase_marked_done_directly(client, project):
+    ws = _clean(project)
+    _ev(ws, "phase.done", "2026-10-03T10:00:00.000+00:00", phase="search", iteration=1)
+    panel = _progress(client.get("/runs/r1"))
+    assert "search" in panel and "incomplete" not in panel

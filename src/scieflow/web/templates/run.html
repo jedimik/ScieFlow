@@ -121,6 +121,7 @@
     {% if pg.gates.longest %}<p>Longest wait on a human: {{ pg.gates.longest.text }} ({{ pg.gates.longest.kind }} gate).</p>{% endif %}
     {% for w in pg.gates.waiting %}<p>A {{ w.kind }} gate is still waiting for an answer (opened {{ w.since }}).</p>{% endfor %}
     <p class="dim">{{ pg.iterations }} iteration{{ "" if pg.iterations == 1 else "s" }} advanced, {{ pg.checkpoints }} checkpoint{{ "" if pg.checkpoints == 1 else "s" }}. Times are UTC as recorded.</p>
+    {% if pg.warnings %}<p class="dim">{{ pg.warnings|join("; ") }}.</p>{% endif %}
     {% if not pg.complete %}<p class="dim">The event log is incomplete: {{ pg.notes|join("; ") }}.</p>{% endif %}
   {% endif %}
   </div>
