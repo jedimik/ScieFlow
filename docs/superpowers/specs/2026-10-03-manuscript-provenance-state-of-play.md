@@ -2,7 +2,7 @@
 
 **Written:** 2026-10-03, retroactively, from the implementation as it stands rather than from intent.
 **Status:** programme item D is feature-complete and unmerged. Verified, not remembered: suite
-`1577 passed / 5 skipped / 6 deselected` on `dev/d-manuscript-provenance` at `a8ac710`.
+`1587 passed / 5 skipped / 6 deselected` on `dev/d-manuscript-provenance`.
 **Supersedes nothing.** The design record is
 [`2026-09-27-manuscript-provenance-design.md`](2026-09-27-manuscript-provenance-design.md),
 which stays a dated record of what was *designed*; this document records what was *built*.
@@ -31,7 +31,7 @@ looks.
 | B | the run explorer | not started |
 | E | container sandbox backend (macOS, native Windows) | not started |
 
-`main` is at `9b1c497`. The branch is 21 commits ahead, tree clean.
+`main` is at `9b1c497`. The branch is 24 commits ahead, tree clean.
 
 ### What item D ships
 
@@ -75,6 +75,13 @@ main                          draft/<agent>
 **`src/scieflow/core/service.py`** (+77) — `manuscript_history(project, slug) -> dict` and
 `manuscript_diff(project, slug, a, b) -> dict`, plus a guarded `provenance.sync` after a
 successful merge round.
+
+**`src/scieflow/core/sandbox.py`** — the mask: an agent dispatch's run grant gets a `--tmpfs` over
+`provenance.git` (`masks_for`), so the agent cannot write the object store.
+
+**`src/scieflow/core/jobs.py`** — `jobs.start` passes `mask=` through to `sandbox.wrap`.
+
+**`scripts/sflib/archive.py`** — `provenance.git` joins the archive's rebuildable skip set.
 
 **`src/scieflow/core/events.py`** (+2 members) — `provenance.synced` and `provenance.skipped`
 join the closed `TYPES` frozenset.
@@ -148,7 +155,8 @@ load-bearing: changing it breaks something a test pins.
   `sync`, the deliberate `except Exception` guards around event emission are not an exception to
   this: they swallow a best-effort side effect so it cannot fail a round, and nothing escapes.
 - **Blobs are hashed by path, so encoding does not matter.** `_blob_file` uses
-  `hash-object --no-filters`, byte-exact. A latin-1 or UTF-16 `.tex` is ordinary in LaTeX work;
+  `hash-object --no-filters`, byte-exact, and never inspects content — which is also why a binary
+  payload under a text extension is committed (see "No binary *source path*" below). A latin-1 or UTF-16 `.tex` is ordinary in LaTeX work;
   the earlier decode-based projection dropped such files from history silently.
 
 ### Injection boundaries
@@ -173,10 +181,15 @@ load-bearing: changing it breaks something a test pins.
 
 ### Properties that fall out of the design
 
-- **The repo is text-only by construction.** Every source in the layout is matched by an explicit
-  text pattern (`*.tex`, `*.json`, named `.md`/`.yml`). No binary can enter, so a planned
-  "binary diffs without dumping bytes" test was replaced by the stronger guarantee: an
-  undecodable file in a round directory is never committed, and therefore cannot reach a diff.
+- **No binary *source path* is projected, but a binary *payload* can be.** Every source in the
+  layout is matched by an explicit text pattern (`*.tex`, `*.json`, named `.md`/`.yml`), so a
+  `figure.pdf` is never globbed and never enters. The patterns constrain the *extension* only:
+  `_blob_file` hashes by path and never inspects content, so a `fig.tex` holding PNG bytes **is**
+  committed, byte-exact, and **does** reach `diff()`. That is deliberate — hashing by path is what
+  stops a latin-1 or UTF-16 `.tex` being silently dropped from history
+  (`test_a_non_utf8_source_is_committed_byte_exact` pins it). Reaching `diff()` is safe without a
+  content check: git itself emits `Binary files … differ` for such a blob, and `diff` runs with
+  `errors="replace"` for non-UTF-8 text.
 - **Rounds are preserved as *paths*, not commit boundaries.** Because history lives in the tree
   structure (`main:merge_2`) rather than the commit graph, a missed or coalesced sync costs a
   commit boundary and never content. This is what makes best-effort committing the right trade
@@ -186,7 +199,7 @@ load-bearing: changing it breaks something a test pins.
 - **A sync failure never fails a round.** The round happened and cost budget. The call is guarded
   and records a closed-vocabulary event.
 
-### Two facts the design got wrong, now corrected in place
+### Three facts the design got wrong, now corrected in place
 
 - **`curation.yml` attaches only to the *highest* round at sync time.** There is one live
   `manuscript/curation/document.yml`, so a per-round snapshot is impossible. A person hand-running
@@ -232,7 +245,10 @@ load-bearing: changing it breaks something a test pins.
 1. **`provenance.git` is excluded from workspace archives.** It is derived by design, so it
    belongs in the archive's rebuildable skip set. Leaving it in let a derived artifact silently
    grow a push's file count toward the rule-15 consent threshold; a pulled run regenerates its
-   history on the next `sync`.
+   history on the next `sync`. The same change has a destructive local side: `extract_zip(force=True)`
+   renames the old run directory aside and `rmtree`s it, so `dvc_sync.py pull --force` now **deletes**
+   a local `provenance.git` the archive no longer carries. Content is rebuilt by the next `sync`;
+   commit boundaries are not.
 2. **The temporary handoff scaffolding is deleted before merge.** The rulings worth keeping are
    distilled into this document; the duplicate process record is not kept.
 3. **Item E is live scope, not dormant.** The deferral in the A1 design ("when those machines are
@@ -262,12 +278,12 @@ load-bearing: changing it breaks something a test pins.
 
 ### To land item D
 
-1. Exclude `provenance.git` from workspace archives (decision 1).
-2. Remove the temporary handoff scaffolding (decision 2). It is **28 files and 7,733 lines** —
+1. ~~Exclude `provenance.git` from workspace archives (decision 1).~~ **Done.**
+2. **Done.** Remove the temporary handoff scaffolding (decision 2). It is **28 files and 7,733 lines** —
    two thirds of the branch's 11,527 insertions, committed by `a8ac710`, whose own message calls
    it temporary. Production code, tests and documentation are the other ~3,794 lines. The live
    ledger at `.superpowers/sdd/` is correctly gitignored and untracked.
-3. Narrow the sandbox writable grant — **blocked on the open decision above**.
+3. ~~Narrow the sandbox writable grant~~ — **done** (decision 5; `provenance.git` masked per agent dispatch).
 4. **Final whole-branch review** over `git merge-base main HEAD`..`HEAD`, on the most capable
    model, pointed explicitly at the ledger's deferred minors. Budget one fix wave plus one scoped
    re-review.

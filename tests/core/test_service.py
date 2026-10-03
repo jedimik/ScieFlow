@@ -762,3 +762,23 @@ def test_manuscript_diff_translates_a_provenance_error(project, monkeypatch):
 def test_manuscript_history_refuses_an_unknown_run(project):
     with pytest.raises(service.ServiceError):
         service.manuscript_history(project, "nope")
+
+
+def test_manuscript_history_keeps_readable_points_when_sync_fails(project, monkeypatch):
+    """A transient sync failure (a lock race, a rebuild in flight) must not
+    blank history the repo already holds. Falsify by putting `sync` and
+    `points` back under one `try`: the view then reports no points."""
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    d = ws / "manuscript" / "curation" / "rounds" / "1"
+    d.mkdir(parents=True)
+    (d / "results.tex").write_text("merged\n")
+    service.manuscript_history(project, "r1")      # a real repo with a real point
+
+    def boom(ws):
+        raise provenance.ProvenanceError("update-ref: cannot lock ref")
+
+    monkeypatch.setattr(service.provenance, "sync", boom)
+    view = service.manuscript_history(project, "r1")
+    assert "main:merge_1" in [p["ref"] for p in view["points"]]

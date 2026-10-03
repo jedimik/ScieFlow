@@ -561,7 +561,14 @@ def merge_round(project: Project, slug: str) -> dict:
         try:
             provenance.sync(ws)
         except provenance.ProvenanceError as exc:
-            events.emit(ws, "provenance.skipped", "system", why=str(exc))
+            # Best-effort like the sync itself: an unwritable event log must not
+            # fail a round that already happened. Note `provenance.skipped` has
+            # two payload shapes: `sync` emits `agents=`/`artifacts=`, this
+            # emits `why=` — a consumer must handle both.
+            try:
+                events.emit(ws, "provenance.skipped", "system", why=str(exc))
+            except Exception:
+                pass
         return {"round": advanced, "turn": turn}
     return {"round": rendered["round"], "turn": turn}
 
@@ -591,8 +598,13 @@ def manuscript_history(project: Project, slug: str) -> dict:
         return {"available": False, "points": [],
                 "reason": "git is not installed, so this run has no manuscript history; "
                           "the drafts and rounds above are unaffected"}
+    # A failed sync must not hide history the repo already holds: a transient
+    # failure (a ref-lock race, a rebuild in flight) leaves readable points.
     try:
         provenance.sync(ws)
+    except provenance.ProvenanceError:
+        pass
+    try:
         points = provenance.points(ws)
     except provenance.ProvenanceError as exc:
         return {"available": True, "points": [], "reason": f"no history yet: {exc}"}

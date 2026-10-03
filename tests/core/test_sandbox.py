@@ -526,3 +526,24 @@ def test_an_agent_grant_masks_exactly_the_runs_provenance_repo(tmp_path):
     writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
     assert sandbox.masks_for(writable, run_dir=run) == [run.resolve() / "provenance.git"]
     assert sandbox.masks_for(writable, run_dir=None) == []
+
+
+def test_jobs_start_passes_the_mask_through_to_wrap(monkeypatch, tmp_path):
+    """Pinned without bwrap: the real-bwrap tests above skip on a host without
+    it, and a dropped `mask=` would fail open. Falsify by removing `mask=` from
+    the `sandbox.wrap` call in `jobs.start`."""
+    from scieflow.core import jobs
+    project = make_project(tmp_path)
+    run = project.run_dir("r1")
+    seen = {}
+
+    def fake_wrap(argv, **kw):
+        seen.update(kw)
+        return ["/bin/true"]
+
+    monkeypatch.setattr(sandbox, "wrap", fake_wrap)
+    writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
+    _, proc = jobs.start(project, ["agent"], kind="agent", cwd=run, run_dir=run,
+                         sandbox_writable=writable)
+    proc.wait()
+    assert seen["mask"] == [run.resolve() / "provenance.git"]
