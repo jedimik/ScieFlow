@@ -109,6 +109,24 @@ def test_the_dashboard_page_never_reads_events_or_jobs(many_runs, counted, clien
         assert not [k for k in reads if k[0] == slug and "jobs" in k[1]], slug
 
 
+def test_the_dashboard_page_costs_three_reads_per_run_plus_its_gates(many_runs, counted, client):
+    """The page's whole per-run cost: the three small files once each, plus
+    the open-gates scan, which must read each run's gate files and nothing
+    else. A second status.yml/config.yml read means the run list is being
+    rebuilt (open_gates calling list_runs) instead of reusing the one in hand."""
+    reads, listings = counted
+    client.get("/")
+    gate_files = {s: [k for k in reads if k[0] == s and k[1].startswith("gates/")]
+                  for s in ("r1", *SLUGS)}
+    assert len(gate_files["r1"]) == 1 and not gate_files["r2"] and not gate_files["r3"]
+    for slug in ("r1", *SLUGS):
+        small = {k[1]: n for k, n in reads.items()
+                 if k[0] == slug and not k[1].startswith("gates/")}
+        assert small == {"status.yml": 1, "config.yml": 1, "budget.yml": 1}, slug
+        assert all(n == 1 for k, n in reads.items() if k[0] == slug), slug
+        assert {k[1] for k in listings if k[0] == slug} <= {"gates"}, slug
+
+
 def test_the_dashboard_still_shows_budget_left(many_runs, client):
     body = client.get("/").text
     assert "iterations 100%" in body

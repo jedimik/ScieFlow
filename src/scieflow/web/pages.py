@@ -53,7 +53,7 @@ def dashboard(request: Request) -> HTMLResponse:
     return TEMPLATES.TemplateResponse(request, "dashboard.html", {
         "runs": runs,
         "detail": detail,
-        "gates": service.open_gates(project),
+        "gates": service.open_gates(project, slugs=[run["slug"] for run in runs]),
         "csrf": auth.csrf_token(request),
     })
 

@@ -664,8 +664,15 @@ def manuscript_diff(project: Project, slug: str, a: str, b: str) -> dict:
         raise ServiceError(str(exc)) from exc
 
 
-def open_gates(project: Project, slug: str | None = None) -> list[dict]:
-    slugs = [slug] if slug else [r["slug"] for r in list_runs(project)]
+def open_gates(project: Project, slug: str | None = None, *,
+               slugs: list[str] | None = None) -> list[dict]:
+    """Open gates for one run (`slug`), for the given `slugs`, or for every
+    run. A caller that already holds the run list passes `slugs` so this does
+    not re-read every run's status.yml and config.yml to rebuild it."""
+    if slug:
+        slugs = [slug]
+    elif slugs is None:
+        slugs = [r["slug"] for r in list_runs(project)]
     out = []
     for name in slugs:
         ws = _ws(project, name)
