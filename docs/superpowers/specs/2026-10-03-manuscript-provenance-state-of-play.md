@@ -2,7 +2,7 @@
 
 **Written:** 2026-10-03, retroactively, from the implementation as it stands rather than from intent.
 **Status:** programme item D is feature-complete and unmerged. Verified, not remembered: suite
-`1587 passed / 5 skipped / 6 deselected` on `dev/d-manuscript-provenance`.
+`1590 passed / 5 skipped / 6 deselected` at `5302829` on `dev/d-manuscript-provenance`.
 **Supersedes nothing.** The design record is
 [`2026-09-27-manuscript-provenance-design.md`](2026-09-27-manuscript-provenance-design.md),
 which stays a dated record of what was *designed*; this document records what was *built*.
@@ -31,7 +31,8 @@ looks.
 | B | the run explorer | not started |
 | E | container sandbox backend (macOS, native Windows) | not started |
 
-`main` is at `9b1c497`. The branch is 24 commits ahead, tree clean.
+The branch forked from `main` at `9b1c497`, tree clean. A commit count is deliberately not quoted
+here: every later commit invalidates it, as two revisions of this line already demonstrated.
 
 ### What item D ships
 
@@ -72,7 +73,7 @@ main                          draft/<agent>
     response.md                   response-<author>.md
 ```
 
-**`src/scieflow/core/service.py`** (+77) — `manuscript_history(project, slug) -> dict` and
+**`src/scieflow/core/service.py`** (+91) — `manuscript_history(project, slug) -> dict` and
 `manuscript_diff(project, slug, a, b) -> dict`, plus a guarded `provenance.sync` after a
 successful merge round.
 
