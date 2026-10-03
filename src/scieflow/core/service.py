@@ -8,11 +8,16 @@ for anything a caller should show the user.
 from __future__ import annotations
 
 import hashlib
+import logging
+import re
 import shutil
 import tempfile
 import threading
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
+
+import yaml
 
 from scieflow.core import (
     agent_config,
@@ -87,6 +92,31 @@ def job_json(job: jobs.Job) -> dict:
 
 def list_runs(project: Project) -> list[dict]:
     return [asdict(r) for r in workspace.list_runs(project.root)]
+
+
+def list_runs_with_budget(project: Project) -> list[dict]:
+    """`list_runs`, each run also carrying `remaining`: the budget fraction
+    left per dimension, or None when the run has no readable budget.
+
+    The run list's whole read cost: `describe` reads `status.yml` and
+    `config.yml` (and already carries `stopped_reason`), and this adds one
+    small read of `budget.yml`. No event log, gate, proposal preview or job
+    listing — that is `run_detail`, for one run's page. Pinned by
+    tests/web/test_dashboard_reads.py.
+    """
+    out = []
+    for run in workspace.list_runs(project.root):
+        try:
+            b = budget.read_budget(_ws(project, run.slug))
+            remaining = budget.remaining_fraction(b) if b else None
+        except (ServiceError, OSError, yaml.YAMLError, ValueError, KeyError, TypeError,
+                AttributeError):
+            # A damaged budget, or a run directory that vanished since it was
+            # listed (a `dvc_sync pull --force` swaps directories), must not
+            # take the list down: still listed, budget unreadable.
+            remaining = None
+        out.append({**asdict(run), "remaining": remaining})
+    return out
 
 
 def run_detail(project: Project, slug: str) -> dict:
@@ -640,11 +670,27 @@ def manuscript_diff(project: Project, slug: str, a: str, b: str) -> dict:
         raise ServiceError(str(exc)) from exc
 
 
-def open_gates(project: Project, slug: str | None = None) -> list[dict]:
-    slugs = [slug] if slug else [r["slug"] for r in list_runs(project)]
+def open_gates(project: Project, slug: str | None = None, *,
+               slugs: list[str] | None = None) -> list[dict]:
+    """Open gates for one run (`slug`), for the given `slugs`, or for every
+    run. A caller that already holds the run list passes `slugs` so this does
+    not re-read every run's status.yml and config.yml to rebuild it.
+
+    `slugs` is a trusted, already-listed set: an unknown name in it is skipped,
+    so `slugs=["typo"]` returns `[]` rather than raising. When both `slug` and
+    `slugs` are passed, `slug` wins and `slugs` is ignored."""
+    if slug:
+        slugs = [slug]
+    elif slugs is None:
+        slugs = [r["slug"] for r in list_runs(project)]
     out = []
     for name in slugs:
-        ws = _ws(project, name)
+        try:
+            ws = _ws(project, name)
+        except ServiceError:
+            if slug:
+                raise          # asked for one run by name: say it does not exist
+            continue           # listed a moment ago, gone now: it has no open gates
         for g in _with_proposal_preview(ws, gates.list_gates(ws, "open")):
             out.append({**g, "slug": name})
     return out
@@ -1369,3 +1415,457 @@ def preview_busy(project: Project, slug: str) -> bool:
     jobs.reconcile(project, ws)
     return any(j.kind == "preview" and j.state == "running"
               for j in jobs.list_jobs(project, ws))
+
+
+def _listing(directory: Path) -> tuple[str, list[str]]:
+    """`(state, entries)` for a directory: `absent`, `empty`, `present` or
+    `unreadable`. Absent and empty are different facts — a run before the
+    phase that creates the directory has not failed, a run whose directory is
+    empty has started and produced nothing — so callers get both."""
+    try:
+        if not directory.is_dir():
+            return "absent", []
+        entries = sorted(p.name for p in directory.iterdir())
+    except (OSError, RuntimeError):
+        return "unreadable", []
+    return ("present" if entries else "empty"), entries
+
+
+def _numbered(entries: list[str], prefix: str) -> list[int]:
+    return sorted(int(e[len(prefix):]) for e in entries
+                  if e.startswith(prefix) and e[len(prefix):].isascii()
+                  and e[len(prefix):].isdigit())
+
+
+def _inventory(ws: Path) -> dict:
+    """Panel 1: what exists on disk, from the run's own artifacts. Every name
+    in it is agent-chosen and therefore untrusted text."""
+    def names(sub: str, noun: str) -> dict:
+        state, entries = _listing(ws / sub)
+        stems = sorted(e[:-5] for e in entries
+                       if e.endswith(".json") and (ws / sub / e).is_file())
+        if state == "present" and not stems:
+            state = "empty"
+        reason = {"absent": f"no {sub}/ directory yet — no agent has written {noun}",
+                  "empty": f"{sub}/ exists but holds no {noun} yet",
+                  "unreadable": f"{sub}/ could not be read"}.get(state, "")
+        return {"state": state, "names": stems, "reason": reason}
+
+    out: dict = {"reason": "", "findings": names("findings", "findings"),
+                 "gaps": names("gaps", "gaps")}
+
+    state, _ = _listing(ws / drafts.DRAFTS_DIR)
+    agents = drafts.agents(ws) if state in ("present", "empty") else []
+    if state == "present" and not agents:
+        state = "empty"
+    grid = []
+    for agent in agents:
+        try:
+            grid.append({"agent": agent, "sections": drafts.sections(ws, agent)})
+        except drafts.DraftError:
+            continue                       # vanished or became unsafe mid-read
+    out["drafts"] = {
+        "state": state, "agents": grid,
+        "sections": sorted({s for row in grid for s in row["sections"]}),
+        "reason": {"absent": "no drafts yet — manuscript/drafts/ appears when "
+                             "paper-draft Phase 3 starts",
+                   "empty": "manuscript/drafts/ exists but no agent has drafted into it yet",
+                   "unreadable": "manuscript/drafts/ could not be read"}.get(state, "")}
+
+    state, _ = _listing(ws / drafts.ROUNDS_DIR)
+    numbers = drafts.rounds(ws) if state in ("present", "empty") else []
+    if state == "present" and not numbers:
+        state = "empty"
+    merges = []
+    for n in numbers:
+        try:
+            merges.append({"n": n, "sections": drafts.round_sections(ws, n)})
+        except drafts.DraftError:
+            continue
+    out["merge"] = {
+        "state": state, "rounds": merges,
+        "reason": {"absent": "no merge round yet — manuscript/curation/rounds/ appears "
+                             "at the first merge",
+                   "empty": "manuscript/curation/rounds/ exists but no merge round has completed",
+                   "unreadable": "manuscript/curation/rounds/ could not be read"}.get(state, "")}
+
+    state, entries = _listing(ws / "review")
+    reviews = ([{"n": n, "kind": "cross-review"} for n in _numbered(entries, "draft-round-")]
+               + [{"n": n, "kind": "review"} for n in _numbered(entries, "round-")])
+    if state == "present" and not reviews:
+        state = "empty"
+    out["review"] = {
+        "state": state, "rounds": reviews,
+        "reason": {"absent": "no review round yet — review/ appears when drafts are "
+                             "cross-reviewed",
+                   "empty": "review/ exists but holds no review round",
+                   "unreadable": "review/ could not be read"}.get(state, "")}
+    return out
+
+
+def _panel(name: str, builder, ws: Path) -> dict:
+    """Run one panel's builder; an unexpected exception becomes that panel's
+    `reason` and nothing else. Isolation lives here, so a panel added later
+    cannot forget it — `run_overview` never calls a builder directly (a test
+    walks its AST and fails if it does).
+
+    The reason names the exception class (a bare `KeyError('x')` would render
+    as `'x'`), and the traceback is logged, because nothing else reports a
+    bug swallowed here: this repo runs no CI over the suite."""
+    try:
+        return builder(ws)
+    except Exception as exc:  # noqa: BLE001 - the contract is "never raises"
+        logging.getLogger(__name__).exception("overview panel %s failed", name)
+        return {"reason": f"this panel could not be built: {type(exc).__name__}: {exc}"}
+
+
+_ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11, "\\": 92, '"': 34}
+
+
+def _header_path(rest: str) -> str | None:
+    """The file path from a `diff --git a/<p> b/<p>` header (after the prefix).
+    Both sides name the same path (no renames between two trees), and git
+    quotes it C-style - `"a/x\\".tex"`, octal bytes for non-ASCII - when it
+    holds unusual characters; that form is decoded here. Returns None for a
+    header that cannot be parsed, so the caller shows nothing for it rather
+    than raw header text."""
+    if rest.startswith('"'):
+        out = bytearray()
+        i = 1
+        while i < len(rest) and rest[i] != '"':
+            ch = rest[i]
+            if ch != "\\":
+                out += ch.encode()
+                i += 1
+            elif rest[i + 1:i + 2] in _ESCAPES:
+                out.append(_ESCAPES[rest[i + 1]])
+                i += 2
+            elif (len(rest[i + 1:i + 4]) == 3
+                  and all(c in "01234567" for c in rest[i + 1:i + 4])):
+                out.append(int(rest[i + 1:i + 4], 8) & 0xFF)
+                i += 4
+            else:
+                return None
+        if i >= len(rest):
+            return None
+        path = out.decode("utf-8", errors="replace")
+    else:
+        half = (len(rest) - 1) // 2
+        if not rest[:half].startswith("a/") or rest[half:half + 1] != " ":
+            return None
+        path = rest[:half]
+    return path[2:] if path.startswith("a/") else None
+
+
+def _manuscript(ws: Path) -> dict:
+    """Panel 2: where the manuscript stands, from `provenance.points` only.
+
+    NEVER `provenance.sync` (nor `ensure_repo`, which creates): the drafts page
+    syncs on every GET at ~0.8s of git subprocesses even when nothing changed,
+    and `points()` alone is ~0.06s. So a repo that does not exist yet is
+    reported, not built. Disk is read only for the section lists (cheap, no git).
+
+    `state` is one of `no_git`, `no_repo`, `no_points`, `no_merge`, `ok`, and
+    `reason` is the sentence for every state but `ok`.
+    """
+    def out(state: str, reason: str = "", **more) -> dict:
+        return {"state": state, "reason": reason, "round": None, "present": [],
+                "drafted": [], "missing": [], "changed": None, "changed_note": "",
+                "compared": [], "behind": None, **more}
+
+    if not provenance.available():
+        return out("no_git", "git is not installed, so there is no manuscript history "
+                             "for this run; the drafts and rounds are unaffected")
+    if not provenance.repo_path(ws).is_dir():
+        return out("no_repo", "manuscript history has not been recorded yet — it appears "
+                              "after the first merge round or workbench visit")
+    points = provenance.points(ws)
+    if not points:
+        return out("no_points", "the history repository exists but holds no points yet — "
+                                "history appears after the first merge round or workbench visit")
+    merges = sorted(((int(m.group(1)), p["ref"]) for p in points
+                     if p.get("kind") == "merge" and "parent" not in p
+                     and (m := re.fullmatch(r"main:merge_(\d+)", p.get("ref", "")))),
+                    reverse=True)
+    if not merges:
+        return out("no_merge", "history holds drafts but no merge round yet")
+
+    n, ref = merges[0]
+    try:
+        present = drafts.round_sections(ws, n)
+    except drafts.DraftError:
+        present = []
+    drafted: set[str] = set()
+    for agent in drafts.agents(ws):
+        try:
+            drafted.update(drafts.sections(ws, agent))
+        except drafts.DraftError:
+            continue
+    on_disk = drafts.rounds(ws)
+    result = out("ok", round=n, present=present, drafted=sorted(drafted),
+                 missing=sorted(drafted - set(present)),
+                 behind=on_disk[-1] if on_disk and on_disk[-1] > n else None)
+
+    if len(merges) < 2:
+        result["changed_note"] = "first merge round — nothing earlier to compare with"
+        return result
+    prev_ref = merges[1][1]
+    result["compared"] = [ref, prev_ref]
+    try:
+        # NOTE: newest first - the reverse of the repo's own (old, new) convention
+        # (see tests/core/test_provenance.py). Harmless here, only the header
+        # names are used; do not reuse this patch's text, it reads backwards.
+        patch = provenance.diff(ws, ref, prev_ref)
+    except provenance.ProvenanceError:
+        result["changed_note"] = "the last two merge rounds could not be compared"
+        return result
+    # Headers read `diff --git a/<path> b/<path>`; git quotes unusual names.
+    names = []
+    dropped = False
+    for line in patch["text"].splitlines():
+        if line.startswith("diff --git "):
+            name = _header_path(line[len("diff --git "):])
+            if name is not None:
+                names.append(name)
+            else:
+                dropped = True
+    result["changed"] = sorted({n.removeprefix("sections/") for n in names})
+    if patch["truncated"]:
+        result["changed_note"] = "the diff was truncated, so this list may be incomplete"
+    elif dropped:
+        result["changed_note"] = "a changed file's name could not be read, so this list is incomplete"
+    return result
+
+
+def _attribution(ws: Path) -> dict:
+    """Panel 3: who contributed what, from the current curation document.
+
+    A `mine` block is the researcher's own words and carries no agent and no
+    section, so per-agent counts cannot sum to the document. `mine` is counted
+    and returned explicitly; dropping it would understate how much of the paper
+    the researcher wrote. Agent and section names are agent-chosen text.
+    """
+    try:
+        doc = curation.read(ws)
+    except (curation.CurationError, yaml.YAMLError, OSError, ValueError) as exc:
+        return {"reason": f"the curation document could not be read: {type(exc).__name__}"}
+    blocks = [b for b in doc["blocks"] if isinstance(b, dict)]
+    out = {"reason": "", "round": doc["round"], "total": len(blocks), "kept": 0,
+           "mine": 0, "other": 0, "agents": []}
+    if not blocks:
+        out["reason"] = "nothing curated yet — no passage has been kept and none of your own added"
+        return out
+    try:
+        drafted = set(drafts.agents(ws))
+    except OSError:
+        drafted = set()
+    per: dict[str, dict[str, int]] = {}
+    for block in blocks:
+        kind = block.get("kind")
+        if kind == "mine":
+            out["mine"] += 1
+        elif kind == "kept":
+            out["kept"] += 1
+            sections = per.setdefault(str(block.get("agent") or "(unrecorded)"), {})
+            name = str(block.get("section") or "(unrecorded)")
+            sections[name] = sections.get(name, 0) + 1
+        else:
+            out["other"] += 1
+    out["agents"] = [{"agent": agent, "count": sum(secs.values()), "drafted": agent in drafted,
+                      "sections": [{"section": s, "count": n} for s, n in sorted(secs.items())]}
+                     for agent, secs in sorted(per.items())]
+    return out
+
+
+def _parse_ts(raw) -> datetime | None:
+    try:
+        return datetime.fromisoformat(raw) if isinstance(raw, str) else None
+    except ValueError:
+        return None
+
+
+def _utc_text(raw, when: datetime | None) -> str:
+    """A log stamp as text. Aware stamps are converted to UTC and labelled so;
+    a stamp with no zone is shown as written and said to have none, because
+    this code cannot know what zone it was in."""
+    if when is None:
+        return f"{raw} (unreadable time)"
+    if when.tzinfo is None:
+        return f"{when:%Y-%m-%d %H:%M:%S} (time zone not recorded)"
+    return f"{when.astimezone(timezone.utc):%Y-%m-%d %H:%M:%S} UTC"
+
+
+def _span_text(seconds: float) -> str:
+    seconds = int(round(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+
+def _progress(ws: Path) -> dict:
+    """Panel 4: spend and waiting over time, from `events.read` alone.
+
+    Adds no event type (`events.TYPES` is closed). The only panel that reads
+    the whole log - fine for one run, which is why ticket 17 took that read off
+    the list page.
+
+    Spend is attributed to the phase open when `budget.recorded` was appended
+    (file order, which is what the log records; timestamps are only used for
+    durations). A duration is only ever `end - start` of two events that both
+    exist, clamped at 0 when the clock disagrees; a gate with no `gate.answered`
+    is listed as still waiting and never timed against now.
+    """
+    log = ws / events.EVENTS_FILE
+    out: dict = {"reason": "", "complete": True, "notes": [], "warnings": [], "phases": [],
+                 "outside_phase": {}, "gates": {"longest": None, "waiting": []},
+                 "checkpoints": 0, "iterations": 0}
+    if not log.is_file():
+        out["reason"] = "no event log yet — nothing has been recorded for this run"
+        return out
+    raw_lines = sum(1 for line in log.read_text(errors="replace").splitlines() if line.strip())
+    evs = [e for e in events.read(ws) if isinstance(e, dict)]
+    if not evs and not raw_lines:
+        out["reason"] = "no event log yet — nothing has been recorded for this run"
+        return out
+
+    notes: list[str] = []
+    if raw_lines > len(evs):
+        notes.append(f"{raw_lines - len(evs)} log line(s) were unreadable and skipped")
+    skew = bad_ts = 0
+    seen_ids: set = set()
+    rows: dict[str, dict] = {}
+    opened_phase: dict[tuple, datetime | None] = {}
+    current: str | None = None
+    gate_open: dict[str, tuple[str, datetime | None, str]] = {}
+    gate_done: set = set()
+    answered: list[dict] = []
+    bad_spend = orphans = 0
+
+    def row(name: str) -> dict:
+        return rows.setdefault(name, {"phase": name, "runs": 0, "seconds": None,
+                                      "running": False, "failed": 0, "spend": {}})
+
+    def span(start, end) -> float | None:
+        nonlocal skew
+        if start is None or end is None or (start.tzinfo is None) != (end.tzinfo is None):
+            return None
+        delta = (end - start).total_seconds()
+        if delta < 0:
+            skew += 1
+            return 0.0
+        return delta
+
+    for ev in evs:
+        eid = ev.get("id")
+        if eid is not None:
+            if eid in seen_ids:
+                continue
+            seen_ids.add(eid)
+        kind = ev.get("type")
+        data = ev.get("data") if isinstance(ev.get("data"), dict) else {}
+        when = _parse_ts(ev.get("ts"))
+        if when is None:
+            bad_ts += 1
+        if kind in ("phase.pending", "phase.started", "phase.done", "phase.failed"):
+            name = str(data.get("phase", "(unnamed)"))
+            key = (name, data.get("iteration"))
+            r = row(name)
+            if kind == "phase.started":
+                r["runs"] += 1
+                opened_phase[key] = when
+                current = name
+            elif kind in ("phase.done", "phase.failed"):
+                if kind == "phase.failed":
+                    r["failed"] += 1
+                if key in opened_phase:
+                    d = span(opened_phase.pop(key), when)
+                    if d is not None:
+                        r["seconds"] = (r["seconds"] or 0) + d
+                else:
+                    # Marked done straight from pending: a supported path, not
+                    # a damaged log. Zero duration, no note.
+                    r["seconds"] = r["seconds"] or 0
+                if current == name:
+                    current = None
+        elif kind == "budget.recorded":
+            target = row(current)["spend"] if current else out["outside_phase"]
+            for dim, amount in data.items():
+                if isinstance(amount, (int, float)) and not isinstance(amount, bool) and amount >= 0:
+                    target[dim] = target.get(dim, 0) + amount
+                else:
+                    bad_spend += 1
+        elif kind == "gate.opened":
+            gid = str(data.get("gate"))
+            gate_open.setdefault(gid, (str(data.get("kind", "")), when, ev.get("ts")))
+        elif kind in ("gate.answered", "gate.withdrawn"):
+            gid = str(data.get("gate"))
+            if gid in gate_done:
+                continue
+            if gid not in gate_open:
+                orphans += 1
+                continue
+            gate_done.add(gid)
+            if kind == "gate.answered":
+                gkind, start, _ = gate_open[gid]
+                d = span(start, when)
+                if d is not None:
+                    answered.append({"gate": gid, "kind": gkind, "seconds": d,
+                                     "text": _span_text(d)})
+        elif kind == "checkpoint":
+            out["checkpoints"] += 1
+        elif kind == "iteration.advanced":
+            out["iterations"] += 1
+
+    for name, r in rows.items():
+        r["running"] = any(k[0] == name for k in opened_phase)
+        r["text"] = _span_text(r["seconds"]) if r["seconds"] is not None else ""
+    out["phases"] = list(rows.values())
+    if answered:
+        out["gates"]["longest"] = max(answered, key=lambda g: g["seconds"])
+    out["gates"]["waiting"] = [
+        {"gate": gid, "kind": gkind, "since": _utc_text(raw, when)}
+        for gid, (gkind, when, raw) in gate_open.items() if gid not in gate_done]
+    if skew:
+        # A clock disagreeing is not a log that is missing lines: not `notes`.
+        out["warnings"].append(
+            f"{skew} interval(s) ended before they started (clock out of order), shown as 0s")
+    if bad_ts:
+        notes.append(f"{bad_ts} event(s) had an unreadable timestamp")
+    if orphans:
+        notes.append(f"{orphans} gate answer(s) with no matching opening in the log")
+    if bad_spend:
+        notes.append(f"{bad_spend} spend figure(s) were not numbers and were ignored")
+    out["notes"] = notes
+    out["complete"] = not notes
+    return out
+
+
+# Panel name -> builder(ws) -> dict.
+_PANELS = {"inventory": _inventory, "manuscript": _manuscript,
+           "attribution": _attribution, "progress": _progress}
+
+
+def run_overview(project: Project, slug: str) -> dict:
+    """What the run has produced, one entry per panel, each with its own
+    `reason`. The template renders a reason; it never branches on an error.
+
+    Never raises for an ordinary state: a fresh run, a run mid-phase, one with
+    drafts and no merge, and one with a directory that is absent, empty or
+    unreadable all come back as data. A panel that fails for an unexpected
+    reason degrades that panel alone (`reason` set, the rest intact), so
+    tickets 19-21 add their panels as further keys without one failure taking
+    the band down.
+
+    Read-only, and must never call `provenance.sync`: the drafts page does
+    that on every GET at ~0.8s of git subprocesses, and a second page must not
+    inherit the cost. A panel needing history uses `provenance.points` only.
+
+    Only a malformed or unknown `slug` raises `ServiceError`, via `_ws`.
+
+    Shape: `{"inventory": {"reason", "findings"|"gaps"|"drafts"|"merge"|
+    "review": {"state": absent|empty|present|unreadable, "reason", ...}}}`.
+    """
+    ws = _ws(project, slug)
+    return {name: _panel(name, _PANELS[name], ws) for name in _PANELS}

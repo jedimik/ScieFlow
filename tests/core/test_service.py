@@ -782,3 +782,631 @@ def test_manuscript_history_keeps_readable_points_when_sync_fails(project, monke
     monkeypatch.setattr(service.provenance, "sync", boom)
     view = service.manuscript_history(project, "r1")
     assert "main:merge_1" in [p["ref"] for p in view["points"]]
+
+
+# --- run_overview (panel 1: what exists on disk) ---------------------------
+
+def _touch(ws, *parts, text="x\n"):
+    path = ws.joinpath(*parts)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def test_run_overview_fresh_run_is_absent_everywhere_with_reasons(project):
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert inv["drafts"]["state"] == "absent"
+    assert "Phase 3" in inv["drafts"]["reason"]
+    assert inv["merge"]["state"] == "absent"
+    assert inv["review"]["state"] == "absent"
+    for key in ("findings", "gaps", "drafts", "merge", "review"):
+        assert inv[key]["reason"], key
+
+
+def test_run_overview_an_empty_directory_is_not_an_absent_one(project):
+    ws = project.run_dir("r1")
+    (ws / "manuscript" / "drafts").mkdir(parents=True)
+    (ws / "findings").mkdir()
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert inv["drafts"]["state"] == "empty"
+    assert inv["findings"]["state"] == "empty"
+    assert inv["gaps"]["state"] == "absent"
+    assert inv["drafts"]["reason"] != service.run_overview(
+        project, "r1")["inventory"]["gaps"]["reason"]
+
+
+def test_run_overview_mid_phase_uses_the_agents_the_run_wrote(project):
+    ws = project.run_dir("r1")
+    _touch(ws, "findings", "zed.json")
+    _touch(ws, "findings", "amy.json")
+    _touch(ws, "gaps", "amy.json")
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert inv["findings"] == {**inv["findings"], "state": "present",
+                               "names": ["amy", "zed"]}
+    assert inv["gaps"]["names"] == ["amy"]
+    assert inv["drafts"]["state"] == "absent"
+
+
+def test_run_overview_drafts_without_a_merge(project):
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _touch(ws, "manuscript", "drafts", "kim", "results.tex")
+    _touch(ws, "manuscript", "drafts", "lee", "intro.tex")
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert inv["drafts"]["state"] == "present"
+    assert inv["drafts"]["agents"] == [
+        {"agent": "kim", "sections": ["intro", "results"]},
+        {"agent": "lee", "sections": ["intro"]}]
+    assert inv["drafts"]["sections"] == ["intro", "results"]
+    assert inv["merge"]["state"] == "absent"
+
+
+def test_run_overview_a_complete_run(project):
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "2", "intro.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "10", "intro.tex")
+    _touch(ws, "review", "round-1", "review.md")
+    _touch(ws, "review", "draft-round-1", "kim-on-lee.json")
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert [r["n"] for r in inv["merge"]["rounds"]] == [2, 10]
+    assert inv["merge"]["rounds"][0]["sections"] == ["intro"]
+    assert {(r["kind"], r["n"]) for r in inv["review"]["rounds"]} == {
+        ("review", 1), ("cross-review", 1)}
+
+
+def test_run_overview_never_reaches_provenance_sync(project, monkeypatch):
+    """The seam ticket 19 wires provenance into. `sync` costs ~0.8s of git
+    subprocesses per call; only `points()` may ever be used here."""
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(a)
+        raise AssertionError("run_overview must not call provenance.sync")
+
+    ensure_calls = []
+    real_ensure = service.provenance.ensure_repo
+
+    def counted_ensure(*a, **k):
+        # `ensure_repo` WRITES (creates the repo) - on a read-only page.
+        ensure_calls.append(a)
+        return real_ensure(*a, **k)
+
+    monkeypatch.setattr(service.provenance, "sync", boom)
+    monkeypatch.setattr(service.provenance, "ensure_repo", counted_ensure)
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "1", "intro.tex")
+    service.run_overview(project, "r1")
+    assert ensure_calls == [], "run_overview must probe with repo_path, never ensure_repo"
+    # The counter carries the guard: a panel that swallows the raise with a
+    # broad `except Exception` (as _panel itself does) cannot hide the call.
+    assert calls == []
+
+
+def test_run_overview_sync_guard_survives_a_swallowed_raise(project, monkeypatch):
+    """A sync that silently returns must still be caught: count calls."""
+    calls = []
+    monkeypatch.setattr(service.provenance, "sync", lambda *a, **k: calls.append(a))
+    monkeypatch.setitem(service._PANELS, "sneaky",
+                        lambda ws: service.provenance.sync(ws) or {"reason": ""})
+    service.run_overview(project, "r1")
+    assert len(calls) == 1, "the counter must see a call that raised nothing"
+
+
+def test_run_overview_one_failing_panel_does_not_take_the_others_down(project, monkeypatch):
+    def boom(ws):
+        raise RuntimeError("panel two exploded")
+
+    monkeypatch.setitem(service._PANELS, "boom", boom)
+    _touch(project.run_dir("r1"), "manuscript", "drafts", "kim", "intro.tex")
+    view = service.run_overview(project, "r1")
+    assert "panel two exploded" in view["boom"]["reason"]
+    assert view["inventory"]["drafts"]["agents"][0]["agent"] == "kim"
+
+
+def test_run_overview_a_panel_failure_names_its_exception_class(project, monkeypatch, caplog):
+    def boom(ws):
+        return {}["x"]
+
+    monkeypatch.setitem(service._PANELS, "boom", boom)
+    with caplog.at_level("ERROR", logger=service.__name__):
+        view = service.run_overview(project, "r1")
+    assert "KeyError" in view["boom"]["reason"]
+    assert any("overview panel boom failed" in r.getMessage() and r.exc_info
+               for r in caplog.records), "the traceback must be logged"
+
+
+def test_run_overview_calls_nothing_but_ws_and_panel():
+    """A builder called directly from run_overview loses isolation, and a
+    direct call that fails only on some run states would pass every other
+    test and 500 the page. Check the call graph, not the output shape."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(service.run_overview))
+    called = [ast.unparse(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)]
+    assert sorted(set(called)) == ["_panel", "_ws"], called
+
+
+import os as _os
+
+_ROOT = hasattr(_os, "geteuid") and _os.geteuid() == 0
+
+
+@pytest.mark.skipif(_ROOT, reason="root ignores mode bits")
+@pytest.mark.parametrize("sub,key", [("findings", "findings"),
+                                     ("manuscript/drafts", "drafts")])
+def test_run_overview_an_unreadable_directory_is_its_own_state(project, sub, key):
+    ws = project.run_dir("r1")
+    _touch(ws, "findings", "amy.json")
+    target = ws / sub
+    target.mkdir(parents=True, exist_ok=True)
+    target.chmod(0)
+    try:
+        inv = service.run_overview(project, "r1")["inventory"]
+    finally:
+        target.chmod(0o755)
+    assert inv[key]["state"] == "unreadable"
+    assert "could not be read" in inv[key]["reason"]
+    assert inv["gaps"]["state"] == "absent"
+
+
+def test_run_overview_degrades_the_panel_on_an_unexpected_failure(project, monkeypatch):
+    def boom(ws):
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(service.drafts, "agents", boom)
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    inv = service.run_overview(project, "r1")["inventory"]
+    assert "disk went away" in inv["reason"]
+
+
+def test_run_overview_refuses_an_unknown_run(project):
+    with pytest.raises(service.ServiceError):
+        service.run_overview(project, "nope")
+
+
+# --- run_overview (panel 2: where the manuscript stands) -------------------
+
+def _two_merge_rounds(ws):
+    """Drafts by two agents in three sections; round 1 has one section, round 2
+    has two; round 2 changes results.tex and adds intro.tex."""
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _touch(ws, "manuscript", "drafts", "kim", "results.tex")
+    _touch(ws, "manuscript", "drafts", "lee", "methods.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "1", "results.tex", text="v1\n")
+    _touch(ws, "manuscript", "curation", "rounds", "2", "results.tex", text="v2\n")
+    _touch(ws, "manuscript", "curation", "rounds", "2", "intro.tex", text="new\n")
+
+
+def _synced(project):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _two_merge_rounds(ws)
+    provenance.sync(ws)                       # set-up only; the panel must not do this
+    return ws
+
+
+def test_manuscript_panel_reports_round_sections_and_changed_files(project):
+    _synced(project)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["state"] == "ok" and ms["reason"] == ""
+    assert ms["round"] == 2
+    assert ms["present"] == ["intro", "results"]
+    assert ms["drafted"] == ["intro", "methods", "results"]
+    assert ms["missing"] == ["methods"]
+    assert ms["changed"] == ["intro.tex", "results.tex"]
+    assert ms["compared"] == ["main:merge_2", "main:merge_1"]
+
+
+def test_manuscript_panel_one_round_has_nothing_to_compare(project):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "curation", "rounds", "1", "results.tex")
+    provenance.sync(ws)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["round"] == 1 and ms["changed"] is None
+    assert "first merge round" in ms["changed_note"]
+
+
+def test_manuscript_panel_never_syncs_even_with_history_present(project, monkeypatch):
+    """The panel this guard was built for. A counter, not a raise: `_panel`
+    swallows exceptions, so only a call count cannot be hidden."""
+    _synced(project)
+    calls = []
+    monkeypatch.setattr(service.provenance, "sync", lambda *a, **k: calls.append(a))
+    assert service.run_overview(project, "r1")["manuscript"]["state"] == "ok"
+    assert calls == []
+
+
+def test_manuscript_panel_never_creates_the_repo(project):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _two_merge_rounds(ws)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["state"] == "no_repo"
+    assert not provenance.repo_path(ws).exists(), "reading must not create history"
+
+
+def test_manuscript_panel_three_no_history_states_are_distinct(project, monkeypatch):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _two_merge_rounds(ws)
+    no_repo = service.run_overview(project, "r1")["manuscript"]
+
+    provenance.ensure_repo(ws)                 # a repo with no branches: artifacts, no points
+    no_points = service.run_overview(project, "r1")["manuscript"]
+
+    monkeypatch.setattr(provenance.shutil, "which", lambda name: None)
+    no_git = service.run_overview(project, "r1")["manuscript"]
+
+    assert (no_git["state"], no_repo["state"], no_points["state"]) == (
+        "no_git", "no_repo", "no_points")
+    assert len({no_git["reason"], no_repo["reason"], no_points["reason"]}) == 3
+    assert "git" in no_git["reason"] and "not installed" in no_git["reason"]
+    for ms in (no_repo, no_points):
+        assert "after the first merge round or workbench visit" in ms["reason"]
+    for ms in (no_git, no_repo, no_points):
+        low = ms["reason"].lower()
+        assert "create" not in low and "sync" not in low, "must not offer the 0.8s stall"
+        assert ms["round"] is None
+
+
+def test_manuscript_panel_draft_history_without_a_merge_says_so(project):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    provenance.sync(ws)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["state"] == "no_merge" and "no merge round" in ms["reason"]
+
+
+def test_manuscript_panel_says_when_history_is_behind_the_disk(project):
+    ws = _synced(project)
+    _touch(ws, "manuscript", "curation", "rounds", "3", "results.tex")   # merged, not yet synced
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["round"] == 2 and ms["behind"] == 3
+
+
+def test_manuscript_panel_a_failed_compare_degrades_that_line_only(project, monkeypatch):
+    _synced(project)
+
+    def boom(ws, a, b):
+        raise service.provenance.ProvenanceError("git diff failed")
+
+    monkeypatch.setattr(service.provenance, "diff", boom)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["round"] == 2 and ms["changed"] is None
+    assert "could not be compared" in ms["changed_note"]
+
+
+# --- run_overview (panel 3: who contributed what) --------------------------
+
+def _curate(ws, kept=(), mine=0):
+    from scieflow.core.run import curation
+
+    for agent, section in kept:
+        curation.keep(ws, "a kept passage", agent=agent, section=section)
+    for i in range(mine):
+        curation.add_own(ws, f"my own words {i}")
+
+
+def test_attribution_counts_kept_passages_per_agent_and_section(project):
+    ws = project.run_dir("r1")
+    _curate(ws, kept=[("kim", "intro"), ("kim", "intro"), ("kim", "results"), ("lee", "methods")])
+    at = service.run_overview(project, "r1")["attribution"]
+    assert at["reason"] == "" and at["total"] == 4 and at["kept"] == 4
+    by = {a["agent"]: a for a in at["agents"]}
+    assert by["kim"]["count"] == 3 and by["lee"]["count"] == 1
+    assert by["kim"]["sections"] == [{"section": "intro", "count": 2},
+                                     {"section": "results", "count": 1}]
+
+
+def test_attribution_shows_the_researchers_own_blocks_as_unattributed(project):
+    """The criterion this panel exists for. Per-agent counts cannot sum to the
+    manuscript: `mine` blocks carry no agent and no section. Dropping them
+    would understate how much of the paper the researcher wrote."""
+    ws = project.run_dir("r1")
+    _curate(ws, kept=[("kim", "intro"), ("lee", "methods")], mine=3)
+    at = service.run_overview(project, "r1")["attribution"]
+    assert at["mine"] == 3, "mine blocks must be counted, not silently dropped"
+    assert at["total"] == 5
+    assert sum(a["count"] for a in at["agents"]) == 2
+    assert sum(a["count"] for a in at["agents"]) + at["mine"] == at["total"]
+
+
+def test_attribution_a_run_of_only_own_words_is_not_empty(project):
+    _curate(project.run_dir("r1"), mine=2)
+    at = service.run_overview(project, "r1")["attribution"]
+    assert at["reason"] == "" and at["agents"] == [] and at["mine"] == 2 and at["total"] == 2
+
+
+def test_attribution_no_curation_document_reads_as_nothing_curated(project):
+    at = service.run_overview(project, "r1")["attribution"]
+    assert "nothing curated yet" in at["reason"]
+    assert at["total"] == 0 and at["agents"] == [] and at["mine"] == 0
+
+
+def test_attribution_keeps_an_agent_that_is_no_longer_in_drafts(project):
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _curate(ws, kept=[("kim", "intro"), ("gone", "intro")])
+    at = service.run_overview(project, "r1")["attribution"]
+    by = {a["agent"]: a for a in at["agents"]}
+    assert by["gone"]["count"] == 1 and by["gone"]["drafted"] is False
+    assert by["kim"]["drafted"] is True
+
+
+def test_attribution_unreadable_curation_is_a_stated_reason(project):
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "curation", "document.yml", text="{ not: [valid")
+    view = service.run_overview(project, "r1")
+    assert view["attribution"]["reason"]
+    assert view["inventory"]["reason"] == "", "one corrupt source degrades one panel"
+
+
+# --- run_overview (panel 4: spend and progress over time) ------------------
+
+_T0 = "2026-10-03T10:00:00.000+00:00"
+
+
+def _at(seconds, base="2026-10-03T10:00:00"):
+    """A UTC stamp `seconds` after 10:00:00, millisecond precision like the log."""
+    from datetime import datetime, timedelta, timezone
+
+    t = datetime.fromisoformat(base).replace(tzinfo=timezone.utc) + timedelta(seconds=seconds)
+    return t.isoformat(timespec="milliseconds")
+
+
+_seq = iter(range(10**6))
+
+
+def _ev(ws, type_, ts, event_id=None, **data):
+    """Append one event with an explicit `ts` (emit() stamps now())."""
+    import json
+
+    event = {"id": event_id or f"e{next(_seq)}", "ts": ts, "type": type_,
+             "actor": "agent", "data": data}
+    with (ws / "events.jsonl").open("a") as f:
+        f.write(json.dumps(event) + "\n")
+
+
+def _progress(project):
+    return service.run_overview(project, "r1")["progress"]
+
+
+def _fresh(project):
+    ws = project.run_dir("r1")
+    (ws / "events.jsonl").unlink(missing_ok=True)       # the fixture seeds a few events
+    return ws
+
+
+def test_progress_adds_no_event_type():
+    from scieflow.core import events
+
+    assert events.TYPES == frozenset({
+        "run.created", "run.resumed",
+        "phase.pending", "phase.started", "phase.done", "phase.failed",
+        "iteration.advanced", "checkpoint", "budget.recorded",
+        "job.queued", "job.started", "job.finished", "job.failed", "job.timeout",
+        "job.cancelled", "job.lost", "job.refused", "sandbox.disabled",
+        "gate.opened", "gate.answered", "gate.withdrawn",
+        "charter.set", "charter.reverted",
+        "turn.sent", "turn.received", "turn.session_lost",
+        "curation.changed", "curation.round",
+        "provenance.synced", "provenance.skipped",
+        "integration.call", "sync.pushed", "sync.pulled",
+    }), "the vocabulary is closed by design; this panel needs no new type"
+
+
+def test_progress_attributes_spend_to_the_phase_it_was_recorded_in(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(0), phase="search", iteration=1)
+    _ev(ws, "budget.recorded", _at(10), experiment_runs=2)
+    _ev(ws, "budget.recorded", _at(20), experiment_runs=3, wall_minutes=5)
+    _ev(ws, "phase.done", _at(90), phase="search", iteration=1)
+    _ev(ws, "phase.started", _at(100), phase="draft", iteration=1)
+    _ev(ws, "budget.recorded", _at(110), experiment_runs=1)
+    _ev(ws, "phase.done", _at(400), phase="draft", iteration=1)
+    _ev(ws, "budget.recorded", _at(500), iterations=1)         # between phases
+    pr = _progress(project)
+    rows = {r["phase"]: r for r in pr["phases"]}
+    assert rows["search"]["spend"] == {"experiment_runs": 5, "wall_minutes": 5}
+    assert rows["search"]["seconds"] == 90 and rows["draft"]["seconds"] == 300
+    assert rows["draft"]["spend"] == {"experiment_runs": 1}
+    assert pr["outside_phase"] == {"iterations": 1}
+
+
+def test_progress_a_running_phase_has_no_duration(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(0), phase="search", iteration=1)
+    row = _progress(project)["phases"][0]
+    assert row["running"] is True and row["seconds"] is None
+
+
+def test_progress_reports_the_longest_answered_gate(project):
+    ws = _fresh(project)
+    for gid, opened, answered in (("g1", 0, 30), ("g2", 100, 700), ("g3", 800, 860)):
+        _ev(ws, "gate.opened", _at(opened), gate=gid, kind="question")
+        _ev(ws, "gate.answered", _at(answered), gate=gid, kind="question")
+    longest = _progress(project)["gates"]["longest"]
+    assert longest["gate"] == "g2" and longest["seconds"] == 600
+
+
+def test_progress_a_gate_still_open_is_still_waiting_not_timed_against_now(project):
+    ws = _fresh(project)
+    _ev(ws, "gate.opened", _at(0), gate="g1", kind="question")
+    _ev(ws, "gate.opened", _at(5), gate="g2", kind="question")
+    _ev(ws, "gate.answered", _at(65), gate="g2", kind="question")
+    gates = _progress(project)["gates"]
+    assert gates["longest"]["gate"] == "g2", "an unanswered gate has no duration to rank"
+    assert [w["gate"] for w in gates["waiting"]] == ["g1"]
+    assert gates["waiting"][0]["since"] == "2026-10-03 10:00:00 UTC"
+    assert "seconds" not in gates["waiting"][0]
+
+
+def test_progress_a_withdrawn_gate_is_not_waiting(project):
+    ws = _fresh(project)
+    _ev(ws, "gate.opened", _at(0), gate="g1", kind="question")
+    _ev(ws, "gate.withdrawn", _at(9), gate="g1")
+    assert _progress(project)["gates"]["waiting"] == []
+
+
+def test_progress_never_yields_a_negative_duration(project):
+    ws = _fresh(project)
+    _ev(ws, "gate.opened", _at(100), gate="g1", kind="question")
+    _ev(ws, "gate.answered", _at(40), gate="g1", kind="question")      # clock stepped back
+    _ev(ws, "phase.started", _at(100), phase="p", iteration=1)
+    _ev(ws, "phase.done", _at(10), phase="p", iteration=1)
+    pr = _progress(project)
+    assert pr["gates"]["longest"]["seconds"] == 0
+    assert pr["phases"][0]["seconds"] == 0
+    assert pr["complete"] is True and any("out of order" in w for w in pr["warnings"])
+
+
+def test_progress_a_duplicated_event_is_counted_once(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(0), phase="p", iteration=1)
+    _ev(ws, "budget.recorded", _at(1), event_id="dup", experiment_runs=4)
+    _ev(ws, "budget.recorded", _at(1), event_id="dup", experiment_runs=4)
+    _ev(ws, "phase.done", _at(2), phase="p", iteration=1)
+    assert _progress(project)["phases"][0]["spend"] == {"experiment_runs": 4}
+
+
+def test_progress_a_truncated_log_shows_what_it_can_and_says_so(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(0), phase="p", iteration=1)
+    _ev(ws, "phase.done", _at(30), phase="p", iteration=1)
+    with (ws / "events.jsonl").open("a") as f:
+        f.write('{"id": "x", "ts": "2026-10-03T10:00:31.000+00:00", "type": "bud')   # cut off
+    pr = _progress(project)
+    assert pr["reason"] == "" and pr["phases"][0]["seconds"] == 30
+    assert pr["complete"] is False and any("unreadable" in n for n in pr["notes"])
+
+
+def test_progress_a_gate_answer_with_no_opening_says_the_log_is_incomplete(project):
+    ws = _fresh(project)
+    _ev(ws, "gate.answered", _at(30), gate="g9", kind="question")
+    pr = _progress(project)
+    assert pr["gates"]["longest"] is None
+    assert pr["complete"] is False and any("gate" in n for n in pr["notes"])
+
+
+def test_progress_a_phase_marked_done_from_pending_is_not_an_incomplete_log(project):
+    """Marking a pending phase done directly is supported (web UI and
+    actions.mark_phase), so a done with no started is a healthy log."""
+    ws = _fresh(project)
+    _ev(ws, "phase.done", _at(30), phase="p", iteration=1)
+    pr = _progress(project)
+    row = pr["phases"][0]
+    assert row["phase"] == "p" and row["seconds"] == 0 and row["running"] is False
+    assert pr["complete"] is True and pr["notes"] == [] and pr["warnings"] == []
+
+
+def test_progress_an_unreadable_line_still_says_incomplete_beside_a_direct_done(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.done", _at(30), phase="p", iteration=1)
+    with (ws / "events.jsonl").open("a") as f:
+        f.write("{not json\n")
+    pr = _progress(project)
+    assert pr["complete"] is False and any("unreadable" in n for n in pr["notes"])
+
+
+def test_progress_clock_skew_is_a_warning_not_incompleteness(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(100), phase="p", iteration=1)
+    _ev(ws, "phase.done", _at(10), phase="p", iteration=1)
+    pr = _progress(project)
+    assert pr["complete"] is True and pr["notes"] == []
+    assert any("out of order" in w for w in pr["warnings"])
+
+
+def test_manuscript_panel_decodes_git_quoted_file_names(project):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    odd = 'sec"x'
+    for n, text in ((1, "a\n"), (2, "b\n")):
+        _touch(ws, "manuscript", "curation", "rounds", str(n), f"{odd}.tex", text=text)
+        _touch(ws, "manuscript", "curation", "rounds", str(n), "caf\u00e9.tex", text=text)
+    provenance.sync(ws)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["changed"] == ["café.tex", 'sec"x.tex']
+
+
+def test_header_path_returns_none_for_a_non_octal_escape():
+    """`899` is three decimal digits but not octal: int(..., 8) raises."""
+    assert service._header_path('"a/x\\899.tex" "b/x\\899.tex"') is None
+    assert service._header_path('"a/x\\\u0663\u0663\u0663.tex"') is None
+
+
+def test_manuscript_says_so_when_a_diff_header_had_to_be_dropped(project, monkeypatch):
+    ws = project.run_dir("r1")
+    for n in (1, 2):
+        _touch(ws, "manuscript", "curation", "rounds", str(n), "intro.tex", text=f"{n}\n")
+    service.provenance.sync(ws)
+    text = ("diff --git a/sections/intro.tex b/sections/intro.tex\n"
+            "diff --git garbage\n")
+    monkeypatch.setattr(service.provenance, "diff",
+                        lambda *a, **k: {"text": text, "truncated": False})
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["changed"] == ["intro.tex"]
+    assert "could not be read" in ms["changed_note"]
+
+
+def test_header_path_returns_none_for_an_unparseable_header():
+    assert service._header_path("garbage") is None
+    assert service._header_path('"a/unterminated') is None
+def test_progress_an_absent_log_is_a_reason_not_zeros(project):
+    ws = _fresh(project)
+    pr = _progress(project)
+    assert "no event log" in pr["reason"] or "no events" in pr["reason"]
+    assert pr["phases"] == []
+
+
+def test_progress_ignores_a_non_numeric_spend_and_says_so(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(0), phase="p", iteration=1)
+    _ev(ws, "budget.recorded", _at(1), experiment_runs="lots", wall_minutes=True, iterations=2)
+    pr = _progress(project)
+    assert pr["phases"][0]["spend"] == {"iterations": 2}
+    assert pr["complete"] is False
+
+
+def test_progress_counts_checkpoints_and_iterations(project):
+    ws = _fresh(project)
+    _ev(ws, "checkpoint", _at(1), reason="low-budget")
+    _ev(ws, "iteration.advanced", _at(2), iteration=2)
+    _ev(ws, "iteration.advanced", _at(3), iteration=3)
+    pr = _progress(project)
+    assert pr["checkpoints"] == 1 and pr["iterations"] == 2   # advances, not the number
+
+
+def test_progress_renders_utc_and_never_local_time(project):
+    import os
+    import time
+
+    ws = _fresh(project)
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = "Pacific/Auckland"            # UTC+13 in October: a local rendering would shift
+    time.tzset()
+    try:
+        _ev(ws, "gate.opened", "2026-10-03T23:30:00.000+00:00", gate="g1", kind="question")
+        _ev(ws, "gate.opened", "2026-10-04T01:00:00.000+02:00", gate="g2", kind="question")
+        _ev(ws, "gate.opened", "2026-10-04T08:00:00", gate="g3", kind="question")   # no zone
+        waiting = {w["gate"]: w["since"] for w in _progress(project)["gates"]["waiting"]}
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
+    assert waiting["g1"] == "2026-10-03 23:30:00 UTC"
+    assert waiting["g2"] == "2026-10-03 23:00:00 UTC"          # converted, labelled UTC
+    assert "UTC" not in waiting["g3"] and "not recorded" in waiting["g3"]
