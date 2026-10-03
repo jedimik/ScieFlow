@@ -81,6 +81,24 @@
       <a href="/runs/{{ slug }}/drafts">Open the workbench for the full diff</a></p>
   {% endif %}
   </div>
+
+  {% set at = overview.attribution %}
+  <div id="ov-attribution">
+  <h3>Who contributed what</h3>
+  {% if at.reason %}
+    <p class="dim">{{ at.reason }}</p>
+  {% else %}
+    <ul>
+    {% for a in at.agents %}
+      <li>{{ a.agent }}: {{ a.count }} kept passage{{ "" if a.count == 1 else "s" }}
+        ({% for s in a.sections %}{{ s.section }} &times;{{ s.count }}{% if not loop.last %}, {% endif %}{% endfor %}){% if not a.drafted %} <span class="dim">&mdash; no longer has a draft in this run</span>{% endif %}</li>
+    {% endfor %}
+      <li>{{ at.mine }} of your own &mdash; <span class="dim">no agent credited</span></li>
+      {% if at.other %}<li>{{ at.other }} of an unrecognised kind</li>{% endif %}
+    </ul>
+    <p class="dim">Per-agent counts do not add up to the document: your own words credit no agent.</p>
+  {% endif %}
+  </div>
 </section>
 
 <h2>The agreed plan</h2>

@@ -1074,3 +1074,68 @@ def test_manuscript_panel_a_failed_compare_degrades_that_line_only(project, monk
     ms = service.run_overview(project, "r1")["manuscript"]
     assert ms["round"] == 2 and ms["changed"] is None
     assert "could not be compared" in ms["changed_note"]
+
+
+# --- run_overview (panel 3: who contributed what) --------------------------
+
+def _curate(ws, kept=(), mine=0):
+    from scieflow.core.run import curation
+
+    for agent, section in kept:
+        curation.keep(ws, "a kept passage", agent=agent, section=section)
+    for i in range(mine):
+        curation.add_own(ws, f"my own words {i}")
+
+
+def test_attribution_counts_kept_passages_per_agent_and_section(project):
+    ws = project.run_dir("r1")
+    _curate(ws, kept=[("kim", "intro"), ("kim", "intro"), ("kim", "results"), ("lee", "methods")])
+    at = service.run_overview(project, "r1")["attribution"]
+    assert at["reason"] == "" and at["total"] == 4 and at["kept"] == 4
+    by = {a["agent"]: a for a in at["agents"]}
+    assert by["kim"]["count"] == 3 and by["lee"]["count"] == 1
+    assert by["kim"]["sections"] == [{"section": "intro", "count": 2},
+                                     {"section": "results", "count": 1}]
+
+
+def test_attribution_shows_the_researchers_own_blocks_as_unattributed(project):
+    """The criterion this panel exists for. Per-agent counts cannot sum to the
+    manuscript: `mine` blocks carry no agent and no section. Dropping them
+    would understate how much of the paper the researcher wrote."""
+    ws = project.run_dir("r1")
+    _curate(ws, kept=[("kim", "intro"), ("lee", "methods")], mine=3)
+    at = service.run_overview(project, "r1")["attribution"]
+    assert at["mine"] == 3, "mine blocks must be counted, not silently dropped"
+    assert at["total"] == 5
+    assert sum(a["count"] for a in at["agents"]) == 2
+    assert sum(a["count"] for a in at["agents"]) + at["mine"] == at["total"]
+
+
+def test_attribution_a_run_of_only_own_words_is_not_empty(project):
+    _curate(project.run_dir("r1"), mine=2)
+    at = service.run_overview(project, "r1")["attribution"]
+    assert at["reason"] == "" and at["agents"] == [] and at["mine"] == 2 and at["total"] == 2
+
+
+def test_attribution_no_curation_document_reads_as_nothing_curated(project):
+    at = service.run_overview(project, "r1")["attribution"]
+    assert "nothing curated yet" in at["reason"]
+    assert at["total"] == 0 and at["agents"] == [] and at["mine"] == 0
+
+
+def test_attribution_keeps_an_agent_that_is_no_longer_in_drafts(project):
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _curate(ws, kept=[("kim", "intro"), ("gone", "intro")])
+    at = service.run_overview(project, "r1")["attribution"]
+    by = {a["agent"]: a for a in at["agents"]}
+    assert by["gone"]["count"] == 1 and by["gone"]["drafted"] is False
+    assert by["kim"]["drafted"] is True
+
+
+def test_attribution_unreadable_curation_is_a_stated_reason(project):
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "curation", "document.yml", text="{ not: [valid")
+    view = service.run_overview(project, "r1")
+    assert view["attribution"]["reason"]
+    assert view["inventory"]["reason"] == "", "one corrupt source degrades one panel"

@@ -1587,8 +1587,49 @@ def _manuscript(ws: Path) -> dict:
     return result
 
 
-# Panel name -> builder(ws) -> dict. Tickets 20-21 add entries here.
-_PANELS = {"inventory": _inventory, "manuscript": _manuscript}
+def _attribution(ws: Path) -> dict:
+    """Panel 3: who contributed what, from the current curation document.
+
+    A `mine` block is the researcher's own words and carries no agent and no
+    section, so per-agent counts cannot sum to the document. `mine` is counted
+    and returned explicitly; dropping it would understate how much of the paper
+    the researcher wrote. Agent and section names are agent-chosen text.
+    """
+    try:
+        doc = curation.read(ws)
+    except (curation.CurationError, yaml.YAMLError, OSError, ValueError) as exc:
+        return {"reason": f"the curation document could not be read: {type(exc).__name__}"}
+    blocks = [b for b in doc["blocks"] if isinstance(b, dict)]
+    out = {"reason": "", "round": doc["round"], "total": len(blocks), "kept": 0,
+           "mine": 0, "other": 0, "agents": []}
+    if not blocks:
+        out["reason"] = "nothing curated yet — no passage has been kept and none of your own added"
+        return out
+    try:
+        drafted = set(drafts.agents(ws))
+    except OSError:
+        drafted = set()
+    per: dict[str, dict[str, int]] = {}
+    for block in blocks:
+        kind = block.get("kind")
+        if kind == "mine":
+            out["mine"] += 1
+        elif kind == "kept":
+            out["kept"] += 1
+            sections = per.setdefault(str(block.get("agent") or "(unrecorded)"), {})
+            name = str(block.get("section") or "(unrecorded)")
+            sections[name] = sections.get(name, 0) + 1
+        else:
+            out["other"] += 1
+    out["agents"] = [{"agent": agent, "count": sum(secs.values()), "drafted": agent in drafted,
+                      "sections": [{"section": s, "count": n} for s, n in sorted(secs.items())]}
+                     for agent, secs in sorted(per.items())]
+    return out
+
+
+# Panel name -> builder(ws) -> dict. Ticket 21 adds its entry here.
+_PANELS = {"inventory": _inventory, "manuscript": _manuscript,
+           "attribution": _attribution}
 
 
 def run_overview(project: Project, slug: str) -> dict:

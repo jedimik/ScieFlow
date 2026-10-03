@@ -193,3 +193,50 @@ def test_the_manuscript_panel_never_syncs_on_a_page_get(client, project, monkeyp
     page = client.get("/runs/r1")
     assert "Merge round 2" in _manuscript(page), "the panel must have rendered history"
     assert calls == []
+
+
+# --- panel 3: who contributed what -----------------------------------------
+
+def _attribution(page):
+    band = _band(page)
+    start = band.index('id="ov-attribution"')
+    return band[start:band.find('id="ov-', start + 1) if 'id="ov-' in band[start + 1:] else None]
+
+
+def test_the_attribution_panel_shows_mine_as_unattributed(client, project):
+    from scieflow.core.run import curation
+
+    ws = project.run_dir("r1")
+    curation.keep(ws, "kept text", agent="kim", section="intro")
+    curation.add_own(ws, "mine one")
+    curation.add_own(ws, "mine two")
+    panel = _attribution(client.get("/runs/r1"))
+    assert "kim" in panel and "intro" in panel
+    assert "2 of your own" in panel
+    assert "no agent credited" in panel
+    assert "do not add up to the document" in panel
+
+
+def test_the_attribution_panel_with_nothing_curated_says_so(client, project):
+    assert "nothing curated yet" in _attribution(client.get("/runs/r1"))
+
+
+def test_the_attribution_panel_escapes_hostile_agent_and_section(client, project):
+    from scieflow.core.run import curation
+
+    agent = 'ev"><script>alert(1)</script>'
+    section = 'se"><img src=x onerror=alert(2)>'
+    curation.keep(project.run_dir("r1"), "t", agent=agent, section=section)
+    page = client.get("/runs/r1")
+    assert page.status_code == 200
+    assert "<script>alert(1)" not in page.text and "<img src=x" not in page.text
+    panel = _attribution(page)
+    assert str(escape(agent)) in panel and str(escape(section)) in panel
+
+
+def test_the_attribution_panel_renders_a_removed_agent(client, project):
+    from scieflow.core.run import curation
+
+    curation.keep(project.run_dir("r1"), "t", agent="departed", section="intro")
+    panel = _attribution(client.get("/runs/r1"))
+    assert "departed" in panel and "no longer has a draft" in panel
