@@ -1139,3 +1139,201 @@ def test_attribution_unreadable_curation_is_a_stated_reason(project):
     view = service.run_overview(project, "r1")
     assert view["attribution"]["reason"]
     assert view["inventory"]["reason"] == "", "one corrupt source degrades one panel"
+
+
+# --- run_overview (panel 4: spend and progress over time) ------------------
+
+_T0 = "2026-10-03T10:00:00.000+00:00"
+
+
+def _at(seconds, base="2026-10-03T10:00:00"):
+    """A UTC stamp `seconds` after 10:00:00, millisecond precision like the log."""
+    from datetime import datetime, timedelta, timezone
+
+    t = datetime.fromisoformat(base).replace(tzinfo=timezone.utc) + timedelta(seconds=seconds)
+    return t.isoformat(timespec="milliseconds")
+
+
+_seq = iter(range(10**6))
+
+
+def _ev(ws, type_, ts, event_id=None, **data):
+    """Append one event with an explicit `ts` (emit() stamps now())."""
+    import json
+
+    event = {"id": event_id or f"e{next(_seq)}", "ts": ts, "type": type_,
+             "actor": "agent", "data": data}
+    with (ws / "events.jsonl").open("a") as f:
+        f.write(json.dumps(event) + "\n")
+
+
+def _progress(project):
+    return service.run_overview(project, "r1")["progress"]
+
+
+def _fresh(project):
+    ws = project.run_dir("r1")
+    (ws / "events.jsonl").unlink(missing_ok=True)       # the fixture seeds a few events
+    return ws
+
+
+def test_progress_adds_no_event_type():
+    from scieflow.core import events
+
+    assert events.TYPES == frozenset({
+        "run.created", "run.resumed",
+        "phase.pending", "phase.started", "phase.done", "phase.failed",
+        "iteration.advanced", "checkpoint", "budget.recorded",
+        "job.queued", "job.started", "job.finished", "job.failed", "job.timeout",
+        "job.cancelled", "job.lost", "job.refused", "sandbox.disabled",
+        "gate.opened", "gate.answered", "gate.withdrawn",
+        "charter.set", "charter.reverted",
+        "turn.sent", "turn.received", "turn.session_lost",
+        "curation.changed", "curation.round",
+        "provenance.synced", "provenance.skipped",
+        "integration.call", "sync.pushed", "sync.pulled",
+    }), "the vocabulary is closed by design; this panel needs no new type"
+
+
+def test_progress_attributes_spend_to_the_phase_it_was_recorded_in(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(0), phase="search", iteration=1)
+    _ev(ws, "budget.recorded", _at(10), experiment_runs=2)
+    _ev(ws, "budget.recorded", _at(20), experiment_runs=3, wall_minutes=5)
+    _ev(ws, "phase.done", _at(90), phase="search", iteration=1)
+    _ev(ws, "phase.started", _at(100), phase="draft", iteration=1)
+    _ev(ws, "budget.recorded", _at(110), experiment_runs=1)
+    _ev(ws, "phase.done", _at(400), phase="draft", iteration=1)
+    _ev(ws, "budget.recorded", _at(500), iterations=1)         # between phases
+    pr = _progress(project)
+    rows = {r["phase"]: r for r in pr["phases"]}
+    assert rows["search"]["spend"] == {"experiment_runs": 5, "wall_minutes": 5}
+    assert rows["search"]["seconds"] == 90 and rows["draft"]["seconds"] == 300
+    assert rows["draft"]["spend"] == {"experiment_runs": 1}
+    assert pr["outside_phase"] == {"iterations": 1}
+
+
+def test_progress_a_running_phase_has_no_duration(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(0), phase="search", iteration=1)
+    row = _progress(project)["phases"][0]
+    assert row["running"] is True and row["seconds"] is None
+
+
+def test_progress_reports_the_longest_answered_gate(project):
+    ws = _fresh(project)
+    for gid, opened, answered in (("g1", 0, 30), ("g2", 100, 700), ("g3", 800, 860)):
+        _ev(ws, "gate.opened", _at(opened), gate=gid, kind="question")
+        _ev(ws, "gate.answered", _at(answered), gate=gid, kind="question")
+    longest = _progress(project)["gates"]["longest"]
+    assert longest["gate"] == "g2" and longest["seconds"] == 600
+
+
+def test_progress_a_gate_still_open_is_still_waiting_not_timed_against_now(project):
+    ws = _fresh(project)
+    _ev(ws, "gate.opened", _at(0), gate="g1", kind="question")
+    _ev(ws, "gate.opened", _at(5), gate="g2", kind="question")
+    _ev(ws, "gate.answered", _at(65), gate="g2", kind="question")
+    gates = _progress(project)["gates"]
+    assert gates["longest"]["gate"] == "g2", "an unanswered gate has no duration to rank"
+    assert [w["gate"] for w in gates["waiting"]] == ["g1"]
+    assert gates["waiting"][0]["since"] == "2026-10-03 10:00:00 UTC"
+    assert "seconds" not in gates["waiting"][0]
+
+
+def test_progress_a_withdrawn_gate_is_not_waiting(project):
+    ws = _fresh(project)
+    _ev(ws, "gate.opened", _at(0), gate="g1", kind="question")
+    _ev(ws, "gate.withdrawn", _at(9), gate="g1")
+    assert _progress(project)["gates"]["waiting"] == []
+
+
+def test_progress_never_yields_a_negative_duration(project):
+    ws = _fresh(project)
+    _ev(ws, "gate.opened", _at(100), gate="g1", kind="question")
+    _ev(ws, "gate.answered", _at(40), gate="g1", kind="question")      # clock stepped back
+    _ev(ws, "phase.started", _at(100), phase="p", iteration=1)
+    _ev(ws, "phase.done", _at(10), phase="p", iteration=1)
+    pr = _progress(project)
+    assert pr["gates"]["longest"]["seconds"] == 0
+    assert pr["phases"][0]["seconds"] == 0
+    assert pr["complete"] is False and any("out of order" in n for n in pr["notes"])
+
+
+def test_progress_a_duplicated_event_is_counted_once(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(0), phase="p", iteration=1)
+    _ev(ws, "budget.recorded", _at(1), event_id="dup", experiment_runs=4)
+    _ev(ws, "budget.recorded", _at(1), event_id="dup", experiment_runs=4)
+    _ev(ws, "phase.done", _at(2), phase="p", iteration=1)
+    assert _progress(project)["phases"][0]["spend"] == {"experiment_runs": 4}
+
+
+def test_progress_a_truncated_log_shows_what_it_can_and_says_so(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(0), phase="p", iteration=1)
+    _ev(ws, "phase.done", _at(30), phase="p", iteration=1)
+    with (ws / "events.jsonl").open("a") as f:
+        f.write('{"id": "x", "ts": "2026-10-03T10:00:31.000+00:00", "type": "bud')   # cut off
+    pr = _progress(project)
+    assert pr["reason"] == "" and pr["phases"][0]["seconds"] == 30
+    assert pr["complete"] is False and any("unreadable" in n for n in pr["notes"])
+
+
+def test_progress_a_close_with_no_open_says_the_log_is_incomplete(project):
+    ws = _fresh(project)
+    _ev(ws, "gate.answered", _at(30), gate="g9", kind="question")
+    _ev(ws, "phase.done", _at(30), phase="p", iteration=1)
+    pr = _progress(project)
+    assert pr["gates"]["longest"] is None
+    assert pr["phases"][0]["seconds"] is None, "no start, so no invented duration"
+    assert pr["complete"] is False
+
+
+def test_progress_an_absent_log_is_a_reason_not_zeros(project):
+    ws = _fresh(project)
+    pr = _progress(project)
+    assert "no event log" in pr["reason"] or "no events" in pr["reason"]
+    assert pr["phases"] == []
+
+
+def test_progress_ignores_a_non_numeric_spend_and_says_so(project):
+    ws = _fresh(project)
+    _ev(ws, "phase.started", _at(0), phase="p", iteration=1)
+    _ev(ws, "budget.recorded", _at(1), experiment_runs="lots", wall_minutes=True, iterations=2)
+    pr = _progress(project)
+    assert pr["phases"][0]["spend"] == {"iterations": 2}
+    assert pr["complete"] is False
+
+
+def test_progress_counts_checkpoints_and_iterations(project):
+    ws = _fresh(project)
+    _ev(ws, "checkpoint", _at(1), reason="low-budget")
+    _ev(ws, "iteration.advanced", _at(2), iteration=2)
+    _ev(ws, "iteration.advanced", _at(3), iteration=3)
+    pr = _progress(project)
+    assert pr["checkpoints"] == 1 and pr["iterations"] == 2   # advances, not the number
+
+
+def test_progress_renders_utc_and_never_local_time(project):
+    import os
+    import time
+
+    ws = _fresh(project)
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = "Pacific/Auckland"            # UTC+13 in October: a local rendering would shift
+    time.tzset()
+    try:
+        _ev(ws, "gate.opened", "2026-10-03T23:30:00.000+00:00", gate="g1", kind="question")
+        _ev(ws, "gate.opened", "2026-10-04T01:00:00.000+02:00", gate="g2", kind="question")
+        _ev(ws, "gate.opened", "2026-10-04T08:00:00", gate="g3", kind="question")   # no zone
+        waiting = {w["gate"]: w["since"] for w in _progress(project)["gates"]["waiting"]}
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
+    assert waiting["g1"] == "2026-10-03 23:30:00 UTC"
+    assert waiting["g2"] == "2026-10-03 23:00:00 UTC"          # converted, labelled UTC
+    assert "UTC" not in waiting["g3"] and "not recorded" in waiting["g3"]

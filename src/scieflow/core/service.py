@@ -14,6 +14,7 @@ import shutil
 import tempfile
 import threading
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -1627,9 +1628,170 @@ def _attribution(ws: Path) -> dict:
     return out
 
 
-# Panel name -> builder(ws) -> dict. Ticket 21 adds its entry here.
+def _parse_ts(raw) -> datetime | None:
+    try:
+        return datetime.fromisoformat(raw) if isinstance(raw, str) else None
+    except ValueError:
+        return None
+
+
+def _utc_text(raw, when: datetime | None) -> str:
+    """A log stamp as text. Aware stamps are converted to UTC and labelled so;
+    a stamp with no zone is shown as written and said to have none, because
+    this code cannot know what zone it was in."""
+    if when is None:
+        return f"{raw} (unreadable time)"
+    if when.tzinfo is None:
+        return f"{when:%Y-%m-%d %H:%M:%S} (time zone not recorded)"
+    return f"{when.astimezone(timezone.utc):%Y-%m-%d %H:%M:%S} UTC"
+
+
+def _span_text(seconds: float) -> str:
+    seconds = int(round(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+
+def _progress(ws: Path) -> dict:
+    """Panel 4: spend and waiting over time, from `events.read` alone.
+
+    Adds no event type (`events.TYPES` is closed). The only panel that reads
+    the whole log - fine for one run, which is why ticket 17 took that read off
+    the list page.
+
+    Spend is attributed to the phase open when `budget.recorded` was appended
+    (file order, which is what the log records; timestamps are only used for
+    durations). A duration is only ever `end - start` of two events that both
+    exist, clamped at 0 when the clock disagrees; a gate with no `gate.answered`
+    is listed as still waiting and never timed against now.
+    """
+    log = ws / events.EVENTS_FILE
+    out: dict = {"reason": "", "complete": True, "notes": [], "phases": [],
+                 "outside_phase": {}, "gates": {"longest": None, "waiting": []},
+                 "checkpoints": 0, "iterations": 0}
+    if not log.is_file():
+        out["reason"] = "no event log yet — nothing has been recorded for this run"
+        return out
+    raw_lines = sum(1 for line in log.read_text(errors="replace").splitlines() if line.strip())
+    evs = [e for e in events.read(ws) if isinstance(e, dict)]
+    if not evs and not raw_lines:
+        out["reason"] = "no event log yet — nothing has been recorded for this run"
+        return out
+
+    notes: list[str] = []
+    if raw_lines > len(evs):
+        notes.append(f"{raw_lines - len(evs)} log line(s) were unreadable and skipped")
+    skew = bad_ts = 0
+    seen_ids: set = set()
+    rows: dict[str, dict] = {}
+    opened_phase: dict[tuple, datetime | None] = {}
+    current: str | None = None
+    gate_open: dict[str, tuple[str, datetime | None, str]] = {}
+    gate_done: set = set()
+    answered: list[dict] = []
+    bad_spend = orphans = 0
+
+    def row(name: str) -> dict:
+        return rows.setdefault(name, {"phase": name, "runs": 0, "seconds": None,
+                                      "running": False, "failed": 0, "spend": {}})
+
+    def span(start, end) -> float | None:
+        nonlocal skew
+        if start is None or end is None or (start.tzinfo is None) != (end.tzinfo is None):
+            return None
+        delta = (end - start).total_seconds()
+        if delta < 0:
+            skew += 1
+            return 0.0
+        return delta
+
+    for ev in evs:
+        eid = ev.get("id")
+        if eid is not None:
+            if eid in seen_ids:
+                continue
+            seen_ids.add(eid)
+        kind = ev.get("type")
+        data = ev.get("data") if isinstance(ev.get("data"), dict) else {}
+        when = _parse_ts(ev.get("ts"))
+        if when is None:
+            bad_ts += 1
+        if kind in ("phase.pending", "phase.started", "phase.done", "phase.failed"):
+            name = str(data.get("phase", "(unnamed)"))
+            key = (name, data.get("iteration"))
+            r = row(name)
+            if kind == "phase.started":
+                r["runs"] += 1
+                opened_phase[key] = when
+                current = name
+            elif kind in ("phase.done", "phase.failed"):
+                if kind == "phase.failed":
+                    r["failed"] += 1
+                if key in opened_phase:
+                    d = span(opened_phase.pop(key), when)
+                    if d is not None:
+                        r["seconds"] = (r["seconds"] or 0) + d
+                else:
+                    orphans += 1
+                if current == name:
+                    current = None
+        elif kind == "budget.recorded":
+            target = row(current)["spend"] if current else out["outside_phase"]
+            for dim, amount in data.items():
+                if isinstance(amount, (int, float)) and not isinstance(amount, bool) and amount >= 0:
+                    target[dim] = target.get(dim, 0) + amount
+                else:
+                    bad_spend += 1
+        elif kind == "gate.opened":
+            gid = str(data.get("gate"))
+            gate_open.setdefault(gid, (str(data.get("kind", "")), when, ev.get("ts")))
+        elif kind in ("gate.answered", "gate.withdrawn"):
+            gid = str(data.get("gate"))
+            if gid in gate_done:
+                continue
+            if gid not in gate_open:
+                orphans += 1
+                continue
+            gate_done.add(gid)
+            if kind == "gate.answered":
+                gkind, start, _ = gate_open[gid]
+                d = span(start, when)
+                if d is not None:
+                    answered.append({"gate": gid, "kind": gkind, "seconds": d,
+                                     "text": _span_text(d)})
+        elif kind == "checkpoint":
+            out["checkpoints"] += 1
+        elif kind == "iteration.advanced":
+            out["iterations"] += 1
+
+    for name, r in rows.items():
+        r["running"] = any(k[0] == name for k in opened_phase)
+        r["text"] = _span_text(r["seconds"]) if r["seconds"] is not None else ""
+    out["phases"] = list(rows.values())
+    if answered:
+        out["gates"]["longest"] = max(answered, key=lambda g: g["seconds"])
+    out["gates"]["waiting"] = [
+        {"gate": gid, "kind": gkind, "since": _utc_text(raw, when)}
+        for gid, (gkind, when, raw) in gate_open.items() if gid not in gate_done]
+    if skew:
+        notes.append(f"{skew} interval(s) ended before they started (clock out of order), shown as 0s")
+    if bad_ts:
+        notes.append(f"{bad_ts} event(s) had an unreadable timestamp")
+    if orphans:
+        notes.append(f"{orphans} event(s) closed something the log never shows opening")
+    if bad_spend:
+        notes.append(f"{bad_spend} spend figure(s) were not numbers and were ignored")
+    out["notes"] = notes
+    out["complete"] = not notes
+    return out
+
+
+# Panel name -> builder(ws) -> dict.
 _PANELS = {"inventory": _inventory, "manuscript": _manuscript,
-           "attribution": _attribution}
+           "attribution": _attribution, "progress": _progress}
 
 
 def run_overview(project: Project, slug: str) -> dict:

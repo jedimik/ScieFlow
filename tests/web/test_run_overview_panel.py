@@ -240,3 +240,77 @@ def test_the_attribution_panel_renders_a_removed_agent(client, project):
     curation.keep(project.run_dir("r1"), "t", agent="departed", section="intro")
     panel = _attribution(client.get("/runs/r1"))
     assert "departed" in panel and "no longer has a draft" in panel
+
+
+# --- panel 4: spend and progress over time ---------------------------------
+
+def _ev(ws, type_, ts, **data):
+    import json
+
+    with (ws / "events.jsonl").open("a") as f:
+        f.write(json.dumps({"id": f"w{abs(hash((type_, ts, str(data))))}", "ts": ts,
+                            "type": type_, "actor": "agent", "data": data}) + "\n")
+
+
+def _progress(page):
+    band = _band(page)
+    return band[band.index('id="ov-progress"'):]
+
+
+def _clean(project):
+    ws = project.run_dir("r1")
+    (ws / "events.jsonl").unlink(missing_ok=True)
+    return ws
+
+
+def test_the_progress_panel_shows_spend_per_phase_and_the_longest_stall(client, project):
+    ws = _clean(project)
+    _ev(ws, "phase.started", "2026-10-03T10:00:00.000+00:00", phase="search", iteration=1)
+    _ev(ws, "budget.recorded", "2026-10-03T10:00:10.000+00:00", experiment_runs=7)
+    _ev(ws, "phase.done", "2026-10-03T10:02:05.000+00:00", phase="search", iteration=1)
+    _ev(ws, "gate.opened", "2026-10-03T10:03:00.000+00:00", gate="g1", kind="question")
+    _ev(ws, "gate.answered", "2026-10-03T11:05:00.000+00:00", gate="g1", kind="question")
+    panel = _progress(client.get("/runs/r1"))
+    assert "search" in panel and "2m 05s" in panel and "experiment_runs 7" in panel
+    assert "1h 02m" in panel and "Longest wait on a human" in panel
+
+
+def test_the_progress_panel_labels_an_open_gate_as_still_waiting(client, project):
+    ws = _clean(project)
+    _ev(ws, "gate.opened", "2026-10-03T10:00:00.000+00:00", gate="g1", kind="question")
+    panel = _progress(client.get("/runs/r1"))
+    assert "still waiting" in panel and "2026-10-03 10:00:00 UTC" in panel
+    assert "Longest wait" not in panel, "an open gate must not be ranked as a finished stall"
+
+
+def test_the_progress_panel_never_claims_local_time(client, project):
+    ws = _clean(project)
+    _ev(ws, "gate.opened", "2026-10-03T23:30:00.000+00:00", gate="g1", kind="question")
+    panel = _progress(client.get("/runs/r1"))
+    assert "2026-10-03 23:30:00 UTC" in panel
+    assert "local" not in panel.lower()
+
+
+def test_the_progress_panel_says_when_the_log_is_incomplete(client, project):
+    ws = _clean(project)
+    _ev(ws, "phase.started", "2026-10-03T10:00:00.000+00:00", phase="p", iteration=1)
+    with (ws / "events.jsonl").open("a") as f:
+        f.write('{"id": "x", "ts"')
+    panel = _progress(client.get("/runs/r1"))
+    assert "log is incomplete" in panel and "unreadable" in panel
+
+
+def test_the_progress_panel_escapes_a_hostile_phase_name(client, project):
+    name = 'ph"><script>alert(1)</script>'
+    ws = _clean(project)
+    _ev(ws, "phase.started", "2026-10-03T10:00:00.000+00:00", phase=name, iteration=1)
+    _ev(ws, "budget.recorded", "2026-10-03T10:00:01.000+00:00", experiment_runs=1)
+    page = client.get("/runs/r1")
+    assert page.status_code == 200 and "<script>alert(1)" not in page.text
+    assert str(escape(name)) in _progress(page)
+
+
+def test_the_progress_panel_with_no_log_says_so(client, project):
+    _clean(project)
+    panel = _progress(client.get("/runs/r1"))
+    assert "no event log" in panel

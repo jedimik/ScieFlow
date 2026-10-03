@@ -99,6 +99,31 @@
     <p class="dim">Per-agent counts do not add up to the document: your own words credit no agent.</p>
   {% endif %}
   </div>
+
+  {% set pg = overview.progress %}
+  <div id="ov-progress">
+  <h3>Spend and time</h3>
+  {% if pg.reason %}
+    <p class="dim">{{ pg.reason }}</p>
+  {% else %}
+    {% if pg.phases %}
+    <table>
+      <tr><th>Phase</th><th>Time</th><th>Spend</th></tr>
+      {% for p in pg.phases %}
+      <tr><td>{{ p.phase }}</td>
+        <td>{% if p.running %}running{% elif p.text %}{{ p.text }}{% else %}<span class="dim">unknown</span>{% endif %}{% if p.failed %} ({{ p.failed }} failed){% endif %}</td>
+        <td>{% for dim, amount in p.spend.items() %}{{ dim }} {{ amount }}{% if not loop.last %}, {% endif %}{% else %}<span class="dim">none recorded</span>{% endfor %}</td></tr>
+      {% endfor %}
+      {% if pg.outside_phase %}<tr><td class="dim">(between phases)</td><td></td>
+        <td>{% for dim, amount in pg.outside_phase.items() %}{{ dim }} {{ amount }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>{% endif %}
+    </table>
+    {% endif %}
+    {% if pg.gates.longest %}<p>Longest wait on a human: {{ pg.gates.longest.text }} ({{ pg.gates.longest.kind }} gate).</p>{% endif %}
+    {% for w in pg.gates.waiting %}<p>A {{ w.kind }} gate is still waiting for an answer (opened {{ w.since }}).</p>{% endfor %}
+    <p class="dim">{{ pg.iterations }} iteration{{ "" if pg.iterations == 1 else "s" }} advanced, {{ pg.checkpoints }} checkpoint{{ "" if pg.checkpoints == 1 else "s" }}. Times are UTC as recorded.</p>
+    {% if not pg.complete %}<p class="dim">The event log is incomplete: {{ pg.notes|join("; ") }}.</p>{% endif %}
+  {% endif %}
+  </div>
 </section>
 
 <h2>The agreed plan</h2>
