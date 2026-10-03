@@ -1496,6 +1496,20 @@ def _inventory(ws: Path) -> dict:
     return out
 
 
+def _panel(builder, ws: Path) -> dict:
+    """Run one panel's builder; an unexpected exception becomes that panel's
+    `reason` and nothing else. Isolation lives here, so a panel added later
+    cannot forget it — `run_overview` never calls a builder directly."""
+    try:
+        return builder(ws)
+    except Exception as exc:  # noqa: BLE001 - the contract is "never raises"
+        return {"reason": f"this panel could not be built: {exc}"}
+
+
+# Panel name -> builder(ws) -> dict. Tickets 19-21 add entries here.
+_PANELS = {"inventory": _inventory}
+
+
 def run_overview(project: Project, slug: str) -> dict:
     """What the run has produced, one entry per panel, each with its own
     `reason`. The template renders a reason; it never branches on an error.
@@ -1517,8 +1531,4 @@ def run_overview(project: Project, slug: str) -> dict:
     "review": {"state": absent|empty|present|unreadable, "reason", ...}}}`.
     """
     ws = _ws(project, slug)
-    try:
-        inventory = _inventory(ws)
-    except (OSError, RuntimeError, ValueError, drafts.DraftError) as exc:
-        inventory = {"reason": f"the run's files could not be listed: {exc}"}
-    return {"inventory": inventory}
+    return {name: _panel(builder, ws) for name, builder in _PANELS.items()}

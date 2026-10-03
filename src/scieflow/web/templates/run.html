@@ -29,8 +29,7 @@
     {% for key, label in (("findings", "Findings"), ("gaps", "Gaps")) %}
     <tr>
       <th>{{ label }}</th>
-      <td>{% if inv[key].names %}{{ inv[key].names|length }} —
-        {% for name in inv[key].names %}{{ name }}{% if not loop.last %}, {% endif %}{% endfor %}
+      <td>{% if inv[key].names %}{{ inv[key].names|length }} agent{{ "" if inv[key].names|length == 1 else "s" }} ({% for name in inv[key].names %}{{ name }}{% if not loop.last %}, {% endif %}{% endfor %})
         {% else %}<span class="dim">{{ inv[key].reason }}</span>{% endif %}</td>
     </tr>
     {% endfor %}

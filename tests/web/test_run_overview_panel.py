@@ -65,12 +65,51 @@ def test_hostile_agent_and_section_names_render_escaped(client, project):
 def test_the_band_never_triggers_a_provenance_sync(client, project, monkeypatch):
     from scieflow.core import service
 
+    calls = []
+
     def boom(*a, **k):
+        calls.append(a)
         raise AssertionError("the run page must not sync provenance")
 
     monkeypatch.setattr(service.provenance, "sync", boom)
     _touch(project.run_dir("r1"), "manuscript", "drafts", "kim", "intro.tex")
     assert client.get("/runs/r1").status_code == 200
+    assert calls == []
+
+
+def test_a_raising_second_panel_leaves_the_band_and_page_up(client, project, monkeypatch):
+    from scieflow.core import service
+
+    def boom(ws):
+        raise RuntimeError("second panel exploded")
+
+    monkeypatch.setitem(service._PANELS, "boom", boom)
+    _touch(project.run_dir("r1"), "manuscript", "drafts", "kim", "intro.tex")
+    page = client.get("/runs/r1")
+    assert page.status_code == 200
+    assert "kim" in _band(page) and "intro" in _band(page)
+
+
+def test_findings_label_counts_agents_not_findings(client, project):
+    ws = project.run_dir("r1")
+    for name in ("a", "b", "c"):
+        _touch(ws, "findings", f"{name}.json")
+    band = _band(client.get("/runs/r1"))
+    assert "3 agents (a, b, c)" in band
+
+
+def test_empty_directories_render_their_own_reason(client, project):
+    ws = project.run_dir("r1")
+    for sub in ("findings", "gaps", "manuscript/curation/rounds", "review"):
+        (ws / sub).mkdir(parents=True)
+    band = _band(client.get("/runs/r1"))
+    for text in ("findings/ exists but holds no findings yet",
+                 "gaps/ exists but holds no gaps yet",
+                 "manuscript/curation/rounds/ exists but no merge round has completed",
+                 "review/ exists but holds no review round"):
+        assert text in band, text
+    assert "no findings/ directory yet" not in band
+    assert "no review round yet" not in band
 
 
 def test_the_band_adds_no_post_form(client, project):

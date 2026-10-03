@@ -857,7 +857,10 @@ def test_run_overview_a_complete_run(project):
 def test_run_overview_never_reaches_provenance_sync(project, monkeypatch):
     """The seam ticket 19 wires provenance into. `sync` costs ~0.8s of git
     subprocesses per call; only `points()` may ever be used here."""
+    calls = []
+
     def boom(*a, **k):
+        calls.append(a)
         raise AssertionError("run_overview must not call provenance.sync")
 
     monkeypatch.setattr(service.provenance, "sync", boom)
@@ -865,6 +868,53 @@ def test_run_overview_never_reaches_provenance_sync(project, monkeypatch):
     _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
     _touch(ws, "manuscript", "curation", "rounds", "1", "intro.tex")
     service.run_overview(project, "r1")
+    # The counter carries the guard: a panel that swallows the raise with a
+    # broad `except Exception` (as _panel itself does) cannot hide the call.
+    assert calls == []
+
+
+def test_run_overview_sync_guard_survives_a_swallowed_raise(project, monkeypatch):
+    """A sync that silently returns must still be caught: count calls."""
+    calls = []
+    monkeypatch.setattr(service.provenance, "sync", lambda *a, **k: calls.append(a))
+    monkeypatch.setitem(service._PANELS, "sneaky",
+                        lambda ws: service.provenance.sync(ws) or {"reason": ""})
+    service.run_overview(project, "r1")
+    assert len(calls) == 1, "the counter must see a call that raised nothing"
+
+
+def test_run_overview_one_failing_panel_does_not_take_the_others_down(project, monkeypatch):
+    def boom(ws):
+        raise RuntimeError("panel two exploded")
+
+    monkeypatch.setitem(service._PANELS, "boom", boom)
+    _touch(project.run_dir("r1"), "manuscript", "drafts", "kim", "intro.tex")
+    view = service.run_overview(project, "r1")
+    assert "panel two exploded" in view["boom"]["reason"]
+    assert view["inventory"]["drafts"]["agents"][0]["agent"] == "kim"
+
+
+import os as _os
+
+_ROOT = hasattr(_os, "geteuid") and _os.geteuid() == 0
+
+
+@pytest.mark.skipif(_ROOT, reason="root ignores mode bits")
+@pytest.mark.parametrize("sub,key", [("findings", "findings"),
+                                     ("manuscript/drafts", "drafts")])
+def test_run_overview_an_unreadable_directory_is_its_own_state(project, sub, key):
+    ws = project.run_dir("r1")
+    _touch(ws, "findings", "amy.json")
+    target = ws / sub
+    target.mkdir(parents=True, exist_ok=True)
+    target.chmod(0)
+    try:
+        inv = service.run_overview(project, "r1")["inventory"]
+    finally:
+        target.chmod(0o755)
+    assert inv[key]["state"] == "unreadable"
+    assert "could not be read" in inv[key]["reason"]
+    assert inv["gaps"]["state"] == "absent"
 
 
 def test_run_overview_degrades_the_panel_on_an_unexpected_failure(project, monkeypatch):
