@@ -863,11 +863,21 @@ def test_run_overview_never_reaches_provenance_sync(project, monkeypatch):
         calls.append(a)
         raise AssertionError("run_overview must not call provenance.sync")
 
+    ensure_calls = []
+    real_ensure = service.provenance.ensure_repo
+
+    def counted_ensure(*a, **k):
+        # `ensure_repo` WRITES (creates the repo) - on a read-only page.
+        ensure_calls.append(a)
+        return real_ensure(*a, **k)
+
     monkeypatch.setattr(service.provenance, "sync", boom)
+    monkeypatch.setattr(service.provenance, "ensure_repo", counted_ensure)
     ws = project.run_dir("r1")
     _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
     _touch(ws, "manuscript", "curation", "rounds", "1", "intro.tex")
     service.run_overview(project, "r1")
+    assert ensure_calls == [], "run_overview must probe with repo_path, never ensure_repo"
     # The counter carries the guard: a panel that swallows the raise with a
     # broad `except Exception` (as _panel itself does) cannot hide the call.
     assert calls == []
@@ -1328,6 +1338,26 @@ def test_manuscript_panel_decodes_git_quoted_file_names(project):
     provenance.sync(ws)
     ms = service.run_overview(project, "r1")["manuscript"]
     assert ms["changed"] == ["café.tex", 'sec"x.tex']
+
+
+def test_header_path_returns_none_for_a_non_octal_escape():
+    """`899` is three decimal digits but not octal: int(..., 8) raises."""
+    assert service._header_path('"a/x\\899.tex" "b/x\\899.tex"') is None
+    assert service._header_path('"a/x\\\u0663\u0663\u0663.tex"') is None
+
+
+def test_manuscript_says_so_when_a_diff_header_had_to_be_dropped(project, monkeypatch):
+    ws = project.run_dir("r1")
+    for n in (1, 2):
+        _touch(ws, "manuscript", "curation", "rounds", str(n), "intro.tex", text=f"{n}\n")
+    service.provenance.sync(ws)
+    text = ("diff --git a/sections/intro.tex b/sections/intro.tex\n"
+            "diff --git garbage\n")
+    monkeypatch.setattr(service.provenance, "diff",
+                        lambda *a, **k: {"text": text, "truncated": False})
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["changed"] == ["intro.tex"]
+    assert "could not be read" in ms["changed_note"]
 
 
 def test_header_path_returns_none_for_an_unparseable_header():

@@ -674,7 +674,11 @@ def open_gates(project: Project, slug: str | None = None, *,
                slugs: list[str] | None = None) -> list[dict]:
     """Open gates for one run (`slug`), for the given `slugs`, or for every
     run. A caller that already holds the run list passes `slugs` so this does
-    not re-read every run's status.yml and config.yml to rebuild it."""
+    not re-read every run's status.yml and config.yml to rebuild it.
+
+    `slugs` is a trusted, already-listed set: an unknown name in it is skipped,
+    so `slugs=["typo"]` returns `[]` rather than raising. When both `slug` and
+    `slugs` are passed, `slug` wins and `slugs` is ignored."""
     if slug:
         slugs = [slug]
     elif slugs is None:
@@ -1536,7 +1540,8 @@ def _header_path(rest: str) -> str | None:
             elif rest[i + 1:i + 2] in _ESCAPES:
                 out.append(_ESCAPES[rest[i + 1]])
                 i += 2
-            elif rest[i + 1:i + 4].isdigit() and len(rest[i + 1:i + 4]) == 3:
+            elif (len(rest[i + 1:i + 4]) == 3
+                  and all(c in "01234567" for c in rest[i + 1:i + 4])):
                 out.append(int(rest[i + 1:i + 4], 8) & 0xFF)
                 i += 4
             else:
@@ -1607,20 +1612,28 @@ def _manuscript(ws: Path) -> dict:
     prev_ref = merges[1][1]
     result["compared"] = [ref, prev_ref]
     try:
+        # NOTE: newest first - the reverse of the repo's own (old, new) convention
+        # (see tests/core/test_provenance.py). Harmless here, only the header
+        # names are used; do not reuse this patch's text, it reads backwards.
         patch = provenance.diff(ws, ref, prev_ref)
     except provenance.ProvenanceError:
         result["changed_note"] = "the last two merge rounds could not be compared"
         return result
     # Headers read `diff --git a/<path> b/<path>`; git quotes unusual names.
     names = []
+    dropped = False
     for line in patch["text"].splitlines():
         if line.startswith("diff --git "):
             name = _header_path(line[len("diff --git "):])
             if name is not None:
                 names.append(name)
+            else:
+                dropped = True
     result["changed"] = sorted({n.removeprefix("sections/") for n in names})
     if patch["truncated"]:
         result["changed_note"] = "the diff was truncated, so this list may be incomplete"
+    elif dropped:
+        result["changed_note"] = "a changed file's name could not be read, so this list is incomplete"
     return result
 
 

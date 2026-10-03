@@ -1,6 +1,6 @@
 # The run explorer — design (programme item B)
 
-**Status:** design approved in conversation 2026-10-03; awaiting spec review before planning.
+**Status:** approved, implemented and reviewed (final review: ready to merge, no Critical or Important findings). Branch `dev/b-run-explorer`, commits `ad4d474..30ee164` plus the final fix wave that follows them.
 **Position:** A1 → C → D (PR #7) → **this (item B)**. B2 (DVC-archived browsing), and F–K from
 [Web/CLI coverage](2026-10-03-web-cli-coverage.md), remain.
 
@@ -12,8 +12,7 @@ Two complaints, measured rather than assumed.
 the cheap `workspace.describe()`, reading only `status.yml` and `config.yml` — and then loops
 `service.run_detail(project, slug)` once per run. `run_detail` reads that run's status, budget,
 `workspace.describe` again, open gates *with proposal previews*, its job list, and **its entire
-event log**. All of that to render two columns: budget left, and stopped. `describe()` already
-returns `stopped`. The cost is O(runs × events) to display O(runs) small numbers.
+event log**. All of that to render one column: budget left. (The old loop also computed `stopped` into `detail`, but `dashboard.html` never rendered it, so it was never a second column.) `stopped_reason` now rides on `describe()`. The cost is O(runs × events) to display O(runs) small numbers.
 
 **The run page makes you click away to answer basic questions.** It already has nine sections —
 charter, conversation, phases, budget, actions, gates, jobs, timeline — and links out to drafts and
@@ -68,7 +67,7 @@ here — it could land alone.
 | Panel | Source | Already exists |
 |---|---|---|
 | Inventory | `drafts.agents`, `drafts.sections`, `drafts.rounds`, `drafts.round_sections` | yes |
-| Manuscript | `provenance.points` | yes (item D) |
+| Manuscript | `provenance.points(ws)` plus one `provenance.diff(ws, newest, previous)`, and `drafts.*` for section lists | yes (item D) |
 | Attribution | `curation.read` | yes (item C) |
 | Progress | `events.read` | yes |
 
@@ -79,14 +78,14 @@ once.
 
 - **List page:** O(runs) × three small YAML reads (`status.yml`, `config.yml`, `budget.yml`).
   Zero event-log reads, zero gate reads, zero proposal previews, zero job listings.
-- **Run page:** one run, target **under ~0.2s** for the band.
+- **Run page:** one run, target **under ~0.2s** for the band. Measured on a 20-round / 4-agent / 6-section / 2000-event run: band ~159ms, manuscript panel ~134ms, full `GET /runs/r1` ~200ms. Currently met.
 
 ### Four hard constraints
 
-1. **`run_overview` must never call `provenance.sync` — only `points()`.** The drafts page runs a
+1. **`run_overview` must never call `provenance.sync` or `ensure_repo` — only `points()` and `diff()`.** The drafts page runs a
    full sync on every GET, measured at **0.81s** of git subprocesses on a 20-round / 4-agent /
    6-section run even when nothing changed. That is a recorded, deferred cost and must not be
-   replicated on a second page. `points()` alone measured **0.06s**.
+   replicated on a second page. `points()` alone measured **0.06s**. `diff` recomputes `points` internally for its ref whitelist, so the panel pays `points` twice — about 130ms of the ~159ms band. That is recorded and deferred to the provenance read-cost ticket (an `allowed=`/`points=` parameter or memoization inside `provenance.diff`); the service layer must not call `_git` itself to skip it, because the whitelist is the only thing stopping an argument-shaped ref reaching `git`.
 2. **No summary or cache file.** Recorded here so it is a decision, not an omission a later session
    "fixes".
 3. **Read-only.** No new route, no POST, therefore no `MUTATING_PATHS` entry, no `SAMPLES` case and
@@ -114,16 +113,16 @@ exists but is empty is distinguished from one that is absent.
 
 ### 2. Where the manuscript stands
 
-**Source:** `provenance.points(ws)` only. Never `sync`.
+**Source:** `provenance.points(ws)` plus one `provenance.diff(ws, newest, previous)`; never `sync` or `ensure_repo`. The changed-file list cannot come from points alone, because every `merge_N` point shares main's tip commit, so only a tree diff shows what changed. Section lists come from `drafts.round_sections`/`agents`/`sections`/`rounds` on disk, with no git.
 
 **Shows:** the current merge round; which sections are present in it against which sections the
 agents drafted; and which files the latest merge changed, from the two most recent `merge_N` points.
 Links to the workbench for the full diff rather than reproducing it.
 
-**Degrades:** three distinct states, each stated plainly rather than collapsed into one:
-`git` absent (`provenance.available()` false); the repo not yet created (no merge round has
-happened and the workbench has never been opened); and a run with artifacts but no points yet. The
-last of these is why the panel must not sync — the honest message is "history appears after the
+**Degrades:** four distinct states plus `ok`, each stated plainly rather than collapsed into one:
+`no_git` (`provenance.available()` false); `no_repo` (the repo not yet created: no merge round has
+happened and the workbench has never been opened); `no_points` (the repo exists but holds no points); and `no_merge` ("history holds drafts but no merge round yet"). The
+`no_repo` and `no_points` states are why the panel must not sync — the honest message is "history appears after the
 first merge round or workbench visit", not a 0.8s stall to create it.
 
 ### 3. Who contributed what
@@ -183,8 +182,7 @@ and `tests/core/test_service.py` for the service-layer read.
 - Each panel's degradation path, asserted on rendered output.
 - `kind: "mine"` blocks are counted as unattributed and visibly reported — falsified by a test that
   fails if they are silently dropped.
-- `run_overview` does **not** call `provenance.sync` — pinned by monkeypatching `sync` to raise, which
-  fails if anything reaches it.
+- `run_overview` does **not** call `provenance.sync` or `ensure_repo` — pinned by a call counter on each, not by a raise: `_panel` swallows any exception, so a raising stub would let the panel degrade to a reason string and the test would still pass. The stub returns silently and the test asserts the counter is zero.
 - `git` absent degrades to a stated reason, tested rather than skipped.
 - Every new handler path is `def` (`tests/web/test_async_routes.py` enforces this globally).
 - An adversarial agent name or section name renders escaped; nothing reaches the template via `|safe`.
