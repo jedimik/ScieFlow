@@ -311,8 +311,29 @@ def _as_int(value: str) -> int:
         raise service.ServiceError(f"not a number: {value!r}") from exc
 
 
+def _manuscript_diff(project, slug: str, a: str, b: str) -> dict | None:
+    """The diff panel's data: `None` when there is nothing to diff yet (`a`
+    or `b` empty — the common case, before the GET form has ever been
+    submitted), otherwise `service.manuscript_diff`'s result, or `{"error":
+    str(exc)}` when the ref pair is rejected.
+
+    `ServiceError` is caught here, not left to `drafts_page` — a hostile or
+    stale `diff_a`/`diff_b` (an old point from before a rebuild, or a
+    `--flag`-shaped string trying to reach `git` as an argument) is an
+    ordinary, expected outcome of a GET query parameter a user or a stale
+    tab can send, not a reason to 404 or 500 the whole workbench page.
+    """
+    if not a or not b:
+        return None
+    try:
+        return service.manuscript_diff(project, slug, a, b)
+    except service.ServiceError as exc:
+        return {"error": str(exc)}
+
+
 @router.get("/runs/{slug}/drafts", response_class=HTMLResponse)
-def drafts_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
+def drafts_page(request: Request, slug: str, error: str = "",
+                diff_a: str = "", diff_b: str = "") -> HTMLResponse:
     """`view` (from `service.workbench`) is spread last so its own `agents`
     key — the draft *authors* — wins over anything with the same name added
     here, and is what the drafts panel and its empty-state check read. The
@@ -321,7 +342,21 @@ def drafts_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
     that one is passed under its own name, `conversational`, rather than
     `agents`: a shared key here would let one of the two silently shadow the
     other depending on dict order, which is exactly the defect this
-    docstring exists to keep from coming back."""
+    docstring exists to keep from coming back.
+
+    The same care applies to `provenance` (the manuscript's own git history,
+    from `service.manuscript_history`) versus `history` (already taken —
+    `service.curation_history`, the curation *document's* version list,
+    which the existing version panel renders). The two are unrelated lists
+    that happen to both describe "versions of something on this page", so
+    they get two names, never one: a shared key here would let one silently
+    shadow the other depending on dict order, exactly as `agents`/
+    `conversational` above, and this is the specific collision a Task-5 fix
+    round on the C plan was spent on.
+
+    `diff_a`/`diff_b` are plain query parameters, not a new route — both the
+    history and diff panels are read-only, driven by this same `GET`, so a
+    point-selection control is a GET form and needs no CSRF field."""
     project = _project(request)
     try:
         view = service.workbench(project, slug)
@@ -338,6 +373,9 @@ def drafts_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
         "conversation": service.conversation_state(project, slug),
         "conversational": service.conversational_agents(project),
         "history": service.curation_history(project, slug),
+        "provenance": service.manuscript_history(project, slug),
+        "diff": _manuscript_diff(project, slug, diff_a, diff_b),
+        "diff_a": diff_a, "diff_b": diff_b,
         "previews": previews,
         "preview_busy": service.preview_busy(project, slug),
         "csrf": auth.csrf_token(request),

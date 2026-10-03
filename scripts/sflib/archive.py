@@ -19,9 +19,14 @@ ARCHIVE_DIR = "_archives"
 # Rebuildable noise, never results. Logs are deliberately NOT skipped:
 # workspace/<slug>/logs/ holds agent prompts and transcripts (AGENTS.md rule 2).
 # `scratch/` is where runs are told to keep tests, envs, clones and caches.
+# `provenance.git` is the manuscript history repo: derived, never authoritative,
+# and rebuilt from artifacts this archive already carries, so it is rebuildable
+# in exactly the sense this set means. Keeping it would also let a derived tree's
+# loose objects push a push's file count toward the AGENTS.md rule 15 threshold.
 _SKIP_DIRS = {
     "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".venv",
     ".snakemake", ".cache", ".uv-cache", "uv-cache", "mpl-cache", "tmp", "scratch",
+    "provenance.git",
 }
 _SKIP_DIR_PATTERNS = ("pytest-*",)
 # Relative-path suffixes: conda prefixes unpacked into a run (`runtime/host`).

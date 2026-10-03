@@ -431,3 +431,119 @@ def test_an_unreadable_allowlist_raises_sandboxerror(tmp_path):
             sandbox.allowlist_paths(project)
     finally:
         path.chmod(0o644)
+
+
+# --- provenance.git is masked inside an agent dispatch's run grant -----------
+
+
+def _tree_state(root: Path) -> dict[str, bytes | None]:
+    """Every path under `root` with its bytes (None for a directory)."""
+    return {str(p.relative_to(root)): (p.read_bytes() if p.is_file() else None)
+            for p in sorted(root.rglob("*"))}
+
+
+_VANDAL = ("mkdir -p {repo}/objects {repo}/refs/heads; echo pwned > {repo}/objects/pwned; echo pwned > {repo}/refs/heads/main; "
+           "rm -rf {repo}/objects/pack; touch {run}/inside")
+
+
+def _vandalise(project, run: Path, **launch) -> None:
+    """Run a write attempt against the run's provenance.git through the real
+    job launcher with the grant an agent dispatch actually receives."""
+    from scieflow.core import jobs
+    writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
+    repo = run / "provenance.git"
+    script = _VANDAL.format(repo=repo, run=run)
+    jobs.run_blocking(project, ["/bin/sh", "-c", script], kind="agent", cwd=run,
+                      run_dir=run, sandbox_writable=writable, **launch)
+    assert (run / "inside").exists()          # the sandbox ran; the grant still works
+
+
+@needs_bwrap
+def test_an_agent_dispatch_cannot_alter_an_existing_provenance_repo(tmp_path):
+    from scieflow.core import provenance
+    project = make_project(tmp_path)
+    run = project.run_dir("r1")
+    provenance.sync(run)
+    repo = provenance.repo_path(run)
+    before = _tree_state(repo)
+    assert before                              # a real object store, not an empty dir
+
+    _vandalise(project, run)
+
+    assert _tree_state(repo) == before
+
+
+@needs_bwrap
+def test_an_agent_dispatch_cannot_plant_a_provenance_repo_that_does_not_exist_yet(tmp_path):
+    """The common case: a fresh run dispatches agents before ensure_repo ever ran."""
+    project = make_project(tmp_path)
+    run = project.run_dir("r1")
+    repo = run / "provenance.git"
+    assert not repo.exists()
+
+    _vandalise(project, run)
+
+    assert not any(repo.iterdir())             # nothing written survives on the host
+
+
+@needs_bwrap
+def test_the_empty_directory_a_dispatch_leaves_behind_is_harmless(tmp_path):
+    from scieflow.core import provenance
+    project = make_project(tmp_path)
+    run = project.run_dir("r1")
+
+    _vandalise(project, run)
+    assert (run / "provenance.git").is_dir()   # the mountpoint materialised on the host
+
+    provenance.ensure_repo(run)
+    provenance.sync(run)
+    assert provenance._git(provenance.repo_path(run), "rev-parse", "refs/heads/main")
+
+
+@needs_bwrap
+def test_the_mask_is_not_laid_over_allowlisted_grants(tmp_path):
+    """A masked mountpoint materialises on the host, so masking every grant
+    would litter an empty provenance.git under each allowlisted path."""
+    project = make_project(tmp_path)
+    run = project.run_dir("r1")
+    extra = tmp_path / "scratch"
+    (project.root / "config" / "sandbox.yml").write_text(
+        "writable:\n  - path: scratch\n")
+    _vandalise(project, run)
+    assert not (extra / "provenance.git").exists()
+
+
+def test_the_coordinator_grant_is_not_masked(tmp_path):
+    project = make_project(tmp_path)
+    run = project.run_dir("r1")
+    writable = sandbox.writable_for(project, run_dir=None, coordinator=True)
+    assert sandbox.masks_for(writable, run_dir=run) == []
+
+
+def test_an_agent_grant_masks_exactly_the_runs_provenance_repo(tmp_path):
+    project = make_project(tmp_path)
+    run = project.run_dir("r1")
+    writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
+    assert sandbox.masks_for(writable, run_dir=run) == [run.resolve() / "provenance.git"]
+    assert sandbox.masks_for(writable, run_dir=None) == []
+
+
+def test_jobs_start_passes_the_mask_through_to_wrap(monkeypatch, tmp_path):
+    """Pinned without bwrap: the real-bwrap tests above skip on a host without
+    it, and a dropped `mask=` would fail open. Falsify by removing `mask=` from
+    the `sandbox.wrap` call in `jobs.start`."""
+    from scieflow.core import jobs
+    project = make_project(tmp_path)
+    run = project.run_dir("r1")
+    seen = {}
+
+    def fake_wrap(argv, **kw):
+        seen.update(kw)
+        return ["/bin/true"]
+
+    monkeypatch.setattr(sandbox, "wrap", fake_wrap)
+    writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
+    _, proc = jobs.start(project, ["agent"], kind="agent", cwd=run, run_dir=run,
+                         sandbox_writable=writable)
+    proc.wait()
+    assert seen["mask"] == [run.resolve() / "provenance.git"]

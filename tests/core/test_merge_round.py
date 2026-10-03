@@ -619,3 +619,58 @@ def test_a_note_less_round_still_states_the_instructions_sentence(project):
 
     assert "The only instructions for this turn are" in sent
     assert "Besides the note" not in sent
+
+
+def test_a_successful_round_syncs_the_provenance_repo(project, curated, responder):
+    """The `responder` fixture only registers the agent; the round is only
+    actually dispatched to it once `curated` (which defaults to `stub`, and
+    `stub` always fails against a real merge prompt) is switched over — the
+    same setup `test_the_round_advances_once_the_turn_succeeds` above uses to
+    reach the success branch that the guarded sync lives in."""
+    from scieflow.core import provenance
+
+    conversation.set_agent(curated, responder)
+    service.merge_round(project, "r1")
+    ws = project.run_dir("r1")
+    assert provenance.repo_path(ws).is_dir(), "a successful round did not sync"
+
+
+def test_a_failing_provenance_sync_does_not_fail_the_round(project, curated, responder,
+                                                           monkeypatch):
+    """The round happened and cost budget. Losing a commit is not worth losing
+    that. Falsify by removing the guard around the sync call: this test then
+    fails with the raised ProvenanceError instead of returning a round."""
+    from scieflow.core import provenance
+
+    def boom(ws):
+        raise provenance.ProvenanceError("git exploded")
+
+    conversation.set_agent(curated, responder)
+    monkeypatch.setattr(service.provenance, "sync", boom)
+    result = service.merge_round(project, "r1")
+    assert result["round"] == 2, "the round must still advance"
+    assert result["turn"]["job"]["state"] == service.MERGE_SUCCESS_STATE
+
+
+def test_a_failing_skipped_event_does_not_fail_the_round(project, curated, responder,
+                                                         monkeypatch):
+    """The sync failure handler records `provenance.skipped`; that emit is
+    itself best-effort. Falsify by removing the guard around the emit: this
+    test then fails with the raised OSError instead of returning a round."""
+    from scieflow.core import provenance
+
+    def boom(ws):
+        raise provenance.ProvenanceError("git exploded")
+
+    real_emit = service.events.emit
+
+    def emit(ws, type_, *args, **kwargs):
+        if type_ == "provenance.skipped":
+            raise OSError("event log unwritable")
+        return real_emit(ws, type_, *args, **kwargs)
+
+    conversation.set_agent(curated, responder)
+    monkeypatch.setattr(service.provenance, "sync", boom)
+    monkeypatch.setattr(service.events, "emit", emit)
+    result = service.merge_round(project, "r1")
+    assert result["round"] == 2, "the round must still advance"
