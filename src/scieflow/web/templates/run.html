@@ -16,6 +16,117 @@
      — {{ detail.status.stopped.get("detail", "") }}</p>
 {% endif %}
 
+{# Overview band: read-only, every name below is agent-chosen text and relies on
+   autoescape — nothing here may use |safe. One `{% set %}` block per panel; later
+   panels add their own keys to `overview`. #}
+<section id="overview" class="overview">
+  <h2>What this run has produced</h2>
+  {% set inv = overview.inventory %}
+  {% if inv.reason %}
+    <p class="dim">{{ inv.reason }}</p>
+  {% else %}
+  <table>
+    {% for key, label in (("findings", "Findings"), ("gaps", "Gaps")) %}
+    <tr>
+      <th>{{ label }}</th>
+      <td>{% if inv[key].names %}{{ inv[key].names|length }} agent{{ "" if inv[key].names|length == 1 else "s" }} ({% for name in inv[key].names %}{{ name }}{% if not loop.last %}, {% endif %}{% endfor %})
+        {% else %}<span class="dim">{{ inv[key].reason }}</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    <tr>
+      <th>Drafts</th>
+      <td>
+      {% if inv.drafts.agents %}
+        <table>
+          <tr><th></th>{% for section in inv.drafts.sections %}<th>{{ section }}</th>{% endfor %}</tr>
+          {% for row in inv.drafts.agents %}
+          <tr><td>{{ row.agent }}</td>
+            {% for section in inv.drafts.sections %}
+            <td>{% if section in row.sections %}yes{% else %}<span class="dim">—</span>{% endif %}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </table>
+      {% else %}<span class="dim">{{ inv.drafts.reason }}</span>{% endif %}
+      </td>
+    </tr>
+    <tr>
+      <th>Merge rounds</th>
+      <td>{% if inv.merge.rounds %}
+        {% for r in inv.merge.rounds %}Merge round {{ r.n }} ({{ r.sections|length }} sections){% if not loop.last %}, {% endif %}{% endfor %}
+        {% else %}<span class="dim">{{ inv.merge.reason }}</span>{% endif %}</td>
+    </tr>
+    <tr>
+      <th>Review rounds</th>
+      <td>{% if inv.review.rounds %}
+        {% for r in inv.review.rounds %}Review round {{ r.n }}{% if r.kind == "cross-review" %} (cross-review){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+        {% else %}<span class="dim">{{ inv.review.reason }}</span>{% endif %}</td>
+    </tr>
+  </table>
+  {% endif %}
+
+  {% set ms = overview.manuscript %}
+  <div id="ov-manuscript">
+  <h3>Where the manuscript stands</h3>
+  {% if ms.reason %}
+    <p class="dim">{{ ms.reason }}</p>
+  {% else %}
+    <p>Merge round {{ ms.round }}: {% if ms.present %}{{ ms.present|join(", ") }}{% else %}<span class="dim">no sections</span>{% endif %}.
+      {% if ms.missing %}Drafted but missing from the merge: {{ ms.missing|join(", ") }}.{% else %}<span class="dim">Every drafted section is in the merge.</span>{% endif %}
+      {% if ms.behind %}<span class="dim">Round {{ ms.behind }} is on disk but not in the history yet.</span>{% endif %}</p>
+    <p>{% if ms.changed is not none %}
+        {% if ms.changed %}Changed since {{ ms.compared[1] }}: {{ ms.changed|join(", ") }}.{% else %}<span class="dim">No files changed since {{ ms.compared[1] }}.</span>{% endif %}
+      {% endif %}
+      {% if ms.changed_note %}<span class="dim">{{ ms.changed_note }}</span>{% endif %}
+      <a href="/runs/{{ slug }}/drafts">Open the workbench for the full diff</a></p>
+  {% endif %}
+  </div>
+
+  {% set at = overview.attribution %}
+  <div id="ov-attribution">
+  <h3>Who contributed what</h3>
+  {% if at.reason %}
+    <p class="dim">{{ at.reason }}</p>
+  {% else %}
+    <ul>
+    {% for a in at.agents %}
+      <li>{{ a.agent }}: {{ a.count }} kept passage{{ "" if a.count == 1 else "s" }}
+        ({% for s in a.sections %}{{ s.section }} &times;{{ s.count }}{% if not loop.last %}, {% endif %}{% endfor %}){% if not a.drafted %} <span class="dim">&mdash; no longer has a draft in this run</span>{% endif %}</li>
+    {% endfor %}
+      <li>{{ at.mine }} of your own &mdash; <span class="dim">no agent credited</span></li>
+      {% if at.other %}<li>{{ at.other }} of an unrecognised kind</li>{% endif %}
+    </ul>
+    <p class="dim">Per-agent counts do not add up to the document: your own words credit no agent.</p>
+  {% endif %}
+  </div>
+
+  {% set pg = overview.progress %}
+  <div id="ov-progress">
+  <h3>Spend and time</h3>
+  {% if pg.reason %}
+    <p class="dim">{{ pg.reason }}</p>
+  {% else %}
+    {% if pg.phases %}
+    <table>
+      <tr><th>Phase</th><th>Time</th><th>Spend</th></tr>
+      {% for p in pg.phases %}
+      <tr><td>{{ p.phase }}</td>
+        <td>{% if p.running %}running{% elif p.text %}{{ p.text }}{% else %}<span class="dim">unknown</span>{% endif %}{% if p.failed %} ({{ p.failed }} failed){% endif %}</td>
+        <td>{% for dim, amount in p.spend.items() %}{{ dim }} {{ amount }}{% if not loop.last %}, {% endif %}{% else %}<span class="dim">none recorded</span>{% endfor %}</td></tr>
+      {% endfor %}
+      {% if pg.outside_phase %}<tr><td class="dim">(between phases)</td><td></td>
+        <td>{% for dim, amount in pg.outside_phase.items() %}{{ dim }} {{ amount }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>{% endif %}
+    </table>
+    {% endif %}
+    {% if pg.gates.longest %}<p>Longest wait on a human: {{ pg.gates.longest.text }} ({{ pg.gates.longest.kind }} gate).</p>{% endif %}
+    {% for w in pg.gates.waiting %}<p>A {{ w.kind }} gate is still waiting for an answer (opened {{ w.since }}).</p>{% endfor %}
+    <p class="dim">{{ pg.iterations }} iteration{{ "" if pg.iterations == 1 else "s" }} advanced, {{ pg.checkpoints }} checkpoint{{ "" if pg.checkpoints == 1 else "s" }}. Times are UTC as recorded.</p>
+    {% if pg.warnings %}<p class="dim">{{ pg.warnings|join("; ") }}.</p>{% endif %}
+    {% if not pg.complete %}<p class="dim">The event log is incomplete: {{ pg.notes|join("; ") }}.</p>{% endif %}
+  {% endif %}
+  </div>
+</section>
+
 <h2>The agreed plan</h2>
 {% if not charter.text %}
   <p class="dim">No charter yet. Whatever you write here is put at the top of

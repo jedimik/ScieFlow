@@ -1,0 +1,323 @@
+"""The overview band on the run page: panel 1, what exists on disk."""
+
+from markupsafe import escape
+
+
+def _touch(ws, *parts):
+    path = ws.joinpath(*parts)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x\n")
+
+
+def _band(page):
+    start = page.text.index('id="overview"')
+    return page.text[start:page.text.index("The agreed plan")]
+
+
+def test_the_band_sits_above_the_existing_sections(client, project):
+    page = client.get("/runs/r1")
+    assert page.status_code == 200
+    assert page.text.index('id="overview"') < page.text.index("The agreed plan")
+
+
+def test_a_run_before_phase_3_names_the_phase_not_zeros(client, project):
+    band = _band(client.get("/runs/r1"))
+    assert "no drafts yet" in band
+    assert "Phase 3" in band
+    assert "exists but" not in band
+
+
+def test_an_empty_drafts_directory_reads_differently_from_an_absent_one(client, project):
+    (project.run_dir("r1") / "manuscript" / "drafts").mkdir(parents=True)
+    band = _band(client.get("/runs/r1"))
+    assert "manuscript/drafts/ exists but no agent has drafted" in band
+    assert "no drafts yet" not in band
+
+
+def test_the_band_shows_the_agents_and_sections_the_run_used(client, project):
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _touch(ws, "manuscript", "drafts", "lee", "results.tex")
+    _touch(ws, "findings", "kim.json")
+    _touch(ws, "gaps", "lee.json")
+    _touch(ws, "manuscript", "curation", "rounds", "1", "intro.tex")
+    _touch(ws, "review", "round-1", "review.md")
+    band = _band(client.get("/runs/r1"))
+    for token in ("kim", "lee", "intro", "results", "Merge round 1", "Review round 1"):
+        assert token in band, token
+
+
+def test_hostile_agent_and_section_names_render_escaped(client, project):
+    name = 'evil"><script>alert(1)'
+    section = 'sec"><img src=x onerror=alert(2)>'
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", name, f"{section}.tex")
+    _touch(ws, "findings", f"{name}.json")
+    page = client.get("/runs/r1")
+    assert page.status_code == 200
+    assert "<script>alert(1)" not in page.text
+    assert "<img src=x" not in page.text
+    band = _band(page)
+    assert str(escape(name)) in band
+    assert str(escape(section)) in band
+
+
+def test_the_band_never_triggers_a_provenance_sync(client, project, monkeypatch):
+    from scieflow.core import service
+
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(a)
+        raise AssertionError("the run page must not sync provenance")
+
+    monkeypatch.setattr(service.provenance, "sync", boom)
+    _touch(project.run_dir("r1"), "manuscript", "drafts", "kim", "intro.tex")
+    assert client.get("/runs/r1").status_code == 200
+    assert calls == []
+
+
+def test_a_raising_second_panel_leaves_the_band_and_page_up(client, project, monkeypatch):
+    from scieflow.core import service
+
+    def boom(ws):
+        raise RuntimeError("second panel exploded")
+
+    monkeypatch.setitem(service._PANELS, "boom", boom)
+    _touch(project.run_dir("r1"), "manuscript", "drafts", "kim", "intro.tex")
+    page = client.get("/runs/r1")
+    assert page.status_code == 200
+    assert "kim" in _band(page) and "intro" in _band(page)
+
+
+def test_findings_label_counts_agents_not_findings(client, project):
+    ws = project.run_dir("r1")
+    for name in ("a", "b", "c"):
+        _touch(ws, "findings", f"{name}.json")
+    band = _band(client.get("/runs/r1"))
+    assert "3 agents (a, b, c)" in band
+
+
+def test_empty_directories_render_their_own_reason(client, project):
+    ws = project.run_dir("r1")
+    for sub in ("findings", "gaps", "manuscript/curation/rounds", "review"):
+        (ws / sub).mkdir(parents=True)
+    band = _band(client.get("/runs/r1"))
+    for text in ("findings/ exists but holds no findings yet",
+                 "gaps/ exists but holds no gaps yet",
+                 "manuscript/curation/rounds/ exists but no merge round has completed",
+                 "review/ exists but holds no review round"):
+        assert text in band, text
+    assert "no findings/ directory yet" not in band
+    assert "no review round yet" not in band
+
+
+def test_the_band_adds_no_post_form(client, project):
+    assert 'id="overview"' in client.get("/runs/r1").text
+    assert "<form" not in _band(client.get("/runs/r1"))
+
+
+# --- panel 2: where the manuscript stands ----------------------------------
+
+def _merged(project, hostile=None):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "drafts", "kim", "intro.tex")
+    _touch(ws, "manuscript", "drafts", "kim", "results.tex")
+    if hostile:
+        _touch(ws, "manuscript", "drafts", "kim", f"{hostile}.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "1", "results.tex")
+    _touch(ws, "manuscript", "curation", "rounds", "2", "results.tex", )
+    (ws / "manuscript" / "curation" / "rounds" / "2" / "results.tex").write_text("changed\n")
+    provenance.sync(ws)
+    return ws
+
+
+def _manuscript(page):
+    band = _band(page)
+    start = band.index('id="ov-manuscript"')
+    return band[start:band.find('id="ov-', start + 1) if 'id="ov-' in band[start + 1:] else None]
+
+
+def test_the_manuscript_panel_names_the_round_and_links_the_workbench(client, project):
+    _merged(project)
+    panel = _manuscript(client.get("/runs/r1"))
+    assert "Merge round 2" in panel
+    assert "missing from the merge: intro" in panel
+    assert "results.tex" in panel
+    assert 'href="/runs/r1/drafts"' in panel
+
+
+def test_the_manuscript_panel_renders_each_no_history_state_distinctly(client, project, monkeypatch):
+    from scieflow.core import provenance
+
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "curation", "rounds", "1", "results.tex")
+    no_repo = _manuscript(client.get("/runs/r1"))
+    provenance.ensure_repo(ws)
+    no_points = _manuscript(client.get("/runs/r1"))
+    monkeypatch.setattr(provenance.shutil, "which", lambda name: None)
+    no_git = _manuscript(client.get("/runs/r1"))
+
+    assert "git is not installed" in no_git
+    assert "has not been recorded yet" in no_repo
+    assert "no points yet" in no_points
+    assert len({no_git, no_repo, no_points}) == 3
+    for panel in (no_git, no_repo, no_points):
+        assert "create" not in panel.lower()
+        assert "<form" not in panel and "/drafts" not in panel, "no offer to go build history"
+    assert "after the first merge round or workbench visit" in no_repo
+    assert "after the first merge round or workbench visit" in no_points
+
+
+def test_the_manuscript_panel_escapes_a_hostile_section_name(client, project):
+    section = 'sec"><img src=x onerror=alert(2)>'
+    _merged(project, hostile=section)
+    from scieflow.core import provenance
+    ws = project.run_dir("r1")
+    _touch(ws, "manuscript", "curation", "rounds", "2", f"{section}.tex")
+    provenance.sync(ws)
+    page = client.get("/runs/r1")
+    assert page.status_code == 200
+    assert "<img src=x" not in page.text
+    assert str(escape(section)) in _manuscript(page)
+
+
+def test_the_manuscript_panel_never_syncs_on_a_page_get(client, project, monkeypatch):
+    from scieflow.core import service
+
+    _merged(project)
+    calls = []
+    monkeypatch.setattr(service.provenance, "sync", lambda *a, **k: calls.append(a))
+    page = client.get("/runs/r1")
+    assert "Merge round 2" in _manuscript(page), "the panel must have rendered history"
+    assert calls == []
+
+
+# --- panel 3: who contributed what -----------------------------------------
+
+def _attribution(page):
+    band = _band(page)
+    start = band.index('id="ov-attribution"')
+    return band[start:band.find('id="ov-', start + 1) if 'id="ov-' in band[start + 1:] else None]
+
+
+def test_the_attribution_panel_shows_mine_as_unattributed(client, project):
+    from scieflow.core.run import curation
+
+    ws = project.run_dir("r1")
+    curation.keep(ws, "kept text", agent="kim", section="intro")
+    curation.add_own(ws, "mine one")
+    curation.add_own(ws, "mine two")
+    panel = _attribution(client.get("/runs/r1"))
+    assert "kim" in panel and "intro" in panel
+    assert "2 of your own" in panel
+    assert "no agent credited" in panel
+    assert "do not add up to the document" in panel
+
+
+def test_the_attribution_panel_with_nothing_curated_says_so(client, project):
+    assert "nothing curated yet" in _attribution(client.get("/runs/r1"))
+
+
+def test_the_attribution_panel_escapes_hostile_agent_and_section(client, project):
+    from scieflow.core.run import curation
+
+    agent = 'ev"><script>alert(1)</script>'
+    section = 'se"><img src=x onerror=alert(2)>'
+    curation.keep(project.run_dir("r1"), "t", agent=agent, section=section)
+    page = client.get("/runs/r1")
+    assert page.status_code == 200
+    assert "<script>alert(1)" not in page.text and "<img src=x" not in page.text
+    panel = _attribution(page)
+    assert str(escape(agent)) in panel and str(escape(section)) in panel
+
+
+def test_the_attribution_panel_renders_a_removed_agent(client, project):
+    from scieflow.core.run import curation
+
+    curation.keep(project.run_dir("r1"), "t", agent="departed", section="intro")
+    panel = _attribution(client.get("/runs/r1"))
+    assert "departed" in panel and "no longer has a draft" in panel
+
+
+# --- panel 4: spend and progress over time ---------------------------------
+
+def _ev(ws, type_, ts, **data):
+    import json
+
+    with (ws / "events.jsonl").open("a") as f:
+        f.write(json.dumps({"id": f"w{abs(hash((type_, ts, str(data))))}", "ts": ts,
+                            "type": type_, "actor": "agent", "data": data}) + "\n")
+
+
+def _progress(page):
+    band = _band(page)
+    return band[band.index('id="ov-progress"'):]
+
+
+def _clean(project):
+    ws = project.run_dir("r1")
+    (ws / "events.jsonl").unlink(missing_ok=True)
+    return ws
+
+
+def test_the_progress_panel_shows_spend_per_phase_and_the_longest_stall(client, project):
+    ws = _clean(project)
+    _ev(ws, "phase.started", "2026-10-03T10:00:00.000+00:00", phase="search", iteration=1)
+    _ev(ws, "budget.recorded", "2026-10-03T10:00:10.000+00:00", experiment_runs=7)
+    _ev(ws, "phase.done", "2026-10-03T10:02:05.000+00:00", phase="search", iteration=1)
+    _ev(ws, "gate.opened", "2026-10-03T10:03:00.000+00:00", gate="g1", kind="question")
+    _ev(ws, "gate.answered", "2026-10-03T11:05:00.000+00:00", gate="g1", kind="question")
+    panel = _progress(client.get("/runs/r1"))
+    assert "search" in panel and "2m 05s" in panel and "experiment_runs 7" in panel
+    assert "1h 02m" in panel and "Longest wait on a human" in panel
+
+
+def test_the_progress_panel_labels_an_open_gate_as_still_waiting(client, project):
+    ws = _clean(project)
+    _ev(ws, "gate.opened", "2026-10-03T10:00:00.000+00:00", gate="g1", kind="question")
+    panel = _progress(client.get("/runs/r1"))
+    assert "still waiting" in panel and "2026-10-03 10:00:00 UTC" in panel
+    assert "Longest wait" not in panel, "an open gate must not be ranked as a finished stall"
+
+
+def test_the_progress_panel_never_claims_local_time(client, project):
+    ws = _clean(project)
+    _ev(ws, "gate.opened", "2026-10-03T23:30:00.000+00:00", gate="g1", kind="question")
+    panel = _progress(client.get("/runs/r1"))
+    assert "2026-10-03 23:30:00 UTC" in panel
+    assert "local" not in panel.lower()
+
+
+def test_the_progress_panel_says_when_the_log_is_incomplete(client, project):
+    ws = _clean(project)
+    _ev(ws, "phase.started", "2026-10-03T10:00:00.000+00:00", phase="p", iteration=1)
+    with (ws / "events.jsonl").open("a") as f:
+        f.write('{"id": "x", "ts"')
+    panel = _progress(client.get("/runs/r1"))
+    assert "log is incomplete" in panel and "unreadable" in panel
+
+
+def test_the_progress_panel_escapes_a_hostile_phase_name(client, project):
+    name = 'ph"><script>alert(1)</script>'
+    ws = _clean(project)
+    _ev(ws, "phase.started", "2026-10-03T10:00:00.000+00:00", phase=name, iteration=1)
+    _ev(ws, "budget.recorded", "2026-10-03T10:00:01.000+00:00", experiment_runs=1)
+    page = client.get("/runs/r1")
+    assert page.status_code == 200 and "<script>alert(1)" not in page.text
+    assert str(escape(name)) in _progress(page)
+
+
+def test_the_progress_panel_with_no_log_says_so(client, project):
+    _clean(project)
+    panel = _progress(client.get("/runs/r1"))
+    assert "no event log" in panel
+
+
+def test_the_progress_panel_does_not_cry_wolf_on_a_phase_marked_done_directly(client, project):
+    ws = _clean(project)
+    _ev(ws, "phase.done", "2026-10-03T10:00:00.000+00:00", phase="search", iteration=1)
+    panel = _progress(client.get("/runs/r1"))
+    assert "search" in panel and "incomplete" not in panel
