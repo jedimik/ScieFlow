@@ -13,6 +13,9 @@ what it can read. See docs/sandbox.md; that limit is stated, not implied.
 from __future__ import annotations
 
 import os
+import hashlib
+import stat
+from dataclasses import dataclass
 import shlex
 import shutil
 import subprocess
@@ -251,18 +254,20 @@ def _load_allowlist(project: Project) -> dict:
         return {}
 
     try:
-        data = yaml.safe_load(path.read_text())
+        return _policy_mapping(path.read_text(), path)
     except (OSError, yaml.YAMLError) as exc:
         raise SandboxError(
             f"allowlist file is malformed YAML: {path}\n{exc}") from exc
 
+def _policy_mapping(raw: bytes | str, path: Path) -> dict:
+    try:
+        data = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        raise SandboxError(f"allowlist file is malformed YAML: {path}\n{exc}") from exc
     if data is None:
         return {}
-
     if not isinstance(data, dict):
-        raise SandboxError(
-            f"allowlist file must be a mapping, not {type(data).__name__}: {path}")
-
+        raise SandboxError(f"allowlist file must be a mapping, not {type(data).__name__}: {path}")
     return data
 
 
@@ -277,7 +282,11 @@ def unsandboxed_runs(project: Project) -> set[str]:
     event's `actor: human` true.
     """
     path = project.root / ALLOWLIST_FILE
-    entries = _load_allowlist(project).get("unsandboxed_runs")
+    return _unsandboxed_of(_load_allowlist(project), path)
+
+
+def _unsandboxed_of(data: dict, path: Path) -> set[str]:
+    entries = data.get("unsandboxed_runs")
     if entries is None:
         return set()
 
@@ -311,7 +320,11 @@ def unsandboxed_runs(project: Project) -> set[str]:
 def allowlist_paths(project: Project) -> list[Path]:
     """Extra writable paths from config/sandbox.yml, deny-by-default."""
     path = project.root / ALLOWLIST_FILE
-    writable = _load_allowlist(project).get("writable")
+    return _allowlist_of(_load_allowlist(project), project.root, path)
+
+
+def _allowlist_of(data: dict, root: Path, path: Path) -> list[Path]:
+    writable = data.get("writable")
     if writable is None:
         return []
 
@@ -319,7 +332,7 @@ def allowlist_paths(project: Project) -> list[Path]:
         raise SandboxError(
             f"allowlist 'writable:' must be a list, not {type(writable).__name__}: {path}")
 
-    root = project.root.resolve()
+    root = root.resolve()
     forbidden = {root, (root / "config").resolve(), (root / "src").resolve()}
     out: list[Path] = []
 
@@ -360,3 +373,186 @@ def writable_for(project: Project, *, run_dir: Path | None,
     else:
         base = [Path(run_dir)]
     return [*base, *allowlist_paths(project)]
+
+
+@dataclass(frozen=True, slots=True)
+class ProtectionPath:
+    """Lexical lstat identity, separately from canonical target identity."""
+    path: Path
+    resolved: Path
+    exists: bool
+    device: int | None
+    inode: int | None
+    mode: int | None
+    size: int | None
+    mtime_ns: int | None
+    ctime_ns: int | None
+    link_target: str | None
+
+    def __post_init__(self):
+        for name in ('path', 'resolved'):
+            value = getattr(self, name)
+            if not isinstance(value, Path) or not value.is_absolute():
+                raise TypeError('protection paths must be absolute Path values')
+        if type(self.exists) is not bool:
+            raise TypeError('exists must be bool')
+        for name in ('device', 'inode', 'mode', 'size', 'mtime_ns', 'ctime_ns'):
+            value = getattr(self, name)
+            if value is not None and type(value) is not int:
+                raise TypeError('path identity must be immutable integer scalars')
+            if self.exists != (value is not None):
+                raise TypeError('path identity must agree with existence')
+        if self.link_target is not None and type(self.link_target) is not str:
+            raise TypeError('link target must be text or None')
+
+
+@dataclass(frozen=True, slots=True)
+class TurnProtection:
+    """Independent policy/path capture, not admission or a filesystem lock."""
+    project_root: Path
+    run_dir: Path
+    workspace_root: Path
+    sandbox_enabled: bool
+    writable: tuple[Path, ...] | None
+    masks: tuple[Path, ...]
+    allowlist: tuple[Path, ...]
+    coordinator_writable: tuple[Path, ...]
+    policy_sha256: str | None
+    path_facts: tuple[ProtectionPath, ...]
+
+    def __post_init__(self):
+        for name in ('project_root', 'run_dir', 'workspace_root'):
+            value = getattr(self, name)
+            if not isinstance(value, Path) or not value.is_absolute():
+                raise TypeError('protection roots must be absolute Paths')
+        if type(self.sandbox_enabled) is not bool or self.sandbox_enabled != (self.writable is not None):
+            raise TypeError('sandbox state and grants must agree')
+        for name in ('writable', 'masks', 'allowlist', 'coordinator_writable'):
+            value = getattr(self, name)
+            if name == 'writable' and value is None:
+                continue
+            if type(value) is not tuple or any(not isinstance(p, Path) or not p.is_absolute() for p in value):
+                raise TypeError('grants and masks must be immutable absolute Path tuples')
+        if type(self.path_facts) is not tuple or any(type(p) is not ProtectionPath for p in self.path_facts):
+            raise TypeError('path facts must be an immutable ProtectionPath tuple')
+        if self.policy_sha256 is not None and (type(self.policy_sha256) is not str or
+                len(self.policy_sha256) != 64 or any(c not in '0123456789abcdef' for c in self.policy_sha256)):
+            raise TypeError('policy digest must be complete lowercase SHA256 or None')
+
+
+def _policy_stat_identity(info: os.stat_result) -> tuple[int, ...]:
+    """Policy security/content identity; reading may legitimately advance atime."""
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
+            info.st_uid, info.st_gid, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _capture_turn_policy(path: Path) -> tuple[dict, str | None, ProtectionPath]:
+    """One bounded regular-file read. Absence is explicit, never a symlink opt-out."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        if path.is_symlink():
+            raise SandboxError(f'unsafe sandbox policy: {path}') from None
+        fact = _path_fact(path)
+        if fact.exists:
+            raise SandboxError(f'sandbox policy changed during capture: {path}')
+        return {}, None, fact
+    except OSError as exc:
+        raise SandboxError(f'cannot capture sandbox policy: {path}') from exc
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 1024 * 1024:
+            raise SandboxError(f'unprovable sandbox policy: {path}')
+        with os.fdopen(fd, 'rb', closefd=False) as stream:
+            raw = stream.read(1024 * 1024 + 1)
+        after = os.fstat(fd)
+        if (_policy_stat_identity(before) != _policy_stat_identity(after) or
+                len(raw) != before.st_size or
+                _policy_stat_identity(path.lstat()) != _policy_stat_identity(after)):
+            raise SandboxError(f'sandbox policy changed during capture: {path}')
+        fact = _path_fact(path)
+        if (fact.device, fact.inode, fact.mode, fact.size, fact.mtime_ns, fact.ctime_ns) != (
+                before.st_dev, before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns, before.st_ctime_ns):
+            raise SandboxError(f'sandbox policy changed during capture: {path}')
+        return _policy_mapping(raw, path), hashlib.sha256(raw).hexdigest(), fact
+    except OSError as exc:
+        raise SandboxError(f'cannot capture sandbox policy: {path}') from exc
+    finally:
+        os.close(fd)
+
+
+def _path_fact(path: Path) -> ProtectionPath:
+    try:
+        resolved = path.resolve()
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return ProtectionPath(path, resolved, False, None, None, None, None, None, None, None)
+        target = os.readlink(path) if stat.S_ISLNK(info.st_mode) else None
+        if target is not None and not path.exists():
+            raise SandboxError(f'dangling safety alias: {path}')
+        return ProtectionPath(path, resolved, True, info.st_dev, info.st_ino, info.st_mode,
+                              info.st_size, info.st_mtime_ns, info.st_ctime_ns, target)
+    except (OSError, RuntimeError) as exc:
+        raise SandboxError(f'unprovable safety path: {path}') from exc
+
+
+def _capture_path_facts(seeds: list[Path]) -> tuple[ProtectionPath, ...]:
+    """Finite policy paths and alias hops, NEVER recursive directory discovery."""
+    pending = list(seeds)
+    visited = set()
+    facts = {}
+    while pending:
+        seed = pending.pop()
+        if seed in visited:
+            continue
+        visited.add(seed)
+        if len(visited) > 8192:
+            raise SandboxError('safety alias/path capture exceeds provable bound')
+        for path in (seed, *seed.parents):
+            if path not in facts:
+                facts[path] = _path_fact(path)
+            fact = facts[path]
+            if fact.link_target is not None:
+                target = Path(fact.link_target)
+                if not target.is_absolute():
+                    target = path.parent / target
+                # Preserve intermediate aliases, suffixes and their ancestors.
+                pending.append(target / seed.relative_to(path))
+        resolved = seed.resolve()
+        if resolved != seed:
+            pending.append(resolved)
+    return tuple(facts[p] for p in sorted(facts, key=str))
+
+
+def resolve_turn_protection(project: Project, *, run_dir: Path) -> TurnProtection:
+    """Capture policy and both grant envelopes without run/agent/charter semantics."""
+    try:
+        root = project.root.resolve(strict=True)
+        workspace = (root / 'workspace').resolve(strict=True)
+        run = Path(run_dir).resolve(strict=True)
+        if not root.is_dir() or not workspace.is_dir() or not run.is_dir() or run.parent != workspace:
+            raise SandboxError('turn protection requires this project owning run')
+        if workspace != root / 'workspace':
+            raise SandboxError('workspace escapes canonical project')
+        policy = root / ALLOWLIST_FILE
+        data, digest, policy_fact = _capture_turn_policy(policy)
+        enabled = run.name not in _unsandboxed_of(data, policy)
+        allowlist = tuple(_allowlist_of(data, root, policy))
+        narrowed = (run, *allowlist)
+        broad = (workspace, *allowlist)
+        _validate_writable(list(narrowed))
+        _validate_writable(list(broad))
+        masks = tuple(masks_for(list(narrowed), run_dir=run))
+        originals = [root / str(e['path']) for e in data.get('writable') or []]
+        seeds = [project.root.absolute(), Path(run_dir).absolute(), root, run, workspace,
+                 policy, *narrowed, *broad, *masks, *originals]
+        facts = _capture_path_facts(seeds)
+        if next(f for f in facts if f.path == policy) != policy_fact:
+            raise SandboxError('sandbox policy changed during protection capture')
+        return TurnProtection(root, run, workspace, enabled, narrowed if enabled else None,
+                              masks, allowlist, broad, digest, facts)
+    except (OSError, ValueError, RuntimeError) as exc:
+        if isinstance(exc, SandboxError):
+            raise
+        raise SandboxError('cannot capture turn protection') from exc

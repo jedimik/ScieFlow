@@ -773,3 +773,545 @@ def test_malformed_charter_yaml_fails_the_dispatch_cleanly(project_with_run):
 
     with pytest.raises(agent_run.DispatchError):
         agent_run.prepare(project, "stub", prompt_file)
+
+
+# --- K producer baseline, through the existing file-based API ---
+@pytest.mark.parametrize('session', [None, 'k-resume-existing'])
+@pytest.mark.parametrize('force_stdin', [False, True])
+def test_k_ordinary_baseline_protocol(k_conversational_project, monkeypatch, session, force_stdin):
+    import hashlib
+    import json
+    import subprocess
+    from scieflow.core import sessions
+    from scieflow.core.run import charter
+
+    project, ws, prompt = k_conversational_project
+    charter.set_text(ws, 'K charter sentinel')
+    prompt.write_text('/scieflow-menu')
+    if force_stdin:
+        monkeypatch.setattr(agent_run, 'PROMPT_ARGV_LIMIT', 10)
+    d = agent_run.prepare(project, 'k-protocol-fixture', prompt,
+                          conversational=True, session=session)
+    sent = d.stdin_text if d.stdin_text is not None else d.argv[-1]
+    assert sent == agent_run.CHARTER_HEADER + '\n\nK charter sentinel\n\n---\n\n/scieflow-menu'
+    assert (d.stdin_text is not None) == force_stdin
+    proc = subprocess.run(d.argv, input=d.stdin_text, capture_output=True, text=True,
+                          cwd=d.cwd, timeout=10, check=False)
+    assert proc.returncode == 0, proc.stderr
+    parsed = sessions.parse({'family': 'claude'}, proc.stdout)
+    assert parsed.id == (session or 'k-session-1') and parsed.text == 'K protocol reply'
+    assert json.loads(proc.stdout.splitlines()[-1])['input_sha256'] == hashlib.sha256(sent.encode()).hexdigest()
+
+
+def _k_sent(prepared):
+    return prepared.stdin_text if prepared.stdin_text is not None else prepared.argv[-1]
+
+
+@pytest.mark.parametrize('session', [None, 'k-resume-existing'])
+@pytest.mark.parametrize('force_stdin', [False, True])
+def test_k_marked_order_exact_protocol(k_conversational_project, offline_k_support,
+                                      monkeypatch, session, force_stdin):
+    import hashlib
+    import json
+    import subprocess
+    from scieflow.core import harness_commands, sessions
+    from scieflow.core.run import charter
+    from scieflow.core.turn_input import accept_human_submission
+
+    project, ws, prompt = k_conversational_project
+    charter.set_text(ws, '  K charter sentinel  ')
+    if force_stdin:
+        monkeypatch.setattr(agent_run, 'PROMPT_ARGV_LIMIT', 10)
+    resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=session)
+    assert not prompt.exists()
+    offline_k_support(resolved.harness_identity)
+    prepared = agent_run.prepare_turn(resolved, accept_human_submission('/scieflow-menu', 'harness-command', '0'))
+    expected = '/scieflow-menu\n\n---\n\n' + agent_run.CHARTER_HEADER + '\n\nK charter sentinel'
+    assert _k_sent(prepared).encode() == expected.encode()
+    assert (prepared.stdin_text is not None) == force_stdin
+    assert prepared.composed_bytes == expected.encode() and prepared.accepted_bytes == b'/scieflow-menu'
+    assert prepared.composition_order == 'command-first' and prepared.input_kind == 'harness-command'
+    assert prepared.selection_revision == '0' and prepared.policy_revision == 'fixture-only'
+    assert prepared.charter_version == 1
+    assert prepared.charter_sha256 == hashlib.sha256(b'K charter sentinel').hexdigest()
+    assert prepared.protection is resolved.protection
+    assert prepared.harness_identity is resolved.harness_identity
+    assert harness_commands.effective_identity(resolved) is resolved.harness_identity
+    assert prepared.env_items is resolved.env_items
+    proc = subprocess.run(prepared.argv, input=prepared.stdin_text, capture_output=True,
+                          text=True, cwd=prepared.cwd, timeout=10, check=False)
+    assert proc.returncode == 0, proc.stderr
+    parsed = sessions.parse({'family': 'claude'}, proc.stdout)
+    assert parsed.id == (session or 'k-session-1') and parsed.text == 'K protocol reply'
+    assert json.loads(proc.stdout.splitlines()[-1])['input_sha256'] == hashlib.sha256(prepared.composed_bytes).hexdigest()
+    assert list((ws / 'logs').iterdir()) == []
+
+
+@pytest.mark.parametrize('force_stdin', [False, True])
+def test_k_accepted_input_wins_over_artifact(k_conversational_project, offline_k_support,
+                                           monkeypatch, force_stdin):
+    from scieflow.core.turn_input import accept_human_submission
+
+    project, ws, prompt = k_conversational_project
+    if force_stdin:
+        monkeypatch.setattr(agent_run, 'PROMPT_ARGV_LIMIT', 10)
+    resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=None)
+    offline_k_support(resolved.harness_identity)
+    accepted = accept_human_submission('/scieflow-menu', 'harness-command', '0')
+    prompt.write_text('/hostile-replacement')
+    prepared = agent_run.prepare_turn(resolved, accepted)
+    assert _k_sent(prepared).encode() == b'/scieflow-menu'
+    prompt.unlink()
+    prompt.symlink_to(project.root / 'config/agents.yml')
+    assert agent_run.prepare_turn(resolved, accepted) == prepared
+
+
+def test_k_single_resolution_and_pure_snapshot(k_conversational_project, monkeypatch):
+    import hashlib
+    from dataclasses import FrozenInstanceError, replace
+    from scieflow.core import sandbox
+    from scieflow.core.run import charter
+    from scieflow.core.turn_input import accept_human_submission
+
+    project, ws, prompt = k_conversational_project
+    charter.set_text(ws, '  Snapshot {model} `literal` "quoted" é  ')
+    registry = agent_run.config.load_agents(project.root)
+    counts = {'registry': 0, 'config': 0, 'policy': 0, 'charter': 0, 'protection': 0}
+    real_config = Path.read_text
+    real_policy, real_charter = sandbox._capture_turn_policy, charter.snapshot
+    real_protection = sandbox.resolve_turn_protection
+    def load(root):
+        counts['registry'] += 1
+        return registry
+    def read(path, *args, **kwargs):
+        if path == ws / 'config.yml':
+            counts['config'] += 1
+        return real_config(path, *args, **kwargs)
+    def policy(path):
+        counts['policy'] += 1
+        return real_policy(path)
+    def snapshot(path):
+        counts['charter'] += 1
+        return real_charter(path)
+    def protect(project, **kwargs):
+        counts['protection'] += 1
+        return real_protection(project, **kwargs)
+    monkeypatch.setattr(agent_run.config, 'load_agents', load)
+    monkeypatch.setattr(Path, 'read_text', read)
+    monkeypatch.setattr(sandbox, '_capture_turn_policy', policy)
+    monkeypatch.setattr(sandbox, 'resolve_turn_protection', protect)
+    monkeypatch.setattr(charter, 'snapshot', snapshot)
+    monkeypatch.setattr(sandbox, 'environment', lambda base: {'SYNTHETIC_ENV': 'original'})
+    resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws,
+                                     session='k-existing', cwd=Path('workspace/r1'))
+    assert counts == dict.fromkeys(counts, 1)
+    assert resolved.cwd == ws and resolved.env_items == (('SYNTHETIC_ENV', 'original'),)
+    assert 'SYNTHETIC_ENV' not in repr(resolved)
+    registry['k-protocol-fixture']['session_cmd'] = 'mutated {prompt}'
+    registry['k-protocol-fixture']['model'] = 'mutated'
+    (ws / 'config.yml').write_text('agent_overrides: [bad]\n')
+    (ws / 'charter.yml').write_text('- malformed\n')
+    (project.root / 'config/sandbox.yml').write_text('writable:\n  - path: src\n')
+    monkeypatch.setattr(agent_run, 'PROMPT_ARGV_LIMIT', 0)
+    monkeypatch.setattr(agent_run.sys, 'executable', '/mutated-python')
+    def forbidden(*args, **kwargs):
+        raise AssertionError('pure preparation performed external lookup')
+    monkeypatch.setattr(Path, 'read_text', forbidden)
+    monkeypatch.setattr(Path, 'read_bytes', forbidden)
+    monkeypatch.setattr(Path, 'resolve', forbidden)
+    monkeypatch.setattr(agent_run.config, 'load_agents', forbidden)
+    monkeypatch.setattr(charter, 'snapshot', forbidden)
+    monkeypatch.setattr(sandbox, 'environment', forbidden)
+    prepared = agent_run.prepare_turn(resolved, accept_human_submission('literal {root} `code` é'))
+    assert counts == dict.fromkeys(counts, 1)
+    assert prepared.stdin_text is None and prepared.argv[0] != '/mutated-python'
+    assert 'mutated' not in prepared.argv
+    assert prepared.composed_bytes == (agent_run.CHARTER_HEADER + '\n\nSnapshot {model} `literal` "quoted" é\n\n---\n\nliteral {root} `code` é').encode()
+    assert prepared.charter_sha256 == hashlib.sha256(resolved.charter_text.encode()).hexdigest()
+    assert prepared.protection is resolved.protection and prepared.env_items is resolved.env_items
+    assert 'SYNTHETIC_ENV' not in repr(prepared)
+    with pytest.raises(FrozenInstanceError):
+        resolved.model = 'bad'
+    for obj, values in ((resolved, {'env_items': {'BAD': 'mutable'}}),
+                        (resolved, {'protection': {}}), (prepared, {'argv': list(prepared.argv)}),
+                        (prepared, {'accepted_bytes': bytearray(b'mutable')})):
+        with pytest.raises(TypeError):
+            replace(obj, **values)
+
+
+@pytest.mark.parametrize('broken', ['config-absent', 'status-absent', 'config-link',
+    'status-link', 'config-directory', 'bad-config', 'bad-overrides', 'bad-agent-override',
+    'stale-sandbox', 'malformed-charter', 'malformed-history'])
+def test_k_full_resolution_refuses_before_artifacts(k_conversational_project, broken):
+    from scieflow.core import sandbox
+
+    project, ws, prompt = k_conversational_project
+    if broken in ('config-absent', 'status-absent'):
+        (ws / (broken.split('-')[0] + '.yml')).unlink()
+    elif broken in ('config-link', 'status-link'):
+        control = ws / (broken.split('-')[0] + '.yml')
+        contents = control.read_bytes()
+        control.unlink()
+        other = ws / 'other.yml'
+        other.write_bytes(contents)
+        control.symlink_to(other)
+    elif broken == 'config-directory':
+        (ws / 'config.yml').unlink()
+        (ws / 'config.yml').mkdir()
+    else:
+        payloads = {'bad-config': '[]\n', 'bad-overrides': 'agent_overrides: [bad]\n',
+                    'bad-agent-override': 'agent_overrides:\n  k-protocol-fixture: [bad]\n',
+                    'stale-sandbox': 'sandbox: off\n',
+                    'malformed-charter': '- bad\n',
+                    'malformed-history': 'current: 1\nversions: [bad]\n'}
+        target = 'charter.yml' if broken.startswith('malformed-') else 'config.yml'
+        (ws / target).write_text(payloads[broken])
+    with pytest.raises((agent_run.DispatchError, sandbox.SandboxError)):
+        agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=None)
+    assert not prompt.exists() and list((ws / 'logs').iterdir()) == []
+
+
+def test_k_run_authority_is_explicit_unique_and_project_owned(k_conversational_project):
+    project, ws, _ = k_conversational_project
+    decoy = ws / 'logs/decoy'
+    decoy.mkdir()
+    for run in (decoy, project.root.parent):
+        with pytest.raises(agent_run.DispatchError):
+            agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=run, session=None)
+    nested = ws / 'workspace/child'
+    nested.mkdir(parents=True)
+    (nested / 'config.yml').write_text('{}\n')
+    (nested / 'status.yml').write_text('{}\n')
+    with pytest.raises(agent_run.DispatchError):
+        agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=nested, session=None)
+
+
+def test_k_unsupported_identity_and_unconfined_marked_refuse(k_conversational_project, offline_k_support):
+    from dataclasses import replace
+    from scieflow.core import harness_commands
+    from scieflow.core.turn_input import accept_human_submission
+
+    project, ws, prompt = k_conversational_project
+    resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=None)
+    assert not resolved.harness_identity.effects_pinned and resolved.harness_identity.version is None
+    assert harness_commands.CERTIFIED_POLICIES == ()
+    marked = accept_human_submission('/scieflow-menu', 'harness-command', '0')
+    with pytest.raises(agent_run.DispatchError):
+        agent_run.prepare_turn(resolved, marked)
+    offline_k_support(resolved.harness_identity)
+    changed = replace(resolved, harness_identity=replace(resolved.harness_identity, model='other'))
+    with pytest.raises(agent_run.DispatchError):
+        agent_run.prepare_turn(changed, marked)
+    (project.root / 'config/sandbox.yml').write_text('unsandboxed_runs:\n  - slug: r1\n    reason: human\n')
+    unconfined = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=None)
+    offline_k_support(unconfined.harness_identity)
+    with pytest.raises(agent_run.DispatchError):
+        agent_run.prepare_turn(unconfined, marked)
+    assert not prompt.exists()
+
+
+@pytest.mark.parametrize('body', ['agent_overrides: []\n',
+    'agent_overrides:\n  k-protocol-fixture: []\n'])
+def test_k_falsy_invalid_override_is_not_absent(k_conversational_project, body):
+    project, ws, _ = k_conversational_project
+    (ws / 'config.yml').write_text(body)
+    with pytest.raises(agent_run.DispatchError):
+        agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=None)
+
+
+@pytest.mark.parametrize('session', [None, 'resume "quoted" {root}'])
+def test_k_captured_python_and_oversized_safety(k_conversational_project, monkeypatch, session):
+    import shlex
+    import sys
+    import yaml
+    from scieflow.core.turn_input import accept_human_submission
+
+    project, ws, _ = k_conversational_project
+    cfg_path = project.root / 'config/agents.yml'
+    registry = yaml.safe_load(cfg_path.read_text())
+    cfg = registry['agents']['k-protocol-fixture']
+    cfg['session_cmd'] = '{python} direct first {prompt}'
+    cfg['resume_cmd'] = '{python} direct --resume {session} resume {prompt}'
+    cfg['stdin_cmd'] = 'wrong-one-shot {prompt}'
+    cfg_path.write_text(yaml.safe_dump(registry))
+    monkeypatch.setattr(agent_run, 'PROMPT_ARGV_LIMIT', 10)
+    resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=session)
+    python = sys.executable
+    monkeypatch.setattr(agent_run.sys, 'executable', '/changed-after-resolution')
+    prepared = agent_run.prepare_turn(resolved, accept_human_submission('é' * 100))
+    assert prepared.argv[0] == python and prepared.stdin_text == 'é' * 100
+    assert 'wrong-one-shot' not in prepared.argv
+    if session:
+        assert prepared.argv[prepared.argv.index('--resume') + 1] == session
+    from dataclasses import replace
+    unsafe = replace(resolved, session_template='agent --print {prompt} --other flag',
+                     resume_template='agent --print {prompt} --resume {session}')
+    with pytest.raises(agent_run.DispatchError):
+        agent_run.prepare_turn(unsafe, accept_human_submission('é' * 100))
+
+
+@pytest.mark.parametrize('change', [{'enabled': False}, {'family': 'missing'},
+    {'session_cmd': ''}, {'resume_cmd': ''}, {'session_cmd': '"unterminated'},
+    {'model': []}, {'timeout_min': float('nan')}, {'timeout_min': True}])
+def test_k_effective_full_send_validation(k_conversational_project, change):
+    import yaml
+    project, ws, prompt = k_conversational_project
+    (ws / 'config.yml').write_text(yaml.safe_dump({'agent_overrides': {'k-protocol-fixture': change}}))
+    with pytest.raises(agent_run.DispatchError):
+        agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=None)
+    assert not prompt.exists()
+
+
+def test_k_exact_fixture_identity_mutations_all_deny(k_conversational_project, offline_k_support):
+    from dataclasses import fields, replace
+    from scieflow.core import harness_commands
+    project, ws, _ = k_conversational_project
+    resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=None)
+    identity = resolved.harness_identity
+    original = harness_commands.support_for
+    offline_k_support(identity)
+    assert harness_commands.support_for(identity).enabled
+    for f in fields(identity):
+        value = getattr(identity, f.name)
+        changed = not value if type(value) is bool else 'changed'
+        assert not harness_commands.support_for(replace(identity, **{f.name: changed})).enabled
+    assert harness_commands.CERTIFIED_POLICIES == ()
+    assert not original(identity).enabled
+
+
+def test_k_binary_capture_does_not_read_unreviewed_command_contents(tmp_path, monkeypatch):
+    script = tmp_path / 'unreviewed-executable'
+    script.write_text('#!/bin/sh\nprivate-content\n')
+    script.chmod(0o700)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('unreviewed command file contents read')
+    monkeypatch.setattr(agent_run.os, 'open', forbidden)
+    executable, digest = agent_run._capture_executable(str(script), tmp_path)
+    assert executable == str(script) and digest is None
+
+
+# --- K Task2 correction: original-token expansion and full-send bindings ---
+def _k_operands_execute(prepared):
+    import hashlib
+    from scieflow.core import sessions
+
+    protocol = ROOT / 'tests/fixtures/k_conversation_protocol.py'
+    assert prepared.argv[:3] == (sys.executable, '-B', str(protocol))
+    assert Path(agent_run.__file__).resolve() == ROOT / 'src/scieflow/core/agent_run.py'
+    proc = subprocess.run(prepared.argv, cwd=prepared.cwd, capture_output=True, text=True,
+                          timeout=10, check=False, env={'SYNTHETIC_OPERANDS_TEST': 'only'},
+                          input=prepared.stdin_text,
+                          stdin=subprocess.DEVNULL if prepared.stdin_text is None else None)
+    assert proc.returncode == 0, proc.stderr
+    parsed = sessions.parse({'family': 'claude'}, proc.stdout)
+    assert parsed.text == 'K protocol reply' and parsed.id
+    result = json.loads(proc.stdout.splitlines()[-1])
+    print('PERMANENT_OPERAND_OBSERVATION ' + json.dumps({
+        'exit_code': proc.returncode, 'session': parsed.id,
+        'received_sha256': result['input_sha256'],
+        'expected_sha256': hashlib.sha256(prepared.composed_bytes).hexdigest(),
+        'stdin_selected': prepared.stdin_text is not None}, sort_keys=True))
+    return parsed, result
+
+
+@pytest.mark.parametrize('session', [None, 'k-resume-control', 'k-resume-{prompt}'])
+@pytest.mark.parametrize('force_stdin', [False, True])
+def test_k_operands_literal_protocol(k_conversational_project, monkeypatch, session, force_stdin):
+    import hashlib
+    from scieflow.core.run import charter
+    from scieflow.core.turn_input import accept_human_submission
+
+    project, ws, prompt = k_conversational_project
+    charter.set_text(ws, 'Literal charter {model} é')
+    if force_stdin:
+        monkeypatch.setattr(agent_run, 'PROMPT_ARGV_LIMIT', 1)
+    resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=session)
+    accepted = accept_human_submission('Accepted {root} "quoted" `literal` é')
+    prepared = agent_run.prepare_turn(resolved, accepted)
+    expected = (agent_run.CHARTER_HEADER + '\n\nLiteral charter {model} é\n\n---\n\n' + accepted.message).encode()
+    assert prepared.accepted_bytes == accepted.message.encode() and prepared.composed_bytes == expected
+    assert prepared.protection is resolved.protection and prepared.session == session
+    assert (prepared.stdin_text is not None) == force_stdin
+    parsed, result = _k_operands_execute(prepared)
+    assert result['input_sha256'] == hashlib.sha256(expected).hexdigest()
+    assert not prompt.exists() and list((ws / 'logs').iterdir()) == []
+    assert parsed.id == (session or 'k-session-1'), 'captured session was reinterpreted as a template'
+    if session:
+        assert prepared.argv[prepared.argv.index('--resume') + 1] == session
+
+
+@pytest.mark.parametrize('shape', ['missing-first-prompt', 'missing-resume-session'])
+@pytest.mark.parametrize('force_stdin', [False, True])
+def test_k_operands_missing_binding_protocol(k_conversational_project, monkeypatch, shape, force_stdin):
+    import hashlib
+    from scieflow.core.turn_input import accept_human_submission
+
+    project, ws, prompt = k_conversational_project
+    path = project.root / 'config/agents.yml'
+    registry = yaml.safe_load(path.read_text())
+    cfg = registry['agents']['k-protocol-fixture']
+    session = None
+    if shape == 'missing-first-prompt':
+        cfg['session_cmd'] = cfg['session_cmd'].removesuffix(' {prompt}')
+    else:
+        cfg['resume_cmd'] = cfg['resume_cmd'].replace(' --resume {session}', '')
+        session = 'k-existing-session'
+    path.write_text(yaml.safe_dump(registry))
+    if force_stdin:
+        monkeypatch.setattr(agent_run, 'PROMPT_ARGV_LIMIT', 1)
+    try:
+        resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=session)
+        prepared = agent_run.prepare_turn(resolved, accept_human_submission('Accepted short input é'))
+    except agent_run.DispatchError:
+        assert not prompt.exists() and list((ws / 'logs').iterdir()) == []
+        return
+    # A zero process exit/usable session alone is not a valid full-send contract.
+    parsed, result = _k_operands_execute(prepared)
+    assert not prompt.exists() and list((ws / 'logs').iterdir()) == []
+    assert result['input_sha256'] == hashlib.sha256(prepared.composed_bytes).hexdigest(), 'prepared bytes silently dropped'
+    assert parsed.id == (session or 'k-session-1'), 'prepared resume silently changed session'
+    pytest.fail('unsupported required binding accepted, including forced-stdin path')
+
+
+@pytest.mark.parametrize('field', ['model', 'reasoning', 'root', 'python', 'session', 'prompt'])
+def test_k_operands_all_inserted_fields_are_literal(field):
+    import shlex
+
+    names = ('model', 'reasoning', 'root', 'python', 'session', 'prompt')
+    literal = '{model} {reasoning} {root} {python} {session} {prompt} "quoted" \'single\' é'
+    values = dict.fromkeys(names, 'control')
+    values[field] = literal
+    template = 'tool ' + ' '.join('{' + name + '}' for name in names)
+    template += ' ' + shlex.quote('embedded:{' + field + '}:end') + ' {unknown} '
+    template += shlex.quote('{unknown:{model}}')
+    argv = agent_run._template_argv(template, values['prompt'], Path(values['root']),
+                                   model=values['model'], reasoning=values['reasoning'],
+                                   python=values['python'], session=values['session'], include_prompt=True)
+    assert argv == ['tool', *(values[name] for name in names), 'embedded:' + values[field] + ':end',
+                    '{unknown}', '{unknown:' + values['model'] + '}']
+    # Legacy omission filters ORIGINAL prompt-containing tokens, not inserted values.
+    omitted = agent_run._template_argv(template, values['prompt'], Path(values['root']),
+                                      model=values['model'], reasoning=values['reasoning'],
+                                      python=values['python'], session=values['session'], include_prompt=False)
+    assert omitted == [value for token, value in zip(shlex.split(template), argv) if '{prompt}' not in token]
+
+
+def test_k_operands_executable_identity_matches_literal_launch(tmp_path, monkeypatch):
+    import shlex
+    from scieflow.core import sandbox
+    from scieflow.core.project import Project
+    from scieflow.core.turn_input import accept_human_submission
+
+    root = tmp_path / 'identity-{python}-{model}-{session}-{prompt} "é"'
+    (root / 'config').mkdir(parents=True)
+    ws = root / 'workspace/r1'
+    (ws / 'logs').mkdir(parents=True)
+    (ws / 'config.yml').write_text('slug: r1\n')
+    (ws / 'status.yml').write_text('{}\n')
+    literal = '{model}-{reasoning}-{root}-{python}-{session}-{prompt} "é"'
+    python = 'python-' + literal
+    template = shlex.quote('{root}/{python}/{model}/{reasoning}') + ' first {prompt}'
+    cfg = {'enabled': True, 'family': 'claude', 'model': 'model-' + literal,
+           'reasoning': 'reasoning-' + literal, 'session_cmd': template,
+           'resume_cmd': 'tool --resume {session} resume {prompt}'}
+    (root / 'config/agents.yml').write_text(yaml.safe_dump({'agents': {'fixture': cfg}}))
+    monkeypatch.setattr(agent_run.sys, 'executable', python)
+    monkeypatch.setattr(sandbox, 'environment', lambda base: {'SYNTHETIC_OPERANDS_TEST': 'only'})
+    captured = []
+    def capture(token, cwd):
+        captured.append(token)
+        return token, None
+    monkeypatch.setattr(agent_run, '_capture_executable', capture)
+    resolved = agent_run.resolve_turn(Project(root), 'fixture', run_dir=ws, session=None)
+    prepared = agent_run.prepare_turn(resolved, accept_human_submission('ordinary text'))
+    expected = str(root) + '/' + python + '/' + cfg['model'] + '/' + cfg['reasoning']
+    assert captured == [expected]
+    assert resolved.harness_identity.executable == prepared.argv[0] == expected
+
+
+def _k_operands_bad_template(template, placeholder, shape):
+    import shlex
+    tokens = shlex.split(template)
+    token = '{' + placeholder + '}'
+    index = tokens.index(token)
+    if shape == 'missing':
+        tokens.pop(index)
+    elif shape == 'duplicate':
+        tokens.append(token)
+    elif shape == 'embedded':
+        tokens[index] = 'prefix-' + token
+    elif shape == 'embedded-duplicate':
+        tokens.append('suffix-' + token)
+    elif shape == 'executable':
+        tokens.pop(index)
+        tokens[0] = token
+    elif shape == 'executable-duplicate':
+        tokens[0] = token
+    return shlex.join(tokens)
+
+
+@pytest.mark.parametrize('key,placeholder', [('session_cmd', 'prompt'),
+    ('resume_cmd', 'prompt'), ('resume_cmd', 'session')])
+@pytest.mark.parametrize('shape', ['missing', 'duplicate', 'embedded', 'embedded-duplicate',
+    'executable', 'executable-duplicate'])
+def test_k_operands_resolver_checks_both_templates(k_conversational_project, monkeypatch, key, placeholder, shape):
+    project, ws, prompt = k_conversational_project
+    path = project.root / 'config/agents.yml'
+    registry = yaml.safe_load(path.read_text())
+    cfg = registry['agents']['k-protocol-fixture']
+    cfg[key] = _k_operands_bad_template(cfg[key], placeholder, shape)
+    # Effective override of the UNSELECTED template must also fail full resolution.
+    (ws / 'config.yml').write_text(yaml.safe_dump({'agent_overrides': {'k-protocol-fixture': {key: cfg[key]}}}))
+    captured = []
+    monkeypatch.setattr(agent_run, '_capture_executable', lambda token, cwd: (captured.append(token), None))
+    with pytest.raises(agent_run.DispatchError, match=key):
+        agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws,
+                               session='existing' if key == 'session_cmd' else None)
+    assert not captured and not prompt.exists() and list((ws / 'logs').iterdir()) == []
+
+
+@pytest.mark.parametrize('key,placeholder', [('session_template', 'prompt'),
+    ('resume_template', 'prompt'), ('resume_template', 'session')])
+@pytest.mark.parametrize('shape', ['missing', 'duplicate', 'embedded', 'embedded-duplicate',
+    'executable', 'executable-duplicate', 'empty', 'malformed'])
+@pytest.mark.parametrize('force_stdin', [False, True])
+def test_k_operands_prepare_revalidates_snapshot(k_conversational_project, monkeypatch, key, placeholder, shape, force_stdin):
+    from dataclasses import replace
+    from scieflow.core.turn_input import accept_human_submission
+
+    project, ws, prompt = k_conversational_project
+    resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws,
+                                     session='existing' if key == 'resume_template' else None)
+    template = getattr(resolved, key)
+    bad = '' if shape == 'empty' else '"unterminated' if shape == 'malformed' else _k_operands_bad_template(template, placeholder, shape)
+    changed = replace(resolved, **{key: bad}, prompt_argv_limit=1 if force_stdin else 100000)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('pure preparation performed external lookup')
+    for name in ('read_text', 'read_bytes', 'resolve'):
+        monkeypatch.setattr(Path, name, forbidden)
+    monkeypatch.setattr(agent_run.config, 'load_agents', forbidden)
+    monkeypatch.setattr(agent_run, '_capture_executable', forbidden)
+    with pytest.raises(agent_run.DispatchError):
+        agent_run.prepare_turn(changed, accept_human_submission('Accepted short input é'))
+    assert not prompt.exists() and list((ws / 'logs').iterdir()) == []
+
+
+def test_k_operands_legacy_and_target_only_do_not_gain_full_send_rules(k_conversational_project):
+    from scieflow.core import service
+
+    project, ws, prompt = k_conversational_project
+    registry = agent_run.config.load_agents(project.root)
+    cfg = registry['k-protocol-fixture']
+    cfg['session_cmd'] = cfg['session_cmd'].removesuffix(' {prompt}')
+    cfg['resume_cmd'] = cfg['resume_cmd'].replace(' --resume {session}', '')
+    assert service._validate_conversation_target('k-protocol-fixture', registry) is None
+    (project.root / 'config/agents.yml').write_text(yaml.safe_dump({'agents': registry}))
+    prompt.write_text('legacy input')
+    dispatch = agent_run.prepare(project, 'k-protocol-fixture', prompt, conversational=True)
+    assert dispatch.argv[-1] == 'first' and dispatch.stdin_text is None
+
+
+def test_k_operands_public_build_argv_literal_values():
+    literal = '{reasoning} {root} {python} {session} {prompt} "é"'
+    cfg = {'cmd': 'tool {model} {reasoning} {session} {prompt}', 'model': literal, 'reasoning': literal}
+    assert agent_run.build_argv(cfg, literal, ROOT, session=literal) == ['tool', literal, literal, literal, literal]

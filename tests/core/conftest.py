@@ -94,3 +94,42 @@ def project(tmp_path):
     (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
     status.write_status(ws, status.new_status("r1", "autonomous"))
     return Project(tmp_path)
+
+
+# K's successful inert protocol is not capability/interception certification.
+@pytest.fixture
+def k_conversational_project(project):
+    import shlex
+
+    ws = project.run_dir('r1')
+    protocol = Path(__file__).resolve().parents[1] / 'fixtures' / 'k_conversation_protocol.py'
+    prefix = f'{shlex.quote(sys.executable)} -B {shlex.quote(str(protocol))}'
+    cfg = {'cmd': prefix + ' first {prompt}',
+           'session_cmd': prefix + ' first {prompt}',
+           'resume_cmd': prefix + ' --resume {session} resume {prompt}',
+           'family': 'claude', 'enabled': True, 'timeout_min': 1,
+           'model': 'fixture', 'reasoning': 'high'}
+    block = ''.join('    ' + line + '\n' for line in yaml.safe_dump(cfg).splitlines())
+    path = project.root / 'config' / 'agents.yml'
+    path.write_text(path.read_text() + f'  k-protocol-fixture:\n{block}')
+    return project, ws, ws / 'logs' / 'k-baseline.md'
+
+
+@pytest.fixture
+def offline_k_support(monkeypatch):
+    from scieflow.core import harness_commands
+    original = harness_commands.support_for
+
+    def bind(identity):
+        assert type(identity) is harness_commands.HarnessIdentity
+        assert identity.agent == 'k-protocol-fixture'
+
+        def support(captured):
+            if captured == identity:
+                return harness_commands.SupportStatus(True, '', 'fixture-only')
+            return original(captured)
+
+        monkeypatch.setattr(harness_commands, 'support_for', support)
+        return identity
+
+    return bind

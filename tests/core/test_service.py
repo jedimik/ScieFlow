@@ -1510,3 +1510,1045 @@ def test_manuscript_panel_task2_comparison_failures_preserve_round_summary(proje
     assert ms["compared"] == ["main:merge_2", "main:merge_1"]
     assert observations == 2 and len(comparisons) == (1 if failure == "comparison" else 0)
     assert provenance._read_memo.get() is None
+
+
+# --- K target-only producer; selection/launch integration belongs later ---
+@pytest.mark.parametrize('change,reason', [({}, ''), ({'enabled': False}, 'disabled'),
+    ({'session_cmd': ''}, 'no session_cmd'), ({'resume_cmd': ''}, 'no resume_cmd'),
+    ({'family': 'unregistered'}, 'no family')])
+def test_k_target_validation_is_snapshot_only(monkeypatch, change, reason):
+    from scieflow.core import agent_run, sandbox
+    from scieflow.core.run import charter
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('target validation read external state')
+
+    monkeypatch.setattr(service.config, 'load_agents', forbidden)
+    monkeypatch.setattr(agent_run, 'prepare', forbidden)
+    monkeypatch.setattr(charter, 'snapshot', forbidden)
+    monkeypatch.setattr(sandbox, 'environment', forbidden)
+    target = {'enabled': True, 'family': 'claude', 'session_cmd': 'missing first {prompt}',
+              'resume_cmd': 'missing resume {session} {prompt}', **change}
+    registry = {'broken-old': None, 'target': target}
+    if reason:
+        with pytest.raises(service.ServiceError, match=reason):
+            service._validate_conversation_target('target', registry)
+    else:
+        assert service._validate_conversation_target('target', registry) is None
+    assert registry['target'] == target
+
+
+@pytest.mark.parametrize('registry', [None, [], {'target': None}, {'target': []}])
+def test_k_target_bad_snapshot_controlled(registry):
+    with pytest.raises(service.ServiceError):
+        service._validate_conversation_target('target', registry)
+
+
+@pytest.mark.parametrize('bad', [{'family': []}, {'family': {}}, {'session_cmd': ['mutable']},
+    {'resume_cmd': {'mutable': True}}, {'enabled': 'false'}])
+def test_k_target_bad_scalar_shape_controlled(bad):
+    registry = {'target': {'enabled': True, 'family': 'claude',
+                           'session_cmd': 'first {prompt}',
+                           'resume_cmd': 'resume {session} {prompt}', **bad}}
+    with pytest.raises(service.ServiceError):
+        service._validate_conversation_target('target', registry)
+
+
+def test_k_target_wrapper_loads_once(project, monkeypatch):
+    calls = []
+    def load(root):
+        calls.append(root)
+        return {'target': {'enabled': True, 'family': 'claude',
+                           'session_cmd': 'missing first', 'resume_cmd': 'missing resume'}}
+    monkeypatch.setattr(service.config, 'load_agents', load)
+    service._check_can_converse(project, 'target')
+    assert calls == [project.root]
+    with pytest.raises(service.ServiceError, match='unknown agent: absent'):
+        service._validate_conversation_target('absent', load(project.root))
+
+
+@pytest.mark.parametrize('family', [['mutable'], {'mutable': True}])
+def test_k_target_nontext_family_refuses_controlled(family):
+    registry = {'target': {'enabled': True, 'family': family,
+                           'session_cmd': 'first {prompt}',
+                           'resume_cmd': 'resume {session} {prompt}'}}
+    with pytest.raises(service.ServiceError):
+        service._validate_conversation_target('target', registry)
+
+
+# Task3 behavioral race: same nodes run before and after basic admission.
+@pytest.mark.parametrize('boundary', ['before-job', 'before-final-record'])
+@pytest.mark.parametrize('contender', ['send', 'handover'])
+def test_k_t3_basic_entry_refuses_through_final_record(k_conversational_project, monkeypatch,
+                                                      boundary, contender):
+    import threading
+    from scieflow.core.run import conversation
+
+    project, ws, _ = k_conversational_project
+    conversation.set_agent(ws, 'k-protocol-fixture')
+    reached, release = threading.Event(), threading.Event()
+    results, errors = [], []
+    real_dispatch, real_record = service.dispatch_agent, conversation.record_session
+
+    def barrier():
+        if threading.current_thread() is owner:
+            reached.set()
+            assert release.wait(15), 'bounded final-record barrier expired'
+
+    def dispatch(*args, **kwargs):
+        if boundary == 'before-job':
+            barrier()
+        result = real_dispatch(*args, **kwargs)
+        assert result['state'] == 'done' and result['exit_code'] == 0
+        return result
+
+    def record(*args, **kwargs):
+        if boundary == 'before-final-record':
+            assert not service._turn_in_flight(project, ws), 'inert process has really exited'
+            barrier()
+        return real_record(*args, **kwargs)
+
+    def run():
+        try:
+            results.append(service.say(project, 'r1', 'owner message'))
+        except BaseException as exc:
+            errors.append(exc)
+
+    monkeypatch.setattr(service, 'dispatch_agent', dispatch)
+    monkeypatch.setattr(conversation, 'record_session', record)
+    owner = threading.Thread(target=run)
+    owner.start()
+    try:
+        assert reached.wait(15), errors
+        before = (ws / 'conversation.yml').read_bytes()
+        with pytest.raises(service.ServiceError, match='busy|still running'):
+            if contender == 'send':
+                service.say(project, 'r1', 'contender message')
+            else:
+                service.set_conversation_agent(project, 'r1', 'stub2')
+        assert (ws / 'conversation.yml').read_bytes() == before
+    finally:
+        release.set()
+        owner.join(20)
+    assert not owner.is_alive() and not errors
+    assert results[0]['job']['exit_code'] == 0
+    doc = conversation.read(ws)
+    assert doc['session'] == 'k-session-1'
+    assert doc['turns'][-1]['text'] == 'K protocol reply'
+
+
+@pytest.mark.parametrize('operation', ['send', 'handover'])
+def test_k_t3_busy_precedes_state_and_semantic_reads(project, monkeypatch, operation):
+    from scieflow.core import sandbox, turn_admission
+    from scieflow.core.run import conversation
+    ws = project.run_dir('r1')
+    conversation.set_agent(ws, 'stub')
+    before = (ws / 'conversation.yml').read_bytes()
+    with turn_admission.reserve(project, ws):
+        def forbidden(*args, **kwargs):
+            raise AssertionError('busy entry read state or semantic configuration')
+        monkeypatch.setattr(conversation, 'read', forbidden)
+        monkeypatch.setattr(service.config, 'load_agents', forbidden)
+        monkeypatch.setattr(sandbox, 'resolve_turn_protection', forbidden)
+        with pytest.raises(service.ServiceError, match='busy'):
+            if operation == 'send':
+                service.say(project, 'r1', 'refused')
+            else:
+                service.set_conversation_agent(project, 'r1', 'stub2')
+    assert (ws / 'conversation.yml').read_bytes() == before
+    assert not list((ws / 'logs').glob('turn-*')) and not (ws / 'jobs').exists()
+
+
+@pytest.mark.parametrize('operation', ['send', 'handover'])
+@pytest.mark.parametrize('policy', ['unsandboxed_runs:\n  - slug: r1\n    reason: deliberate\n',
+                                  'writable:\n  - path: .scieflow\n'])
+def test_k_t3_supported_unsafe_never_legacy_fallback(project, monkeypatch, operation, policy):
+    from scieflow.core.run import conversation
+    ws = project.run_dir('r1')
+    conversation.set_agent(ws, 'stub')
+    before = (ws / 'conversation.yml').read_bytes()
+    (project.root / 'config/sandbox.yml').write_text(policy)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('unsafe entry reached old dispatch or selection write')
+    monkeypatch.setattr(service, 'dispatch_agent', forbidden)
+    monkeypatch.setattr(conversation, 'set_agent', forbidden)
+    with pytest.raises(service.ServiceError, match='unconfined|writable grant'):
+        if operation == 'send':
+            service.say(project, 'r1', 'refused')
+        else:
+            service.set_conversation_agent(project, 'r1', 'stub2')
+    assert (ws / 'conversation.yml').read_bytes() == before
+    assert not list((ws / 'logs').glob('turn-*')) and not (ws / 'jobs').exists()
+
+
+def test_k_t3_unsupported_ordinary_explicit_legacy_compatibility(k_conversational_project, monkeypatch):
+    from scieflow.core import sandbox, turn_admission
+    from scieflow.core.run import conversation
+    project, ws, _ = k_conversational_project
+    monkeypatch.setattr(turn_admission, 'backend_supported', lambda: False)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('unsupported ordinary used admission/protection guarantee')
+    monkeypatch.setattr(turn_admission, 'reserve', forbidden)
+    monkeypatch.setattr(sandbox, 'resolve_turn_protection', forbidden)
+    service.set_conversation_agent(project, 'r1', 'k-protocol-fixture')
+    result = service.say(project, 'r1', 'ordinary compatibility')
+    assert result['job']['state'] == 'done' and result['job']['exit_code'] == 0
+    assert conversation.read(ws)['session'] == 'k-session-1'
+    assert not (project.root / '.scieflow').exists()
+
+
+@pytest.mark.parametrize('old', ['', 'removed-manager', 'stub_disabled', 'sleepy'])
+def test_k_t3_nonlaunch_target_only_one_capture_and_no_charter(k_conversational_project, monkeypatch, old):
+    from scieflow.core import agent_run, harness_commands, sandbox, turn_admission
+    from scieflow.core.run import charter, conversation
+    project, ws, _ = k_conversational_project
+    if old:
+        conversation.set_agent(ws, old)
+    (ws / 'charter.yml').write_text('malformed: [\n')
+    calls, captured, validations = [], [], []
+    load = service.config.load_agents
+    capture = sandbox.resolve_turn_protection
+    validate = turn_admission.Reservation.validate_protection
+    def registry(root):
+        calls.append(root)
+        return load(root)
+    def protection(*args, **kwargs):
+        result = capture(*args, **kwargs)
+        captured.append(result)
+        return result
+    def check(self, value):
+        validations.append(value)
+        return validate(self, value)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('nonlaunch used full send/charter/capability/spend')
+    monkeypatch.setattr(service.config, 'load_agents', registry)
+    monkeypatch.setattr(sandbox, 'resolve_turn_protection', protection)
+    monkeypatch.setattr(turn_admission.Reservation, 'validate_protection', check)
+    for obj, name in ((agent_run, 'resolve_turn'), (agent_run, 'prepare_turn'),
+                      (agent_run, 'prepare'), (charter, 'snapshot'),
+                      (harness_commands, 'support_for'), (sandbox, 'verify'),
+                      (service.actions, 'record_spend')):
+        monkeypatch.setattr(obj, name, forbidden)
+    selected = service.set_conversation_agent(project, 'r1', 'k-protocol-fixture')
+    assert selected['agent'] == 'k-protocol-fixture'
+    assert len(calls) == len(captured) == 1
+    assert len(validations) == 2 and all(p is captured[0] for p in validations)
+    assert not list((ws / 'logs').glob('turn-*')) and not (ws / 'jobs').exists()
+
+
+@pytest.mark.parametrize('change', ['registry', 'policy', 'lock', 'ancestor'])
+def test_k_t3_selection_mutation_barrier_zero_write(project, monkeypatch, change):
+    import threading
+    from scieflow.core import sandbox
+    from scieflow.core.run import conversation
+    ws = project.run_dir('r1')
+    conversation.set_agent(ws, 'stub')
+    before = (ws / 'conversation.yml').read_bytes()
+    reached, release = threading.Event(), threading.Event()
+    errors, reads, policies = [], [], []
+    validate = service._validate_conversation_target
+    load = service.config.load_agents
+    capture = sandbox.resolve_turn_protection
+    def target(*args):
+        validate(*args)
+        reached.set()
+        assert release.wait(15)
+    def registry(root):
+        reads.append(root)
+        return load(root)
+    def protection(*args, **kwargs):
+        policies.append(True)
+        return capture(*args, **kwargs)
+    def run():
+        try:
+            service.set_conversation_agent(project, 'r1', 'stub2')
+        except service.ServiceError as exc:
+            errors.append(exc)
+    monkeypatch.setattr(service, '_validate_conversation_target', target)
+    monkeypatch.setattr(service.config, 'load_agents', registry)
+    monkeypatch.setattr(sandbox, 'resolve_turn_protection', protection)
+    thread = threading.Thread(target=run)
+    thread.start()
+    backup = None
+    try:
+        assert reached.wait(15)
+        if change == 'registry':
+            path = project.root / 'config/agents.yml'
+            path.write_text(path.read_text() + '# mutation\n')
+        elif change == 'policy':
+            (project.root / 'config/sandbox.yml').write_text('writable: []\n')
+        elif change == 'lock':
+            [path] = list((project.root / '.scieflow/turn-admission').glob('*.lock'))
+            path.unlink()
+            path.touch(mode=0o600)
+        else:
+            path = project.root / '.scieflow'
+            backup = path.with_name('.scieflow-moved')
+            path.rename(backup)
+            path.mkdir()
+    finally:
+        release.set()
+        thread.join(20)
+        if backup is not None:
+            path.rmdir()
+            backup.rename(path)
+    assert not thread.is_alive() and len(errors) == 1
+    assert len(reads) == len(policies) == 1
+    assert (ws / 'conversation.yml').read_bytes() == before
+
+
+def test_k_t3_basic_send_independent_protection_and_legacy_prepare_once(k_conversational_project, monkeypatch):
+    from scieflow.core import agent_run, sandbox, turn_admission
+    from scieflow.core.run import conversation
+    project, ws, _ = k_conversational_project
+    conversation.set_agent(ws, 'k-protocol-fixture')
+    captured, validations, preparations = [], [], []
+    capture, validate, prepare = sandbox.resolve_turn_protection, turn_admission.Reservation.validate_protection, agent_run.prepare
+    def protection(*args, **kwargs):
+        result = capture(*args, **kwargs)
+        captured.append(result)
+        return result
+    def check(self, value):
+        validations.append(value)
+        return validate(self, value)
+    def legacy(*args, **kwargs):
+        result = prepare(*args, **kwargs)
+        preparations.append(result)
+        return result
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Task3 must not full-prepare then dispatch double-prepare')
+    monkeypatch.setattr(sandbox, 'resolve_turn_protection', protection)
+    monkeypatch.setattr(turn_admission.Reservation, 'validate_protection', check)
+    monkeypatch.setattr(agent_run, 'prepare', legacy)
+    monkeypatch.setattr(agent_run, 'resolve_turn', forbidden)
+    monkeypatch.setattr(agent_run, 'prepare_turn', forbidden)
+    result = service.say(project, 'r1', 'ordinary')
+    assert result['job']['exit_code'] == 0 and result['turn']['text'] == 'K protocol reply'
+    assert len(captured) == len(preparations) == 1
+    assert len(validations) == 4 and all(p is captured[0] for p in validations)
+
+
+def test_k_t3_exception_releases_basic_entry(k_conversational_project, monkeypatch):
+    from scieflow.core.run import conversation
+    project, ws, _ = k_conversational_project
+    conversation.set_agent(ws, 'k-protocol-fixture')
+    real = service.dispatch_agent
+    def fail(*args, **kwargs):
+        raise service.ServiceError('injected dispatch failure')
+    monkeypatch.setattr(service, 'dispatch_agent', fail)
+    with pytest.raises(service.ServiceError, match='injected'):
+        service.say(project, 'r1', 'failed attempt')
+    monkeypatch.setattr(service, 'dispatch_agent', real)
+    assert service.say(project, 'r1', 'next explicit attempt')['job']['exit_code'] == 0
+
+
+# C1-C3: admission owns the canonical destination, not the request spelling.
+def _k_t3_run_identity_pair(k_conversational_project):
+    from scieflow.core.run import conversation, status
+
+    project, r1, _ = k_conversational_project
+    conversation.set_agent(r1, 'k-protocol-fixture')
+    r2 = project.run_dir('r2')
+    (r2 / 'logs').mkdir(parents=True)
+    (r2 / 'config.yml').write_text('slug: r2\napproval: autonomous\n')
+    status.write_status(r2, status.new_status('r2', 'autonomous'))
+    conversation.set_agent(r2, 'stub')
+    (r2 / 'logs/kept-transcript.out.md').write_text('destination transcript sentinel')
+    (r2 / 'artifacts').mkdir()
+    (r2 / 'artifacts/kept.bin').write_bytes(b'\x00destination artifact\xff')
+    alias = project.workspace_root / 'view'
+    alias.symlink_to('r1', target_is_directory=True)
+    return project, r1, r2, alias
+
+
+def _k_t3_run_identity_inventory(ws):
+    # Include conversation, logs, transcripts, artifacts, and newly created
+    # entries. Reads may advance atime; that is not an artifact mutation.
+    import stat
+
+    inventory = {}
+    for path in sorted(ws.rglob('*')):
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            value = ('link', path.readlink().as_posix())
+        elif stat.S_ISDIR(info.st_mode):
+            value = ('directory',)
+        else:
+            assert stat.S_ISREG(info.st_mode)
+            value = ('file', path.read_bytes())
+        inventory[path.relative_to(ws).as_posix()] = (info.st_mode, value)
+    return inventory
+
+
+def _k_t3_run_identity_both_busy(project, r1, r2):
+    from scieflow.core import turn_admission
+
+    for ws in (r1, r2):
+        with pytest.raises(turn_admission.AdmissionBusy):
+            with turn_admission.reserve(project, ws):
+                raise AssertionError('independently reserved run was admitted twice')
+
+
+def _k_t3_run_identity_retarget(project, alias, protection):
+    import shlex
+    import subprocess
+    from scieflow.core import sandbox
+
+    assert sandbox.available(), 'this regression requires the real supported sandbox'
+    sentinel = project.workspace_root / 'run-identity-child-positive'
+    script = (f'printf coordinator > {shlex.quote(str(sentinel))} && '
+              f'rm {shlex.quote(str(alias))} && '
+              f'ln -s r2 {shlex.quote(str(alias))}')
+    child = subprocess.run(
+        sandbox.wrap(['/bin/sh', '-c', script],
+                     writable=list(protection.coordinator_writable),
+                     cwd=project.workspace_root, mask=list(protection.masks)),
+        capture_output=True, text=True, timeout=20, check=False)
+    assert child.returncode == 0, child.stderr
+    assert sentinel.read_bytes() == b'coordinator'
+    assert alias.resolve() == project.run_dir('r2')
+    return child.returncode
+
+
+@pytest.mark.parametrize('retarget', [False, True], ids=['stable-alias', 'sandbox-retarget'])
+def test_k_t3_run_identity_final_record_keeps_reserved_destination(
+        k_conversational_project, monkeypatch, retarget):
+    from scieflow.core import sandbox, turn_admission
+    from scieflow.core.run import conversation
+
+    project, r1, r2, alias = _k_t3_run_identity_pair(k_conversational_project)
+    before_r2 = _k_t3_run_identity_inventory(r2)
+    captured, capture_paths, completed, dispatch_paths, record_paths, busy_paths = [], [], [], [], [], []
+    real_capture = sandbox.resolve_turn_protection
+    real_dispatch = service.dispatch_agent
+    real_record = conversation.record_session
+    real_busy = service._turn_in_flight
+    child_exits = []
+
+    def capture(*args, **kwargs):
+        capture_paths.append(kwargs['run_dir'])
+        value = real_capture(*args, **kwargs)
+        captured.append(value)
+        return value
+
+    def busy(project, ws):
+        busy_paths.append(ws)
+        return real_busy(project, ws)
+
+    def dispatch(project, agent, prompt, transcript, **kwargs):
+        dispatch_paths.append((prompt, transcript))
+        value = real_dispatch(project, agent, prompt, transcript, **kwargs)
+        assert value['state'] == 'done' and value['exit_code'] == 0
+        completed.append(value)
+        return value
+
+    def record(ws, session_id):
+        assert len(completed) == len(captured) == 1 and session_id == 'k-session-1'
+        assert not real_busy(project, r1), 'actual inert process must have exited'
+        _k_t3_run_identity_both_busy(project, r1, r2)
+        if retarget:
+            child_exits.append(_k_t3_run_identity_retarget(project, alias, captured[0]))
+        _k_t3_run_identity_both_busy(project, r1, r2)
+        record_paths.append(ws)  # Never require the vulnerable lexical spelling.
+        return real_record(ws, session_id)
+
+    monkeypatch.setattr(sandbox, 'resolve_turn_protection', capture)
+    monkeypatch.setattr(service, '_turn_in_flight', busy)
+    monkeypatch.setattr(service, 'dispatch_agent', dispatch)
+    monkeypatch.setattr(conversation, 'record_session', record)
+    with turn_admission.reserve(project, r2):
+        try:
+            result = service.say(project, 'view', 'canonical destination inert turn')
+            unchanged = _k_t3_run_identity_inventory(r2) == before_r2
+            print('T3_RUN_IDENTITY_FINAL', {'retarget': retarget, 'r2_inventory_unchanged': unchanged,
+                  'child_exits': child_exits, 'real_job_exit': completed[0]['exit_code'],
+                  'r1_session': conversation.read(r1)['session'],
+                  'r2_session': conversation.read(r2)['session'], 'both_busy_at_boundary': True})
+            assert unchanged, 'final recording changed independently reserved r2 through the request alias'
+            assert result['job']['exit_code'] == 0 and result['turn']['text'] == 'K protocol reply'
+            doc = conversation.read(r1)
+            assert doc['session'] == 'k-session-1' and doc['turns'][-1]['text'] == 'K protocol reply'
+            assert [p.resolve() for p in capture_paths] == [p.resolve() for p in record_paths] == [r1]
+            assert [p.resolve() for p in busy_paths] == [r1]
+            [(prompt, transcript)] = dispatch_paths
+            assert prompt.parent.resolve() == transcript.parent.resolve() == r1 / service.TURN_PROMPT_DIR
+            assert transcript.read_text() == 'K protocol reply'
+            assert child_exits == ([0] if retarget else [])
+        finally:
+            alias.unlink()
+            alias.symlink_to('r1', target_is_directory=True)
+    # Both ownership domains cleanly release after real success.
+    with turn_admission.reserve(project, r1), turn_admission.reserve(project, r2):
+        pass
+
+
+def test_k_t3_run_identity_postdispatch_drift_refuses_before_parse(
+        k_conversational_project, monkeypatch):
+    from scieflow.core import sandbox, turn_admission
+    from scieflow.core.run import conversation
+
+    project, r1, r2, alias = _k_t3_run_identity_pair(k_conversational_project)
+    before_r2 = _k_t3_run_identity_inventory(r2)
+    captured, validations, completed, parses, records, errors = [], [], [], [], [], []
+    real_capture = sandbox.resolve_turn_protection
+    real_validate = turn_admission.Reservation.validate_protection
+    real_dispatch = service.dispatch_agent
+    real_parse = service.sessions.parse
+    real_record = conversation.record_session
+
+    def capture(*args, **kwargs):
+        value = real_capture(*args, **kwargs)
+        captured.append(value)
+        return value
+
+    def validate(self, protection):
+        validations.append(protection)
+        return real_validate(self, protection)
+
+    def dispatch(*args, **kwargs):
+        value = real_dispatch(*args, **kwargs)
+        assert value['state'] == 'done' and value['exit_code'] == 0
+        completed.append(value)
+        assert len(captured) == 1
+        _k_t3_run_identity_both_busy(project, r1, r2)
+        assert _k_t3_run_identity_retarget(project, alias, captured[0]) == 0
+        _k_t3_run_identity_both_busy(project, r1, r2)
+        return value
+
+    def parse(*args, **kwargs):
+        parses.append(True)
+        return real_parse(*args, **kwargs)
+
+    def record(*args, **kwargs):
+        records.append(True)
+        return real_record(*args, **kwargs)
+
+    monkeypatch.setattr(sandbox, 'resolve_turn_protection', capture)
+    monkeypatch.setattr(turn_admission.Reservation, 'validate_protection', validate)
+    monkeypatch.setattr(service, 'dispatch_agent', dispatch)
+    monkeypatch.setattr(service.sessions, 'parse', parse)
+    monkeypatch.setattr(conversation, 'record_session', record)
+    with turn_admission.reserve(project, r2):
+        try:
+            try:
+                service.say(project, 'view', 'attempt remains recorded on identity drift')
+            except (service.ServiceError, OSError) as exc:
+                errors.append(exc)
+            print('T3_RUN_IDENTITY_POSTDISPATCH', {'error_types': [type(e).__name__ for e in errors],
+                  'dispatches': len(completed), 'captures': len(captured), 'validations': len(validations),
+                  'parses': len(parses), 'records': len(records),
+                  'r2_inventory_unchanged': _k_t3_run_identity_inventory(r2) == before_r2})
+            assert _k_t3_run_identity_inventory(r2) == before_r2
+            assert len(completed) == len(captured) == 1
+            assert len(errors) == 1 and isinstance(errors[0], service.ServiceError), \
+                'completion identity drift must visibly refuse, not follow the alias or fail on a missing transcript'
+            assert 'identity changed' in str(errors[0])
+            assert len(validations) == 4 and all(p is captured[0] for p in validations)
+            assert not parses and not records
+            doc = conversation.read(r1)
+            assert doc['session'] is None and len(doc['turns']) == 1
+            assert doc['turns'][0]['role'] == 'human'
+            assert completed[0]['exit_code'] == 0  # real attempted job retained, never retried
+        finally:
+            alias.unlink()
+            alias.symlink_to('r1', target_is_directory=True)
+    with turn_admission.reserve(project, r1), turn_admission.reserve(project, r2):
+        pass
+
+
+@pytest.mark.parametrize('retarget', [False, True], ids=['stable-alias', 'sandbox-retarget'])
+def test_k_t3_run_identity_handover_keeps_reserved_destination(
+        k_conversational_project, monkeypatch, retarget):
+    from scieflow.core import agent_run, harness_commands, sandbox, turn_admission
+    from scieflow.core.run import charter, conversation
+
+    project, r1, r2, alias = _k_t3_run_identity_pair(k_conversational_project)
+    before_r2 = _k_t3_run_identity_inventory(r2)
+    captured, validations, registries, capture_paths, write_paths, busy_paths = [], [], [], [], [], []
+    real_capture = sandbox.resolve_turn_protection
+    real_validate = turn_admission.Reservation.validate_protection
+    real_load = service.config.load_agents
+    real_set = conversation.set_agent
+    real_busy = service._turn_in_flight
+    child_exits = []
+
+    def capture(*args, **kwargs):
+        capture_paths.append(kwargs['run_dir'])
+        value = real_capture(*args, **kwargs)
+        captured.append(value)
+        return value
+
+    def validate(self, protection):
+        validations.append(protection)
+        return real_validate(self, protection)
+
+    def registry(root):
+        registries.append(root)
+        return real_load(root)
+
+    def busy(project, ws):
+        busy_paths.append(ws)
+        return real_busy(project, ws)
+
+    def set_agent(ws, agent, actor='human'):
+        assert len(captured) == len(registries) == 1
+        _k_t3_run_identity_both_busy(project, r1, r2)
+        if retarget:
+            child_exits.append(_k_t3_run_identity_retarget(project, alias, captured[0]))
+        _k_t3_run_identity_both_busy(project, r1, r2)
+        write_paths.append(ws)
+        return real_set(ws, agent, actor)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('nonlaunch destination binding used a full send/probe/spend')
+
+    monkeypatch.setattr(sandbox, 'resolve_turn_protection', capture)
+    monkeypatch.setattr(turn_admission.Reservation, 'validate_protection', validate)
+    monkeypatch.setattr(service.config, 'load_agents', registry)
+    monkeypatch.setattr(service, '_turn_in_flight', busy)
+    monkeypatch.setattr(conversation, 'set_agent', set_agent)
+    for obj, name in ((agent_run, 'resolve_turn'), (agent_run, 'prepare_turn'),
+                      (agent_run, 'prepare'), (charter, 'snapshot'),
+                      (harness_commands, 'support_for'), (sandbox, 'verify'),
+                      (service, 'dispatch_agent'), (service.actions, 'record_spend')):
+        monkeypatch.setattr(obj, name, forbidden)
+    with turn_admission.reserve(project, r2):
+        try:
+            selected = service.set_conversation_agent(project, 'view', 'stub2')
+            unchanged = _k_t3_run_identity_inventory(r2) == before_r2
+            print('T3_RUN_IDENTITY_HANDOVER', {'retarget': retarget, 'r2_inventory_unchanged': unchanged,
+                  'r1_agent': conversation.read(r1)['agent'], 'child_exits': child_exits,
+                  'captures': len(captured), 'registry_loads': len(registries),
+                  'validations': len(validations), 'both_busy_at_boundary': True})
+            assert unchanged, 'hand-over changed independently reserved r2 through the request alias'
+            assert selected['agent'] == conversation.read(r1)['agent'] == 'stub2'
+            assert [p.resolve() for p in capture_paths] == [p.resolve() for p in write_paths] == [r1]
+            assert [p.resolve() for p in busy_paths] == [r1]
+            assert len(validations) == 2 and all(p is captured[0] for p in validations)
+            assert child_exits == ([0] if retarget else [])
+            assert not list((r1 / service.TURN_PROMPT_DIR).glob('turn-*')) and not (r1 / 'jobs').exists()
+        finally:
+            alias.unlink()
+            alias.symlink_to('r1', target_is_directory=True)
+    with turn_admission.reserve(project, r1), turn_admission.reserve(project, r2):
+        pass
+
+
+# M1-M4: send-only host preparation, immutable capture, actual masked launch.
+@pytest.mark.parametrize('present', [False, True], ids=['first-absent', 'existing-provenance'])
+def test_k_t3_mask_prepared_before_real_first_and_resumed_dispatch(
+        k_conversational_project, monkeypatch, present):
+    import os
+    import shlex
+    import subprocess
+    from scieflow.core import agent_run, provenance, sandbox, turn_admission
+    from scieflow.core.run import conversation
+
+    project, ws, _ = k_conversational_project
+    conversation.set_agent(ws, 'k-protocol-fixture')
+    leaf = ws / provenance.REPO_DIR
+    if present:
+        leaf.mkdir(mode=0o750)
+        (leaf / 'host-content').write_bytes(b'provenance sentinel')
+    initial_inventory = _k_t3_run_identity_inventory(leaf) if present else {}
+    captured, validations, preparations, masks, jobs_seen = [], [], [], [], []
+    real_capture = sandbox.resolve_turn_protection
+    real_validate = turn_admission.Reservation.validate_protection
+    real_prepare = turn_admission.Reservation.prepare_launch_masks
+    real_legacy = agent_run.prepare
+    real_dispatch = service.dispatch_agent
+
+    def capture(*args, **kwargs):
+        value = real_capture(*args, **kwargs)
+        captured.append(value)
+        return value
+
+    def validate(self, value):
+        validations.append(value)
+        return real_validate(self, value)
+
+    def prepare(self, value):
+        assert value is captured[-1]
+        absence = next(f for f in value.path_facts if f.path == leaf)
+        original = value.path_facts
+        assert absence.exists is (present or len(captured) == 2)
+        real_prepare(self, value)
+        assert value.path_facts is original
+        assert absence.exists is (present or len(captured) == 2)
+        assert leaf.is_dir()
+        masks.append((leaf.lstat().st_ino, self._launch_mask.fd if self._launch_mask else None))
+
+    def legacy(*args, **kwargs):
+        preparations.append(True)
+        return real_legacy(*args, **kwargs)
+
+    def dispatch(*args, **kwargs):
+        assert len(masks) == len(captured) and leaf.stat().st_ino == masks[-1][0]
+        value = captured[-1]
+        positive = ws / 'mask-child-positive'
+        script = (f'printf permitted > {shlex.quote(str(positive))} && '
+                  f'printf discarded > {shlex.quote(str(leaf / "discarded-child-write"))}')
+        child = subprocess.run(sandbox.wrap(['/bin/sh', '-c', script],
+                               writable=list(value.writable), cwd=ws, mask=list(value.masks)),
+                               capture_output=True, text=True, timeout=20, check=False)
+        assert child.returncode == 0, child.stderr
+        assert positive.read_bytes() == b'permitted' and not (leaf / 'discarded-child-write').exists()
+        assert leaf.stat().st_ino == masks[-1][0]
+        result = real_dispatch(*args, **kwargs)
+        assert result['exit_code'] == 0 and leaf.stat().st_ino == masks[-1][0]
+        assert _k_t3_run_identity_inventory(leaf) == initial_inventory
+        jobs_seen.append(result)
+        return result
+
+    monkeypatch.setattr(sandbox, 'resolve_turn_protection', capture)
+    monkeypatch.setattr(turn_admission.Reservation, 'validate_protection', validate)
+    monkeypatch.setattr(turn_admission.Reservation, 'prepare_launch_masks', prepare)
+    monkeypatch.setattr(agent_run, 'prepare', legacy)
+    monkeypatch.setattr(service, 'dispatch_agent', dispatch)
+    for text in ('first explicit turn', 'resumed explicit turn'):
+        result = service.say(project, 'r1', text)
+        assert result['job']['exit_code'] == 0 and result['turn']['text'] == 'K protocol reply'
+        assert conversation.read(ws)['session'] == 'k-session-1'
+    assert len(captured) == len(preparations) == len(masks) == len(jobs_seen) == 2
+    assert len(validations) == 8
+    assert all(p is captured[0] for p in validations[:4])
+    assert all(p is captured[1] for p in validations[4:])
+    assert masks[0][0] == masks[1][0]
+    for _, fd in masks:
+        if fd is not None:
+            with pytest.raises(OSError):
+                os.fstat(fd)
+    print('T3_MASK_REAL', {'present': present, 'job_exits': [j['exit_code'] for j in jobs_seen],
+          'captures': len(captured), 'legacy_prepares': len(preparations), 'validations': len(validations),
+          'same_nofollow_inode': True, 'masked_write_discarded': True, 'provenance_unchanged': True})
+
+
+@pytest.mark.parametrize('kind', ['directory', 'symlink'])
+def test_k_t3_mask_creation_race_prevents_dispatch(k_conversational_project, monkeypatch, kind):
+    import os
+    from scieflow.core import provenance, turn_admission
+    from scieflow.core.run import conversation
+    project, ws, _ = k_conversational_project
+    conversation.set_agent(ws, 'k-protocol-fixture')
+    leaf = ws / provenance.REPO_DIR
+    outside = project.root / 'outside-mask'
+    outside.mkdir()
+    (outside / 'sentinel').write_bytes(b'outside')
+    real_mkdir = os.mkdir
+    real_publish = turn_admission._publish_mask_noreplace
+    real_prepare = turn_admission.Reservation.prepare_launch_masks
+    raced, dispatches, entered = [], [], []
+    def publish(src_fd, src_name, dst_fd, dst_name):
+        if dst_name == leaf.name:
+            if kind == 'directory':
+                real_mkdir(dst_name, 0o700, dir_fd=dst_fd)
+            else:
+                os.symlink(str(outside), dst_name, dir_fd=dst_fd)
+            raced.append(leaf.lstat().st_ino)
+        return real_publish(src_fd, src_name, dst_fd, dst_name)
+    def forbidden(*args, **kwargs):
+        dispatches.append(True)
+        raise AssertionError('mask preparation failure dispatched a model')
+    def preparation(self, protection):
+        # Inject AFTER supported admission at the real exclusive publication.
+        entered.append(protection)
+        with monkeypatch.context() as patch:
+            patch.setattr(turn_admission, '_publish_mask_noreplace', publish)
+            return real_prepare(self, protection)
+    monkeypatch.setattr(turn_admission.Reservation, 'prepare_launch_masks', preparation)
+    monkeypatch.setattr(service, 'dispatch_agent', forbidden)
+    with pytest.raises(service.ServiceError):
+        service.say(project, 'r1', 'record the human attempt, never dispatch the conflict')
+    assert len(entered) == 1 and raced == [leaf.lstat().st_ino] and not dispatches
+    doc = conversation.read(ws)
+    assert doc['session'] is None and [t['role'] for t in doc['turns']] == ['human']
+    assert not (ws / 'jobs').exists()
+    assert (outside / 'sentinel').read_bytes() == b'outside'
+    with turn_admission.reserve(project, ws):
+        pass
+
+
+@pytest.mark.parametrize('reason', ['nonlaunch', 'no-agent', 'preflight', 'running', 'busy', 'unsafe', 'unsupported'])
+def test_k_t3_mask_not_prepared_on_nonlaunch_or_refused_or_unsupported_paths(
+        k_conversational_project, monkeypatch, reason):
+    from scieflow.core import provenance, sandbox, turn_admission
+    from scieflow.core.run import conversation
+    project, ws, _ = k_conversational_project
+    leaf = ws / provenance.REPO_DIR
+    def forbidden(*args, **kwargs):
+        raise AssertionError('this path must not perform send-only mask preparation')
+    monkeypatch.setattr(turn_admission.Reservation, 'prepare_launch_masks', forbidden)
+    if reason == 'nonlaunch':
+        service.set_conversation_agent(project, 'r1', 'k-protocol-fixture')
+        with pytest.raises(service.ServiceError, match='no job'):
+            service.cancel_job(project, 'no-such-job')
+    elif reason == 'no-agent':
+        with pytest.raises(service.ServiceError, match='choose an agent'):
+            service.say(project, 'r1', 'no selected manager')
+    else:
+        conversation.set_agent(ws, 'k-protocol-fixture')
+        if reason == 'preflight':
+            monkeypatch.setattr(service.sessions, 'can_converse', lambda cfg: False)
+        elif reason == 'running':
+            monkeypatch.setattr(service, '_turn_in_flight', lambda *args: True)
+        elif reason == 'unsafe':
+            (project.root / sandbox.ALLOWLIST_FILE).write_text('writable:\n  - path: .scieflow\n')
+        elif reason == 'unsupported':
+            monkeypatch.setattr(turn_admission, 'backend_supported', lambda: False)
+            assert service.say(project, 'r1', 'legacy compatibility')['job']['exit_code'] == 0
+            assert leaf.exists()  # ordinary sandbox side effect, NOT new preparation
+            return
+        if reason == 'busy':
+            with turn_admission.reserve(project, ws):
+                with pytest.raises(service.ServiceError, match='busy'):
+                    service.say(project, 'r1', 'held elsewhere')
+        else:
+            with pytest.raises(service.ServiceError):
+                service.say(project, 'r1', 'refused before send-only preparation')
+    assert not leaf.exists() and not leaf.is_symlink()
+    assert not list((ws / service.TURN_PROMPT_DIR).glob('turn-*'))
+
+
+# P1-P4: preserve behavior across old exposed creation/new protected publication.
+@pytest.mark.parametrize('boundary', ['stable', 'protected-stage', 'destination-conflict', 'after-publication'])
+def test_k_t3_mask_publication_confined_boundaries(k_conversational_project, monkeypatch, boundary):
+    import os
+    import shlex
+    import subprocess
+    from scieflow.core import agent_run, sandbox, turn_admission as admission
+    from scieflow.core.run import conversation
+
+    assert admission.backend_supported() and sandbox.available()
+    project, ws, _ = k_conversational_project
+    conversation.set_agent(ws, 'k-protocol-fixture')
+    leaf = ws / 'provenance.git'
+    backup = ws / 'original-published-mask'
+    positive = project.workspace_root / 'publication-child-positive'
+    protected = project.root / 'config/publication-readonly'
+    protected.write_bytes(b'protected')
+    captured, validations, dispatches, legacy_calls, opened = [], [], [], [], []
+    observed = {}
+    real_capture = sandbox.resolve_turn_protection
+    real_validate = admission.Reservation.validate_protection
+    real_prepare = admission.Reservation.prepare_launch_masks
+    real_dispatch = service.dispatch_agent
+    real_legacy = agent_run.prepare
+    real_mkdir, real_open, real_stat = os.mkdir, os.open, os.stat
+    real_publish = getattr(admission, '_publish_mask_noreplace', None)
+    before = set(os.listdir('/proc/self/fd'))
+
+    def capture(*args, **kwargs):
+        value = real_capture(*args, **kwargs)
+        captured.append(value)
+        return value
+
+    def validate(self, value):
+        validations.append(value)
+        return real_validate(self, value)
+
+    def legacy(*args, **kwargs):
+        legacy_calls.append(True)
+        return real_legacy(*args, **kwargs)
+
+    def child(protection, action):
+        grants = list(protection.coordinator_writable)
+        masks = sandbox.masks_for(grants, run_dir=ws)
+        assert grants == [project.workspace_root] and masks == []
+        script = (f'printf granted > {shlex.quote(str(positive))} && '
+                  f'if (printf forbidden > {shlex.quote(str(protected))}) 2>/dev/null; '
+                  f'then exit 41; fi; ' + action)
+        result = subprocess.run(sandbox.wrap(['/bin/sh', '-c', script], writable=grants,
+                                cwd=project.workspace_root, mask=masks),
+                                capture_output=True, text=True, timeout=20, check=False)
+        assert result.returncode == 0, result.stderr
+        assert positive.read_bytes() == b'granted' and protected.read_bytes() == b'protected'
+        observed.update(child_exit=0, protected_write_denied=True)
+
+    def substitute(protection):
+        assert 'replacement_inode' not in observed
+        child(protection, f'mv -- {shlex.quote(str(leaf))} {shlex.quote(str(backup))} && '
+              f'mkdir -m 700 -- {shlex.quote(str(leaf))} && '
+              f'printf stranger > {shlex.quote(str(leaf / "stranger"))}')
+        observed['replacement_inode'] = leaf.lstat().st_ino
+        assert backup.lstat().st_ino == observed['created_inode']
+        assert observed['replacement_inode'] != observed['created_inode']
+
+    def preparation(self, protection):
+        parent = self._fds[ws]
+        neutral_path = self._lock_path.parent
+        neutral = self._fds[neutral_path]
+        neutral_identity = neutral_path.lstat().st_ino
+        sentinel = neutral_path / 'protected-parent-sentinel'
+        if not sentinel.exists():
+            sentinel.write_bytes(b'neutral protected')
+
+        def mkdir(name, mode=0o777, *, dir_fd=None):
+            result = real_mkdir(name, mode, dir_fd=dir_fd)
+            if dir_fd == neutral and str(name).startswith('mask-v1-'):
+                stage = neutral_path / name
+                observed.update(stage_name=name, created_inode=stage.lstat().st_ino)
+                if boundary in ('protected-stage', 'destination-conflict'):
+                    # Reached immediately after mkdir, before production stat/open.
+                    action = (f'if mv -- {shlex.quote(str(stage))} {shlex.quote(str(stage)+".moved")} 2>/dev/null; '
+                              f'then exit 42; fi; '
+                              f'if mkdir -- {shlex.quote(str(stage / "forbidden-child"))} 2>/dev/null; then exit 43; fi; '
+                              f'if mv -- {shlex.quote(str(neutral_path))} {shlex.quote(str(neutral_path)+".moved")} 2>/dev/null; '
+                              f'then exit 44; fi; '
+                              f'if (printf forbidden > {shlex.quote(str(sentinel))}) 2>/dev/null; then exit 45; fi; ')
+                    if boundary == 'destination-conflict':
+                        action += f'mkdir -m 700 -- {shlex.quote(str(leaf))} && printf stranger > {shlex.quote(str(leaf / "stranger"))}'
+                    else:
+                        action += 'true'
+                    child(protection, action)
+                    assert stage.lstat().st_ino == observed['created_inode']
+                    assert neutral_path.lstat().st_ino == neutral_identity
+                    assert sentinel.read_bytes() == b'neutral protected' and not (stage / 'forbidden-child').exists()
+                    observed['stage_attempts_reached_and_denied'] = True
+            elif dir_fd == parent and name == leaf.name and real_publish is None:
+                observed['created_inode'] = real_stat(name, dir_fd=parent, follow_symlinks=False).st_ino
+                if boundary == 'after-publication':
+                    substitute(protection)
+            return result
+
+        def opening(name, flags, mode=0o777, *, dir_fd=None):
+            fd = real_open(name, flags, mode, dir_fd=dir_fd)
+            if dir_fd in (neutral, parent) and (name == leaf.name or str(name).startswith('mask-v1-')):
+                opened.append(fd)
+            return fd
+
+        def publish(src_fd, src_name, dst_fd, dst_name):
+            assert src_fd == neutral and dst_fd == parent and dst_name == leaf.name
+            pinned = [fd for fd in opened if os.fstat(fd).st_ino == observed['created_inode']]
+            assert len(pinned) == 1, 'source must be pinned before publication'
+            observed['prepublication_fd_inode'] = os.fstat(pinned[0]).st_ino
+            real_publish(src_fd, src_name, dst_fd, dst_name)
+            if boundary == 'after-publication':
+                substitute(protection)
+                assert os.fstat(pinned[0]).st_ino == observed['created_inode']
+
+        with monkeypatch.context() as patch:
+            patch.setattr(os, 'mkdir', mkdir)
+            patch.setattr(os, 'open', opening)
+            if real_publish is not None:
+                patch.setattr(admission, '_publish_mask_noreplace', publish)
+            real_prepare(self, protection)
+        if self._launch_mask is not None:
+            assert self._launch_mask.protection is protection and not self._launch_mask.absence.exists
+            observed['owned_inode'] = self._launch_mask.identity[1]
+
+    def dispatch(*args, **kwargs):
+        dispatches.append(True)
+        return real_dispatch(*args, **kwargs)
+
+    monkeypatch.setattr(sandbox, 'resolve_turn_protection', capture)
+    monkeypatch.setattr(admission.Reservation, 'validate_protection', validate)
+    monkeypatch.setattr(admission.Reservation, 'prepare_launch_masks', preparation)
+    monkeypatch.setattr(agent_run, 'prepare', legacy)
+    monkeypatch.setattr(service, 'dispatch_agent', dispatch)
+    result, errors = None, []
+    try:
+        result = service.say(project, 'r1', 'publication boundary inert first send')
+    except service.ServiceError as exc:
+        errors.append(str(exc))
+    print('T3_PUBLICATION_BOUNDARY', dict(observed, boundary=boundary, dispatches=len(dispatches), refusal=errors))
+    assert len(captured) == 1 and all(value is captured[0] for value in validations)
+    assert set(os.listdir('/proc/self/fd')) == before
+    for fd in opened:
+        with pytest.raises(OSError):
+            os.fstat(fd)
+    assert protected.read_bytes() == b'protected'
+    if boundary in ('destination-conflict', 'after-publication'):
+        assert observed['child_exit'] == 0
+        assert errors and not dispatches, 'persistent stranger was adopted and dispatched as owned'
+        assert result is None and conversation.read(ws)['session'] is None
+        assert [turn['role'] for turn in conversation.read(ws)['turns']] == ['human']
+        assert not (ws / 'jobs').exists() and (leaf / 'stranger').read_bytes() == b'stranger'
+        if boundary == 'after-publication':
+            assert backup.lstat().st_ino == observed['created_inode']
+        else:
+            assert observed['stage_attempts_reached_and_denied']
+    else:
+        assert not errors and result['job']['exit_code'] == 0 and result['turn']['text'] == 'K protocol reply'
+        assert len(validations) == 4 and len(legacy_calls) == 1
+        assert observed['owned_inode'] == observed['created_inode']
+        if real_publish is not None:
+            assert observed['owned_inode'] == observed['prepublication_fd_inode']
+        if boundary == 'protected-stage':
+            assert observed['stage_attempts_reached_and_denied']
+        resumed = service.say(project, 'r1', 'publication boundary inert resume')
+        assert resumed['job']['exit_code'] == 0 and resumed['turn']['text'] == 'K protocol reply'
+        assert len(captured) == len(legacy_calls) == len(dispatches) == 2 and len(validations) == 8
+        assert all(value is captured[1] for value in validations[4:])
+        assert leaf.lstat().st_ino == observed['created_inode']
+        assert not list(leaf.iterdir()), 'tmpfs/protocol must leave host provenance unchanged'
+    with admission.reserve(project, ws):
+        pass
+
+
+@pytest.mark.parametrize('failure', ['missing-symbol', 'abi', 'ENOSYS', 'EINVAL', 'EOPNOTSUPP', 'EXDEV', 'EACCES'])
+def test_k_t3_mask_publication_errors_never_dispatch_or_fall_back(k_conversational_project, monkeypatch, failure):
+    import ctypes
+    import errno
+    import os
+    from scieflow.core import sandbox, turn_admission as admission
+    from scieflow.core.run import conversation
+    project, ws, _ = k_conversational_project
+    conversation.set_agent(ws, 'k-protocol-fixture')
+    assert admission.backend_supported()
+    calls, captures = [], []
+    before = set(os.listdir('/proc/self/fd'))
+    real_capture = sandbox.resolve_turn_protection
+
+    class Function:
+        def __call__(self, *args):
+            calls.append(args)
+            if failure == 'abi':
+                raise ctypes.ArgumentError('injected ABI error')
+            ctypes.set_errno(getattr(errno, failure))
+            return -1
+
+    class Library:
+        def __init__(self, *args, **kwargs):
+            if failure != 'missing-symbol':
+                self.renameat2 = Function()
+
+    def capture(*args, **kwargs):
+        value = real_capture(*args, **kwargs)
+        captures.append(value)
+        return value
+
+    def forbidden(*args, **kwargs):
+        pytest.fail('supported publication failure fell back or dispatched')
+
+    monkeypatch.setattr(ctypes, 'CDLL', Library)
+    monkeypatch.setattr(sandbox, 'resolve_turn_protection', capture)
+    monkeypatch.setattr(service, 'dispatch_agent', forbidden)
+    with pytest.raises(service.ServiceError, match='prepare owned provenance mask'):
+        service.say(project, 'r1', 'keep the attempted human turn, refuse publication')
+    assert len(captures) == 1 and len(calls) == (0 if failure == 'missing-symbol' else 1)
+    assert not (ws / 'provenance.git').exists() and not (ws / 'jobs').exists()
+    assert not list((project.root / '.scieflow/turn-admission').glob('mask-v1-*.stage'))
+    assert conversation.read(ws)['session'] is None
+    assert [turn['role'] for turn in conversation.read(ws)['turns']] == ['human']
+    assert set(os.listdir('/proc/self/fd')) == before
+    with admission.reserve(project, ws):
+        pass
+
+
+def test_k_t3_mask_publication_not_required_for_existing_or_nonlaunch(k_conversational_project, monkeypatch):
+    from scieflow.core import turn_admission as admission
+    from scieflow.core.run import conversation
+    project, ws, _ = k_conversational_project
+    leaf = ws / 'provenance.git'
+    def forbidden(*args, **kwargs):
+        pytest.fail('existing/nonlaunch path required no-replace libc support')
+    monkeypatch.setattr(admission.ctypes, 'CDLL', forbidden)
+    service.set_conversation_agent(project, 'r1', 'k-protocol-fixture')
+    assert not leaf.exists()
+    leaf.mkdir(mode=0o750)
+    (leaf / 'sentinel').write_bytes(b'existing provenance')
+    inode = leaf.lstat().st_ino
+    result = service.say(project, 'r1', 'ordinary existing mask needs no publication')
+    assert result['job']['exit_code'] == 0 and result['turn']['text'] == 'K protocol reply'
+    assert conversation.read(ws)['session'] == 'k-session-1'
+    assert leaf.lstat().st_ino == inode and (leaf / 'sentinel').read_bytes() == b'existing provenance'

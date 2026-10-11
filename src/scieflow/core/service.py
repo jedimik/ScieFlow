@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import shutil
+import stat
 import tempfile
 import threading
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +36,7 @@ from scieflow.core import (
     sandbox,
     sessions,
     store,
+    turn_admission,
     workspace,
 )
 from scieflow.core.gates import ADOPTED, CHARTER_ADOPTION
@@ -279,13 +283,12 @@ def _turn_in_flight(project: Project, ws: Path) -> bool:
     for nearly all of an autonomous run's life — every dispatch the
     coordinator itself makes is `kind="agent"` too.
 
-    This is still a plain read of the job records, not a lock: two `say()`
-    calls that both read "not busy" before either one's job is recorded can
-    still both proceed. It narrows that window to the time between reading
-    the conversation record and starting the job, but does not close it — a
-    real fix would need a lock held across that whole span (e.g. the
-    run-scoped file lock `store.locked` already uses elsewhere), which this
-    task does not add.
+    This remains a plain read, not a lock. Supported ordinary send/selection
+    entries now hold neutral admission across it and final recording. The
+    scan is STILL necessary: kernel ownership may be released when a lock
+    owner dies while a separately running turn survives. Writable YAML locks
+    do not span launch/wait, and unsupported ordinary compatibility has no
+    new admission guarantee.
     """
     return any(job.state == "running" and job.kind == "turn"
               for job in jobs.list_jobs(project, ws))
@@ -318,7 +321,45 @@ def conversation_state(project: Project, slug: str) -> dict:
             "session_lost": session_lost}
 
 
+@contextmanager
+def _conversation_reservation(project: Project, ws: Path):
+    """Task3 basic wrapper; Task4 replaces the transitional send snapshot.
+
+    Unsupported ordinary compatibility is chosen BEFORE reserve. A supported
+    unsafe/busy result never takes that branch. No state/configuration capture
+    precedes the neutral reservation, and cancellation does not use it.
+    """
+    if not turn_admission.backend_supported():
+        yield None, None
+        return
+    try:
+        with turn_admission.reserve(project, ws) as reservation:
+            protection = sandbox.resolve_turn_protection(project, run_dir=reservation.run_dir)
+            reservation.validate_protection(protection)
+            yield reservation, protection
+    except (turn_admission.AdmissionError, sandbox.SandboxError) as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 def say(project: Project, slug: str, message: str, actor: str = "human") -> dict:
+    """An ordinary turn, reserved through all legacy final recording.
+
+    This basic stage independently captures protection once; it deliberately
+    retains legacy dispatch preparation. Same-prepared-object launch and the
+    marked API belong to Task4, not this intermediate wrapper.
+    """
+    if not message or not message.strip():
+        raise ServiceError("say something")
+    ws = _ws(project, slug)
+    with _conversation_reservation(project, ws) as (reservation, protection):
+        if reservation is not None:
+            # Admission owns the destination even if the request alias moves.
+            ws = reservation.run_dir
+        return _say_reserved(project, ws, message, actor, reservation, protection)
+
+
+def _say_reserved(project: Project, ws: Path, message: str, actor: str,
+                  reservation, protection) -> dict:
     """One conversation turn: a sandboxed job that resumes the agent's session.
 
     This is an ordinary dispatch — `dispatch_agent` guards the budget, proves
@@ -338,9 +379,6 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
     human turn is already on record by then, and a turn that genuinely
     started and died should still show what was asked.
     """
-    if not message or not message.strip():
-        raise ServiceError("say something")
-    ws = _ws(project, slug)
     try:
         doc = conversation.read(ws)
     except conversation.ConversationError as exc:
@@ -363,6 +401,8 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
     except actions.BudgetExhausted as exc:
         raise ServiceError(f"{exc} — run checkpointed") from exc
 
+    if reservation is not None:
+        reservation.validate_protection(protection)
     prompt_file = Path(ws) / TURN_PROMPT_DIR / f"turn-{store.new_id()}.md"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text(message)
@@ -373,8 +413,12 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
         raise ServiceError(str(exc)) from exc
 
     transcript = prompt_file.with_suffix(".out.md")
+    if reservation is not None:
+        reservation.prepare_launch_masks(protection)
     job = dispatch_agent(project, doc["agent"], prompt_file, transcript,
                          session=doc["session"], conversational=True)
+    if reservation is not None:
+        reservation.validate_protection(protection)
 
     parsed = sessions.parse(agent_cfg, Path(transcript).read_text())
     try:
@@ -970,6 +1014,30 @@ def record_spend(project: Project, slug: str, actor: str = "human", **spent) -> 
     return result
 
 
+def _validate_conversation_target(agent: str, registry_snapshot) -> None:
+    """Pure target-only eligibility from a caller's one registry snapshot."""
+    if not isinstance(registry_snapshot, dict) or any(type(name) is not str for name in registry_snapshot):
+        raise ServiceError('agent registry must be a mapping with text names')
+    agents = registry_snapshot
+    if type(agent) is not str or agent not in agents:
+        raise ServiceError(f"unknown agent: {agent} (known: {', '.join(agents)})")
+    agent_cfg = agents[agent]
+    if not isinstance(agent_cfg, dict):
+        raise ServiceError(f'{agent} configuration must be a mapping')
+    if type(agent_cfg.get('enabled', True)) is not bool or not agent_cfg.get("enabled", True):
+        raise ServiceError(f"{agent} is disabled (config/agents.yml); enable it first")
+    if type(agent_cfg.get('session_cmd')) is not str or not agent_cfg.get("session_cmd"):
+        raise ServiceError(
+            f"{agent} cannot host a conversation: no session_cmd in its configuration")
+    if type(agent_cfg.get('resume_cmd')) is not str or not agent_cfg.get("resume_cmd"):
+        raise ServiceError(
+            f"{agent} cannot host a conversation: no resume_cmd in its configuration")
+    if type(agent_cfg.get('family')) is not str or not sessions.can_converse(agent_cfg):
+        raise ServiceError(
+            f"{agent} cannot host a conversation: no family in its configuration "
+            "or the family is not registered")
+
+
 def _check_can_converse(project: Project, agent: str) -> None:
     """The per-reason check for whether `agent` could hold a conversation at
     all: known, enabled, and configured with both session commands and a
@@ -981,23 +1049,36 @@ def _check_can_converse(project: Project, agent: str) -> None:
     here never leaves a half-started run behind).
     """
     agents = config.load_agents(project.root)
-    if agent not in agents:
-        raise ServiceError(f"unknown agent: {agent} (known: {', '.join(agents)})")
-    agent_cfg = agents[agent]
-    if not agent_cfg.get("enabled", True):
-        raise ServiceError(f"{agent} is disabled (config/agents.yml); enable it first")
-    if not agent_cfg.get("session_cmd"):
-        raise ServiceError(
-            f"{agent} cannot host a conversation: no session_cmd in its configuration")
-    if not agent_cfg.get("resume_cmd"):
-        raise ServiceError(
-            f"{agent} cannot host a conversation: no resume_cmd in its configuration")
-    if not sessions.can_converse(agent_cfg):
-        # The only remaining reason can_converse can fail (given both commands exist)
-        # is an invalid family
-        raise ServiceError(
-            f"{agent} cannot host a conversation: no family in its configuration "
-            "or the family is not registered")
+    _validate_conversation_target(agent, agents)
+
+
+@contextmanager
+def _target_registry(project: Project):
+    """ONE semantic target snapshot with pinned identity before mutation."""
+    path = project.root / 'config/agents.yml'
+    fd = None
+    try:
+        facts = sandbox._capture_path_facts([path.absolute()])
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        os.set_inheritable(fd, False)
+        initial = os.fstat(fd)
+        if not stat.S_ISREG(initial.st_mode):
+            raise ServiceError('agent registry must be a regular file')
+
+        def revalidate():
+            if sandbox._policy_stat_identity(os.fstat(fd)) != sandbox._policy_stat_identity(initial):
+                raise ServiceError('agent registry identity changed during selection')
+            turn_admission._validate_facts(facts)
+
+        revalidate()
+        registry = config.load_agents(project.root)
+        revalidate()
+        yield registry, revalidate
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError, sandbox.SandboxError) as exc:
+        raise ServiceError(f'cannot capture safe agent registry: {exc}') from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def set_conversation_agent(project: Project, slug: str, agent: str,
@@ -1009,9 +1090,23 @@ def set_conversation_agent(project: Project, slug: str, agent: str,
     said are history and are kept.
     """
     ws = _ws(project, slug)
-    _check_can_converse(project, agent)
-    if _turn_in_flight(project, ws):
-        raise ServiceError("a turn is still running; wait for it or cancel it")
+    with _conversation_reservation(project, ws) as (reservation, protection):
+        if reservation is None:
+            _check_can_converse(project, agent)
+            if _turn_in_flight(project, ws):
+                raise ServiceError("a turn is still running; wait for it or cancel it")
+            return _set_conversation_agent_record(ws, agent, actor)
+        ws = reservation.run_dir
+        if _turn_in_flight(project, ws):
+            raise ServiceError("a turn is still running; wait for it or cancel it")
+        with _target_registry(project) as (registry, revalidate_registry):
+            _validate_conversation_target(agent, registry)
+            reservation.validate_protection(protection)
+            revalidate_registry()
+            return _set_conversation_agent_record(ws, agent, actor)
+
+
+def _set_conversation_agent_record(ws: Path, agent: str, actor: str) -> dict:
     try:
         return conversation.set_agent(ws, agent, actor)
     except conversation.ConversationError as exc:
