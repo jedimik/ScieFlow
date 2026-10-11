@@ -391,6 +391,16 @@ def test_t4_marked_unusable_completion_requires_deliberate_recovery(
     service.set_conversation_agent(project, 'r1', 'k-protocol-fixture')
     conversation.record_session(ws, 'k-session-1')
     submission = _marked_fixture(project, ws, monkeypatch, offline_k_support, completion=False)
+    malformed_reached = []
+    if result == 'default':
+        real_wait = jobs.wait
+        def malformed_wait(job, proc):
+            actual = real_wait(job, proc)
+            assert actual.state == 'done' and actual.exit_code == 0
+            Path(actual.log).write_bytes(b'{"type":"result",')
+            malformed_reached.append(actual.id)
+            return actual
+        monkeypatch.setattr(jobs, 'wait', malformed_wait)
     if result == 'failed':
         p = project.root / 'config/agents.yml'
         data = yaml.safe_load(p.read_text())
@@ -413,6 +423,11 @@ def test_t4_marked_unusable_completion_requires_deliberate_recovery(
             service._TurnCompletion(None if result == 'missing' else 'different' if result == 'contradictory' else
                                     'k-session-1', 'finite partial', result != 'incomplete', ''))
     response = service.say(project, 'r1', submission.message, human_submission=submission)
+    if result == 'default':
+        assert malformed_reached == [response['job']['id']]
+        assert Path(response['job']['log']).read_bytes() == b'{"type":"result",'
+        tid = response['job']['turn_audit']['turn_id']
+        assert (ws / 'logs' / f'turn-{tid}.out.md').read_bytes() == b'{"type":"result",'
     if result in ('failed', 'timeout', 'cancelled'):
         assert response['job']['state'] == result
     else:

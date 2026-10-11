@@ -14,12 +14,15 @@ import signal
 import subprocess
 import threading
 import time
-from dataclasses import asdict, dataclass
+from contextlib import ExitStack, contextmanager
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+import stat
 
 from scieflow.core import events, sandbox, store
 from scieflow.core.project import Project
+from scieflow.core.turn_artifacts import ArtifactError, ArtifactRoot, open_run_artifact, pin_artifact_root
 
 STATES = ("queued", "running", "done", "failed", "timeout", "cancelled", "lost")
 FINAL = frozenset({"done", "failed", "timeout", "cancelled", "lost"})
@@ -63,6 +66,198 @@ class Job:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+class JobArtifactError(ValueError):
+    """Fixed safe reader failures, never raw record/path exception text."""
+
+
+def _artifact_job_id(value):
+    if (type(value) is not str or len(value) != 26 or value[0] not in '01234567' or
+            any(char not in store._CROCKFORD for char in value)):
+        raise JobArtifactError('invalid-job-id')
+
+
+def _artifact_pairs(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise JobArtifactError('invalid-job-record')
+        value[key] = item
+    return value
+
+
+def _artifact_constant(value):
+    raise JobArtifactError('invalid-job-record')
+
+
+@dataclass(frozen=True)
+class JobArtifactLocation:
+    """Detached records are data; only this active pinned root selects bytes."""
+    job_id: str
+    run_dir: Path | None
+    root: ArtifactRoot
+    _parent_root: ArtifactRoot = field(repr=False)
+
+    @property
+    def relative_log(self):
+        return f'jobs/{self.job_id}.log'
+
+    @property
+    def relative_err(self):
+        return f'jobs/{self.job_id}.err'
+
+    def read_job(self) -> Job:
+        try:
+            self.root._verify()
+            with open_run_artifact(self._parent_root, f'{self.job_id}.json') as source:
+                chunks, offset = [], 0
+                while offset < source.snapshot_size:
+                    requested = min(65536, source.snapshot_size - offset)
+                    raw = source.read_at(offset, requested)
+                    if len(raw) != requested:
+                        raise JobArtifactError('invalid-job-record')
+                    chunks.append(raw)
+                    offset += len(raw)
+                data = json.loads(b''.join(chunks), object_pairs_hook=_artifact_pairs,
+                                  parse_constant=_artifact_constant)
+                source.verify_unchanged()
+                if type(data) is not dict:
+                    raise JobArtifactError('invalid-job-record')
+                value = Job(**data)
+                for name in ('id', 'kind', 'cwd', 'label', 'state', 'queued', 'log', 'err'):
+                    if type(getattr(value, name)) is not str:
+                        raise JobArtifactError('invalid-job-record')
+                if (type(value.argv) is not list or any(type(arg) is not str for arg in value.argv) or
+                        type(value.sandboxed) is not bool):
+                    raise JobArtifactError('invalid-job-record')
+                for name in ('pid', 'exit_code'):
+                    if getattr(value, name) is not None and type(getattr(value, name)) is not int:
+                        raise JobArtifactError('invalid-job-record')
+                for name in ('run_dir', 'started', 'finished'):
+                    if getattr(value, name) is not None and type(getattr(value, name)) is not str:
+                        raise JobArtifactError('invalid-job-record')
+                if value.timeout_s is not None and type(value.timeout_s) not in (int, float):
+                    raise JobArtifactError('invalid-job-record')
+                if (value.id != self.job_id or
+                        value.run_dir != (str(self.run_dir) if self.run_dir is not None else None) or
+                        value.log != str(self.root.path / self.relative_log) or
+                        value.err != str(self.root.path / self.relative_err) or value.state not in STATES):
+                    raise JobArtifactError('invalid-job-record')
+                source.verify_unchanged()
+                return value
+        except (ArtifactError, OSError, ValueError, TypeError, RecursionError) as exc:
+            raise JobArtifactError('invalid-job-record') from exc
+
+    def peek_state(self) -> str | None:
+        try:
+            return self.read_job().state
+        except JobArtifactError:
+            return None
+
+    @contextmanager
+    def open_log(self, stream='stdout'):
+        if type(stream) is not str or stream not in ('stdout', 'stderr'):
+            raise JobArtifactError('invalid-job-stream')
+        relative = self.relative_log if stream == 'stdout' else self.relative_err
+        try:
+            self.root._verify()
+            with open_run_artifact(self._parent_root, relative.removeprefix('jobs/')) as source:
+                yield source
+        except (ArtifactError, OSError) as exc:
+            raise JobArtifactError('unsafe-job-log') from exc
+
+
+def _artifact_canonical(path):
+    path = Path(path)
+    if not path.is_absolute() or '..' in path.parts or '\0' in str(path):
+        raise JobArtifactError('invalid-job-root')
+    return path
+
+
+def _artifact_candidate(stack, root_path, run_dir, job_id, expected=None):
+    # Missing roots/records are absence; unsafe matching entries are refusal.
+    try:
+        root_path.lstat()
+    except FileNotFoundError:
+        return None
+    root = stack.enter_context(pin_artifact_root(root_path, expected_identity=expected))
+    try:
+        info = os.stat('jobs', dir_fd=root._fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISDIR(info.st_mode):
+        raise JobArtifactError('unsafe-job-root')
+    # Traversal into the parent is descriptor-owned, never a following lookup.
+    parent = stack.enter_context(pin_artifact_root(root_path / 'jobs',
+        expected_identity=(info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode))))
+    try:
+        os.stat(f'{job_id}.json', dir_fd=parent._fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    parent._verify()
+    root._verify()
+    location = JobArtifactLocation(job_id, run_dir, root, parent)
+    location.read_job()
+    return location
+
+
+@contextmanager
+def locate_artifacts(project: Project, job_id: str, *, run_dir: Path | None = None,
+                     expected_run_identity: tuple[int, int, int] | None = None):
+    """Acquire one selected owner; discover global roots once, poll only it."""
+    _artifact_job_id(job_id)  # BEFORE even project/path lookup.
+    stacks = []
+    try:
+        project_root = _artifact_canonical(project.root)
+        workspace = _artifact_canonical(project.workspace_root)
+        if workspace != project_root / 'workspace':
+            raise JobArtifactError('invalid-job-root')
+        if run_dir is not None:
+            selected = _artifact_canonical(run_dir)
+            if selected.parent != workspace:
+                raise JobArtifactError('invalid-job-root')
+            owner = ExitStack()
+            stacks.append(owner)
+            location = _artifact_candidate(owner, selected, selected, job_id, expected_run_identity)
+            if location is None:
+                raise JobArtifactError('missing-job-record')
+        else:
+            if expected_run_identity is not None:
+                raise JobArtifactError('invalid-expected-run-identity')
+            state = _artifact_canonical(project.state_dir)  # Host override captured ONCE.
+            candidates: list[tuple[Path, Path | None]] = [(state, None)]
+            try:
+                workspace.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                with pin_artifact_root(workspace) as workspace_handle:
+                    with os.scandir(workspace_handle._fd) as entries:
+                        candidates.extend((workspace / entry.name, workspace / entry.name)
+                                          for entry in entries if entry.is_dir(follow_symlinks=False))
+                    workspace_handle._verify()
+            matches = []
+            for path, owning_run in candidates:
+                owner = ExitStack()
+                stacks.append(owner)
+                match = _artifact_candidate(owner, path, owning_run, job_id)
+                if match is None:
+                    owner.close()
+                else:
+                    matches.append((owner, match))
+            if len(matches) != 1:
+                raise JobArtifactError('ambiguous-job-record' if matches else 'missing-job-record')
+            owner, location = matches[0]
+            for other in stacks:
+                if other is not owner:
+                    other.close()
+        yield location
+    except (ArtifactError, OSError, TypeError) as exc:
+        raise JobArtifactError('unsafe-job-location') from exc
+    finally:
+        for stack in reversed(stacks):
+            stack.close()
 
 
 def jobs_dir(project: Project, run_dir: Path | None) -> Path:

@@ -16,7 +16,7 @@ import stat
 import tempfile
 import threading
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,6 +43,7 @@ from scieflow.core.gates import ADOPTED, CHARTER_ADOPTION
 from scieflow.core.project import Project, ProjectError
 from scieflow.core.run import actions, budget, charter, conversation, curation, status
 from scieflow.core.turn_input import HumanSubmission, accept_human_submission
+from scieflow.core import turn_artifacts, turn_output
 
 RECENT_JOBS = 20
 RECENT_EVENTS = 50
@@ -448,6 +449,7 @@ class _TurnArtifacts:
     raw: Path
     composed: Path
     transcript: Path
+    log_directory_identity: tuple[int, int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -510,8 +512,10 @@ def _create_turn_artifacts(artifacts, prepared):
     fd = os.open(artifacts.raw.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     transcript_identity = None
     try:
-        for path, raw in ((artifacts.raw, prepared.accepted_bytes),
-                          (artifacts.composed, prepared.composed_bytes), (artifacts.transcript, b'')):
+        writes = ((artifacts.raw, prepared.accepted_bytes), (artifacts.composed, prepared.composed_bytes))
+        if prepared.input_kind != 'harness-command':
+            writes += ((artifacts.transcript, b''),)
+        for path, raw in writes:
             leaf = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                            0o600, dir_fd=fd)
             with os.fdopen(leaf, 'wb') as stream:
@@ -550,9 +554,59 @@ def _write_ordinary_transcript(path, text, identities):
         os.close(parent)
 
 
+def _marked_run_identity(prepared):
+    """Original immutable admission fact, never a fresh stat-as-expectation."""
+    facts = [f for f in prepared.protection.path_facts if f.path == prepared.run_dir]
+    if len(facts) != 1:
+        raise jobs.JobArtifactError('invalid-admitted-run')
+    fact = facts[0]
+    if (not fact.exists or fact.resolved != prepared.run_dir or fact.link_target is not None or
+            fact.mode is None or not stat.S_ISDIR(fact.mode)):
+        raise jobs.JobArtifactError('invalid-admitted-run')
+    return fact.device, fact.inode, stat.S_IFMT(fact.mode)
+
+
+@contextmanager
+def _marked_job_location(prepared, job):
+    project = Project(prepared.protection.project_root)
+    with jobs.locate_artifacts(project, job.id, run_dir=prepared.run_dir,
+            expected_run_identity=_marked_run_identity(prepared)) as location:
+        record = location.read_job()
+        # Job fields are checked as correspondence/audit, NEVER path authority.
+        for name in ('id', 'run_dir', 'log', 'err', 'state', 'exit_code'):
+            if getattr(job, name) != getattr(record, name):
+                raise jobs.JobArtifactError('invalid-marked-job-location')
+        yield location
+
+
+def _validate_marked_job_destination(prepared, job):
+    """Narrow marked caller check; legacy jobs.save is not redesigned."""
+    with _marked_job_location(prepared, job):
+        pass
+
+
 def _complete_marked_turn(prepared, job, *, artifacts) -> _TurnCompletion:
-    """Task5 boundary: shipped seam intentionally does not read/copy any log."""
-    return _TurnCompletion(None, '', False, 'bounded-output-unavailable')
+    """One pinned source/snapshot, bounded K parse and uncapped exact raw copy."""
+    text = ''
+    try:
+        jobs._artifact_job_id(artifacts.turn_id)
+        logs = prepared.run_dir / TURN_PROMPT_DIR
+        basename = f'turn-{artifacts.turn_id}.out.md'
+        if artifacts.transcript != logs / basename or artifacts.log_directory_identity is None:
+            raise jobs.JobArtifactError('invalid-marked-transcript')
+        with _marked_job_location(prepared, job) as location:
+            with turn_artifacts.pin_artifact_root(logs,
+                    expected_identity=artifacts.log_directory_identity) as target_root:
+                with location.open_log() as source:
+                    parsed = turn_output.read_completed_turn(source, prepared.family)
+                    text = parsed.text
+                    with turn_artifacts.create_run_artifact(target_root, basename) as target:
+                        copied = turn_output.copy_raw_log(source, target)
+                    complete = parsed.complete and copied.complete
+                    return _TurnCompletion(parsed.id if complete else None, text, complete,
+                        copied.reason if not copied.complete else parsed.reason)
+    except (jobs.JobArtifactError, turn_artifacts.ArtifactError, OSError, ValueError, TypeError):
+        return _TurnCompletion(None, text, False, 'artifact-acquisition-incomplete')
 
 
 def _launch_prepared_turn(project, prepared, *, artifacts, turn_audit) -> jobs.Job:
@@ -632,12 +686,17 @@ def _say_prepared(project, reservation, submission, actor):
     try:
         conversation.add_turn(ws, role='human', text=submission.message, actor=actor, turn_id=tid, audit=audit)
         artifact_identities = _create_turn_artifacts(artifacts, prepared)
+        if marked:
+            parent = artifact_identities[0]
+            artifacts = replace(artifacts, log_directory_identity=(parent.st_dev, parent.st_ino,
+                                                                  stat.S_IFMT(parent.st_mode)))
         reservation.prepare_launch_masks(prepared.protection)
         _validate_execution(prepared)
         job = _launch_prepared_turn(project, prepared, artifacts=artifacts, turn_audit=audit)
         reservation.validate_protection(prepared.protection)
         audit['job_id'] = job.id
         if marked:
+            _validate_marked_job_destination(prepared, job)
             completion = _complete_marked_turn(prepared, job, artifacts=artifacts)
             if type(completion) is not _TurnCompletion:
                 raise ServiceError('invalid completion result')
@@ -668,6 +727,8 @@ def _say_prepared(project, reservation, submission, actor):
             if parsed.text.strip():
                 _write_ordinary_transcript(artifacts.transcript, parsed.text, artifact_identities)
         job.turn_audit = conversation.validate_audit(audit)
+        if marked:
+            _validate_marked_job_destination(prepared, job)
         jobs.save(job)
         return {'job': asdict(job), 'turn': turn}
     except Exception as exc:
@@ -678,6 +739,8 @@ def _say_prepared(project, reservation, submission, actor):
             try:
                 reservation._validate_held()
                 reservation._validate_protection_facts(prepared.protection)
+                if job is not None:
+                    _validate_marked_job_destination(prepared, job)
                 current = conversation.read(ws)
                 if current['pending_turn_id'] == tid:
                     job_id = job.id if job else ''
@@ -687,6 +750,7 @@ def _say_prepared(project, reservation, submission, actor):
                         audit=audit, recovery_required=True)
                     if job is not None:
                         job.turn_audit = conversation.validate_audit(final['audit'])
+                        _validate_marked_job_destination(prepared, job)
                         jobs.save(job)
             except Exception:
                 pass  # Pending evidence remains uncertain; never replay or recapture.
