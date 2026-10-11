@@ -1218,10 +1218,10 @@ def test_k_operands_executable_identity_matches_literal_launch(tmp_path, monkeyp
     monkeypatch.setattr(agent_run.sys, 'executable', python)
     monkeypatch.setattr(sandbox, 'environment', lambda base: {'SYNTHETIC_OPERANDS_TEST': 'only'})
     captured = []
-    def capture(token, cwd):
+    def capture(token, cwd, env):
         captured.append(token)
-        return token, None
-    monkeypatch.setattr(agent_run, '_capture_executable', capture)
+        return Path(token), (), token
+    monkeypatch.setattr(agent_run, '_capture_execution', capture)
     resolved = agent_run.resolve_turn(Project(root), 'fixture', run_dir=ws, session=None)
     prepared = agent_run.prepare_turn(resolved, accept_human_submission('ordinary text'))
     expected = str(root) + '/' + python + '/' + cfg['model'] + '/' + cfg['reasoning']
@@ -1263,7 +1263,7 @@ def test_k_operands_resolver_checks_both_templates(k_conversational_project, mon
     # Effective override of the UNSELECTED template must also fail full resolution.
     (ws / 'config.yml').write_text(yaml.safe_dump({'agent_overrides': {'k-protocol-fixture': {key: cfg[key]}}}))
     captured = []
-    monkeypatch.setattr(agent_run, '_capture_executable', lambda token, cwd: (captured.append(token), None))
+    monkeypatch.setattr(agent_run, '_capture_execution', lambda token, cwd, env: (captured.append(token), (), None))
     with pytest.raises(agent_run.DispatchError, match=key):
         agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws,
                                session='existing' if key == 'session_cmd' else None)
@@ -1290,7 +1290,7 @@ def test_k_operands_prepare_revalidates_snapshot(k_conversational_project, monke
     for name in ('read_text', 'read_bytes', 'resolve'):
         monkeypatch.setattr(Path, name, forbidden)
     monkeypatch.setattr(agent_run.config, 'load_agents', forbidden)
-    monkeypatch.setattr(agent_run, '_capture_executable', forbidden)
+    monkeypatch.setattr(agent_run, '_capture_execution', forbidden)
     with pytest.raises(agent_run.DispatchError):
         agent_run.prepare_turn(changed, accept_human_submission('Accepted short input é'))
     assert not prompt.exists() and list((ws / 'logs').iterdir()) == []

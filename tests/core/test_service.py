@@ -362,21 +362,43 @@ def test_say_preflight_refuses_an_unknown_agent_before_writing_anything(project)
 
 
 def test_say_keeps_the_human_turn_when_the_dispatch_itself_fails(project, monkeypatch):
-    """The other side of finding 7: a failure *during* the dispatch (sandbox
-    verify, here) is not a pre-flight condition — the human turn is already
-    on record by the time it happens, and must stay, unlike a pre-flight
-    refusal."""
+    """The other side of finding 7: sandbox wrapping fails at actual launch
+    after successful real pre-flight verification. The already-recorded human
+    attempt must stay, unlike a pre-flight refusal."""
     from scieflow.core import events, sandbox
     from scieflow.core.run import conversation
 
     ws = project.run_dir("r1")
     conversation.set_agent(ws, "stub")
-    monkeypatch.setattr(sandbox, "available", lambda: False)
+    real_verify = sandbox.verify
+    real_launch = service._launch_prepared_turn
+    reached = {"verify": 0, "launch": 0}
+
+    def verify(*args, **kwargs):
+        result = real_verify(*args, **kwargs)
+        reached["verify"] += 1
+        return result
+
+    def launch(project, prepared, *, artifacts, turn_audit):
+        assert reached["verify"] == 1
+        attempted = conversation.read(ws)["turns"]
+        assert len(attempted) == 1 and attempted[0]["role"] == "human" and attempted[0]["text"] == "hello"
+        reached["launch"] += 1
+        monkeypatch.setattr(sandbox, "available", lambda: False)
+        return real_launch(project, prepared, artifacts=artifacts, turn_audit=turn_audit)
+
+    monkeypatch.setattr(sandbox, "verify", verify)
+    monkeypatch.setattr(service, "_launch_prepared_turn", launch)
     with pytest.raises(service.ServiceError, match="bubblewrap"):
         service.say(project, "r1", "hello")
     turns = conversation.read(ws)["turns"]
     assert len(turns) == 1 and turns[0]["role"] == "human" and turns[0]["text"] == "hello"
     assert len([e for e in events.read(ws) if e["type"] == "turn.sent"]) == 1
+    assert reached == {"verify": 1, "launch": 1}
+    recorded = events.read(ws)
+    assert len([e for e in recorded if e["type"] == "job.queued"]) == 1
+    assert len([e for e in recorded if e["type"] == "job.failed"]) == 1
+    assert not [e for e in recorded if e["type"] == "job.started"]
 
 
 def test_say_refuses_while_a_turn_is_still_running(project, running_turn):
@@ -1588,7 +1610,7 @@ def test_k_t3_basic_entry_refuses_through_final_record(k_conversational_project,
     conversation.set_agent(ws, 'k-protocol-fixture')
     reached, release = threading.Event(), threading.Event()
     results, errors = [], []
-    real_dispatch, real_record = service.dispatch_agent, conversation.record_session
+    real_dispatch, real_record = service._launch_prepared_turn, conversation.record_session
 
     def barrier():
         if threading.current_thread() is owner:
@@ -1598,9 +1620,10 @@ def test_k_t3_basic_entry_refuses_through_final_record(k_conversational_project,
     def dispatch(*args, **kwargs):
         if boundary == 'before-job':
             barrier()
-        result = real_dispatch(*args, **kwargs)
+        job = real_dispatch(*args, **kwargs)
+        result = service.asdict(job)
         assert result['state'] == 'done' and result['exit_code'] == 0
-        return result
+        return job
 
     def record(*args, **kwargs):
         if boundary == 'before-final-record':
@@ -1614,7 +1637,7 @@ def test_k_t3_basic_entry_refuses_through_final_record(k_conversational_project,
         except BaseException as exc:
             errors.append(exc)
 
-    monkeypatch.setattr(service, 'dispatch_agent', dispatch)
+    monkeypatch.setattr(service, '_launch_prepared_turn', dispatch)
     monkeypatch.setattr(conversation, 'record_session', record)
     owner = threading.Thread(target=run)
     owner.start()
@@ -1670,7 +1693,7 @@ def test_k_t3_supported_unsafe_never_legacy_fallback(project, monkeypatch, opera
     (project.root / 'config/sandbox.yml').write_text(policy)
     def forbidden(*args, **kwargs):
         raise AssertionError('unsafe entry reached old dispatch or selection write')
-    monkeypatch.setattr(service, 'dispatch_agent', forbidden)
+    monkeypatch.setattr(service, '_launch_prepared_turn', forbidden)
     monkeypatch.setattr(conversation, 'set_agent', forbidden)
     with pytest.raises(service.ServiceError, match='unconfined|writable grant'):
         if operation == 'send':
@@ -1803,7 +1826,9 @@ def test_k_t3_basic_send_independent_protection_and_legacy_prepare_once(k_conver
     project, ws, _ = k_conversational_project
     conversation.set_agent(ws, 'k-protocol-fixture')
     captured, validations, preparations = [], [], []
-    capture, validate, prepare = sandbox.resolve_turn_protection, turn_admission.Reservation.validate_protection, agent_run.prepare
+    capture, validate, prepare = sandbox.resolve_turn_protection, turn_admission.Reservation.validate_protection, agent_run.prepare_turn
+    resolutions = []
+    real_resolve = agent_run.resolve_turn
     def protection(*args, **kwargs):
         result = capture(*args, **kwargs)
         captured.append(result)
@@ -1816,12 +1841,17 @@ def test_k_t3_basic_send_independent_protection_and_legacy_prepare_once(k_conver
         preparations.append(result)
         return result
     def forbidden(*args, **kwargs):
-        raise AssertionError('Task3 must not full-prepare then dispatch double-prepare')
+        raise AssertionError('supported send must not legacy-prepare or dispatch')
+    def resolve(*args, **kwargs):
+        value = real_resolve(*args, **kwargs)
+        resolutions.append(value)
+        return value
     monkeypatch.setattr(sandbox, 'resolve_turn_protection', protection)
     monkeypatch.setattr(turn_admission.Reservation, 'validate_protection', check)
-    monkeypatch.setattr(agent_run, 'prepare', legacy)
-    monkeypatch.setattr(agent_run, 'resolve_turn', forbidden)
-    monkeypatch.setattr(agent_run, 'prepare_turn', forbidden)
+    monkeypatch.setattr(agent_run, 'prepare_turn', legacy)
+    monkeypatch.setattr(agent_run, 'resolve_turn', resolve)
+    monkeypatch.setattr(agent_run, 'prepare', forbidden)
+    monkeypatch.setattr(service, 'dispatch_agent', forbidden)
     result = service.say(project, 'r1', 'ordinary')
     assert result['job']['exit_code'] == 0 and result['turn']['text'] == 'K protocol reply'
     assert len(captured) == len(preparations) == 1
@@ -1832,13 +1862,13 @@ def test_k_t3_exception_releases_basic_entry(k_conversational_project, monkeypat
     from scieflow.core.run import conversation
     project, ws, _ = k_conversational_project
     conversation.set_agent(ws, 'k-protocol-fixture')
-    real = service.dispatch_agent
+    real = service._launch_prepared_turn
     def fail(*args, **kwargs):
         raise service.ServiceError('injected dispatch failure')
-    monkeypatch.setattr(service, 'dispatch_agent', fail)
+    monkeypatch.setattr(service, '_launch_prepared_turn', fail)
     with pytest.raises(service.ServiceError, match='injected'):
         service.say(project, 'r1', 'failed attempt')
-    monkeypatch.setattr(service, 'dispatch_agent', real)
+    monkeypatch.setattr(service, '_launch_prepared_turn', real)
     assert service.say(project, 'r1', 'next explicit attempt')['job']['exit_code'] == 0
 
 
@@ -1920,7 +1950,7 @@ def test_k_t3_run_identity_final_record_keeps_reserved_destination(
     before_r2 = _k_t3_run_identity_inventory(r2)
     captured, capture_paths, completed, dispatch_paths, record_paths, busy_paths = [], [], [], [], [], []
     real_capture = sandbox.resolve_turn_protection
-    real_dispatch = service.dispatch_agent
+    real_dispatch = service._launch_prepared_turn
     real_record = conversation.record_session
     real_busy = service._turn_in_flight
     child_exits = []
@@ -1935,12 +1965,13 @@ def test_k_t3_run_identity_final_record_keeps_reserved_destination(
         busy_paths.append(ws)
         return real_busy(project, ws)
 
-    def dispatch(project, agent, prompt, transcript, **kwargs):
-        dispatch_paths.append((prompt, transcript))
-        value = real_dispatch(project, agent, prompt, transcript, **kwargs)
+    def dispatch(project, prepared, *, artifacts, turn_audit):
+        dispatch_paths.append((artifacts.raw, artifacts.transcript))
+        job = real_dispatch(project, prepared, artifacts=artifacts, turn_audit=turn_audit)
+        value = service.asdict(job)
         assert value['state'] == 'done' and value['exit_code'] == 0
         completed.append(value)
-        return value
+        return job
 
     def record(ws, session_id):
         assert len(completed) == len(captured) == 1 and session_id == 'k-session-1'
@@ -1954,7 +1985,7 @@ def test_k_t3_run_identity_final_record_keeps_reserved_destination(
 
     monkeypatch.setattr(sandbox, 'resolve_turn_protection', capture)
     monkeypatch.setattr(service, '_turn_in_flight', busy)
-    monkeypatch.setattr(service, 'dispatch_agent', dispatch)
+    monkeypatch.setattr(service, '_launch_prepared_turn', dispatch)
     monkeypatch.setattr(conversation, 'record_session', record)
     with turn_admission.reserve(project, r2):
         try:
@@ -1992,7 +2023,7 @@ def test_k_t3_run_identity_postdispatch_drift_refuses_before_parse(
     captured, validations, completed, parses, records, errors = [], [], [], [], [], []
     real_capture = sandbox.resolve_turn_protection
     real_validate = turn_admission.Reservation.validate_protection
-    real_dispatch = service.dispatch_agent
+    real_dispatch = service._launch_prepared_turn
     real_parse = service.sessions.parse
     real_record = conversation.record_session
 
@@ -2006,14 +2037,15 @@ def test_k_t3_run_identity_postdispatch_drift_refuses_before_parse(
         return real_validate(self, protection)
 
     def dispatch(*args, **kwargs):
-        value = real_dispatch(*args, **kwargs)
+        job = real_dispatch(*args, **kwargs)
+        value = service.asdict(job)
         assert value['state'] == 'done' and value['exit_code'] == 0
         completed.append(value)
         assert len(captured) == 1
         _k_t3_run_identity_both_busy(project, r1, r2)
         assert _k_t3_run_identity_retarget(project, alias, captured[0]) == 0
         _k_t3_run_identity_both_busy(project, r1, r2)
-        return value
+        return job
 
     def parse(*args, **kwargs):
         parses.append(True)
@@ -2025,7 +2057,7 @@ def test_k_t3_run_identity_postdispatch_drift_refuses_before_parse(
 
     monkeypatch.setattr(sandbox, 'resolve_turn_protection', capture)
     monkeypatch.setattr(turn_admission.Reservation, 'validate_protection', validate)
-    monkeypatch.setattr(service, 'dispatch_agent', dispatch)
+    monkeypatch.setattr(service, '_launch_prepared_turn', dispatch)
     monkeypatch.setattr(service.sessions, 'parse', parse)
     monkeypatch.setattr(conversation, 'record_session', record)
     with turn_admission.reserve(project, r2):
@@ -2155,8 +2187,8 @@ def test_k_t3_mask_prepared_before_real_first_and_resumed_dispatch(
     real_capture = sandbox.resolve_turn_protection
     real_validate = turn_admission.Reservation.validate_protection
     real_prepare = turn_admission.Reservation.prepare_launch_masks
-    real_legacy = agent_run.prepare
-    real_dispatch = service.dispatch_agent
+    real_legacy = agent_run.prepare_turn
+    real_dispatch = service._launch_prepared_turn
 
     def capture(*args, **kwargs):
         value = real_capture(*args, **kwargs)
@@ -2194,17 +2226,18 @@ def test_k_t3_mask_prepared_before_real_first_and_resumed_dispatch(
         assert child.returncode == 0, child.stderr
         assert positive.read_bytes() == b'permitted' and not (leaf / 'discarded-child-write').exists()
         assert leaf.stat().st_ino == masks[-1][0]
-        result = real_dispatch(*args, **kwargs)
+        job = real_dispatch(*args, **kwargs)
+        result = service.asdict(job)
         assert result['exit_code'] == 0 and leaf.stat().st_ino == masks[-1][0]
         assert _k_t3_run_identity_inventory(leaf) == initial_inventory
         jobs_seen.append(result)
-        return result
+        return job
 
     monkeypatch.setattr(sandbox, 'resolve_turn_protection', capture)
     monkeypatch.setattr(turn_admission.Reservation, 'validate_protection', validate)
     monkeypatch.setattr(turn_admission.Reservation, 'prepare_launch_masks', prepare)
-    monkeypatch.setattr(agent_run, 'prepare', legacy)
-    monkeypatch.setattr(service, 'dispatch_agent', dispatch)
+    monkeypatch.setattr(agent_run, 'prepare_turn', legacy)
+    monkeypatch.setattr(service, '_launch_prepared_turn', dispatch)
     for text in ('first explicit turn', 'resumed explicit turn'):
         result = service.say(project, 'r1', text)
         assert result['job']['exit_code'] == 0 and result['turn']['text'] == 'K protocol reply'
@@ -2256,7 +2289,7 @@ def test_k_t3_mask_creation_race_prevents_dispatch(k_conversational_project, mon
             patch.setattr(turn_admission, '_publish_mask_noreplace', publish)
             return real_prepare(self, protection)
     monkeypatch.setattr(turn_admission.Reservation, 'prepare_launch_masks', preparation)
-    monkeypatch.setattr(service, 'dispatch_agent', forbidden)
+    monkeypatch.setattr(service, '_launch_prepared_turn', forbidden)
     with pytest.raises(service.ServiceError):
         service.say(project, 'r1', 'record the human attempt, never dispatch the conflict')
     assert len(entered) == 1 and raced == [leaf.lstat().st_ino] and not dispatches
@@ -2288,7 +2321,7 @@ def test_k_t3_mask_not_prepared_on_nonlaunch_or_refused_or_unsupported_paths(
     else:
         conversation.set_agent(ws, 'k-protocol-fixture')
         if reason == 'preflight':
-            monkeypatch.setattr(service.sessions, 'can_converse', lambda cfg: False)
+            (ws / 'config.yml').write_text('agent_overrides:\n  k-protocol-fixture:\n    family: unregistered\n')
         elif reason == 'running':
             monkeypatch.setattr(service, '_turn_in_flight', lambda *args: True)
         elif reason == 'unsafe':
@@ -2331,8 +2364,8 @@ def test_k_t3_mask_publication_confined_boundaries(k_conversational_project, mon
     real_capture = sandbox.resolve_turn_protection
     real_validate = admission.Reservation.validate_protection
     real_prepare = admission.Reservation.prepare_launch_masks
-    real_dispatch = service.dispatch_agent
-    real_legacy = agent_run.prepare
+    real_dispatch = service._launch_prepared_turn
+    real_legacy = agent_run.prepare_turn
     real_mkdir, real_open, real_stat = os.mkdir, os.open, os.stat
     real_publish = getattr(admission, '_publish_mask_noreplace', None)
     before = set(os.listdir('/proc/self/fd'))
@@ -2443,8 +2476,8 @@ def test_k_t3_mask_publication_confined_boundaries(k_conversational_project, mon
     monkeypatch.setattr(sandbox, 'resolve_turn_protection', capture)
     monkeypatch.setattr(admission.Reservation, 'validate_protection', validate)
     monkeypatch.setattr(admission.Reservation, 'prepare_launch_masks', preparation)
-    monkeypatch.setattr(agent_run, 'prepare', legacy)
-    monkeypatch.setattr(service, 'dispatch_agent', dispatch)
+    monkeypatch.setattr(agent_run, 'prepare_turn', legacy)
+    monkeypatch.setattr(service, '_launch_prepared_turn', dispatch)
     result, errors = None, []
     try:
         result = service.say(project, 'r1', 'publication boundary inert first send')
@@ -2522,7 +2555,7 @@ def test_k_t3_mask_publication_errors_never_dispatch_or_fall_back(k_conversation
 
     monkeypatch.setattr(ctypes, 'CDLL', Library)
     monkeypatch.setattr(sandbox, 'resolve_turn_protection', capture)
-    monkeypatch.setattr(service, 'dispatch_agent', forbidden)
+    monkeypatch.setattr(service, '_launch_prepared_turn', forbidden)
     with pytest.raises(service.ServiceError, match='prepare owned provenance mask'):
         service.say(project, 'r1', 'keep the attempted human turn, refuse publication')
     assert len(captures) == 1 and len(calls) == (0 if failure == 'missing-symbol' else 1)

@@ -16,7 +16,7 @@ import stat
 import tempfile
 import threading
 from contextlib import contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,6 +42,7 @@ from scieflow.core import (
 from scieflow.core.gates import ADOPTED, CHARTER_ADOPTION
 from scieflow.core.project import Project, ProjectError
 from scieflow.core.run import actions, budget, charter, conversation, curation, status
+from scieflow.core.turn_input import HumanSubmission, accept_human_submission
 
 RECENT_JOBS = 20
 RECENT_EVENTS = 50
@@ -323,42 +324,45 @@ def conversation_state(project: Project, slug: str) -> dict:
 
 @contextmanager
 def _conversation_reservation(project: Project, ws: Path):
-    """Task3 basic wrapper; Task4 replaces the transitional send snapshot.
-
-    Unsupported ordinary compatibility is chosen BEFORE reserve. A supported
-    unsafe/busy result never takes that branch. No state/configuration capture
-    precedes the neutral reservation, and cancellation does not use it.
-    """
+    """Neutral admission BEFORE semantics, never a supported-error fallback."""
     if not turn_admission.backend_supported():
-        yield None, None
+        yield None
         return
     try:
         with turn_admission.reserve(project, ws) as reservation:
-            protection = sandbox.resolve_turn_protection(project, run_dir=reservation.run_dir)
-            reservation.validate_protection(protection)
-            yield reservation, protection
+            yield reservation
     except (turn_admission.AdmissionError, sandbox.SandboxError) as exc:
         raise ServiceError(str(exc)) from exc
 
 
-def say(project: Project, slug: str, message: str, actor: str = "human") -> dict:
-    """An ordinary turn, reserved through all legacy final recording.
-
-    This basic stage independently captures protection once; it deliberately
-    retains legacy dispatch preparation. Same-prepared-object launch and the
-    marked API belong to Task4, not this intermediate wrapper.
-    """
-    if not message or not message.strip():
+def say(project: Project, slug: str, message: str, actor: str = "human", *,
+        human_submission: HumanSubmission | None = None) -> dict:
+    """An immutable admitted send; absent explicit intent is ordinary chat only."""
+    if type(message) is not str or not message or not message.strip():
         raise ServiceError("say something")
+    try:
+        submission = accept_human_submission(message) if human_submission is None else human_submission
+        if type(submission) is not HumanSubmission or submission.message != message:
+            raise ValueError('submission must be the exact accepted human message')
+        if actor not in events.ACTORS or (submission.mode == 'harness-command' and actor != 'human'):
+            raise ValueError('marked submission requires a human actor')
+        message.encode('utf-8')
+    except (TypeError, ValueError) as exc:
+        raise ServiceError(str(exc)) from exc
     ws = _ws(project, slug)
-    with _conversation_reservation(project, ws) as (reservation, protection):
-        if reservation is not None:
-            # Admission owns the destination even if the request alias moves.
-            ws = reservation.run_dir
-        return _say_reserved(project, ws, message, actor, reservation, protection)
+    with _conversation_reservation(project, ws) as reservation:
+        if reservation is None:
+            if submission.mode == 'harness-command':
+                raise ServiceError('marked turns require supported protected admission')
+            try:
+                _send_state(project, ws, submission)
+            except conversation.ConversationError as exc:
+                raise ServiceError(str(exc)) from exc
+            return _say_legacy(project, ws, message, actor, None, None)
+        return _say_prepared(project, reservation, submission, actor)
 
 
-def _say_reserved(project: Project, ws: Path, message: str, actor: str,
+def _say_legacy(project: Project, ws: Path, message: str, actor: str,
                   reservation, protection) -> dict:
     """One conversation turn: a sandboxed job that resumes the agent's session.
 
@@ -436,6 +440,259 @@ def _say_reserved(project: Project, ws: Path, message: str, actor: str,
     if parsed.text.strip():
         Path(transcript).write_text(parsed.text)  # the job page shows prose, not JSON
     return {"job": job, "turn": turn}
+
+
+@dataclass(frozen=True)
+class _TurnArtifacts:
+    turn_id: str
+    raw: Path
+    composed: Path
+    transcript: Path
+
+
+@dataclass(frozen=True)
+class _TurnCompletion:
+    session_id: str | None
+    text: str
+    complete: bool
+    reason: str
+
+
+class _TurnLaunchError(Exception):
+    """Retain actual known job state on a later error, never trigger a relaunch."""
+    def __init__(self, job):
+        super().__init__('turn launch/completion failed')
+        self.job = job
+
+
+def _send_state(project, ws, submission):
+    doc = conversation.read(ws)
+    conversation.check_revision(doc, submission.selection_revision,
+                                required=submission.mode == 'harness-command')
+    if doc['pending_turn_id'] or doc['recovery_required']:
+        raise ServiceError('conversation requires deliberate revision-checked recovery')
+    if not doc['agent']:
+        raise ServiceError("choose an agent for this run's conversation first")
+    if _turn_in_flight(project, ws):
+        raise ServiceError('a turn is still running; wait for it or cancel it')
+    return doc
+
+
+def _validate_execution(prepared):
+    if (prepared.execution_path is None or not prepared.execution_facts or
+            prepared.argv[0] != str(prepared.execution_path)):
+        raise ServiceError('selected conversation executable is unavailable or unpinned')
+    facts = {f.path: f for f in prepared.execution_facts}
+    if not facts or len(facts) != len(prepared.execution_facts) or len(facts) > 8192:
+        raise ServiceError('incomplete captured executable facts')
+    required = {prepared.execution_path, *prepared.execution_path.parents}
+    for fact in prepared.execution_facts:
+        required.update((fact.resolved, *fact.resolved.parents, *fact.path.parents))
+        if fact.link_target is not None:
+            target = Path(fact.link_target)
+            target = target if target.is_absolute() else fact.path.parent / target
+            required.update((target, *target.parents))
+    if not required <= facts.keys() or facts[prepared.execution_path].resolved != Path(prepared.harness_identity.executable):
+        raise ServiceError('incomplete captured executable identity/alias closure')
+    turn_admission._validate_facts(prepared.execution_facts)
+
+
+def _validate_turn_destination(prepared):
+    """Private nonsemantic original-run check before correlation writes."""
+    paths = {prepared.run_dir, *prepared.run_dir.parents}
+    facts = tuple(f for f in prepared.protection.path_facts if f.path in paths)
+    if {f.path for f in facts} != paths:
+        raise ServiceError('incomplete admitted run identity')
+    turn_admission._validate_facts(facts)
+
+
+def _create_turn_artifacts(artifacts, prepared):
+    fd = os.open(artifacts.raw.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    transcript_identity = None
+    try:
+        for path, raw in ((artifacts.raw, prepared.accepted_bytes),
+                          (artifacts.composed, prepared.composed_bytes), (artifacts.transcript, b'')):
+            leaf = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                           0o600, dir_fd=fd)
+            with os.fdopen(leaf, 'wb') as stream:
+                if path == artifacts.transcript:
+                    transcript_identity = os.fstat(stream.fileno())
+                stream.write(raw)
+        return os.fstat(fd), transcript_identity
+    finally:
+        os.close(fd)
+
+
+def _write_ordinary_transcript(path, text, identities):
+    """Legacy uncapped presentation, only into our original exclusive file.
+
+    This is not Task5's marked-log reader/parser/copy or a public safe-handle API.
+    """
+    parent = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    leaf = None
+    try:
+        original_parent, original_leaf = identities
+        def identity(info):
+            return info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode)
+        if identity(os.fstat(parent)) != identity(original_parent):
+            raise ServiceError('ordinary transcript parent identity changed')
+        leaf = os.open(path.name, os.O_WRONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+        current = os.fstat(leaf)
+        if not stat.S_ISREG(current.st_mode) or identity(current) != identity(original_leaf):
+            raise ServiceError('ordinary transcript identity changed')
+        os.ftruncate(leaf, 0)
+        with os.fdopen(leaf, 'w') as stream:
+            leaf = None
+            stream.write(text)
+    finally:
+        if leaf is not None:
+            os.close(leaf)
+        os.close(parent)
+
+
+def _complete_marked_turn(prepared, job, *, artifacts) -> _TurnCompletion:
+    """Task5 boundary: shipped seam intentionally does not read/copy any log."""
+    return _TurnCompletion(None, '', False, 'bounded-output-unavailable')
+
+
+def _launch_prepared_turn(project, prepared, *, artifacts, turn_audit) -> jobs.Job:
+    """Launch the SAME snapshot; short linkage write, wait, actual spend once."""
+    job, proc = jobs.start(project, list(prepared.argv), kind='turn', cwd=prepared.cwd,
+                           run_dir=prepared.run_dir, label=prepared.agent, timeout_s=prepared.timeout_s,
+                           stdin_text=prepared.stdin_text, env=dict(prepared.env_items),
+                           sandbox_writable=list(prepared.protection.writable),
+                           sandbox_mask=list(prepared.protection.masks), turn_audit=turn_audit)
+    linkage_error = None
+    try:
+        _validate_turn_destination(prepared)
+        conversation.annotate_turn(prepared.run_dir, artifacts.turn_id, job_id=job.id,
+                                   audit={**turn_audit, 'job_id': job.id})
+    except Exception as exc:
+        linkage_error = exc
+    spend_attempted = False
+    try:
+        job = jobs.wait(job, proc)
+        if job.duration_s is not None:
+            _validate_turn_destination(prepared)
+            spend_attempted = True
+            actions.record_spend(prepared.run_dir, wall_minutes=round(job.duration_s / 60, 3))
+        if linkage_error is not None:
+            raise linkage_error
+        return job
+    except Exception as exc:
+        # A wait failure may occur after _finish persisted the real process exit.
+        # Unknown/running state is not proof of duration; never retry a spend.
+        if not spend_attempted and job.state in jobs.FINAL and job.duration_s is not None:
+            try:
+                _validate_turn_destination(prepared)
+                spend_attempted = True
+                actions.record_spend(prepared.run_dir, wall_minutes=round(job.duration_s / 60, 3))
+            except Exception:
+                pass
+        raise _TurnLaunchError(job) from exc
+
+
+def _say_prepared(project, reservation, submission, actor):
+    ws = reservation.run_dir
+    try:
+        doc = _send_state(project, ws, submission)
+        accepted_revision = conversation.selection_revision(doc)
+        resolved = agent_run.resolve_turn(project, doc['agent'], run_dir=ws, session=doc['session'])
+        prepared = agent_run.prepare_turn(resolved, submission)
+        reservation.validate_protection(prepared.protection)
+        _validate_execution(prepared)
+        actions.guard_budget(ws, ('wall_minutes',))
+        try:
+            sandbox.verify(list(prepared.protection.writable), prepared.cwd)
+        except sandbox.SandboxError as exc:
+            events.emit(ws, 'job.refused', 'system', reason='sandbox', detail=str(exc))
+            raise
+        _validate_execution(prepared)
+        reservation.validate_protection(prepared.protection)
+        conversation.check_revision(conversation.read(ws), accepted_revision, required=True)
+    except actions.BudgetExhausted as exc:
+        raise ServiceError(f'{exc} — run checkpointed') from exc
+    except (conversation.ConversationError, agent_run.DispatchError, sandbox.SandboxError,
+            OSError, TypeError, ValueError) as exc:
+        raise ServiceError(str(exc)) from exc
+
+    tid = store.new_id()
+    stem = ws / TURN_PROMPT_DIR / f'turn-{tid}'
+    artifacts = _TurnArtifacts(tid, stem.with_suffix('.md'), stem.with_suffix('.composed.md'),
+                               stem.with_suffix('.out.md'))
+    audit = dict(schema_version=1, turn_id=tid, input_kind=prepared.input_kind,
+                 composition_order=prepared.composition_order, selected_manager=prepared.agent,
+                 family=prepared.family, policy_revision=prepared.policy_revision,
+                 message_sha256=hashlib.sha256(prepared.accepted_bytes).hexdigest(),
+                 charter_version=prepared.charter_version, charter_sha256=prepared.charter_sha256,
+                 composed_artifact=str(artifacts.composed.relative_to(ws)), job_id='',
+                 parse_complete=None, reason='', accepted_revision=accepted_revision, final_revision=None)
+    marked = submission.mode == 'harness-command'
+    job = None
+    try:
+        conversation.add_turn(ws, role='human', text=submission.message, actor=actor, turn_id=tid, audit=audit)
+        artifact_identities = _create_turn_artifacts(artifacts, prepared)
+        reservation.prepare_launch_masks(prepared.protection)
+        _validate_execution(prepared)
+        job = _launch_prepared_turn(project, prepared, artifacts=artifacts, turn_audit=audit)
+        reservation.validate_protection(prepared.protection)
+        audit['job_id'] = job.id
+        if marked:
+            completion = _complete_marked_turn(prepared, job, artifacts=artifacts)
+            if type(completion) is not _TurnCompletion:
+                raise ServiceError('invalid completion result')
+            usable = (job.state == 'done' and job.exit_code == 0 and completion.complete is True and
+                      type(completion.session_id) is str and bool(completion.session_id) and
+                      (prepared.session is None or prepared.session == completion.session_id))
+            reason = '' if usable else (completion.reason or
+                ('process-not-successful' if job.state != 'done' or job.exit_code != 0 else
+                 'incomplete-output' if completion.complete is not True else
+                 'missing-session' if not completion.session_id else 'inconsistent-session'))
+            audit.update(parse_complete=completion.complete, reason=reason)
+            turn = conversation.finalize_turn(ws, tid, job_id=job.id,
+                    session_id=completion.session_id if usable else None, reply=completion.text,
+                    state=job.state, audit=audit, recovery_required=not usable)
+            audit = turn['audit']
+        else:
+            out = Path(job.log).read_text()
+            note = f'\n{prepared.agent}: timed out after {prepared.timeout_s:.0f}s\n' if job.state == 'timeout' else ''
+            _write_ordinary_transcript(artifacts.transcript, out + note, artifact_identities)
+            parsed = sessions.parse({'family': prepared.family}, out + note)
+            after_session = conversation.record_session(ws, parsed.id)
+            turn = conversation.add_turn(ws, role='agent', text=parsed.text, job_id=job.id,
+                                         actor='agent', state=job.state)
+            audit.update(parse_complete=True, final_revision=conversation.selection_revision(conversation.read(ws)))
+            conversation.annotate_turn(ws, tid, job_id=job.id, audit=audit)
+            if not after_session['session']:
+                events.emit(ws, 'turn.session_lost', 'system', agent=prepared.agent, job=job.id)
+            if parsed.text.strip():
+                _write_ordinary_transcript(artifacts.transcript, parsed.text, artifact_identities)
+        job.turn_audit = conversation.validate_audit(audit)
+        jobs.save(job)
+        return {'job': asdict(job), 'turn': turn}
+    except Exception as exc:
+        if isinstance(exc, _TurnLaunchError):
+            job = exc.job
+        if marked:
+            # No state write to a newly adopted run or a duplicate completed turn.
+            try:
+                reservation._validate_held()
+                reservation._validate_protection_facts(prepared.protection)
+                current = conversation.read(ws)
+                if current['pending_turn_id'] == tid:
+                    job_id = job.id if job else ''
+                    audit.update(job_id=job_id, parse_complete=False, reason='turn-error')
+                    final = conversation.finalize_turn(ws, tid, job_id=job_id, session_id=None, reply='',
+                        state=job.state if job and job.state in jobs.FINAL else 'lost',
+                        audit=audit, recovery_required=True)
+                    if job is not None:
+                        job.turn_audit = conversation.validate_audit(final['audit'])
+                        jobs.save(job)
+            except Exception:
+                pass  # Pending evidence remains uncertain; never replay or recapture.
+        if not marked:
+            raise ServiceError(str(exc)) from exc
+        raise ServiceError('turn attempt uncertain; deliberate revision-checked recovery is required') from exc
 
 
 ROUND_TARGET = "manuscript/curation/rounds"
@@ -1082,7 +1339,8 @@ def _target_registry(project: Project):
 
 
 def set_conversation_agent(project: Project, slug: str, agent: str,
-                           actor: str = "human") -> dict:
+                           actor: str = "human", *, expected_revision=None,
+                           reset_session=False) -> dict:
     """Choose who holds this run's conversation.
 
     Switching discards the session id, because one CLI's session means
@@ -1090,25 +1348,42 @@ def set_conversation_agent(project: Project, slug: str, agent: str,
     said are history and are kept.
     """
     ws = _ws(project, slug)
-    with _conversation_reservation(project, ws) as (reservation, protection):
+    with _conversation_reservation(project, ws) as reservation:
+        if reservation is not None:
+            ws = reservation.run_dir
+        try:
+            doc = conversation.read(ws)
+            uncertain = bool(doc['recovery_required'] or doc['pending_turn_id'])
+            conversation.check_revision(doc, expected_revision, required=reset_session or uncertain)
+            if type(reset_session) is not bool or ((reset_session or uncertain) and actor != 'human'):
+                raise conversation.ConversationError('deliberate human recovery is required')
+        except conversation.ConversationError as exc:
+            raise ServiceError(str(exc)) from exc
         if reservation is None:
             _check_can_converse(project, agent)
             if _turn_in_flight(project, ws):
                 raise ServiceError("a turn is still running; wait for it or cancel it")
-            return _set_conversation_agent_record(ws, agent, actor)
-        ws = reservation.run_dir
+            return _set_conversation_agent_record(ws, agent, actor, expected_revision=expected_revision,
+                                                  reset_session=reset_session)
         if _turn_in_flight(project, ws):
             raise ServiceError("a turn is still running; wait for it or cancel it")
         with _target_registry(project) as (registry, revalidate_registry):
+            protection = sandbox.resolve_turn_protection(project, run_dir=ws)
+            reservation.validate_protection(protection)
             _validate_conversation_target(agent, registry)
             reservation.validate_protection(protection)
             revalidate_registry()
-            return _set_conversation_agent_record(ws, agent, actor)
+            return _set_conversation_agent_record(ws, agent, actor, expected_revision=expected_revision,
+                                                  reset_session=reset_session)
 
 
-def _set_conversation_agent_record(ws: Path, agent: str, actor: str) -> dict:
+def _set_conversation_agent_record(ws: Path, agent: str, actor: str, *,
+                                   expected_revision=None, reset_session=False) -> dict:
     try:
-        return conversation.set_agent(ws, agent, actor)
+        if expected_revision is None and reset_session is False:
+            return conversation.set_agent(ws, agent, actor)
+        return conversation.set_agent(ws, agent, actor, expected_revision=expected_revision,
+                                      reset_session=reset_session)
     except conversation.ConversationError as exc:
         raise ServiceError(str(exc)) from exc
 

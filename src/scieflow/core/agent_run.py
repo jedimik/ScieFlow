@@ -343,6 +343,10 @@ def _validate_turn_record(record) -> None:
         value = getattr(record, f.name)
         if f.name in ('root', 'run_dir', 'cwd'):
             valid = isinstance(value, Path) and value.is_absolute()
+        elif f.name == 'execution_path':
+            valid = value is None or (isinstance(value, Path) and value.is_absolute())
+        elif f.name == 'execution_facts':
+            valid = type(value) is tuple and all(type(p) is sandbox.ProtectionPath for p in value)
         elif f.name == 'protection':
             valid = type(value) is sandbox.TurnProtection
         elif f.name == 'harness_identity':
@@ -388,6 +392,8 @@ class ResolvedTurn:
     charter_text: str
     charter_version: int
     charter_sha256: str
+    execution_path: Path | None = None
+    execution_facts: tuple[sandbox.ProtectionPath, ...] = ()
 
     def __post_init__(self):
         _validate_turn_record(self)
@@ -415,6 +421,8 @@ class PreparedTurn:
     charter_version: int
     charter_sha256: str
     policy_revision: str
+    execution_path: Path | None = None
+    execution_facts: tuple[sandbox.ProtectionPath, ...] = ()
 
     def __post_init__(self):
         _validate_turn_record(self)
@@ -440,6 +448,34 @@ def _capture_executable(token: str, cwd: Path) -> tuple[str | None, str | None]:
         return None, None
     except (OSError, ValueError, RuntimeError):
         return None, None
+
+
+def _capture_execution(token: str, cwd: Path, env: dict):
+    """Select once using captured PATH/cwd, preserving lexical invocation semantics."""
+    if not token or '\0' in token:
+        return None, (), None
+    if '/' in token:
+        located = Path(token) if Path(token).is_absolute() else cwd / token
+        if not located.is_file() or not os.access(located, os.X_OK):
+            return None, (), None
+    else:
+        located = None
+        for entry in os.get_exec_path(env):
+            base = Path(entry) if entry else cwd
+            if not base.is_absolute():
+                base = cwd / base
+            candidate = base / token
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                located = candidate
+                break
+        if located is None:
+            return None, (), None
+    located = located.absolute()  # Never resolve the invocation spelling.
+    facts = sandbox._capture_path_facts([located])
+    target = located.resolve(strict=True)
+    if not stat.S_ISREG(target.stat().st_mode):
+        return None, (), None
+    return located, facts, str(target)
 
 
 def resolve_turn(project: Project, agent: str, *, run_dir: Path,
@@ -503,13 +539,14 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
         first_token = shlex.split(templates[1] if session else templates[0])[0]
         first_token = _template_token(first_token, '', root, model=model, reasoning=reasoning,
                                       python=python, session=session or '')
-        executable, binary_digest = _capture_executable(first_token, work)
-        identity = HarnessIdentity(agent, family, True, executable, binary_digest, None,
+        execution_path, execution_facts, executable = _capture_execution(first_token, work, env)
+        identity = HarnessIdentity(agent, family, True, executable, None, None,
                                    templates[0], templates[1], model, reasoning, str(work),
                                    None, None, None, False)
         return ResolvedTurn(agent, family, root, run, work, session, templates[0], templates[1],
                             model, reasoning, python, PROMPT_ARGV_LIMIT, float(timeout) * 60,
-                            protection, env_items, identity, text, version, charter_digest)
+                            protection, env_items, identity, text, version, charter_digest,
+                            execution_path, execution_facts)
     except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError, charter.CharterError) as exc:
         raise DispatchError(f'invalid conversational turn configuration: {exc}') from exc
 
@@ -540,12 +577,14 @@ def prepare_turn(resolved: ResolvedTurn, submission: HumanSubmission) -> Prepare
     argv = _template_argv(template, composed, resolved.root, model=resolved.model,
                           reasoning=resolved.reasoning, python=resolved.python_executable,
                           include_prompt=not use_stdin, session=resolved.session or '')
+    if resolved.execution_path is not None:
+        argv[0] = str(resolved.execution_path)
     return PreparedTurn(resolved.agent, resolved.family, resolved.run_dir, resolved.cwd,
                         resolved.session, tuple(argv), composed if use_stdin else None,
                         resolved.timeout_s, resolved.protection, resolved.env_items,
                         resolved.harness_identity, raw, composed.encode('utf-8'), submission.mode,
                         submission.selection_revision, 'command-first' if marked else 'charter-first', resolved.charter_version,
-                        resolved.charter_sha256, revision)
+                        resolved.charter_sha256, revision, resolved.execution_path, resolved.execution_facts)
 
 
 def _write(path: Path, text: str) -> None:

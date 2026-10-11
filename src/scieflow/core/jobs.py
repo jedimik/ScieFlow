@@ -45,6 +45,12 @@ class Job:
     log: str = ""
     err: str = ""
     sandboxed: bool = False
+    turn_audit: dict | None = None
+
+    def __post_init__(self):
+        if self.turn_audit is not None:
+            from scieflow.core.run.conversation import validate_audit
+            self.turn_audit = validate_audit(self.turn_audit)
 
     @property
     def duration_s(self) -> float | None:
@@ -141,21 +147,26 @@ def _alive(pid: int) -> bool:
 def start(project: Project, argv: list[str], *, kind: str, cwd: Path,
           run_dir: Path | None = None, label: str = "", timeout_s: float | None = None,
           stdin_text: str | None = None, env: dict | None = None,
-          sandbox_writable: list[Path] | None = None) -> tuple[Job, subprocess.Popen]:
+          sandbox_writable: list[Path] | None = None, turn_audit=None,
+          sandbox_mask: list[Path] | None = None) -> tuple[Job, subprocess.Popen]:
     job_id = store.new_id()
     directory = jobs_dir(project, run_dir)
     directory.mkdir(parents=True, exist_ok=True)
     job = Job(id=job_id, kind=kind, argv=list(argv), cwd=str(cwd), label=label,
               run_dir=str(run_dir) if run_dir else None, queued=_now(), timeout_s=timeout_s,
               log=str(directory / f"{job_id}.log"), err=str(directory / f"{job_id}.err"),
-              sandboxed=sandbox_writable is not None)
+              sandboxed=sandbox_writable is not None, turn_audit=turn_audit)
+    if job.turn_audit is not None:
+        job.turn_audit['job_id'] = job_id
+    captured_mask = list(sandbox_mask) if sandbox_mask is not None else None
     save(job)
     _emit(job, "job.queued")
     with open(job.log, "w") as out, open(job.err, "w") as err:
         try:
             # The job records the command that was asked for; the wrapper is plumbing.
             launch = (sandbox.wrap(argv, writable=sandbox_writable, cwd=cwd,
-                                   mask=sandbox.masks_for(sandbox_writable, run_dir=run_dir))
+                                   mask=(captured_mask if captured_mask is not None else
+                                         sandbox.masks_for(sandbox_writable, run_dir=run_dir)))
                       if sandbox_writable is not None else list(argv))
             proc = subprocess.Popen(
                 launch, cwd=cwd, stdout=out, stderr=err, text=True, env=env,
