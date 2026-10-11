@@ -1,7 +1,8 @@
-"""K-only bounded Claude parsing and byte-exact finite raw copying.
+"""K-only bounded Claude parsing, exact raw copying and shared plain display.
 
 No process/session state mutation, old full-string parser, unchecked path,
-reopening, retry, sanitation or raw-copy total ceiling lives here.
+reopening, retry or raw-copy total ceiling lives here. Sanitization is solely
+for presentation; protocol parsing and raw artifact bytes remain unchanged.
 """
 from __future__ import annotations
 
@@ -232,3 +233,209 @@ def copy_raw_log(handle: RegularArtifact, exclusive_target: ExclusiveArtifact, *
     except (ArtifactError, OSError):
         return RawCopyResult(copied, False, 'copy-invalidated')
     return RawCopyResult(copied, True, '')
+
+
+DISPLAY_UNITS = 200000
+
+
+@dataclass(frozen=True)
+class DisplayPanel:
+    text: str
+    truncated: bool
+    reason: str
+
+
+class DisplaySanitizer:
+    """Incremental plain text with bounded decoder and escape-discard state.
+
+    Known escape payload is consumed, not retained. Only a potential single
+    ESC is kept alongside the decoder's at-most-three undecided UTF-8 bytes.
+    A saturating raw-length counter bounds an escape independently of feeds.
+    """
+    def __init__(self):
+        import codecs
+        # surrogateescape preserves the raw width of malformed bytes inside
+        # discarded escapes. These internal markers are NEVER returned.
+        self._decoder = codecs.getincrementaldecoder('utf-8')('surrogateescape')
+        self._pending = b''
+        self._state = 'text'
+        self._escape_bytes = 0
+        self._discard = False
+        self._reason = ''
+        self._final = False
+
+    @property
+    def reason(self):
+        return self._reason
+
+    @property
+    def pending_bytes(self):
+        return len(self._pending) + len(self._decoder.getstate()[0])
+
+    def _end_escape(self):
+        self._state, self._pending = 'text', b''
+        self._escape_bytes, self._discard = 0, False
+
+    def _count_escape(self, char, result):
+        self._escape_bytes = min(RECORD_BYTES + 1,
+                                 self._escape_bytes + len(char.encode('utf-8', 'surrogateescape')))
+        if self._escape_bytes > RECORD_BYTES and not self._discard:
+            self._discard = True
+            self._reason = 'escape-limit'
+            result.append('[Escape omitted: escape-limit]')
+
+    def _text(self, char, result):
+        code = ord(char)
+        if char == '\x1b':
+            self._state, self._pending, self._escape_bytes = 'esc', b'\x1b', 1
+        elif char in ('\x9b', '\x9d'):
+            self._state = 'csi' if char == '\x9b' else 'osc'
+            self._escape_bytes = 2
+        elif 0xdc80 <= code <= 0xdcff:
+            result.append('�')
+        elif code < 32 and char not in ('\n', '\t') or 0x7f <= code <= 0x9f:
+            result.append(f'\\x{code:02x}')
+        elif code in (0x061c, 0x200e, 0x200f) or 0x202a <= code <= 0x202e or 0x2066 <= code <= 0x2069:
+            result.append(f'\\u{code:04x}')
+        else:
+            result.append(char)
+
+    def feed(self, data: bytes, final=False) -> str:
+        if type(data) is not bytes or len(data) > CHUNK_BYTES:
+            raise ValueError('bounded bytes feed required')
+        if self._final:
+            if data:
+                raise ValueError('display sanitizer finalized')
+            return ''
+        result = []
+        for char in self._decoder.decode(data, final=final):
+            if self._state == 'text':
+                self._text(char, result)
+            elif self._state == 'esc':
+                if char in ('[', ']'):
+                    self._state = 'csi' if char == '[' else 'osc'
+                    self._pending = b''
+                    self._count_escape(char, result)
+                else:
+                    result.append('\\x1b')
+                    self._end_escape()
+                    self._text(char, result)
+            elif self._state == 'csi':
+                self._count_escape(char, result)
+                if '@' <= char <= '~':
+                    self._end_escape()
+            else:  # OSC, including a possible ESC part of the ST terminator
+                self._count_escape(char, result)
+                if char in ('\x07', '\x9c') or self._pending and char == '\\':
+                    self._end_escape()
+                else:
+                    self._pending = b'\x1b' if char == '\x1b' else b''
+        if final:
+            if self._state != 'text':
+                if not self._discard:
+                    self._reason = self._reason or 'unterminated-escape'
+                    result.append('\\x1b' if self._state == 'esc' else
+                                  '[Escape omitted: unterminated-escape]')
+                self._end_escape()
+            self._final = True
+        # At most six output characters per decoded input scalar, plus one
+        # fixed notice per overlong escape; no retained output across calls.
+        return ''.join(result)
+
+
+def _display_units(text):
+    return sum(2 if ord(char) > 0xffff else 1 for char in text)
+
+
+def _display_prefix(text, units):
+    consumed = 0
+    for index, char in enumerate(text):
+        width = 2 if ord(char) > 0xffff else 1
+        if consumed + width > units:
+            return text[:index]
+        consumed += width
+    return text
+
+
+class _DisplayPrefix:
+    """Retain only a finite scalar-safe prefix; reserve notices on failure."""
+    def __init__(self):
+        self.parts, self.units, self.exhausted = [], 0, False
+
+    def accept(self, text):
+        if self.exhausted or not text:
+            return
+        remaining = DISPLAY_UNITS - self.units
+        width = _display_units(text)
+        if width > remaining:
+            text = _display_prefix(text, remaining)
+            self.exhausted = True
+        self.parts.append(text)
+        self.units += _display_units(text)
+
+    def finish(self, reason):
+        text = ''.join(self.parts)
+        if reason:
+            notice = f'\n[Display truncated: {reason}; raw artifact retained]'
+            text = _display_prefix(text, DISPLAY_UNITS - _display_units(notice)) + notice
+        return DisplayPanel(text, bool(reason), reason)
+
+
+def _display_chunks(chunks):
+    sanitizer, prefix = DisplaySanitizer(), _DisplayPrefix()
+    lookahead = False
+    for chunk, at_end in chunks:
+        prefix.accept(sanitizer.feed(chunk))
+        if prefix.exhausted:
+            return prefix.finish(sanitizer.reason or 'display-limit')
+        if lookahead and not at_end:
+            # One bounded lookahead permits a final stripped escape without
+            # scanning arbitrary additional zero-output input after the cap.
+            return prefix.finish(sanitizer.reason or 'display-limit')
+        lookahead = prefix.units == DISPLAY_UNITS
+    prefix.accept(sanitizer.feed(b'', final=True))
+    return prefix.finish(sanitizer.reason or ('display-limit' if prefix.exhausted else ''))
+
+
+def display_text(text: str) -> DisplayPanel:
+    """Already decoded audit text, encoded only in bounded scalar slices."""
+    if type(text) is not str:
+        raise ValueError('display string required')
+    def chunks():
+        for start in range(0, len(text), 8192):
+            # Even all isolated surrogates expand to at most 49152 bytes.
+            yield text[start:start + 8192].encode('utf-8', 'backslashreplace'), start + 8192 >= len(text)
+    return _display_chunks(chunks())
+
+
+def display_panel(handle: RegularArtifact) -> DisplayPanel:
+    """Consume a finite prefix on the caller-owned original artifact handle."""
+    _handle(handle)
+    reason = ''
+    def chunks():
+        nonlocal reason
+        offset, extent = 0, handle.snapshot_size
+        while offset < extent:
+            requested = min(CHUNK_BYTES, extent - offset)
+            chunk = handle.read_at(offset, requested)
+            if len(chunk) != requested:
+                reason = 'source-short-read'
+                yield chunk, True
+                return
+            offset += len(chunk)
+            yield chunk, offset == extent
+    panel = DisplayPanel('', False, '')
+    try:
+        handle.verify_unchanged()
+        panel = _display_chunks(chunks())
+    except (ArtifactError, OSError):
+        reason = 'source-invalidated'
+    try:
+        handle.verify_unchanged()
+    except (ArtifactError, OSError):
+        reason = 'source-invalidated'
+    if reason:
+        prefix = _DisplayPrefix()
+        prefix.accept(panel.text)
+        return prefix.finish(reason)
+    return panel

@@ -642,3 +642,255 @@ def test_boundaries_parse_budget_is_not_physical_eof(tmp_path, monkeypatch, edge
     assert sum(actual for _, _, actual in requests) == output.PARSE_BYTES
     assert max(size for _, size, _ in requests) == output.CHUNK_BYTES
     assert path.read_bytes() == data and set(os.listdir('/proc/self/fd')) == before_fds
+
+
+# Task6A presentation producers: plain text, not browser safety evidence.
+def units6a(text):
+    return len(text.encode('utf-16-le')) // 2
+
+
+def sanitize6a(raw, split):
+    sanitizer = output.DisplaySanitizer()
+    values = []
+    for start in range(0, len(raw), split):
+        values.append(sanitizer.feed(raw[start:start + split]))
+        assert sanitizer.pending_bytes <= output.RECORD_BYTES
+    values.append(sanitizer.feed(b'', final=True))
+    return ''.join(values), sanitizer.reason
+
+
+def test_display6a_import_and_frozen_plain_positive(tmp_path, monkeypatch):
+    from pathlib import Path
+    assert output.__file__ == str(Path.cwd() / 'src/scieflow/core/turn_output.py')
+    print(f'TASK6A_IMPORT_ORIGIN module=scieflow.core.turn_output file={output.__file__}', flush=True)
+    text = 'ASCII Žluťoučký 🦊\n\tpartial <script>x</script> [link](url)'
+    assert output.DISPLAY_UNITS == 200000
+    panel = output.display_text(text)
+    assert panel == output.DisplayPanel(text, False, '')
+    with pytest.raises(FrozenInstanceError):
+        panel.text = 'changed'
+    with source(tmp_path, text.encode(), monkeypatch) as (_, handle, stream, consumed):
+        assert output.display_panel(handle) == panel
+        handle.verify_unchanged()
+        assert handle.read_at(0, 5) == b'ASCII'
+        assert sum(consumed[:-1]) == len(text.encode()) and max(stream.requests) <= 65536
+
+
+@pytest.mark.parametrize('raw', [b'\x1b[31m', b'\x1b[1;2;3m', b'\x1b]8;;https://bad\x07',
+    b'\x1b]52;c;clipboard\x1b\\', '\u009b31m'.encode(), '\u009d8;;url\u009c'.encode()])
+def test_display6a_sequences_every_boundary(raw):
+    for split in range(1, len(raw) + 3):
+        assert sanitize6a(b'before' + raw + b'after', split) == ('beforeafter', '')
+    for boundary in range(len(raw) + 1):
+        sanitizer = output.DisplaySanitizer()
+        got = sanitizer.feed(b'before' + raw[:boundary])
+        got += sanitizer.feed(raw[boundary:] + b'after', final=True)
+        assert got == 'beforeafter' and sanitizer.reason == ''
+    assert sanitize6a(b'1' + raw + raw + b'2', 1) == ('12', '')
+
+
+@pytest.mark.parametrize('raw,expected', [
+    (b'\0\x01\x07\x08\x0b\x0c\r\x1f\x7f', r'\x00\x01\x07\x08\x0b\x0c\x0d\x1f\x7f'),
+    ('\u0080\u0085\u009c\u009f'.encode(), r'\x80\x85\x9c\x9f'),
+    ('\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069'.encode(),
+     r'\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069'),
+    (b'\x1bX\x1b\\x\n\t', '\\x1bX\\x1b\\x\n\t'),
+    (b'\xff\xc0\xaf\xf0\x9f', '�����'),
+    ('é🦊'.encode() + b'\xe2x', 'é🦊�x'),
+])
+def test_display6a_controls_utf8_and_unknown(raw, expected):
+    for split in (1, 2, 3, 5, 65536):
+        assert sanitize6a(raw, split) == (expected, '')
+
+
+@pytest.mark.parametrize('raw', [b'\x1b[123', b'\x1b]52;never', b'\x1b]8;url\x1b'])
+def test_display6a_incomplete_escapes_partition_invariant(raw):
+    expected = sanitize6a(raw, 1)
+    assert expected[1] == 'unterminated-escape' and 'Escape omitted' in expected[0]
+    assert 'never' not in expected[0] and 'url' not in expected[0]
+    for split in range(1, len(raw) + 1):
+        assert sanitize6a(raw, split) == expected
+    panel = output.display_text(raw.decode())
+    assert panel.truncated and panel.reason == 'unterminated-escape'
+    assert 'Display truncated' in panel.text and 'raw artifact retained' in panel.text
+    assert sanitize6a(b'\x1b', 1) == (r'\x1b', 'unterminated-escape')
+    assert sanitize6a(b'\x1b\x1bX', 1) == (r'\x1b\x1bX', '')
+
+
+@pytest.mark.parametrize('opener,terminator', [(b'\x1b]', b'\x07'), (b'\x1b]', b'\x1b\\'),
+    (b'\x1b[', b'm'), ('\u009d'.encode(), '\u009c'.encode())])
+def test_display6a_huge_escape_discard_recovery(opener, terminator):
+    raw = b'prefix' + opener + b'1' * 180000 + terminator + b'RECOVERED'
+    expected = sanitize6a(raw, 65536)
+    assert expected[1] == 'escape-limit'
+    assert expected[0].startswith('prefix') and expected[0].endswith('RECOVERED')
+    assert expected[0].count('Escape omitted') == 1 and '11111' not in expected[0]
+    for split in (1, 13, 16384, 65535):
+        assert sanitize6a(raw, split) == expected
+    unfinished = sanitize6a(opener + b'1' * 180000, 65536)
+    assert unfinished == ('[Escape omitted: escape-limit]', 'escape-limit')
+
+
+def test_display6a_endless_calls_actual_pending_and_finalization():
+    sanitizer = output.DisplaySanitizer()
+    assert sanitizer.feed(b'\x1b]') == ''
+    observed = []
+    for _ in range(2200):
+        observed.append(sanitizer.feed(b'x' * 100))
+        buffers = [v for v in vars(sanitizer).values() if isinstance(v, (bytes, bytearray))]
+        decoder = next(v for v in vars(sanitizer).values() if hasattr(v, 'getstate'))
+        actual = sum(map(len, buffers)) + len(decoder.getstate()[0])
+        assert sanitizer.pending_bytes == actual <= 16384
+        assert all(abs(v) <= 16385 for v in vars(sanitizer).values() if type(v) is int)
+    assert sanitizer.feed(b'\xf0\x9f') == '' and sanitizer.pending_bytes == 2
+    assert sanitizer.feed(b'\xa6\x8a') == '' and sanitizer.pending_bytes == 0
+    assert ''.join(observed).count('Escape omitted') == 1
+    assert sanitizer.feed(b'\x1b') == ''
+    assert sanitizer.feed(b'\\okay', final=True) == 'okay'
+    assert sanitizer.pending_bytes == 0 and sanitizer.reason == 'escape-limit'
+    assert sanitizer.feed(b'', final=True) == ''
+    with pytest.raises(ValueError):
+        sanitizer.feed(b'new')
+    with pytest.raises(AttributeError):
+        sanitizer.reason = 'attacker'
+    with pytest.raises(AttributeError):
+        sanitizer.pending_bytes = 0
+
+
+@pytest.mark.parametrize('bad', ['text', bytearray(b'a'), memoryview(b'a'), None, 7, b'x' * 65537])
+def test_display6a_feed_rejects_before_processing(bad):
+    sanitizer = output.DisplaySanitizer()
+    assert sanitizer.feed(b'\xf0\x9f') == '' and sanitizer.pending_bytes == 2
+    with pytest.raises(ValueError):
+        sanitizer.feed(bad)
+    assert sanitizer.pending_bytes == 2
+    assert sanitizer.feed(b'\xa6\x8a', final=True) == '🦊'
+
+
+@pytest.mark.parametrize('text', ['', 'partial', 'x' * 200000, '🦊' * 100000,
+    'x' * 199999 + 'é', 'x' * 199998 + '🦊'])
+def test_display6a_exact_safe_cap_no_false_notice(text):
+    assert output.display_text(text) == output.DisplayPanel(text, False, '')
+
+
+@pytest.mark.parametrize('text', ['x' * 200001, '🦊' * 100001, 'x' * 199999 + '🦊',
+    '\0' * 50001, '\u202e' * 33334, 'x' * 200000 + '\0', 'x' * 199990 + '\ud800' * 5])
+def test_display6a_post_expansion_scalar_and_notice_budget(text):
+    panel = output.display_text(text)
+    assert panel.truncated and panel.reason == 'display-limit'
+    assert units6a(panel.text) <= 200000
+    assert 'Display truncated' in panel.text and 'raw artifact retained' in panel.text
+    assert not any(0xd800 <= ord(c) <= 0xdfff for c in panel.text)
+    assert not any(c in panel.text for c in ('\0', '\u202e'))
+    assert panel.text.startswith('🦊' if text.startswith('🦊') else '\\x00' if text.startswith('\0') else '\\u202e' if text.startswith('\u202e') else 'x')
+
+
+def test_display6a_text_surrogates_and_strict_input():
+    assert output.display_text('a\ud800b\udfff') == output.DisplayPanel(r'a\ud800b\udfff', False, '')
+    for bad in (None, b'raw', [], 42):
+        with pytest.raises(ValueError):
+            output.display_text(bad)
+
+
+@pytest.mark.parametrize('data', [b'', b'partial\n\t', '🦊'.encode() * 100000, b'x' * 200000,
+    b'x' * 200001, b'\0' * 70000, b'x' * 199999 + '🦊'.encode(), b'x' * 200000 + b'\x1b[31m'])
+def test_display6a_panel_same_logic_finite_snapshot_and_raw(tmp_path, monkeypatch, data):
+    with source(tmp_path, data, monkeypatch) as (_, handle, stream, consumed):
+        panel = output.display_panel(handle)
+        assert panel == output.display_text(data.decode())
+        assert units6a(panel.text) <= 200000 and max(stream.requests, default=0) <= 65536
+        assert sum(consumed) <= len(data)
+        handle.verify_unchanged()
+    assert hashlib.sha256((tmp_path / 'source').read_bytes()).digest() == hashlib.sha256(data).digest()
+
+
+def test_display6a_large_prefix_stops_before_whole_input(tmp_path, monkeypatch):
+    data = b'x' * 3000000
+    requests = []
+    with source(tmp_path, data) as (_, handle, _, _):
+        read = handle.read_at
+        def reading(offset, size):
+            requests.append((offset, size))
+            return read(offset, size)
+        monkeypatch.setattr(handle, 'read_at', reading)
+        panel = output.display_panel(handle)
+        assert panel.truncated and panel.reason == 'display-limit'
+        assert sum(n for _, n in requests) <= 5 * 65536 < len(data)
+        handle.verify_unchanged()
+    feeds = []
+    feed = output.DisplaySanitizer.feed
+    def feeding(self, value, final=False):
+        feeds.append(len(value))
+        return feed(self, value, final=final)
+    monkeypatch.setattr(output.DisplaySanitizer, 'feed', feeding)
+    assert output.display_text('🦊' * 1000000).truncated
+    assert max(feeds) <= 65536 and sum(feeds) < 500000
+
+
+@pytest.mark.parametrize('fault', ['short', 'io', 'grow', 'truncate', 'replace', 'metadata'])
+def test_display6a_real_source_fault_and_ownership(tmp_path, monkeypatch, fault):
+    path = tmp_path / 'source'
+    data = b'prefix' + b'x' * 250000
+    path.write_bytes(data)
+    mutations, requests = [], []
+    before_fds = set(os.listdir('/proc/self/fd'))
+    with artifacts.pin_artifact_root(tmp_path) as root, artifacts.open_run_artifact(root, 'source') as handle:
+        read = handle.read_at
+        def reading(offset, size):
+            value = read(offset, size)
+            requests.append((offset, size))
+            if not mutations and (fault in ('short', 'io') or len(requests) == 4):
+                mutations.append(fault)
+                if fault == 'short':
+                    return value[:-1]
+                if fault == 'io':
+                    raise OSError('UNTRUSTED_EXCEPTION_PAYLOAD')
+                if fault == 'grow':
+                    with path.open('ab') as stream:
+                        stream.write(b'never captured')
+                elif fault == 'truncate':
+                    path.write_bytes(b'')
+                elif fault == 'replace':
+                    path.rename(tmp_path / 'original')
+                    path.write_bytes(b'OUTSIDE_SENTINEL')
+                else:
+                    path.chmod(0o400)
+            return value
+        monkeypatch.setattr(handle, 'read_at', reading)
+        panel = output.display_panel(handle)
+        assert panel.truncated and panel.reason == ('source-short-read' if fault == 'short' else 'source-invalidated')
+        assert 'Display truncated' in panel.text and 'raw artifact retained' in panel.text
+        assert 'UNTRUSTED_EXCEPTION_PAYLOAD' not in panel.text and 'OUTSIDE_SENTINEL' not in panel.text
+        assert units6a(panel.text) <= 200000 and requests and max(n for _, n in requests) <= 65536
+        assert handle._active
+    assert not handle._active and set(os.listdir('/proc/self/fd')) == before_fds
+    if fault == 'replace':
+        assert path.read_bytes() == b'OUTSIDE_SENTINEL' and (tmp_path / 'original').read_bytes() == data
+    elif fault in ('short', 'io'):
+        assert path.read_bytes() == data
+
+
+def test_display6a_no_whole_read_or_path_reopen_with_sentinel(tmp_path, monkeypatch):
+    from pathlib import Path
+    def prohibited(*args, **kwargs):
+        raise AssertionError('whole read or reopen')
+    path = tmp_path / 'source'
+    data = b'positive actual fd'
+    path.write_bytes(data)
+    with artifacts.pin_artifact_root(tmp_path) as root, artifacts.open_run_artifact(root, 'source') as handle:
+        with monkeypatch.context() as guard:
+            guard.setattr(Path, 'read_text', prohibited)
+            guard.setattr(Path, 'read_bytes', prohibited)
+            guard.setattr(Path, 'open', prohibited)
+            guard.setattr(__import__('builtins'), 'open', prohibited)
+            guard.setattr(artifacts.os, 'open', prohibited)
+            with pytest.raises(AssertionError, match='whole read or reopen'):
+                path.read_text()
+            with pytest.raises(AssertionError, match='whole read or reopen'):
+                artifacts.os.open(path, os.O_RDONLY)
+            assert output.display_panel(handle) == output.DisplayPanel('positive actual fd', False, '')
+            handle.verify_unchanged()
+    assert path.read_bytes() == data
+    with pytest.raises(ValueError):
+        output.display_panel(path)
+    assert output.display_panel(handle).reason == 'source-invalidated'
