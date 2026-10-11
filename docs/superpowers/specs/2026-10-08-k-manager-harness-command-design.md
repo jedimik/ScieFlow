@@ -176,10 +176,6 @@ Use one run-scoped admission boundary shared by sends and hand-over: serialize s
 reservation and launch so another request cannot pass the check before the first job is recorded.
 Use a dedicated cross-process run admission lock, distinct from YAML/store locks, acquired without queueing;
 hold it through the synchronous turn's session/reply finalization, closing the gap after process exit and before session recording.
-Derive its identity from the canonical project/run, not client text or writable audit records. Its file and parent
-must be outside every effective agent writable grant or protected by verified confinement; an ordinary lock file
-inside the writable run is insufficient. Check overrides/allowlists and refuse marked admission if protection
-cannot be proved. Same-UID mode bits alone are not protection; this adds no receipt store or replay authority.
 It reserves admission, not prompt authority; existing job-state checks still refuse a surviving running job after lock-owner loss.
 Concurrent sends/hand-overs fail visibly as busy. Disable repeat UI submission while busy and never auto-resend.
 This is race prevention for admitted turns, not exactly-once execution, durable idempotency or restart-proof retry suppression.
@@ -256,7 +252,6 @@ Required acceptance cases before enablement/merge:
 - First/resumed argv/stdin tests retain the usable session; unsafe stdin refuses; expansion preserves the full charter exactly once
   without new model/effort/tool/permission escalation or changes to current permission templates.
 - Racing sends/hand-overs cannot launch conflicting turns, including finalization; busy UI suppresses repeat submits.
-  A dispatched sandboxed agent cannot unlink/replace the admission lock or its parent; unsafe effective grants refuse.
   Lost acknowledgements/jobs, disconnects and restart never auto-replay; uncertainty requires a human decision, not an idempotency claim.
 - Budget exhaustion, normal gates, narrowed sandbox, provenance mask and refusal of unsandboxed K are exercised.
 - Malicious cross-site forms, bad/missing session or CSRF, malformed forms, token exchange and unauthenticated SSE exercise
@@ -274,12 +269,10 @@ An **independent security review is a required pre-merge gate**, covering human 
 retained authentication/CSRF/SSE and residual Host/Origin risk, sandbox/provenance, accepted-byte integrity,
 admission/uncertain outcomes, bounded output/session recovery and credential/permission exclusions.
 
-User approval is still needed for this proposal, finite-command evidence policy, synchronous admission/
+User approval is still needed for this proposal, finite initial command set/evidence policy, synchronous admission/
 uncertain-outcome behavior and marked-input/display/parse cap defaults. Option C itself is settled, not reopened here.
-No unnamed command is approved by accepting this design; the implementation plan must name candidate commands,
-and enablement requires the fresh evidence and security review above.
 Shared HTTP-hardening and any execution capture/termination policy are separate future approvals, not choices silently
 adopted by approving K. No live probe or harness support has been authorized or established by this documentation revision.
 Ticket 16 traceability: scope/sandbox/transport/prompts/CLI list/output/audit/concurrency are ruled above;
 pane/unknown names/transcript order/per-harness degradation are explicit; slices and security gate are named.
-Ticket completion requires explicit design approval and strict-docs verification; this proposal alone does not close ticket 16.
+The ticket's approval and strict-docs completion criteria remain outstanding; this proposal does not close ticket 16.

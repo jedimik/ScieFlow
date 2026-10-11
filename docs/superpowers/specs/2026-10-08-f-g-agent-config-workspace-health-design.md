@@ -350,4 +350,4 @@ shared compare/replan/apply protocol and control-byte/index/scan defaults. Share
 approval with its own configuration/compatibility decisions, not an implicit K prerequisite or adopted migration here.
 Ticket 11's field/promotion/scope/repair/cost questions are answered above, with a failure section;
 ticket 12's service/routes/forms/CSRF/invalid-value/scope/escaping/docs/full-suite invariants are acceptance requirements.
-Design completion requires explicit user approval and strict MkDocs verification; this proposal alone closes neither ticket.
+Explicit user design approval and strict MkDocs verification remain outstanding; tickets 11 and 12 stay open.
