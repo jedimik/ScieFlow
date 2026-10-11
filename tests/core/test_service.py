@@ -1410,3 +1410,103 @@ def test_progress_renders_utc_and_never_local_time(project):
     assert waiting["g1"] == "2026-10-03 23:30:00 UTC"
     assert waiting["g2"] == "2026-10-03 23:00:00 UTC"          # converted, labelled UTC
     assert "UTC" not in waiting["g3"] and "not recorded" in waiting["g3"]
+
+
+@pytest.mark.parametrize("rounds", [2, 20])
+def test_manuscript_panel_task2_reuses_history_with_real_comparison(project, monkeypatch, rounds):
+    provenance = service.provenance
+    ws = project.run_dir("r1")
+    for n in range(1, rounds + 1):
+        _touch(ws, "manuscript", "curation", "rounds", str(n), "results.tex", text=f"merged {n}\n")
+        _touch(ws, "review", f"round-{n}", "review.md", text=f"review {n}\n")
+        for agent in ("agy", "claude", "codex", "gemini"):
+            _touch(ws, "manuscript", "drafts", agent, "results.tex", text=f"{agent}\n")
+            _touch(ws, "review", f"draft-round-{n}", f"response-{agent}.md", text=f"response {n}\n")
+    provenance.sync(ws)
+    repo = provenance.repo_path(ws)
+    real_run = provenance.subprocess.run
+    calls = []
+
+    def measured(argv, **kwargs):
+        if argv[:3] == ["git", "--git-dir", str(repo)]:
+            calls.append(argv[3:])
+            assert argv[3] in {"for-each-ref", "ls-tree", "diff"}, "panel reads never write"
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(provenance.subprocess, "run", measured)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["state"] == "ok" and ms["round"] == rounds
+    assert ms["present"] == ["results"] and ms["missing"] == []
+    assert ms["changed"] == ["results.tex"] and ms["changed_note"] == ""
+    assert ms["compared"] == [f"main:merge_{rounds}", f"main:merge_{rounds - 1}"]
+    trees = sum(c[0] == "ls-tree" for c in calls)
+    print(f"MANUSCRIPT_TASK2 rounds={rounds} branches=5 ls-tree={trees} total-git={len(calls)}")
+    assert trees == 5, "comparison must not repeat the history traversal"
+    assert len(calls) == 8, "cold observation/listings + fingerprint + actual diff"
+    assert sum(c[0] == "diff" for c in calls) == 1
+
+
+def test_manuscript_panel_task2_long_canonical_round_is_explicitly_delimited(project):
+    provenance = service.provenance
+    ws = project.run_dir("r1")
+    repo = provenance.ensure_repo(ws)
+    empty = provenance._tree(repo, [])
+    huge = "9" * 5000
+    tree = provenance._tree(repo, [("040000", "tree", empty, f"merge_{n}")
+                                    for n in ("2", "10", "9" * 4999, huge)])
+    commit = provenance._commit(repo, tree, [], "long canonical round")
+    provenance._update_ref(repo, "refs/heads/main", commit)
+    assert provenance.points(ws)[0]["ref"] == f"main:merge_{huge}", "reader accepts the canonical round"
+    ms = service._manuscript(ws)
+    assert ms["state"] == "no_merge" and ms["round"] is None
+    assert "cannot be represented" in ms["reason"] and "round identifier" in ms["reason"]
+    assert ms["present"] == [] and ms["changed"] is None and ms["compared"] == []
+
+
+@pytest.mark.parametrize("failure", ["refs", "listing", "comparison"])
+def test_manuscript_panel_task2_comparison_failures_preserve_round_summary(project, monkeypatch, failure):
+    ws = _synced(project)
+    provenance = service.provenance
+    repo = provenance.repo_path(ws)
+    real_tips = provenance._read_branch_tips
+    real_bytes = provenance._git_bytes
+    observations = 0
+
+    def tips(path):
+        nonlocal observations
+        observations += 1
+        if observations == 2:
+            if failure == "refs":
+                (repo / "HEAD").write_text("broken HEAD\n")
+            if failure == "listing":
+                main = provenance._ref_sha(repo, "refs/heads/main")
+                assert main is not None
+                provenance._update_ref(repo, "refs/heads/draft/new", main)
+        return real_tips(path)
+
+    def binary(path, *args):
+        if observations == 2 and failure == "listing" and args[0] == "ls-tree":
+            raise provenance.ProvenanceError("listing failed after panel points")
+        return real_bytes(path, *args)
+
+    real_run = provenance.subprocess.run
+    comparisons = []
+
+    def compare(argv, **kwargs):
+        if argv[:4] == ["git", "--git-dir", str(repo), "diff"]:
+            comparisons.append(argv[4:])
+            if failure == "comparison":
+                (repo / "HEAD").write_text("broken HEAD\n")
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(provenance, "_read_branch_tips", tips)
+    monkeypatch.setattr(provenance, "_git_bytes", binary)
+    monkeypatch.setattr(provenance.subprocess, "run", compare)
+    ms = service.run_overview(project, "r1")["manuscript"]
+    assert ms["state"] == "ok" and ms["round"] == 2 and ms["reason"] == ""
+    assert ms["present"] == ["intro", "results"] and ms["missing"] == ["methods"]
+    assert ms["drafted"] == ["intro", "methods", "results"]
+    assert ms["changed"] is None and "could not be compared" in ms["changed_note"]
+    assert ms["compared"] == ["main:merge_2", "main:merge_1"]
+    assert observations == 2 and len(comparisons) == (1 if failure == "comparison" else 0)
+    assert provenance._read_memo.get() is None

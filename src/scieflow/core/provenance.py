@@ -31,6 +31,11 @@ import os
 import re
 import shutil
 import subprocess
+import stat
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
 
@@ -196,6 +201,33 @@ def _git(repo: Path, *args: str, stdin: str | None = None,
         tail = result.stderr.strip().splitlines()[-1:] or [""]
         raise ProvenanceError(f"git {subcommand} failed: {tail[0]}")
     return result.stdout.strip()
+
+
+def _git_bytes(repo: Path, *args: str) -> bytes:
+    """Lossless read transport; no newline conversion or pathname stripping.
+
+    Uses the same sealed environment, timeout and typed failures as `_git`.
+    Only diagnostic stderr is decoded with replacement, never tree authority.
+    """
+    # Ref metadata and tree authority must describe the actual observed OIDs,
+    # not mutable refs/replace redirects. Keep the base/writer environment sealed.
+    env = {**_env(), "GIT_NO_REPLACE_OBJECTS": "1"}
+    subcommand = args[0] if args else "?"
+    try:
+        result = subprocess.run(
+            [GIT, "--git-dir", str(repo), *args], capture_output=True,
+            timeout=_TIMEOUT_S, env=env,
+        )
+    except OSError as exc:
+        raise ProvenanceError(f"git {subcommand} unavailable: {exc}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ProvenanceError(
+            f"git {subcommand} timed out after {_TIMEOUT_S}s") from exc
+    if result.returncode != 0:
+        lines = result.stderr.decode("utf-8", errors="replace").strip().splitlines()
+        tail = lines[-1:] or [""]
+        raise ProvenanceError(f"git {subcommand} failed: {tail[0]}")
+    return result.stdout
 
 
 def _blob(repo: Path, data: str) -> str:
@@ -755,73 +787,145 @@ def sync(ws: Path) -> dict:
 #: silent (see `diff`).
 DIFF_LIMIT = 200_000
 
-_MERGE_DIR_RE = re.compile(r"^merge_(\d+)$")
-_REVIEW_DIR_RE = re.compile(r"^review_(\d+)$")
+_MERGE_DIR_RE = re.compile(rb"merge_(0|[1-9][0-9]*)")
+_REVIEW_DIR_RE = re.compile(rb"review_(0|[1-9][0-9]*)")
 
 
-def _branch_tip(repo: Path, ref: str) -> tuple[str, str] | None:
-    """`(sha, committer-date-iso)` for `ref`'s current tip, or `None` if
-    `ref` does not exist.
+@dataclass(frozen=True, slots=True)
+class _BranchTip:
+    """Full ref name, object ID and date from a single ref observation."""
 
-    Read once per branch and shared by every point that branch contributes
-    (see `points`) — `%cI` is the committer date in strict ISO 8601, and a
-    NUL separates it from the sha so neither field can bleed into the
-    other regardless of what `%H` or `%cI` ever produce.
+    ref: str
+    commit: str
+    at: str
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _Point(Mapping[str, str]):
+    """An immutable record; mapping equality keeps the internal reader seam.
+
+    No dictionary backing is retained. Public readers materialize copies.
     """
-    if _ref_sha(repo, ref) is None:
+
+    fields: tuple[tuple[str, str], ...]
+
+    def __getitem__(self, key: str) -> str:
+        for name, value in self.fields:
+            if key == name:
+                return value
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[str]:
+        return (name for name, _value in self.fields)
+
+    def __len__(self) -> int:
+        return len(self.fields)
+
+
+@dataclass(frozen=True, slots=True)
+class _PointSnapshot:
+    """Observed branch table and its OID-bound point enumeration.
+
+    An empty snapshot is successful; `None` means the ref table could not
+    be read. This is an observation, not a transaction across Git writers.
+    """
+
+    branches: tuple[_BranchTip, ...]
+    points: tuple[_Point, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _RepoIdentity:
+    location: str
+    device: int
+    inode: int
+
+
+@dataclass(frozen=True, slots=True)
+class _Memo:
+    identity: _RepoIdentity
+    snapshot: _PointSnapshot
+
+
+# None means unscoped, not a mutable default shared by unrelated requests.
+_read_memo: ContextVar[tuple[_Memo, ...] | None] = ContextVar("provenance_read_memo", default=None)
+
+
+@contextmanager
+def read_scope() -> Iterator[None]:
+    """Own one lazy read lifetime; nested entries are fresh and unwind safely.
+
+    Immutable replaced state prevents copied async contexts sharing edits.
+    Restored outer entries are revalidated just like any other cache hit.
+    """
+    token = _read_memo.set(())
+    try:
+        yield
+    finally:
+        _read_memo.reset(token)
+
+
+def _repo_identity(repo: Path) -> _RepoIdentity | None:
+    try:
+        resolved = repo.resolve()
+        info = resolved.stat()
+        if not stat.S_ISDIR(info.st_mode):
+            return None
+        return _RepoIdentity(str(resolved), info.st_dev, info.st_ino)
+    except (OSError, RuntimeError):
         return None
-    out = _git(repo, "log", "-1", "--format=%H%x00%cI", ref)
-    sha, _, at = out.partition("\x00")
-    return sha, at
 
 
-def _ls_tree_names(repo: Path, treeish: str) -> list[str]:
-    """Top-level entry names of `treeish` (non-recursive), or `[]` if it
-    doesn't resolve to a tree at all — e.g. a round that turns out to have
-    no `sections` subdirectory, or a branch with an empty tree."""
+def _read_branch_tips(repo: Path) -> tuple[_BranchTip, ...] | None:
     try:
-        out = _git(repo, "ls-tree", "--name-only", treeish)
+        out = _git_bytes(repo, "for-each-ref",
+                         "--format=%(refname)%00%(objectname)%00%(objecttype)"
+                         "%00%(committerdate:iso-strict)",
+                         "refs/heads/main", "refs/heads/draft/")
     except ProvenanceError:
-        return []
-    return out.splitlines() if out else []
+        return None
+    tips = []
+    # Git disallows LF/NUL in refs, but permits Unicode line separators.
+    # Decode only after parsing Git's actual binary field/record boundaries.
+    try:
+        for line in out.split(b"\n"):
+            if not line:
+                continue
+            ref, sha, kind, at = line.split(b"\x00")
+            if ref == b"refs/heads/main" or ref.startswith(b"refs/heads/draft/"):
+                if kind != b"commit" or not at:
+                    raise ProvenanceError("provenance branch does not name a commit")
+                tips.append(_BranchTip(ref.decode("utf-8"), sha.decode("ascii"),
+                                       at.decode("ascii")))
+    except (UnicodeError, ValueError) as exc:
+        raise ProvenanceError("invalid provenance ref metadata") from exc
+    return tuple(sorted(tips, key=lambda tip: (tip.ref != "refs/heads/main", tip.ref)))
 
 
-def _numbered_dirs(names: list[str], pattern: re.Pattern[str]) -> list[int]:
-    """Every `pattern`-matching name in `names`, as its captured number,
-    sorted newest (highest) first."""
-    numbers = (int(match.group(1)) for name in names if (match := pattern.match(name)))
-    return sorted(numbers, reverse=True)
+def _recursive_entries(repo: Path, commit: str) -> dict[bytes, bytes]:
+    """Path bytes to object types, including tree entries and empty trees."""
+    out = _git_bytes(repo, "ls-tree", "-r", "-t", "-z", commit)
+    entries = {}
+    for record in out.split(b"\x00"):
+        if record:
+            header, path = record.split(b"\t", 1)
+            _mode, kind, _oid = header.split(b" ")
+            entries[path] = kind
+    return entries
 
 
-def _draft_branches(repo: Path) -> list[str]:
-    """Agent names with a `draft/<agent>` branch actually present in the
-    repo, sorted.
+def _numbered_dirs(entries: dict[bytes, bytes], pattern: re.Pattern[bytes]) -> list[str]:
+    """Canonical decimals sort numerically by length, then ASCII spelling.
 
-    Read from the repo's own refs via `for-each-ref`, not from
-    `agents(ws)` — `points` reflects what is *committed*, per its own
-    contract, and a workspace can drift from what was last synced (an
-    agent's directory removed after the fact, say). A repo with no
-    `draft/*` branches at all yields `[]`, not an error.
-
-    `%(refname:lstrip=3)` strips exactly the `refs/heads/draft/` prefix
-    (three path components) from each ref's real name — not
-    `%(refname:short)` plus `removeprefix("draft/")`, which shortens
-    ambiguously: a same-named tag (`refs/tags/draft/claude`) would make
-    git's "short" form of the *branch* `heads/draft/claude` instead of
-    `draft/claude`, and `removeprefix` would then silently fail to strip
-    it, dropping that agent's points entirely rather than reporting them
-    under the wrong name. `lstrip=3` operates on the real ref name and
-    never depends on what else happens to exist in the repo.
+    Keep their exact spelling, without integer conversion limits or aliases.
+    No irrelevant pathname bytes need decoding.
     """
-    try:
-        out = _git(repo, "for-each-ref", "--format=%(refname:lstrip=3)",
-                   "refs/heads/draft/*")
-    except ProvenanceError:
-        return []
-    return sorted(line for line in out.splitlines() if line)
+    numbers = (match.group(1).decode("ascii") for path, kind in entries.items()
+               if kind == b"tree" and (match := pattern.fullmatch(path)))
+    return sorted(numbers, key=lambda n: (len(n), n), reverse=True)
 
 
-def _main_points(repo: Path) -> list[dict]:
+def _main_points(tip: _BranchTip, entries: dict[bytes, bytes]) -> list[dict]:
     """Points contributed by `refs/heads/main`: one per `merge_<n>`
     directory (plus a finer `merge_<n>/sections` point when that round has
     a `sections` subdirectory — the same depth as a draft's `sections`
@@ -837,54 +941,86 @@ def _main_points(repo: Path) -> list[dict]:
     (Task 5's panel) can tell a genuinely separate point from a same-round
     refinement of one already shown, without suffix-parsing `ref` itself.
     """
-    ref = "refs/heads/main"
-    tip = _branch_tip(repo, ref)
-    if tip is None:
-        return []
-    sha, at = tip
-    names = _ls_tree_names(repo, ref)
+    sha, at = tip.commit, tip.at
 
     points_: list[dict] = []
-    for n in _numbered_dirs(names, _MERGE_DIR_RE):
+    for n in _numbered_dirs(entries, _MERGE_DIR_RE):
         points_.append({"ref": f"main:merge_{n}", "label": f"Merge round {n}",
                         "kind": "merge", "commit": sha, "at": at})
-        sub = _ls_tree_names(repo, f"{ref}:merge_{n}")
-        if "sections" in sub:
+        if entries.get(f"merge_{n}/sections".encode("ascii")) == b"tree":
             points_.append({"ref": f"main:merge_{n}/sections",
                             "label": f"Merge round {n} sections",
                             "kind": "merge", "parent": f"main:merge_{n}",
                             "commit": sha, "at": at})
-    for n in _numbered_dirs(names, _REVIEW_DIR_RE):
+    for n in _numbered_dirs(entries, _REVIEW_DIR_RE):
         points_.append({"ref": f"main:review_{n}", "label": f"Review round {n}",
                         "kind": "review", "commit": sha, "at": at})
-    if "outline.md" in names:
+    if entries.get(b"outline.md") == b"blob":
         points_.append({"ref": "main:outline.md", "label": "Outline",
                         "kind": "outline", "commit": sha, "at": at})
     return points_
 
 
-def _draft_points(repo: Path, agent: str) -> list[dict]:
+def _draft_points(tip: _BranchTip, entries: dict[bytes, bytes]) -> list[dict]:
     """Points contributed by `refs/heads/draft/<agent>`: one for
     `sections` (that agent's current draft) when present, and one per
     `review_<N>` directory. `sections` first — it is the current state,
     the most recent thing to look at — then reviews newest round first.
     """
-    short = f"draft/{agent}"
-    ref = f"refs/heads/{short}"
-    tip = _branch_tip(repo, ref)
-    if tip is None:
-        return []
-    sha, at = tip
-    names = _ls_tree_names(repo, ref)
+    short = tip.ref.removeprefix("refs/heads/")
+    agent = short.removeprefix("draft/")
+    sha, at = tip.commit, tip.at
 
     points_: list[dict] = []
-    if "sections" in names:
+    if entries.get(b"sections") == b"tree":
         points_.append({"ref": f"{short}:sections", "label": f"{agent}'s draft",
                         "kind": "draft", "commit": sha, "at": at})
-    for n in _numbered_dirs(names, _REVIEW_DIR_RE):
+    for n in _numbered_dirs(entries, _REVIEW_DIR_RE):
         points_.append({"ref": f"{short}:review_{n}", "label": f"Review round {n} ({agent})",
                         "kind": "review", "commit": sha, "at": at})
     return points_
+
+
+def _read_point_snapshot(ws: Path) -> _PointSnapshot | None:
+    """Read once, then enumerate solely from the observed object IDs.
+
+    Listing errors propagate without exposing any partial point set. No
+    repair, lock, ref reread or round-dependent fallback occurs here.
+    """
+    repo = repo_path(ws)
+    identity = _repo_identity(repo)
+    state = _read_memo.get()
+    # Remove old authority *before* any fallible transport/listing operation.
+    # Missing/replaced directories and failed observations cannot revive it.
+    cached = None
+    if state is not None:
+        if identity is None:
+            _read_memo.set(())
+        else:
+            cached = next((memo for memo in state if memo.identity == identity), None)
+            _read_memo.set(tuple(memo for memo in state
+                                 if memo.identity.location != identity.location))
+    if identity is None:
+        return None
+    tips = _read_branch_tips(repo)
+    if tips is None:
+        return None
+    if _repo_identity(repo) != identity:
+        raise ProvenanceError("provenance repository changed during ref observation")
+    if cached is not None and cached.snapshot.branches == tips:
+        _read_memo.set((*(_read_memo.get() or ()), cached))
+        return cached.snapshot
+    result = []
+    for tip in tips:
+        entries = _recursive_entries(repo, tip.commit)
+        if tip.ref == "refs/heads/main":
+            result.extend(_main_points(tip, entries))
+        else:
+            result.extend(_draft_points(tip, entries))
+    snapshot = _PointSnapshot(tips, tuple(_Point(tuple(point.items())) for point in result))
+    if state is not None:
+        _read_memo.set((*(_read_memo.get() or ()), _Memo(identity, snapshot)))
+    return snapshot
 
 
 def points(ws: Path) -> list[dict]:
@@ -907,27 +1043,22 @@ def points(ws: Path) -> list[dict]:
     A workspace whose repo doesn't exist at all — never synced — is the
     same ordinary case as one synced with no branches: `[]`, not an error.
 
+    An initial ref-read failure also yields `[]`. After readable refs,
+    failed recursive listings or unrepresentable control metadata raise
+    `ProvenanceError`, never a successful partial enumeration.
+
     Sorted `main` before the draft branches (agents sorted by name), and
     newest-round-first within each branch, so a panel listing these
     top-down reads as the most recent work first.
     """
-    ws = Path(ws)
-    repo = repo_path(ws)
-    if not repo.is_dir():
-        return []
-
-    result = _main_points(repo)
-    for agent in _draft_branches(repo):
-        result.extend(_draft_points(repo, agent))
-    return result
+    snapshot = _read_point_snapshot(Path(ws))
+    return [dict(point) for point in snapshot.points] if snapshot is not None else []
 
 
-def _point_treeish(point: str) -> str:
-    """`<branch>:<tree path>` -> `refs/heads/<branch>:<tree path>`, the
-    tree-ish `git diff` actually takes. Only ever called on a `point`
-    already proven to equal one `points()` returned — see `diff`."""
-    branch, _, path = point.partition(":")
-    return f"refs/heads/{branch}:{path}"
+def _point_treeish(point: _Point) -> str:
+    """A checked immutable record's OID and exact authorized tree path."""
+    _branch, _sep, path = point["ref"].partition(":")
+    return f"{point['commit']}:{path}"
 
 
 def diff(ws: Path, a: str, b: str) -> dict:
@@ -946,8 +1077,8 @@ def diff(ws: Path, a: str, b: str) -> dict:
     the check is equality against a known-good set, not a general
     ref-format or existence check.
 
-    Both points are resolved to a `refs/heads/<branch>:<tree path>`
-    tree-ish (see `_point_treeish`) and diffed directly — `git diff`
+    Both points resolve to `<observed object ID>:<authorized tree path>`
+    from the same checked snapshot (see `_point_treeish`) — `git diff`
     accepts two tree-ish arguments and compares them recursively, which is
     exactly what lets a draft's `sections` be compared against a round's
     `merge_<n>/sections` despite living on different branches.
@@ -962,15 +1093,16 @@ def diff(ws: Path, a: str, b: str) -> dict:
     reporting `Binary files ... differ` instead of emitting them.
     """
     ws = Path(ws)
-    allowed = {point["ref"] for point in points(ws)}
+    snapshot = _read_point_snapshot(ws)
+    allowed = {point["ref"]: point for point in snapshot.points} if snapshot is not None else {}
     if a not in allowed:
         raise ProvenanceError(f"not a point: {a!r}")
     if b not in allowed:
         raise ProvenanceError(f"not a point: {b!r}")
 
     repo = repo_path(ws)
-    text = _git(repo, "diff", "--no-color", _point_treeish(a), _point_treeish(b),
-               errors="replace")
+    text = _git(repo, "diff", "--no-color", _point_treeish(allowed[a]), _point_treeish(allowed[b]),
+               errors="replace", extra_env={"GIT_NO_REPLACE_OBJECTS": "1"})
 
     truncated = False
     if len(text) > DIFF_LIMIT:

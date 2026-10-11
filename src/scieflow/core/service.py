@@ -1579,14 +1579,27 @@ def _manuscript(ws: Path) -> dict:
     if not provenance.repo_path(ws).is_dir():
         return out("no_repo", "manuscript history has not been recorded yet — it appears "
                               "after the first merge round or workbench visit")
+    with provenance.read_scope():
+        return _manuscript_points(ws, out)
+
+
+def _manuscript_points(ws: Path, out) -> dict:
+    """The panel's normal points/comparison path, inside its lazy read scope."""
     points = provenance.points(ws)
     if not points:
         return out("no_points", "the history repository exists but holds no points yet — "
                                 "history appears after the first merge round or workbench visit")
-    merges = sorted(((int(m.group(1)), p["ref"]) for p in points
-                     if p.get("kind") == "merge" and "parent" not in p
-                     and (m := re.fullmatch(r"main:merge_(\d+)", p.get("ref", "")))),
-                    reverse=True)
+    try:
+        merges = sorted(((int(m.group(1)), p["ref"]) for p in points
+                         if p.get("kind") == "merge" and "parent" not in p
+                         and (m := re.fullmatch(r"main:merge_(\d+)", p.get("ref", "")))),
+                        reverse=True)
+    except ValueError:
+        # The reader accepts arbitrarily long canonical decimals. This panel
+        # still has an integer round contract; never substitute an older round
+        # or alter Python's global integer limits to disguise that boundary.
+        return out("no_merge", "history contains a merge round identifier that cannot be represented "
+                               "by this panel's integer round field")
     if not merges:
         return out("no_merge", "history holds drafts but no merge round yet")
 
