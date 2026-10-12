@@ -221,9 +221,13 @@ def apply_agents(request: Request, slug: str = Form(""),
 
 @router.get("/runs/{slug}", response_class=HTMLResponse)
 def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
+    from scieflow.web import presentation
+
     project = _project(request)
-    detail = service.run_detail(project, slug)          # ServiceError -> 404
+    detail = presentation.sanitized(service.run_detail(project, slug))
     ws = service.run_workspace(project, slug)
+    for event in detail.get('events', []):
+        event['data'] = presentation.text(event.get('data', {}))
     status = detail["status"] or {}
     return TEMPLATES.TemplateResponse(request, "run.html", {
         "slug": slug,
@@ -231,12 +235,13 @@ def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
         "phases": list((status.get("phases") or {}).items()),
         "remaining": {dim: _percent(value)
                       for dim, value in (detail["remaining"] or {}).items()},
-        "jobs": [service.job_json(job) for job in reversed(jobs_mod.list_jobs(project, ws))],
-        "charter": service.run_charter(project, slug),
-        "conversation": service.conversation_state(project, slug),
+        "jobs": [presentation.sanitized(service.job_json(job)) for job in reversed(jobs_mod.list_jobs(project, ws))],
+        "charter": presentation.sanitized(service.run_charter(project, slug)),
+        "conversation": presentation.conversation_view(service.conversation_state(project, slug)),
+        "conversation_raw": presentation.verified_raw_url(ws, slug, 'conversation.yml'),
         "agents": service.conversational_agents(project),
-        "overview": service.run_overview(project, slug),
-        "error": error,
+        "overview": presentation.sanitized(service.run_overview(project, slug)),
+        "error": presentation.text(error),
         "csrf": auth.csrf_token(request),
     })
 
@@ -531,20 +536,35 @@ def cancel_job(request: Request, slug: str, job_id: str):
 
 @router.get("/runs/{slug}/jobs/{job_id}", response_class=HTMLResponse)
 def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
+    from scieflow.core.turn_output import display_panel
+    from scieflow.web import presentation
+
     project = _project(request)
-    job = _owning_job(project, slug, job_id)
-
-    def _read(path: str) -> str:
-        try:
-            return Path(path).read_text(errors="replace")[-200_000:]
-        except OSError:
-            return ""
-
+    ws = service.run_workspace(project, slug)
+    try:
+        with jobs_mod.locate_artifacts(project, job_id, run_dir=ws) as location:
+            job = location.read_job()
+            panels = {}
+            for stream in ('stdout', 'stderr'):
+                try:
+                    with location.open_log(stream) as source:
+                        panels[stream] = display_panel(source).text
+                except jobs_mod.JobArtifactError:
+                    panels[stream] = '[Display unavailable: source invalidated; raw artifact retained]'
+            # argv is already materialized by record loading. Do NOT sanitize
+            # every argument before the lazy capped aggregate consumes it.
+            view = presentation.sanitized({key: value for key, value in service.job_json(job).items() if key != 'argv'})
+            view['argv_display'] = presentation.argv_panel(job.argv)
+    except jobs_mod.JobArtifactError as exc:
+        raise HTTPException(status_code=404, detail='job unavailable') from exc
     return TEMPLATES.TemplateResponse(request, "job.html", {
         "slug": slug,
-        "job": service.job_json(job),
-        "out": _read(job.log),
-        "err": _read(job.err),
+        "job": view,
+        "out": panels['stdout'],
+        "err": panels['stderr'],
+        "out_raw": presentation.verified_raw_url(ws, slug, location.relative_log),
+        "err_raw": presentation.verified_raw_url(ws, slug, location.relative_err),
+        "job_raw": presentation.verified_raw_url(ws, slug, f'jobs/{job_id}.json'),
         "live": job.state == "running",
     })
 
@@ -567,38 +587,35 @@ def files_page(request: Request, slug: str, path: str = "") -> HTMLResponse:
 
 
 @router.get("/runs/{slug}/file")
-def file_view(request: Request, slug: str, path: str):
-    from fastapi import HTTPException
-    from fastapi.responses import FileResponse
-
-    from scieflow.web import files as files_mod
+def file_view(request: Request, slug: str, path: str, download: bool = False):
+    from scieflow.core.turn_artifacts import ArtifactError
+    from scieflow.core.turn_output import display_panel
+    from scieflow.web import files as files_mod, presentation
+    from scieflow.web.artifact_response import ArtifactResponse
 
     ws = service.run_workspace(_project(request), slug)
     try:
-        target = files_mod.resolve(ws, path)
+        handle, owner = files_mod.acquire_owned(ws, path)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail='path escapes the run or is unsafe') from exc
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=f"no such file: {path}") from exc
-    if target.is_dir():
-        raise HTTPException(status_code=400, detail="that is a directory")
+        raise HTTPException(status_code=404, detail='no such file') from exc
     try:
-        if files_mod.is_text(target) and target.stat().st_size <= files_mod.MAX_INLINE:
-            return TEMPLATES.TemplateResponse(request, "file.html", {
-                "slug": slug, "path": path,
-                "text": target.read_text(errors="replace"),
-            })
-    except OSError as exc:
-        # Gone (or unreadable) between resolve() and here — e.g. an agent
-        # deleted it. Not a security escape, just no longer there.
-        raise HTTPException(status_code=404, detail=f"no such file: {path}") from exc
-    media_type, download = files_mod.download_type(target)
-    return FileResponse(
-        target,
-        media_type=media_type,
-        headers={"X-Content-Type-Options": "nosniff"},
-        # Only the inline-safe allowlist skips a forced download; everything
-        # else — HTML, JS, SVG, anything unrecognised — is served as an
-        # attachment so it can never execute in this app's origin.
-        filename=target.name if download else None,
-    )
+        target = Path(path)  # suffix/name classification ONLY; no filesystem I/O
+        if not download and files_mod.is_text(target) and handle.snapshot_size <= files_mod.MAX_INLINE:
+            panel = display_panel(handle)
+            handle.verify_unchanged()
+            return TEMPLATES.TemplateResponse(request, 'file.html', {
+                'slug': slug, 'path': presentation.text(path), 'text': panel.text,
+                'raw': presentation.raw_url(slug, path)})
+        media_type, attachment = files_mod.download_type(target)
+        if download:
+            media_type, attachment = 'application/octet-stream', True
+        response = ArtifactResponse(handle, owner, media_type, target.name if attachment else None)
+        owner = None  # Successful response construction transfers the active stack.
+        return response
+    except ArtifactError as exc:
+        raise HTTPException(status_code=400, detail='artifact unavailable') from exc
+    finally:
+        if owner is not None:
+            owner.close()

@@ -173,12 +173,17 @@ class RegularArtifact:
         self._root, self._directories = root, directories
         self._parent, self._name, self._fd = parent, name, fd
         self._facts, self._size = _file_facts(info), info.st_size
+        self._snapshot_stat = info
         self._aliases = aliases
         self._active = True
 
     @property
     def snapshot_size(self):
         return self._size
+
+    @property
+    def snapshot_stat(self):
+        return self._snapshot_stat
 
     def verify_unchanged(self):
         if not self._active:
@@ -371,7 +376,7 @@ def _contained_route(root, parts, directories):
 
 
 @contextmanager
-def _acquire(root, relative_path, *, create=False, allow_contained_aliases=False):
+def _acquire(root, relative_path, *, create=False, allow_contained_aliases=False, live=False):
     root = _root(root)
     if type(allow_contained_aliases) is not bool:
         raise ValueError('invalid alias selection')
@@ -399,12 +404,24 @@ def _acquire(root, relative_path, *, create=False, allow_contained_aliases=False
         root._verify()
         directories.verify()
         _verify_aliases(aliases)
-        if _file_facts(os.stat(name, dir_fd=parent, follow_symlinks=False)) != _file_facts(info):
+        named = _file_facts(os.stat(name, dir_fd=parent, follow_symlinks=False))
+        if live:
+            # fd/name stat calls are not atomic with a genuine append writer.
+            # Accept ONLY ordered growth of the original structural identity.
+            latest = os.fstat(fd)
+            if not (_live_progress(_file_facts(info), named) and
+                    _live_progress(named, _file_facts(latest))):
+                raise ArtifactError('artifact-identity-changed')
+            info = latest
+            root._verify()
+            directories.verify()
+        elif named != _file_facts(info):
             raise ArtifactError('artifact-identity-changed')
         if create:
             handle = ExclusiveArtifact(_TOKEN, root, directories, parent, name, fd, info)
         else:
-            handle = RegularArtifact(_TOKEN, root, directories, parent, name, fd, info, aliases)
+            constructor = LiveArtifact if live else RegularArtifact
+            handle = constructor(_TOKEN, root, directories, parent, name, fd, info, aliases)
         fd = None
     except OSError as exc:
         try:
@@ -433,3 +450,68 @@ def open_run_artifact(root_identity: ArtifactRoot, relative_path: str | Path, *,
 
 def create_run_artifact(root_identity: ArtifactRoot, relative_path: str | Path):
     return _acquire(root_identity, relative_path, create=True)
+
+
+def _live_progress(previous, current):
+    return (previous[:7] == current[:7] and current[7] >= previous[7] and
+            (current[7] > previous[7] or current == previous))
+
+
+class LiveArtifact(RegularArtifact):
+    """Append-observing view, distinct from an immutable finite snapshot.
+
+    Same-size changes are invalid, not a new baseline. Growth cannot prove
+    that a privileged writer has not also rewritten earlier bytes.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._observed = self._facts
+        self._invalid = False
+
+    def _observe(self):
+        if not self._active or self._invalid:
+            raise ArtifactError('live-artifact-invalidated')
+        try:
+            self._root._verify()
+            self._directories.verify()
+            _verify_aliases(self._aliases)
+            info = os.fstat(self._fd)
+            facts = _file_facts(info)
+            named = _file_facts(os.stat(self._name, dir_fd=self._parent, follow_symlinks=False))
+            latest = os.fstat(self._fd)
+            final = _file_facts(latest)
+            if not (_live_progress(self._observed, facts) and
+                    _live_progress(facts, named) and _live_progress(named, final)):
+                raise ArtifactError('live-artifact-invalidated')
+            self._root._verify()
+            self._directories.verify()
+            _verify_aliases(self._aliases)
+            self._observed = final
+            return latest.st_size
+        except (ArtifactError, OSError) as exc:
+            self._invalid = True
+            raise ArtifactError('live-artifact-invalidated') from exc
+
+    def extent(self):
+        return self._observe()
+
+    def read_available(self, offset, size):
+        if type(offset) is not int or type(size) is not int or offset < 0 or not 0 <= size <= _MAX_READ:
+            raise ValueError('invalid bounded read')
+        extent = self._observe()
+        try:
+            count = min(size, max(0, extent - offset))
+            data = os.pread(self._fd, count, offset) if count else b''
+            self._observe()
+            if len(data) != count:
+                raise ArtifactError('live-artifact-short-read')
+            return data
+        except (ArtifactError, OSError) as exc:
+            self._invalid = True
+            raise ArtifactError('live-artifact-invalidated') from exc
+
+
+@contextmanager
+def open_live_artifact(root: ArtifactRoot, relative: str):
+    with _acquire(root, relative, live=True) as handle:
+        yield handle

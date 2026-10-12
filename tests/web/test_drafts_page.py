@@ -44,7 +44,7 @@ def _responder_cmd() -> str:
     like this one can prove the round actually advances end to end."""
     code = ('import json;print(json.dumps({"session_id": "resp-1"}));'
            'print(json.dumps({"type": "result", "result": "merged okay"}))')
-    return f"{sys.executable} -c '{code}' {{prompt}}"
+    return f"{sys.executable} -c '{code}' {{session}} {{prompt}}"
 
 
 @pytest.fixture

@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import ExitStack
 from pathlib import Path
+
+import anyio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -41,53 +44,109 @@ async def _events(request: Request, slug: str, since: str | None):
         await asyncio.sleep(POLL_S)
 
 
-async def _log(request: Request, path: Path):
-    """One frame per completed line, holding back a trailing partial line.
+def _wire_frame(text):
+    """Cap actual encoded framing AFTER sanitation, never cut a scalar."""
+    limit = 16384 - len(b'data: \n\n')
+    raw = text.encode('utf-8')
+    if len(raw) > limit:
+        notice = '[Output truncated: wire-limit; raw artifact retained]'
+        available = limit - len(notice.encode('utf-8'))
+        text = raw[:available].decode('utf-8', 'ignore') + notice
+    return ('data: ' + text + '\n\n').encode('utf-8')
 
-    A subprocess's write and our poll are not aligned, so a read can land
-    mid-line (`"hello wor"`, with `"ld\\n"` arriving on the next poll).
-    `splitlines()` on each chunk in isolation would treat that partial tail
-    as its own complete line and tear it into two frames. So the tail after
-    the last newline in what we've read is held in `pending` across polls
-    and only emitted once a newline completes it -- except when the job has
-    reached a final state (`jobs.FINAL`), in which case no more output is
-    ever coming and the held-back remainder (which may never gain a
-    trailing newline, e.g. the process's very last write) is flushed as-is.
 
-    The final-state check reads only this job's own record file
-    (`jobs.peek_state`), not every job in the project. `jobs.find` would
-    glob and JSON-parse every job record under every run each time it is
-    called; since this branch runs on essentially every poll for a job
-    that is actively writing output (not just once at the end of the
-    stream), that cost is O(n) in the number of jobs ever run, on a hot
-    path hit roughly every `POLL_S` for the life of the stream. A record
-    that can't be read yet (missing, unreadable, mid-write) reads as "not
-    final" and the loop just polls again.
-    """
-    offset = 0
-    idle = 0
-    pending = ""
-    while True:
-        if await request.is_disconnected():
-            return
-        chunk = ""
-        if path.exists():
-            with path.open("r", errors="replace") as handle:
-                handle.seek(offset)
-                chunk = handle.read()
-                offset = handle.tell()
-        pending += chunk
-        lines = pending.split("\n")
-        pending = lines.pop()      # remainder after the last newline seen so far
-        for line in lines:
-            yield f"data: {line}\n\n"
-        if pending and jobs.peek_state(path) in jobs.FINAL:
-            yield f"data: {pending}\n\n"
-            pending = ""
-        idle = 0 if (chunk or lines) else idle + 1
-        if idle and idle % HEARTBEAT_EVERY == 0:
-            yield ": ping\n\n"
-        await asyncio.sleep(POLL_S)
+class _LogRecords:
+    """Raw partial <=16KiB; shared sanitizer also sees discarded terminators."""
+    def __init__(self):
+        from scieflow.core.turn_output import DisplaySanitizer
+
+        self.pending = b''
+        self.discard = False
+        self.sanitizer = DisplaySanitizer()
+
+    def feed(self, chunk):
+        start = 0
+        while start < len(chunk):
+            end = chunk.find(b'\n', start)
+            complete = end >= 0
+            end = end if complete else len(chunk)
+            part = chunk[start:end]
+            if self.discard:
+                self.sanitizer.feed(part)
+            elif len(self.pending) + len(part) > 16384:
+                self.sanitizer.feed(self.pending)
+                self.sanitizer.feed(part)
+                self.pending, self.discard = b'', True
+            else:
+                self.pending += part
+            if complete:
+                if self.discard:
+                    self.sanitizer.feed(b'\n')
+                    yield _wire_frame('[Output omitted: raw-record-limit; raw artifact retained]')
+                else:
+                    text = self.sanitizer.feed(self.pending + b'\n')
+                    # LF in an OSC payload is consumed, not finalization.
+                    if text.endswith('\n'):
+                        text = text[:-1]
+                    if text or not self.pending:
+                        yield _wire_frame(text)
+                self.pending, self.discard = b'', False
+            start = end + (1 if complete else 0)
+
+    def finish(self):
+        if self.discard:
+            self.sanitizer.feed(b'', final=True)
+            yield _wire_frame('[Output omitted: raw-record-limit; raw artifact retained]')
+        else:
+            text = self.sanitizer.feed(self.pending, final=True)
+            if text:
+                yield _wire_frame(text)
+        self.pending = b''
+
+
+async def _log(request: Request, location, source, owner):
+    offset, idle, records = 0, 0, _LogRecords()
+    try:
+        while True:
+            if await request.is_disconnected():
+                return
+            chunk = await anyio.to_thread.run_sync(source.read_available, offset, 65536)
+            offset += len(chunk)
+            for frame in records.feed(chunk):
+                if await request.is_disconnected():
+                    return
+                yield frame
+                await asyncio.sleep(0)  # cooperative under sustained output
+            extent = await anyio.to_thread.run_sync(source.extent)
+            if offset >= extent:
+                state = await anyio.to_thread.run_sync(location.peek_state)
+                # Reobserve after the selected record; final state alone is
+                # not EOF while already-observed log bytes remain unread.
+                if state in jobs.FINAL and offset >= await anyio.to_thread.run_sync(source.extent):
+                    for frame in records.finish():
+                        yield frame
+                    return
+            idle = 0 if chunk else idle + 1
+            if idle and idle % HEARTBEAT_EVERY == 0:
+                yield b': ping\n\n'
+            await asyncio.sleep(0 if offset < extent else POLL_S)
+    except (jobs.JobArtifactError, ValueError, OSError):
+        yield _wire_frame('[Display stopped: source invalidated; raw artifact retained]')
+    finally:
+        owner.close()
+
+
+class _OwnedLogResponse(StreamingResponse):
+    """Close even if cancellation precedes the generator's first iteration."""
+    def __init__(self, content, owner):
+        self.owner = owner
+        super().__init__(content, media_type='text/event-stream', headers=SSE_HEADERS)
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self.owner.close()
 
 
 @router.get("/runs/{slug}/events/stream", tags=["runs"])
@@ -104,8 +163,18 @@ async def event_stream(request: Request, slug: str,
 @router.get("/jobs/{job_id}/log/stream", tags=["jobs"])
 async def log_stream(request: Request, job_id: str) -> StreamingResponse:
     """One frame per line of a job's stdout, as it is written."""
-    job = jobs.find(request.app.state.project, job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"no job {job_id}")
-    return StreamingResponse(_log(request, Path(job.log)),
-                             media_type="text/event-stream", headers=SSE_HEADERS)
+    owner = ExitStack()
+    def acquire():
+        location = owner.enter_context(jobs.locate_artifacts(request.app.state.project, job_id))
+        source = owner.enter_context(location.open_live_log())
+        source.extent()
+        return location, source
+    try:
+        location, source = await anyio.to_thread.run_sync(acquire)
+        return _OwnedLogResponse(_log(request, location, source, owner), owner)
+    except (jobs.JobArtifactError, ValueError, OSError) as exc:
+        owner.close()
+        raise HTTPException(status_code=404, detail='job log unavailable') from exc
+    except BaseException:
+        owner.close()
+        raise

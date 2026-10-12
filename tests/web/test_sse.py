@@ -187,7 +187,7 @@ def test_the_server_keeps_answering_while_a_turn_is_in_flight(live, project):
     from scieflow.web.auth import CSRF_COOKIE
 
     ws = project.run_dir("r1")
-    slow = f"{sys.executable} -c 'import time; time.sleep(3)' {{prompt}}"
+    slow = f"{sys.executable} -c 'import time; time.sleep(3)' {{session}} {{prompt}}"
     agents_yml = project.root / "config" / "agents.yml"
     agents_yml.write_text(agents_yml.read_text() + (
         f'  slow:\n    cmd: "{slow}"\n    session_cmd: "{slow}"\n'
@@ -360,3 +360,71 @@ def test_the_server_keeps_answering_while_a_preview_compiles(live, project):
     finally:
         preview.shutil.which = original_which
         preview.LATEXMK = original_latexmk
+
+
+def test_task6_real_continuous_stdout_health_cancel_and_close(live, project, monkeypatch):
+    """Real writer, real stream and guarded cancel concurrently; no model."""
+    from contextlib import contextmanager
+    from pathlib import Path
+    from scieflow.core import jobs
+    from scieflow.web.auth import CSRF_COOKIE
+
+    original = jobs.locate_artifacts
+    acquired = []
+    @contextmanager
+    def counted(*args, **kwargs):
+        with original(*args, **kwargs) as location:
+            acquired.append(location.root)
+            yield location
+    monkeypatch.setattr(jobs, 'locate_artifacts', counted)
+    script = 'import os, time\nwhile True:\n os.write(1, b"continuous\\n" * 6000)\n time.sleep(0.002)\n'
+    job, proc = jobs.start(project, [sys.executable, '-c', script], kind='ordinary',
+                           cwd=project.root, run_dir=project.run_dir('r1'))
+    try:
+        with live.stream('GET', f'/api/v1/jobs/{job.id}/log/stream', timeout=10) as response:
+            assert response.status_code == 200
+            lines = response.iter_lines()
+            assert next(line for line in lines if line.startswith('data: ')) == 'data: continuous'
+            start = time.monotonic()
+            assert live.get('/healthz').status_code == 200
+            assert time.monotonic() - start < 2
+            result = live.post(f'/api/v1/jobs/{job.id}/cancel', headers={'x-csrf-token': live.cookies[CSRF_COOKIE]}, timeout=30)
+            assert result.status_code == 200
+        deadline = time.monotonic() + 3
+        while acquired and acquired[0]._active and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert len(acquired) == 1 and not acquired[0]._active
+        assert jobs.peek_state(Path(job.log)) == 'cancelled'
+        assert Path(job.log).stat().st_size > 65536
+    finally:
+        jobs.cancel(job)
+        jobs.wait(job, proc)
+
+
+def test_task6_records_exact_wire_scalar_and_discard_bounds():
+    from scieflow.web.sse import _LogRecords, _wire_frame
+
+    exact = 'a' * (16384 - len(b'data: \n\n'))
+    assert len(_wire_frame(exact)) == 16384
+    assert b'truncated' not in _wire_frame(exact)
+    for value in (exact + 'a', '😀' * 5000, '\\u202e' * 4000):
+        frame = _wire_frame(value)
+        assert len(frame) <= 16384 and b'truncated' in frame
+        frame.decode('utf-8', 'strict')
+    records = _LogRecords()
+    assert list(records.feed(b'x' * 16384)) == []
+    assert len(records.pending) == 16384
+    assert list(records.feed(b'x' * 65536)) == []
+    assert not records.pending and records.discard
+    for _ in range(32):
+        assert list(records.feed(b'x' * 65536)) == []
+        assert len(records.pending) <= 16384 and records.sanitizer.pending_bytes <= 16384
+    frames = list(records.feed(b'suffix\nnormal\n'))
+    assert len(frames) == 2 and b'omitted' in frames[0] and frames[1] == b'data: normal\n\n'
+    assert b'suffix' not in b''.join(frames)
+    records = _LogRecords()
+    assert list(records.feed(b'\x1b]osc\n')) == []
+    assert list(records.feed(b'secret\x1b')) == []
+    assert list(records.feed(b'\\public\xf0\x9f')) == []
+    frames = list(records.feed(b'\x98\x80\r\n'))
+    assert frames == ['data: public😀\\x0d\n\n'.encode()]

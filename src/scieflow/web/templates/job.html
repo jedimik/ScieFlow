@@ -8,17 +8,41 @@
   {% if job.exit_code is not none %} · exit {{ job.exit_code }}{% endif %}
   {% if job.duration_s %} · {{ "%.1f"|format(job.duration_s) }}s{% endif %}
 </p>
-<p class="dim"><code>{{ job.argv|join(" ") }}</code></p>
+<p class="dim"><code>{{ job.argv_display }}</code></p>
+{% if job_raw %}<p><a href="{{ job_raw }}">raw job record / argv</a></p>{% else %}<p class="dim">Raw job record unavailable.</p>{% endif %}
 
 <h2>Output</h2>
 <pre class="log" id="out">{{ out }}</pre>
+{% if out_raw %}<a href="{{ out_raw }}">raw stdout artifact</a>{% else %}<p class="dim">Raw stdout unavailable.</p>{% endif %}
 {% if err %}<h2>Errors</h2><pre class="log">{{ err }}</pre>{% endif %}
+{% if err_raw %}<a href="{{ err_raw }}">raw stderr artifact</a>{% else %}<p class="dim">Raw stderr unavailable.</p>{% endif %}
 {% if live %}
 <script>
   const out = document.getElementById("out");
   const stream = new EventSource("/api/v1/jobs/" + {{ job.id|tojson }} + "/log/stream");
+  const limit = 200000;
+  const notice = "\n[Display truncated: display-limit; raw artifact retained]";
+  let initialized = false, saturated = false, used = 0;
+  function prefix(value, room) {
+    let end = Math.min(value.length, room);
+    if (end && end < value.length && /[\uD800-\uDBFF]/.test(value[end - 1])) { end--; }
+    return value.slice(0, end);
+  }
   stream.onmessage = (message) => {
-    out.textContent += message.data + "\n";
+    if (saturated) { return; }
+    // SSE starts at zero. Keep the useful server panel until its first frame,
+    // then replace it ONCE rather than showing the same prefix twice.
+    if (!initialized) { out.textContent = ""; initialized = true; }
+    const room = limit - notice.length - used;
+    const value = prefix(message.data, Math.max(0, room));
+    if (value) { out.appendChild(document.createTextNode(value)); used += value.length; }
+    if (value.length < message.data.length || used >= limit - notice.length) {
+      out.appendChild(document.createTextNode(notice));
+      saturated = true;
+      stream.close(); // Stop this view only, never cancel/replay the job.
+    } else {
+      out.appendChild(document.createTextNode("\n")); used++;
+    }
     out.scrollTop = out.scrollHeight;
   };
 </script>

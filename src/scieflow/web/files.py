@@ -128,3 +128,37 @@ def listing(ws: Path, relpath: str = "") -> list[dict]:
             "size": size,
         })
     return entries
+
+
+def acquire_owned(ws: Path, relpath: str):
+    """Transfer a pinned root and contained-alias source in one ExitStack.
+
+    The raw relative route is traversed from the root descriptor; resolve()
+    is not the authorization for a later absolute-path reopen.
+    """
+    from contextlib import ExitStack
+
+    from scieflow.core.turn_artifacts import ArtifactError, open_run_artifact, pin_artifact_root
+
+    owner = ExitStack()
+    try:
+        if type(relpath) is not str or not relpath or relpath.startswith('/') or '\0' in relpath:
+            raise ValueError('path escapes the run or is unsafe')
+        parts = relpath.split('/')
+        if any(p in ('', '.', '..') for p in parts):
+            raise ValueError('path escapes the run or is unsafe')
+        root = owner.enter_context(pin_artifact_root(ws))
+        handle = owner.enter_context(open_run_artifact(root, relpath, allow_contained_aliases=True))
+        handle.verify_unchanged()
+        return handle, owner
+    except ArtifactError as exc:
+        owner.close()
+        cause = exc
+        while cause is not None:
+            if isinstance(cause, FileNotFoundError):
+                raise FileNotFoundError('no such artifact') from None
+            cause = cause.__cause__
+        raise ValueError('path escapes the run or is unsafe') from None
+    except BaseException:
+        owner.close()
+        raise

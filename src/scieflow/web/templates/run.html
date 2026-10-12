@@ -167,6 +167,7 @@
 {% endif %}
 
 <h2>Conversation</h2>
+{% if conversation_raw %}<p><a href="{{ conversation_raw }}">raw conversation / audit artifact</a></p>{% else %}<p class="dim">Raw conversation artifact unavailable.</p>{% endif %}
 {% if not conversation.agent %}
   <p class="dim">No agent is holding this conversation yet — choose an agent
      below to start one. Each message is a sandboxed job that resumes the
@@ -189,6 +190,7 @@
     <span class="state-failed">({{ turn.state }})</span>
     {% endif %}
     <pre>{{ turn.text }}</pre>
+    {% if turn.audit_display %}<details><summary>Turn audit (data only)</summary><pre>{{ turn.audit_display }}</pre></details>{% endif %}
     {% if turn.job_id %}
     <a class="dim" href="/runs/{{ slug }}/jobs/{{ turn.job_id }}">this turn's job →</a>
     {% endif %}

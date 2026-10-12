@@ -167,6 +167,20 @@ class JobArtifactLocation:
         except (ArtifactError, OSError) as exc:
             raise JobArtifactError('unsafe-job-log') from exc
 
+    @contextmanager
+    def open_live_log(self, stream='stdout'):
+        from scieflow.core.turn_artifacts import open_live_artifact
+
+        if type(stream) is not str or stream not in ('stdout', 'stderr'):
+            raise JobArtifactError('invalid-job-stream')
+        relative = self.relative_log if stream == 'stdout' else self.relative_err
+        try:
+            self.root._verify()
+            with open_live_artifact(self._parent_root, relative.removeprefix('jobs/')) as source:
+                yield source
+        except (ArtifactError, OSError) as exc:
+            raise JobArtifactError('unsafe-job-log') from exc
+
 
 def _artifact_canonical(path):
     path = Path(path)
