@@ -16,7 +16,7 @@ enforce this for the whole app, not just this module.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 
 from scieflow.core import jobs, service
 from scieflow.web import auth
@@ -28,6 +28,12 @@ MUTATE = [Depends(auth.csrf_protect)]
 
 def _project(request: Request):
     return request.app.state.project
+
+
+#: The async form-read dependency (see `scieflow.web.pages._conversation_form`):
+#: resolved on the event loop before the plain-`def` handlers below run in
+#: the threadpool — reading the body needs the loop, the handlers must not.
+from scieflow.web.pages import _conversation_form as _read_form
 
 
 @router.get("/runs", tags=["runs"])
@@ -184,24 +190,73 @@ def conversation(request: Request, slug: str) -> dict:
 
 
 @router.post("/runs/{slug}/conversation", dependencies=MUTATE, tags=["runs"])
-def say(request: Request, slug: str, message: str = Form(...)) -> dict:
+def say(request: Request, slug: str, message: str = Form(...),
+        form=Depends(_read_form)) -> dict:
     """Send one message; the reply is a sandboxed job that resumes the session.
 
-    Plain `def`, not `async def`: `service.say` runs `dispatch_agent`, which
-    blocks on `proc.wait(timeout=...)` for as long as the agent's own
+    Task7 variants: optional `mode` ('chat' default, 'harness-command'
+    accepted-but-not-enabled) and `selection_revision` (canonical decimal
+    string, mapped to HumanSubmission.selection_revision). Malformed,
+    duplicate or non-decimal fields reject with a controlled 400; stale
+    revisions refuse with 400. The submission object is constructed here,
+    inside the authenticated controller; a client actor is never trusted.
+
+    Plain `def`, not `async def` — `service.say` runs `dispatch_agent`,
+    which blocks on `proc.wait(timeout=...)` for as long as the agent's own
     `timeout_min` (30 minutes for claude, 180 for codex in the shipped
-    registry). `serve.py` runs a single uvicorn process — an `async def`
-    handler doing that wait would block the one event loop for that whole
-    window, so nothing else (the dashboard, every run page, both SSE
-    streams, the Cancel button) could be served meanwhile. A synchronous
-    `def` handler is instead run in Starlette's threadpool, which is what
-    keeps the rest of the app answering while a turn is in flight.
+    registry). `serve.py` runs a single uvicorn process — doing that wait
+    on the event loop would block every other request (the dashboard, every
+    run page, both SSE streams, the Cancel button) for that whole window.
+    The raw form multi-dict is read by the async `_conversation_form`
+    dependency (resolved on the loop); this handler runs in the threadpool.
     """
-    return service.say(_project(request), slug, message)
+    from scieflow.web.pages import _FormError, _submission_from_form
+
+    project = _project(request)
+    try:
+        submission = _submission_from_form(form)
+    except _FormError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if submission.mode == 'harness-command':
+        from scieflow.web.pages import _as_chat
+
+        # Accepted but not enabled: CERTIFIED_POLICIES is empty, so run
+        # the message as ordinary chat — never a silent enablement.
+        return service.say(project, slug, submission.message, 'human',
+                           human_submission=_as_chat(submission))
+    return service.say(project, slug, submission.message, 'human',
+                       human_submission=submission)
 
 
 @router.post("/runs/{slug}/conversation/agent", dependencies=MUTATE, tags=["runs"])
 def set_conversation_agent(request: Request, slug: str,
-                           agent: str = Form(...)) -> dict:
-    """Hand the conversation to a different agent; the next turn starts fresh."""
-    return service.set_conversation_agent(_project(request), slug, agent)
+                           agent: str = Form(...),
+                           form=Depends(_read_form)) -> dict:
+    """Hand the conversation to a different agent; the next turn starts fresh.
+
+    Task7 variants: optional `expected_revision` (canonical decimal string),
+    `reset_session` (boolean, default false) and `confirm_new_session`
+    (required true when reset_session is true). The revision is compared
+    inside the reservation; a reset without both the confirmation and a
+    current revision rejects with a controlled 400.
+    """
+    from scieflow.web.pages import _FormError, _bool_field, _revision_field
+
+    project = _project(request)
+    try:
+        reset = _bool_field(form, 'reset_session')
+        confirm = _bool_field(form, 'confirm_new_session')
+        expected = _revision_field(form, 'expected_revision')
+        if reset and not confirm:
+            raise _FormError('resetting the session requires the new-session '
+                             'confirmation (confirm_new_session)')
+        if reset and expected is None:
+            raise _FormError('resetting the session requires the current revision '
+                             '(expected_revision)')
+    except _FormError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return service.set_conversation_agent(project, slug, agent,
+                                          expected_revision=expected,
+                                          reset_session=reset)

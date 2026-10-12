@@ -9,6 +9,7 @@
   {% if job.duration_s %} · {{ "%.1f"|format(job.duration_s) }}s{% endif %}
 </p>
 <p class="dim"><code>{{ job.argv_display }}</code></p>
+<p class="dim">turn mode: <span class="mode-badge">{{ turn_mode }}</span></p>
 {% if job_raw %}<p><a href="{{ job_raw }}">raw job record / argv</a></p>{% else %}<p class="dim">Raw job record unavailable.</p>{% endif %}
 
 <h2>Output</h2>

@@ -18,9 +18,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from urllib.parse import quote
+import re
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.datastructures import FormData
 
 from scieflow.core import jobs as jobs_mod
 from scieflow.core import service
@@ -34,6 +36,144 @@ MUTATE = [Depends(auth.csrf_protect)]
 
 def _project(request: Request):
     return request.app.state.project
+
+
+#: The send form's allowed `mode` values. 'harness-command' is an explicit
+#: intent marker only: with CERTIFIED_POLICIES empty the turn runs as
+#: ordinary chat and the page says the capability is not certified — never a
+#: claim of command execution.
+SEND_MODES = ('chat', 'harness-command')
+
+_DECIMAL = re.compile(r'(?:0|[1-9][0-9]*)')
+
+
+class _FormError(ValueError):
+    """A controlled form-field rejection: 400 for the API surface, a
+    redirect-with-error for the page surface. Nothing was written."""
+
+
+def _single_field(form, name):
+    """One value for `name`, or a controlled rejection.
+
+    A request body carrying the same key twice (a hand-crafted body, or a
+    browser bug) is ambiguity, not a value: the form parser keeps the last
+    one, so the controller must read the multi-dict directly to see the
+    duplication at all.
+    """
+    values = form.getlist(name)
+    if not values:
+        return None
+    if len(values) > 1:
+        raise _FormError(f'duplicate form field: {name}')
+    value = values[0]
+    if type(value) is not str:
+        raise _FormError(f'invalid form field: {name}')
+    return value
+
+
+def _revision_field(form, name, *, default=None):
+    """A canonical decimal revision string (0-9, no leading zeros), or None.
+
+    An ABSENT field means "no pin" — script clients and the legacy form omit
+    it. A PRESENT field is a claim about state, and the rendered forms always
+    carry a canonical token: a present-but-empty or non-canonical value is a
+    controlled rejection, never a parse-to-int of attacker text.
+    """
+    raw = _single_field(form, name)
+    if raw is None:
+        return default
+    if _DECIMAL.fullmatch(raw) is None:
+        raise _FormError(f'{name} must be a canonical decimal revision (0-9)')
+    return raw
+
+
+def _mode_field(form):
+    """The send form's mode: absent defaults to 'chat'; a bad enum rejects."""
+    raw = _single_field(form, 'mode')
+    if raw is None or raw == '':
+        return 'chat'
+    if raw not in SEND_MODES:
+        raise _FormError(f'unknown mode: {raw!r} (chat or harness-command)')
+    return raw
+
+
+def _bool_field(form, name, *, default=False):
+    """A checkbox-shaped field: absent means the default (unchecked)."""
+    raw = _single_field(form, name)
+    if raw is None or raw == '':
+        return default
+    if raw.lower() in ('true', 'on', '1', 'yes'):
+        return True
+    if raw.lower() in ('false', 'off', '0', 'no'):
+        return False
+    raise _FormError(f'{name} must be a boolean')
+
+
+async def _conversation_form(request: Request):
+    """The raw form multi-dict, once, with the body already cached by the
+    CSRF middleware's read (see auth._supplied_csrf) so the route's own
+    Form(...) parsing still sees the same bytes.
+
+    This is an `async def` DEPENDENCY, not a handler: FastAPI/Starlette
+    resolves dependencies on the event loop, then runs a plain `def`
+    handler in the threadpool. Reading the body needs the loop
+    (`request.form()`); the handler itself must stay off it (see
+    `tests/web/async_allowlist.py`), so the route signature takes
+    `form: FormData = Depends(_conversation_form)` and stays `def`.
+    """
+    return await request.form()
+
+
+def _submission_from_form(form, *, marked_requires_revision=False):
+    """Build the HumanSubmission inside the controller, from the form.
+
+    The client's actor is ignored entirely: identity is the authenticated
+    session, and `service.say` pins the actor to 'human' for marked turns.
+    """
+    from scieflow.core.turn_input import accept_human_submission
+
+    mode = _mode_field(form)
+    revision = _revision_field(form, 'selection_revision')
+    if mode == 'harness-command' and revision is None:
+        # A marked submission must pin the state it means to mark; without
+        # that, a stale tab could mark intent against an unknown revision.
+        raise _FormError('mode harness-command requires selection_revision')
+    try:
+        return accept_human_submission(_single_field(form, 'message') or '',
+                                       mode=None if mode == 'chat' else mode,
+                                       selection_revision=revision)
+    except ValueError as exc:
+        raise _FormError(str(exc)) from exc
+
+
+def _as_chat(submission):
+    """The same message as an ordinary chat submission: a marked send on a
+    deployment with no certified policies runs as charter-first chat, with
+    a visible notice — never a silent enablement or a silent refusal.
+
+    The marked submission's selection_revision is carried through, not
+    dropped: the downgraded chat send must still refuse on a stale
+    revision (check_revision with required=False compares when present),
+    so the weaker mode can never mark intent against a selection the user
+    no longer sees."""
+    from scieflow.core.turn_input import accept_human_submission
+
+    return accept_human_submission(submission.message, mode='chat',
+                                   selection_revision=submission.selection_revision)
+
+
+def _reset_fields_from_form(form):
+    """The hand-over form's reset controls, validated as a pair.
+
+    `reset_session` without `confirm_new_session` is a deliberate refusal —
+    the confirm checkbox is what makes a session-destroying action
+    deliberate — and an explicit reset always requires a revision.
+    """
+    reset = _bool_field(form, 'reset_session')
+    confirm = _bool_field(form, 'confirm_new_session')
+    if reset and not confirm:
+        raise _FormError('resetting the session requires the new-session confirmation')
+    return reset
 
 
 def _percent(fraction: float | None) -> int:
@@ -229,6 +369,17 @@ def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
     for event in detail.get('events', []):
         event['data'] = presentation.text(event.get('data', {}))
     status = detail["status"] or {}
+    try:
+        state = service.conversation_state(project, slug)
+        conversation_view = presentation.conversation_view(state)
+        # The canonical decimal token both forms render, and the page's
+        # integrity verdict for a malformed stored generation.
+        revision_token = str(state['selection_generation'])
+        generation_error = None
+    except service.ServiceError as exc:
+        conversation_view = {}
+        revision_token = ''
+        generation_error = str(exc)
     return TEMPLATES.TemplateResponse(request, "run.html", {
         "slug": slug,
         "detail": detail,
@@ -237,7 +388,9 @@ def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
                       for dim, value in (detail["remaining"] or {}).items()},
         "jobs": [presentation.sanitized(service.job_json(job)) for job in reversed(jobs_mod.list_jobs(project, ws))],
         "charter": presentation.sanitized(service.run_charter(project, slug)),
-        "conversation": presentation.conversation_view(service.conversation_state(project, slug)),
+        "conversation": conversation_view,
+        "revision_token": revision_token,
+        "generation_error": generation_error,
         "conversation_raw": presentation.verified_raw_url(ws, slug, 'conversation.yml'),
         "agents": service.conversational_agents(project),
         "overview": presentation.sanitized(service.run_overview(project, slug)),
@@ -463,17 +616,53 @@ def compile_preview(request: Request, slug: str, source: str = Form(...)):
 
 @router.post("/runs/{slug}/say", dependencies=MUTATE)
 def say(request: Request, slug: str, action: str = Form("say"),
-        message: str = Form(""), agent: str = Form("")):
+        message: str = Form(""), agent: str = Form(""),
+        form: FormData = Depends(_conversation_form)):
     """Plain `def`, not `async def` — see `scieflow.web.api.say` for why:
     `service.say` blocks for up to the agent's `timeout_min`, and an `async
     def` handler doing that would stall the one event loop this app runs on
-    for the whole turn."""
+    for the whole turn. The raw form multi-dict is read by the async
+    `_conversation_form` dependency (resolved on the loop before this
+    handler runs in the threadpool); every field check below is pure CPU.
+
+    Task7 variants: the send branch carries optional `mode` and
+    `selection_revision` form fields; the hand-over branch carries optional
+    `expected_revision`, `reset_session` and `confirm_new_session`. All
+    revision fields are canonical decimal strings; malformed, stale or
+    missing-when-required values reject with a redirect-and-error, leaving
+    state byte-identical. The HumanSubmission is constructed here, inside
+    the authenticated controller — a client-supplied actor is never trusted.
+    """
     project = _project(request)
+
     try:
         if action == "agent":
-            service.set_conversation_agent(project, slug, agent)
+            reset = _reset_fields_from_form(form)
+            expected = _revision_field(form, 'expected_revision')
+            if reset and expected is None:
+                # An explicit reset must pin the state it resets; a
+                # revision-less reset could race a concurrent selection.
+                raise _FormError('resetting the session requires the current '
+                                 'revision (expected_revision)')
+            service.set_conversation_agent(
+                project, slug, agent, expected_revision=expected,
+                reset_session=reset)
         else:
-            service.say(project, slug, message)
+            submission = _submission_from_form(form)
+            if submission.mode == 'harness-command':
+                # Explicit intent, but the shipped policy tuple is empty:
+                # run it as ordinary chat and say the capability is not
+                # certified. Never a silent enablement.
+                service.say(project, slug, submission.message, "human",
+                           human_submission=_as_chat(submission))
+                return _back(slug, 'harness-command capability is not certified '
+                                   'on this deployment; your message was sent as '
+                                   'ordinary chat')
+            service.say(project, slug, submission.message, "human",
+                       human_submission=submission)
+            return _back(slug)
+    except _FormError as exc:
+        return _back(slug, str(exc))
     except service.ServiceError as exc:
         return _back(slug, str(exc))
     return _back(slug)
@@ -557,6 +746,10 @@ def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
             view['argv_display'] = presentation.argv_panel(job.argv)
     except jobs_mod.JobArtifactError as exc:
         raise HTTPException(status_code=404, detail='job unavailable') from exc
+    audit = (job.turn_audit or {})
+    turn_mode = audit.get('input_kind') if isinstance(audit, dict) else None
+    if turn_mode not in ('chat', 'harness-command'):
+        turn_mode = 'chat' if job.kind != 'turn' else 'unsupported'
     return TEMPLATES.TemplateResponse(request, "job.html", {
         "slug": slug,
         "job": view,
@@ -566,6 +759,7 @@ def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
         "err_raw": presentation.verified_raw_url(ws, slug, location.relative_err),
         "job_raw": presentation.verified_raw_url(ws, slug, f'jobs/{job_id}.json'),
         "live": job.state == "running",
+        "turn_mode": presentation.text(turn_mode),
     })
 
 

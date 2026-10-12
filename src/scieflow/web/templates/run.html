@@ -168,6 +168,10 @@
 
 <h2>Conversation</h2>
 {% if conversation_raw %}<p><a href="{{ conversation_raw }}">raw conversation / audit artifact</a></p>{% else %}<p class="dim">Raw conversation artifact unavailable.</p>{% endif %}
+{% if generation_error %}
+  <p class="state-failed">Conversation state integrity error: {{ generation_error }}
+     — no silent recovery; fix or deliberately reset the record.</p>
+{% endif %}
 {% if not conversation.agent %}
   <p class="dim">No agent is holding this conversation yet — choose an agent
      below to start one. Each message is a sandboxed job that resumes the
@@ -181,11 +185,21 @@
      id, and none was ever recorded — the next message will start a fresh
      context rather than resuming what came before.</p>
 {% endif %}
+{% if conversation.recovery_required %}
+  <p class="state-failed">This conversation requires deliberate recovery: the last
+     marked turn ended uncertain. Retry is never automatic — choose an ordinary
+     chat message, or hand over with a confirmed new-session reset below.</p>
+{% endif %}
 
 <div class="chat">
   {% for turn in conversation.turns %}
   <div class="turn {{ turn.role }}">
     <span class="dim">{{ turn.role }} · {{ turn.get("ts", "")[11:19] }}</span>
+    {% if turn.get('audit', {}).get('input_kind') %}
+    <span class="mode-badge">{{ 'unsupported' if not turn.get('audit', {}).get('policy_revision') and turn['audit']['input_kind'] == 'harness-command' else turn['audit']['input_kind'] }}</span>
+    {% else %}
+    <span class="mode-badge">chat</span>
+    {% endif %}
     {% if turn.state and turn.state != "done" %}
     <span class="state-failed">({{ turn.state }})</span>
     {% endif %}
@@ -199,21 +213,30 @@
   {% if conversation.busy %}<p class="dim">A turn is running…</p>{% endif %}
 </div>
 
-<form method="post" action="/runs/{{ slug }}/say">
+<form method="post" action="/runs/{{ slug }}/say" id="composer">
   <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="selection_revision" value="{{ revision_token }}">
   <textarea name="message" rows="3" placeholder="Say something to the coordinator"
             {% if conversation.busy or not conversation.can_converse %}disabled{% endif %}></textarea>
+  <label class="dim"><input type="checkbox" name="mode_checkbox" value="harness-command">
+     harness-command (not certified on this deployment; sent as chat)</label>
+  <input type="hidden" name="mode" value="chat">
   <button name="action" value="say"
           {% if conversation.busy or not conversation.can_converse %}disabled{% endif %}>Send</button>
 </form>
 
 <form method="post" action="/runs/{{ slug }}/say" class="actions">
   <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="expected_revision" value="{{ revision_token }}">
   <select name="agent">
     {% for name in agents %}
     <option {% if name == conversation.agent %}selected{% endif %}>{{ name }}</option>
     {% endfor %}
   </select>
+  <label class="dim"><input type="checkbox" name="reset_session" value="true">
+     reset session</label>
+  <label class="dim"><input type="checkbox" name="confirm_new_session" value="true">
+     I confirm a new session (history is kept, the session id is discarded)</label>
   <button name="action" value="agent"
           {% if conversation.busy %}disabled{% endif %}>Hand the conversation over</button>
 </form>
@@ -358,5 +381,39 @@
     actor.textContent = event.actor;
     row.insertCell().className = "dim";
   });
+  // Task7 composer: the mode checkbox expresses intent only; with no
+  // certified policy the server sends it as chat and says so.
+  const composer = document.getElementById("composer");
+  if (composer) {
+    const modeBox = composer.querySelector('[name="mode_checkbox"]');
+    const modeField = composer.querySelector('[name="mode"]');
+    const sendButton = composer.querySelector('button[value="say"]');
+    let inFlight = false;
+    if (modeBox && modeField) {
+      modeBox.addEventListener("change", () => {
+        modeField.value = modeBox.checked ? "harness-command" : "chat";
+      });
+    }
+    // Immediate repeat suppression: one submit in flight; a rapid
+    // duplicate click is ignored, not sent twice. The click guard (capture
+    // phase) stops a double-click from producing a second submit event at
+    // all; the submit guard covers programmatic form.submit() paths.
+    composer.addEventListener("click", (event) => {
+      if (inFlight) { event.preventDefault(); event.stopPropagation(); }
+    }, true);
+    composer.addEventListener("submit", (event) => {
+      if (inFlight) { event.preventDefault(); return; }
+      inFlight = true;
+      if (sendButton) { sendButton.disabled = true; }
+    });
+  }
+  // A successful selection/reset lands on a fresh page; the timeline
+  // stream of the OLD state must not replay or refresh anything. The
+  // form's own navigation replaces the document, but terminate the
+  // stream first so no further frames land in this (dying) document.
+  const handover = document.querySelector("form.actions");
+  if (handover) {
+    handover.addEventListener("submit", () => { stream.close(); });
+  }
 </script>
 {% endblock %}
