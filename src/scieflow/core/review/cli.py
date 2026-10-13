@@ -507,3 +507,130 @@ def matrix_cmd(slug, round_, check_):
                 blockers=blockers)
     click.echo(f"written: {rel}/{path.name} ({len(data['clusters'])} clusters, "
                f"{len(blockers)} blocker(s))")
+    _open_gates(_project, ws, round_)
+
+
+def _open_gates(project, ws, round_) -> None:
+    from scieflow.core.review import decision_gates as dg
+
+    try:
+        report = dg.open_gates(project, ws, round_)
+    except (dg.DecisionGateError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"review gates of round {round_}: opened {len(report['opened'])}, "
+               f"already there {len(report['existing'])}, withdrawn {len(report['withdrawn'])}")
+    for g in report["opened"]:
+        who = "human only" if g["requires_human"] else (
+            "user, or the coordinator with a rationale" if g["in_scope"] else "user")
+        click.echo(f"  {g['id']} {g['kind']} ({who}): {dg.parse(g)['cluster']} "
+                   f"[{'|'.join(g['options'])}]")
+    if report["opened"]:
+        click.echo(f"answer with `scieflow gate answer {ws.name} <gate id> <option> "
+                   "[--note TEXT]` (an overrule needs the user's reason as --note)")
+
+
+@review.command("gates")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+def gates_cmd(slug, round_):
+    """Open round N's review-decision and review-blocker gates (idempotent).
+
+    One review-decision gate per undecided cluster (accept|reject|defer) and one
+    human-only review-blocker gate per open blocker (overrule|fixed). Gates of an
+    earlier matrix are withdrawn. `review matrix --check` runs this too.
+    """
+    project, ws = _run_ws(slug)
+    _open_gates(project, ws, round_)
+
+
+@review.command("revise")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--author", required=True, help="The author whose draft is revised.")
+@click.option("--write", "write", is_flag=True,
+              help="Write workspace/<SLUG>/prompts/revise-<author>-round-N.md instead of "
+                   "printing the prompt.")
+def revise_cmd(slug, round_, author, write):
+    """Build the author's revision prompt with the ACCEPTED clusters only.
+
+    Needs decisions recorded by `review decide` or a review-decision gate; a
+    hand-written decisions.json is ignored. Exit 1 when nothing is accepted.
+    """
+    from scieflow.core.review import revise
+
+    _project, ws = _run_ws(slug)
+    try:
+        text = revise.revision_prompt(ws, round_, author, slug=slug)
+        got = revise.clusters_for(ws, round_, author)
+    except (revise.RevisionError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    stem = f"revise-{author}-round-{round_}"
+    rel_prompt = f"workspace/{slug}/prompts/{stem}.md"
+    how = (f"dispatch: uv run scieflow agent run --role {revise.ROLE} {author} {rel_prompt} "
+           f"workspace/{slug}/logs/{stem}.log")
+    summary = (f"accepted {', '.join(c['cluster'] for c in got['accepted'])}; "
+               f"undecided {', '.join(got['undecided']) or 'none'}")
+    if not write:
+        click.echo(text, nl=False)
+        click.echo(f"# {summary}\n# {how}", err=True)
+        return
+    path = ws / "prompts" / f"{stem}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    click.echo(f"written: {rel_prompt} ({summary})")
+    click.echo(how)
+
+
+@review.command("coverage")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--author", required=True, help="The author whose response letter is checked.")
+def coverage_cmd(slug, round_, author):
+    """Check that response-<author>.md addresses every accepted cluster id (exit 1 if not)."""
+    from scieflow.core.review import revise
+
+    _project, ws = _run_ws(slug)
+    try:
+        got = revise.coverage(ws, round_, author)
+    except (revise.RevisionError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    name = f"review/round-{round_}/{revise.response_name(author)}"
+    if got["ok"]:
+        click.echo(f"ok: {name} covers {', '.join(got['required']) or 'no accepted cluster'}")
+        return
+    if not got["response"]:
+        click.echo(f"missing: {name} does not exist (accepted: {', '.join(got['required'])})")
+    else:
+        click.echo(f"missing in {name}: {', '.join(got['missing'])}")
+    sys.exit(1)
+
+
+@review.command("merge-check")
+@click.argument("slug")
+def merge_check_cmd(slug):
+    """Refuse merge (exit 1) while a retracted / unresolvable reference blocker is open."""
+    from scieflow.core.review import service
+
+    project, _ws = _run_ws(slug)
+    try:
+        open_ = service.blockers(project, slug)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if not open_:
+        click.echo(f"ok: workspace/{slug} has no open blockers")
+        return
+    click.echo(f"merge refused: workspace/{slug} has {len(open_)} open blocker(s)")
+    for b in open_:
+        refs = ", ".join(" ".join(x for x in (r.get("doi"), f"({r['key']})" if r.get("key")
+                                              else None) if x) for r in b["references"])
+        click.echo(f"  round {b['round']} {b['cluster'] or '(no cluster)'}: {b['reason']} "
+                   f"{refs}" + (f" (decided: {b['decision']})" if b["decision"] else ""))
+    click.echo("fix the citation and build the evidence of a new round, or let the user "
+               "overrule it:")
+    for b in open_:
+        if b["cluster"]:
+            click.echo(f"  scieflow review decide {slug} --round {b['round']} --decision "
+                       f"{b['cluster']}=reject --overrule {b['cluster']}=REASON --yes")
+    click.echo(f"  (or answer its open review-blocker gate: scieflow gate answer {slug} <gate id> "
+               "overrule --note REASON; `scieflow gate list` shows it)")
+    sys.exit(1)

@@ -15,7 +15,8 @@ Rules (spec §5, decision Q9/Q14/Q17):
   loses or adds a decision.
 - A human (`actor="human"`) may decide any cluster. A coordinator agent
   (`actor="agent"`) may decide only when the run's `review_decisions` is
-  `coordinator`, must give a rationale, and may never decide a blocker.
+  `coordinator`, must give a rationale, may never decide a blocker and may
+  never change a cluster a human decided.
 - Any decision on a blocker cluster needs a human `overrule_reason`. Only a
   `reject` with that reason overrules (clears) the blocker; `accept` or
   `defer` keep it open until a later round's evidence no longer flags it.
@@ -237,6 +238,11 @@ def decide(ws: Path, round_: int, decisions: dict, actor: str, settings: dict,
         kept = {}
         if previous:
             kept = {k: v for k, v in previous["decisions"].items() if k in clusters}
+        if actor == "agent":
+            for cid in checked:
+                if (kept.get(cid) or {}).get("actor") == "human":
+                    raise DecisionError(f"{cid} was decided by the user (human); an agent may "
+                                        "not change a human decision")
         stamp = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
         for cid, entry in checked.items():
             kept[cid] = {**entry, "actor": actor, "decided": stamp}

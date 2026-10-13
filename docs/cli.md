@@ -195,6 +195,10 @@ uv run scieflow review check SLUG --round N --reviewer R --author A --pass blind
 uv run scieflow review freeze SLUG --round N
 uv run scieflow review evidence SLUG --round N [--plan] [--json]
 uv run scieflow review matrix SLUG --round N [--check]
+uv run scieflow review gates SLUG --round N
+uv run scieflow review revise SLUG --round N --author A [--write]
+uv run scieflow review coverage SLUG --round N --author A
+uv run scieflow review merge-check SLUG
 uv run scieflow review status SLUG [--json]
 uv run scieflow review decide SLUG --round N --decision CLUSTER=accept|reject|defer ...
     [--note CLUSTER=TEXT ...] [--overrule CLUSTER=REASON ...]
@@ -223,6 +227,19 @@ rounds, open blockers and whether scite is configured. `decide` records
 per-cluster decisions on the round's matrix; a blocker cluster needs the
 user's `--overrule` reason (a `reject` with a reason overrules it), and an
 agent may decide only when the run's `review_decisions` is `coordinator`.
+
+`gates` (also run by `matrix --check`) opens one `review-decision` gate per
+undecided cluster (`accept|reject|defer`) and one human-only `review-blocker`
+gate per open blocker (`overrule|fixed`, with a `review.blocker` event).
+Answering one with `scieflow gate answer` records the decision through the
+same writer as `decide`: an overrule needs the user's reason as `--note`,
+`fixed` records nothing (the blocker clears when a later round's evidence no
+longer flags the reference). `revise` builds an author's revision prompt with
+the accepted clusters only; it refuses without recorded decisions (a
+hand-written `decisions.json` is ignored). `coverage` checks that every
+accepted cluster id heads a section (`## K2`) with text under it in
+`review/round-N/response-<author>.md` (exit 1 if not). An agent never
+changes a decision the user made. `merge-check` exits 1 while a blocker is open.
 
 ## `scieflow workspace`
 

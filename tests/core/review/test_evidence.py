@@ -613,3 +613,114 @@ def test_reused_followups_do_not_count_against_the_cap(project):
     p = evidence.plan(ws(project), 1, pol.load(project.root, HOST_ENV), slug=FX)
     assert len([r for r in p.requests if r.kind == "followup"]) == 2
     assert p.dropped == []
+
+
+# --- quota exhaustion and backfill (ticket 12, plan T2.6) ---------------------------------------
+
+
+def quota_build(project, keep_matrix=False):
+    """Round 1 built into a quota stop; by default before any matrix exists."""
+    err = smcp.RPCError("Usage quota exceeded for your plan.", code=-32000)
+    if not keep_matrix:
+        for name in ("matrix.json", "matrix.md"):
+            (ws(project) / "review" / "round-1" / name).unlink(missing_ok=True)
+    return build(project, fakes=Fakes(mcp_errors=[None, err]))
+
+
+def test_quota_mid_round_marks_matrix_rows_and_the_round_completes(project):
+    from scieflow.core.review import matrix as mx
+
+    out, _ = quota_build(project, keep_matrix=True)
+    assert out.status == "built"
+    sk = mx.skeleton(ws(project), 1)
+    assert sk["scite_status"] == "quota"
+    rd = ws(project) / "review" / "round-1"
+    data = json.loads((rd / "matrix.json").read_text())
+    data.pop("bundle_hash", None)
+    (rd / "matrix.json").write_text(json.dumps(data))
+    with pytest.raises(mx.MatrixError, match="scite_status ok does not match the round's quota"):
+        mx.check(ws(project), 1)
+
+
+def test_budget_exhaustion_notifies_once_per_run(project):
+    write_policy(project.root, max_mcp_calls_per_round=2)
+    build(project)
+    build(project, round_=2)
+    got = events.read(ws(project), types=("scite.unavailable",))
+    assert len(got) == 1 and got[0]["data"]["reason"] == "budget"
+
+
+def test_backfill_fills_only_the_missing_parts(project):
+    quota_build(project)
+    before = len(ledger_rows(project))
+    fakes = Fakes()
+    out = evidence.backfill(project, FX, 1, environ=HOST_ENV, sources_factory=fakes.factory)
+    assert out.status == "built" and out.scite_status == "ok"
+    assert fakes.crossref_calls == [] and fakes.rest_calls == [] and fakes.epmc_calls == []
+    assert len(fakes.mcp_calls) == 3                     # the one that failed and the two skipped
+    # the contested-sources graph succeeded before the quota error: not asked again
+    assert [tool for tool, _ in fakes.mcp_calls] == ["search_literature"] * 3
+    assert out.bundle["calls"]["skipped"] == []
+    assert sum(1 for r in ledger_rows(project)[before:] if r["source"] == "mcp") == 3
+    ev = events.read(ws(project), types=("review.evidence_built",))
+    assert ev[-1]["data"]["backfill"] is True and ev[-1]["data"]["scite_status"] == "ok"
+
+
+def test_backfill_stays_within_the_budget(project):
+    quota_build(project)
+    used = sum(1 for r in ledger_rows(project) if r["source"] == "mcp")
+    write_policy(project.root, max_mcp_calls_per_round=used + 1)
+    fakes = Fakes()
+    out = evidence.backfill(project, FX, 1, environ=HOST_ENV, sources_factory=fakes.factory)
+    assert len(fakes.mcp_calls) == 1
+    assert out.scite_status == "quota"
+    assert [s["reason"] for s in out.bundle["calls"]["skipped"]] == ["budget", "budget"]
+
+
+def test_backfill_refuses_a_round_with_nothing_missing(project):
+    build(project)
+    with pytest.raises(evidence.BackfillError, match="nothing to backfill"):
+        evidence.backfill(project, FX, 1, environ=HOST_ENV, sources_factory=Fakes().factory)
+
+
+def test_backfill_refuses_a_round_without_a_bundle(project):
+    with pytest.raises(evidence.BackfillError, match="no evidence bundle"):
+        evidence.backfill(project, FX, 2, environ=HOST_ENV, sources_factory=Fakes().factory)
+
+
+def test_backfill_refuses_inside_a_dispatch(project):
+    quota_build(project)
+    fakes = Fakes()
+    with pytest.raises(pol.PolicyError):
+        evidence.backfill(project, FX, 1, environ=DISPATCH_ENV, sources_factory=fakes.factory)
+    assert fakes.total == 0
+
+
+def test_backfill_cli(project, monkeypatch):
+    from scieflow.research.cli import research
+
+    res = CliRunner().invoke(research, ["scite", "backfill", FX, "--round", "2"])
+    assert res.exit_code != 0 and "no evidence bundle" in res.output
+
+
+def test_backfill_refuses_a_changed_manuscript(project):
+    quota_build(project)
+    draft = ws(project) / "manuscript" / "drafts" / "agy" / "main.tex"
+    draft.write_text(draft.read_text() + "\n% edited\n")
+    fakes = Fakes()
+    with pytest.raises(evidence.BackfillError, match="manuscript changed"):
+        evidence.backfill(project, FX, 1, environ=HOST_ENV, sources_factory=fakes.factory)
+    assert fakes.total == 0
+
+
+def test_backfill_refuses_a_round_with_a_matrix_unless_forced(project):
+    quota_build(project, keep_matrix=True)
+    rd = ws(project) / "review" / "round-1"
+    assert (rd / "matrix.json").is_file()                 # the fixture's matrix
+    fakes = Fakes()
+    with pytest.raises(evidence.BackfillError, match="matrix"):
+        evidence.backfill(project, FX, 1, environ=HOST_ENV, sources_factory=fakes.factory)
+    assert fakes.total == 0
+    out = evidence.backfill(project, FX, 1, environ=HOST_ENV, sources_factory=fakes.factory,
+                            force=True)
+    assert out.status == "built" and len(fakes.mcp_calls) == 3

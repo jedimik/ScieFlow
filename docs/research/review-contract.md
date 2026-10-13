@@ -113,8 +113,8 @@ Golden outputs for the fixture run are in `tests/fixtures/review/golden/`.
 - `decision` is `accept`, `reject` or `defer`; cluster ids must exist in the
   round's matrix, which must exist and validate. Unknown fields are refused.
 - `actor="human"` may decide any cluster. `actor="agent"` may decide only when
-  the run's `review_decisions` is `coordinator`, must give a `rationale`, and
-  may never decide a blocker.
+  the run's `review_decisions` is `coordinator`, must give a `rationale`,
+  may never decide a blocker, and may never change a cluster a human decided.
 - **Blockers.** Any decision on a blocker cluster needs a human
   `overrule_reason`. Only `reject` with that reason overrules the blocker
   (`blockers()` drops it); `accept` and `defer` keep it open until a later
@@ -163,6 +163,11 @@ Closed vocabulary in `core/events.py`, on the run timeline
 `review.evidence_built`, `review.matrix_ready`, `review.decided`,
 `review.blocker`, `scite.quota_low`, `scite.unavailable`. M0 emits
 `review.decided`; the producers of the others arrive in M1–M2.
+`review.blocker` is emitted when its `review-blocker` gate is opened.
+`scite.unavailable` (`{reason, ...}`) is emitted once per run, by the MCP
+client on an auth or quota error or by the evidence build when a spent budget
+leaves the round at `scite_status: quota`. `review.evidence_built` carries
+`backfill: true` for a `scieflow research scite backfill` build.
 `review.pass_done` (`{round, reviewer, author, pass, sha256}`) is emitted by
 `scieflow review check`, `review.matrix_ready` (`{round, clusters, blockers}`)
 by `scieflow review matrix --check`. A pass A changed after it was frozen
@@ -175,6 +180,49 @@ author}`) when pass B is refused for that pair.
 it, with a rationale, when `review_decisions: coordinator`),
 `review-blocker` and `scite-consent` (human only, in every approval mode),
 plus the existing `external-sharing` (human only).
+
+Core opens the review gates of a round (`scieflow review gates`, also run by
+`scieflow review matrix --check`; Python `core/review/decision_gates.py`
+`open_gates(project, ws, round)`), only for a matrix that checks:
+
+- one `review-decision` gate per undecided non-blocker cluster, options
+  `accept | reject | defer`, `in_scope` only when the run sets
+  `review_decisions: coordinator`;
+- one `review-blocker` gate per open blocker cluster, options
+  `overrule | fixed`, plus a `review.blocker` event
+  (`{round, cluster, reason, references: [{doi, key, detail}], gate}`).
+
+Questions start with `[review round N · cluster K · matrix H]` (H = the
+first 12 hex digits of the matrix's sha256); `decision_gates.parse(gate)`
+returns `{round, cluster, matrix}`. Answering such a gate (`gates.answer`, so
+`scieflow gate answer` and `core/service.answer_gate`) first records the
+decision through `decide()` and leaves the gate open when that is refused:
+`review-decision` → the answer is the decision, the gate note its `note`, an
+agent's rationale its `rationale`; `review-blocker` `overrule` → `reject` with
+the note as the user's `overrule_reason` (a blank note is refused);
+`fixed` → no decision, the blocker stays open until a later round's bundle no
+longer flags the reference. Only a gate core opened counts: its
+`gate.opened` event has actor `system` and its kind, question and options are
+exactly what core writes for that cluster of the current matrix; a look-alike
+or edited gate is refused. A gate of an earlier matrix is refused too.
+Re-running `open_gates` (serialised per round) withdraws (`gate.withdrawn`)
+stale and look-alike gates and decision gates of clusters decided meanwhile,
+and opens what is missing. A review-kind gate opened by hand without the
+prefix is an ordinary gate and records nothing.
+
+## Revision and merge
+
+`scieflow review revise SLUG --round N --author A [--write]`
+(`core/review/revise.py` `revision_prompt`) gives the author only the
+accepted clusters that concern its draft — clusters with a comment on that
+draft, or flag-only clusters whose flagged reference the draft cites — and
+refuses when the round has no decisions recorded by `decide()`.
+`clusters_for(ws, round, author)` returns `{accepted, rejected, deferred,
+undecided}`. `scieflow review coverage` checks that every accepted id heads a
+section (`## K2`) with text under it in `review/round-N/response-<author>.md`;
+an author with nothing accepted needs no letter.
+`scieflow review merge-check SLUG` exits 1 while `blockers()` is non-empty;
+every merge path should refuse on the same condition.
 
 ## Fixture run
 

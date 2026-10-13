@@ -94,3 +94,49 @@ def scite_plan_cmd(slug, round_, as_json):
 def scite_run_cmd(slug, round_, as_json):
     """Same as `scieflow review evidence SLUG --round N`."""
     _evidence(slug, round_, False, as_json)
+
+
+@scite.command("backfill")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number.")
+@click.option("--force", is_flag=True,
+              help="Backfill a round that already has a matrix (it must then be rebuilt and "
+                   "its decisions made again).")
+@click.option("--json", "as_json", is_flag=True, help="Print the outcome as JSON.")
+def scite_backfill_cmd(slug, round_, force, as_json):
+    """Fill what round N's evidence bundle is missing after a quota stop or an outage.
+
+    Earlier answers are reused (no call); only the skipped requests are sent, within
+    the budgets of config/scite.yml. Pass-B reviews written against the old bundle
+    should be re-checked afterwards. Exit 3 on a policy / consent / dispatch refusal.
+    """
+    import json
+    import sys
+
+    from scieflow.core.project import Project
+    from scieflow.core.review import evidence
+    from scieflow.integrations.scite import policy as _policy
+
+    project = Project.discover()
+    try:
+        outcome = evidence.backfill(project, slug, round_, force=force)
+    except _policy.PolicyError as exc:
+        click.echo(f"refused: {exc}", err=True)
+        sys.exit(_policy.exit_code(exc))
+    except (ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if outcome.status == "off":
+        click.echo(f"scite is off: {outcome.reason} — nothing sent")
+        return
+    s = outcome.calls["summary"]
+    if as_json:
+        click.echo(json.dumps({"status": "built", "scite_status": outcome.scite_status,
+                               "calls": s}, indent=2, ensure_ascii=False))
+        return
+    click.echo(f"backfilled: workspace/{slug}/review/round-{round_}/evidence/bundle.json "
+               f"(scite {outcome.scite_status}; {s['mcp']} MCP, {s['rest']} REST, "
+               f"{s['cached']} cached, {len(s['skipped'])} still skipped)")
+    for item in s["skipped"]:
+        click.echo(f"  skipped ({item['reason']}): {item['query']}")
+    click.echo("next: re-run the matrix check; pass B written against the old bundle may "
+               "need a re-run")

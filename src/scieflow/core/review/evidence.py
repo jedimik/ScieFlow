@@ -894,8 +894,12 @@ class Outcome:
 
 def execute(p: Plan, ws: Path, policy: _policy.Policy, *, ledger=None, cache=None,
             sources: Sources | None = None, sources_factory=None,
-            now: Callable[[], datetime] | None = None) -> Outcome:
-    """Run the plan, write bundle.json + calls.json + state.json, emit review.evidence_built."""
+            now: Callable[[], datetime] | None = None, backfill: bool = False) -> Outcome:
+    """Run the plan, write bundle.json + calls.json + state.json, emit review.evidence_built.
+
+    A round that ends `scite_status: quota` tells the user once per run
+    (`scite.unavailable`; the MCP client already emits it for a QUOTA error, so
+    this covers a spent budget)."""
     from scieflow.integrations.scite.cache import Cache
     from scieflow.integrations.scite.ledger import Ledger, default_dir
 
@@ -931,7 +935,10 @@ def execute(p: Plan, ws: Path, policy: _policy.Policy, *, ledger=None, cache=Non
     store.write_text(out / "bundle.json", json.dumps(bundle, indent=2, ensure_ascii=False) + "\n")
     events.emit(ws, "review.evidence_built", round=p.round, scite_status=b.status,
                 mcp=summary["mcp"], rest=summary["rest"], cached=summary["cached"],
-                skipped=len(summary["skipped"]), manuscript_hash=p.manuscript_hash)
+                skipped=len(summary["skipped"]), manuscript_hash=p.manuscript_hash,
+                **({"backfill": True} if backfill else {}))
+    if b.status == "quota" and not events.read(ws, types=("scite.unavailable",)):
+        events.emit(ws, "scite.unavailable", reason=b.stop or "budget", round=p.round)
     return Outcome("built", b.status, bundle=bundle, calls=calls, plan=p)
 
 
@@ -982,3 +989,54 @@ def build(project, slug: str, round_: int, *, plan_only: bool = False, environ=N
     outcome = execute(p, ws, policy, **kw)
     outcome.frozen = frozen
     return outcome
+
+
+class BackfillError(ValueError):
+    """Nothing to backfill, or the round cannot be backfilled; nothing was sent."""
+
+
+def backfill(project, slug: str, round_: int, *, environ=None, force: bool = False,
+             **kw) -> Outcome:
+    """`scieflow research scite backfill <slug> --round N` (spec Q23).
+
+    Re-runs round N's evidence build after a quota or outage: every answer the
+    earlier build got is reused from state.json, so only the skipped parts are
+    requested, under the same budgets (a spent budget is still a boundary).
+    Refused inside a dispatch, for a round without a bundle, for a bundle with
+    nothing missing, and when the manuscript changed since (that is a new round).
+    A round that already has a matrix (or decisions) is refused unless `force`:
+    the new bundle changes the bundle hash, the flags and the scite status the
+    matrix and the pass-B reviews were checked against, so the matrix must be
+    rebuilt and its decisions made again.
+    """
+    from scieflow.integrations.scite import mcp as smcp
+
+    smcp.refuse_in_dispatch(environ)
+    if isinstance(round_, bool) or not isinstance(round_, int) or round_ < 1:
+        raise BackfillError(f"round {round_!r} is not an integer >= 1")
+    ws = project.run_dir(slug)
+    if not ws.is_dir():
+        raise BackfillError(f"no workspace {slug!r}")
+    path = _rd(ws, round_) / EVIDENCE / "bundle.json"
+    try:
+        bundle = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise BackfillError(f"round {round_} has no evidence bundle: run `scieflow review "
+                            f"evidence {slug} --round {round_}` first") from None
+    except (OSError, ValueError) as exc:
+        raise BackfillError(f"round {round_}: bundle.json is unreadable: {exc}") from exc
+    if not isinstance(bundle, dict):
+        raise BackfillError(f"round {round_}: bundle.json is not a JSON object")
+    skipped = (bundle.get("calls") or {}).get("skipped") or []
+    if bundle.get("scite_status") == "ok" and not skipped:
+        raise BackfillError(f"nothing to backfill: round {round_}'s bundle has scite_status ok "
+                            "and no skipped request")
+    if bundle.get("manuscript_hash") != manuscript_hash(ws):
+        raise BackfillError(f"the manuscript changed since round {round_}'s bundle was built: "
+                            "build the evidence of a new round instead")
+    rd = _rd(ws, round_)
+    if not force and ((rd / "matrix.json").exists() or (rd / "decisions.json").exists()):
+        raise BackfillError(f"round {round_} already has a matrix: a backfilled bundle "
+                            "invalidates it (and any decisions on it); re-run pass B and the "
+                            "matrix afterwards, or pass --force to backfill anyway")
+    return build(project, slug, round_, environ=environ, backfill=True, **kw)
