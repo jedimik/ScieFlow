@@ -1,0 +1,10 @@
+{
+  "description": "HTTP 503 on tools/call",
+  "http": {
+    "status": 503,
+    "headers": {
+      "content-type": "text/plain"
+    },
+    "raw": "service unavailable"
+  }
+}

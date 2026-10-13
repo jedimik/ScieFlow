@@ -1,0 +1,22 @@
+{
+  "description": "valid JSON-RPC result whose text content is not the documented JSON payload",
+  "http": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "<request id>",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "<html>gateway timeout</html>"
+          }
+        ],
+        "isError": false
+      }
+    }
+  }
+}

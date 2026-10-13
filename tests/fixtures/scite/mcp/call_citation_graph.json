@@ -1,0 +1,22 @@
+{
+  "description": "tools/call citation_graph: one text content item holding the documented {edges, papers, ...} JSON",
+  "http": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "<request id>",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"seeds\": [\"10.1038/s41586-020-2012-7\"], \"edges\": [{\"s\": \"10.1000/citing.1\", \"t\": \"10.1038/s41586-020-2012-7\", \"d\": 1, \"type\": \"supporting\", \"section\": \"Results\"}, {\"s\": \"10.1000/citing.2\", \"t\": \"10.1038/s41586-020-2012-7\", \"d\": 1, \"type\": \"contrasting\", \"section\": \"Discussion\"}, {\"s\": \"10.1038/s41586-020-2012-7\", \"t\": \"10.1000/ref.1\", \"d\": 1, \"type\": \"mentioning\", \"section\": \"Introduction\"}], \"papers\": {\"10.1038/s41586-020-2012-7\": {\"title\": \"A pneumonia outbreak associated with a new coronavirus of probable bat origin\", \"year\": 2020}, \"10.1000/citing.1\": {\"title\": \"Citing one\", \"year\": 2021}, \"10.1000/citing.2\": {\"title\": \"Citing two\", \"year\": 2022}, \"10.1000/ref.1\": {\"title\": \"Reference one\", \"year\": 2015}}, \"truncated\": false, \"seed_coverage\": {\"10.1038/s41586-020-2012-7\": 3}, \"low_coverage_seeds\": []}"
+          }
+        ],
+        "isError": false
+      }
+    }
+  }
+}

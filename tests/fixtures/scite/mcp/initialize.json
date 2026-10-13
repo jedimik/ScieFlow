@@ -1,0 +1,29 @@
+{
+  "description": "initialize response (JSON body, session id header)",
+  "http": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "mcp-session-id": "fixture-session-1"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "<request id>",
+      "result": {
+        "protocolVersion": "<echo client>",
+        "capabilities": {
+          "tools": {
+            "listChanged": false
+          },
+          "prompts": {
+            "listChanged": false
+          }
+        },
+        "serverInfo": {
+          "name": "scite",
+          "version": "1.0.0"
+        }
+      }
+    }
+  }
+}
