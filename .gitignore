@@ -16,6 +16,7 @@ workspace/chats/*
 .superpowers/
 config/remotes.yml
 config/notebooklm.yml
+config/scite.yml
 config/chats.yml
 # Machine-local DVC remote (endpoint + bucket); credentials live in config.local
 .dvc/config

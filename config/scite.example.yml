@@ -1,0 +1,30 @@
+# Copy to config/scite.yml (gitignored) to enable scite. Deny-by-default:
+# without config/scite.yml scite is off for every run. Unknown keys are
+# refused. This file is YOUR control surface over what ScieFlow may spend on
+# your scite account; agents never edit it. Docs: docs/research/scite.md.
+
+# Where the MCP token comes from — set ONE of these. ScieFlow only checks that
+# the variable is set or the file exists; it never logs, prints or writes the
+# token. Without a token only the free public REST tier (tallies, papers) is used.
+token_env: SCITE_TOKEN
+# token_file: /home/you/.config/scieflow/scite-token
+
+# scite MCP tools core may call. Allowed values: search_literature,
+# citation_graph, read_fulltext, bibliography. Collection writers are never allowed.
+allowed_tools: [search_literature, citation_graph]
+
+# MCP call budgets (cache hits cost nothing; failed calls count).
+max_mcp_calls_per_round: 5
+max_mcp_calls_per_run: 20
+# max_mcp_calls_per_day: 50       # shared by every run on this machine; unset = no daily cap
+
+max_followups_per_round: 2        # reviewer follow-up queries core may run per round
+contested_seeds: 10               # DOIs with the highest contrasting share sent to citation_graph
+
+# Public REST (no key): request rate and bulk tallies chunk size.
+rest_rate_per_s: 5
+rest_max_dois_per_request: 500
+
+cache_ttl_days:
+  metadata: 30                    # papers, tallies, Crossref records
+  search: 7                       # search_literature / citation_graph results
