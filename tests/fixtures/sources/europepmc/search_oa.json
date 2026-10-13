@@ -1,0 +1,35 @@
+{
+ "version": "6.9",
+ "hitCount": 1,
+ "request": {
+  "queryString": "DOI:\"10.1371/journal.pone.0110232\"",
+  "resultType": "core",
+  "cursorMark": "*",
+  "pageSize": 1,
+  "sort": "",
+  "synonym": false
+ },
+ "resultList": {
+  "result": [
+   {
+    "id": "25333472",
+    "source": "MED",
+    "pmid": "25333472",
+    "pmcid": "PMC4204854",
+    "doi": "10.1371/journal.pone.0110232",
+    "title": "Computational prediction of candidate proteins for S-nitrosylation in Arabidopsis thaliana.",
+    "pubYear": "2014",
+    "abstractText": "Nitric oxide (NO) is an important signaling molecule that regulates many physiological processes in plants. One of the most important regulatory mechanisms of NO is S-nitrosylation-the covalent attachment of NO to cysteine residues. Although the involvement of cysteine S-nitrosylation in the regulation of protein functions is well established, its substrate specificity remains unknown. Identification of candidates for S-nitrosylation and their target cysteine residues is fundamental for studying the molecular mechanisms and regulatory roles of S-nitrosylation in plants. Several experimental methods that are based on the biotin switch have been developed to identify target proteins for S-nitrosylation. However, these methods have their limits. Thus, computational methods are attracting considerable attention for the identification of modification sites in proteins. Using GPS-SNO version 1.0, a recently developed S-nitrosylation site-prediction program, a set of 16,610 candidate proteins for S-nitrosylation containing 31,900 S-nitrosylation sites was isolated from the entire Arabidopsis proteome using the medium threshold. In the compartments \"chloroplast,\" \"CUL4-RING ubiquitin ligase complex,\" and \"membrane\" more than 70% of the proteins were identified as candidates for S-nitrosylation. The high number of identified candidates in the proteome reflects the importance of redox signaling in these compartments. An analysis of the functional distribution of the predicted candidates showed that proteins involved in signaling processes exhibited the highest prediction rate. In a set of 46 proteins, where 53 putative S-nitrosylation sites were already experimentally determined, the GPS-SNO program predicted 60 S-nitrosylation sites, but only 11 overlap with the results of the experimental approach. In general, a computer-assisted method for the prediction of targets for S-nitrosylation is a very good tool; however, further development, such as including the three dimensional structure of proteins in such analyses, would improve the identification of S-nitrosylation sites.",
+    "isOpenAccess": "Y",
+    "inEPMC": "Y",
+    "inPMC": "Y",
+    "hasPDF": "Y",
+    "journalInfo": {
+     "journal": {
+      "title": "PloS one"
+     }
+    }
+   }
+  ]
+ }
+}

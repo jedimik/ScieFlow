@@ -1,0 +1,26 @@
+{
+ "authors": [
+  {"authorName": "K. Luan Phan", "authorSequenceNumber": 1, "family": "Phan", "given": "K. Luan"},
+  {"authorName": "Daniel A. Fitzgerald", "authorSequenceNumber": 2, "family": "Fitzgerald", "given": "Daniel A."}
+ ],
+ "doi": "10.1016/j.biopsych.2005.08.012",
+ "editorialNotices": [],
+ "id": 66831114,
+ "issns": ["0006-3223"],
+ "issue": "5",
+ "journal": "Biological Psychiatry",
+ "journalSlug": "5GzJD",
+ "memberId": 78,
+ "normalizedTypes": ["article"],
+ "page": "424-429",
+ "preprintLinks": [],
+ "publicationLinks": [],
+ "publisher": "Elsevier BV",
+ "retracted": false,
+ "shortJournal": "Biological Psychiatry",
+ "slug": "association-between-amygdala-hyperactivity-to-gVamGz",
+ "title": "Association between Amygdala Hyperactivity to Harsh Faces and Severity of Social Anxiety in Generalized Social Phobia",
+ "type": "journal-article",
+ "volume": "59",
+ "year": 2006
+}
