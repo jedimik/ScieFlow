@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scieflow.local/schemas/review-assignment.schema.json",
+  "title": "ScieFlow review round reviewer assignment (review/round-N/assignment.json)",
+  "type": "object",
+  "required": ["version", "round", "source", "settings", "authors", "reviewers", "pairs", "coverage", "warnings"],
+  "properties": {
+    "version": {"const": 1},
+    "round": {"type": "integer", "minimum": 1},
+    "source": {"enum": ["auto", "matrix_override"]},
+    "settings": {
+      "type": "object",
+      "required": ["reviews_per_draft", "allow_same_family_review", "allow_self_review"],
+      "properties": {
+        "reviews_per_draft": {"type": "integer", "minimum": 1},
+        "allow_same_family_review": {"type": "boolean"},
+        "allow_self_review": {"type": "boolean"}
+      }
+    },
+    "authors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["agent", "model_family"],
+        "properties": {
+          "agent": {"$ref": "#/$defs/name"},
+          "model_family": {"$ref": "#/$defs/name"}
+        }
+      }
+    },
+    "reviewers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["agent", "model_family", "covers", "reviews"],
+        "properties": {
+          "agent": {"$ref": "#/$defs/name"},
+          "model_family": {"$ref": "#/$defs/name"},
+          "covers": {"enum": ["all", "auto", "override"]},
+          "reviews": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "pairs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["reviewer", "author", "reviewer_family", "author_family", "covers", "self", "same_family", "fresh_dispatch"],
+        "properties": {
+          "reviewer": {"$ref": "#/$defs/name"},
+          "author": {"$ref": "#/$defs/name"},
+          "reviewer_family": {"$ref": "#/$defs/name"},
+          "author_family": {"$ref": "#/$defs/name"},
+          "covers": {"enum": ["all", "auto", "override"]},
+          "self": {"type": "boolean"},
+          "same_family": {"type": "boolean"},
+          "fresh_dispatch": {"const": true}
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["reviewers", "target", "shortfall"],
+        "properties": {
+          "reviewers": {"type": "integer", "minimum": 1},
+          "target": {"type": "integer", "minimum": 1},
+          "shortfall": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "name": {"type": "string", "minLength": 1, "pattern": "^[^/\\\\\\s]+$"}
+  }
+}

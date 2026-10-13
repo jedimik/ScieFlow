@@ -99,3 +99,67 @@ def configure(slug, sets, as_agent, yes):
     except settings.SettingsError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"written: workspace/{slug}/config.yml (review:)")
+
+
+def _assignment_inputs(project, slug: str):
+    """(authors, pool, settings, families) for a run, from its effective config."""
+    from scieflow.core import agent_config as ac
+    from scieflow.core.review import settings as rs
+    from scieflow.core.review.assign import AssignmentError
+
+    effective = rs.load(project, slug)
+    eff = ac.resolve(project.root, slug)
+    authors = eff.value(ac.DRAFT_AUTHORS)
+    authors = [authors] if isinstance(authors, str) else list(authors or [])
+    pool = effective["pool"]
+    if pool is None:
+        names = eff.value(ac.DRAFT_REVIEWERS)
+        names = [names] if isinstance(names, str) else list(names or [])
+        pool = [{"agent": n} for n in names]
+    registry = (ac._load_yaml(project.root / "config" / "agents.yml") or {}).get("agents") or {}
+    reviewers = [e.get("agent") for e in pool] + list(effective["matrix_override"] or {})
+    for name in reviewers:
+        if name not in registry:
+            raise AssignmentError(f"reviewer {name!r} is not in config/agents.yml")
+        if not (registry[name] or {}).get("enabled", True):
+            raise AssignmentError(f"reviewer {name!r} is disabled in config/agents.yml")
+    families = {name: ac.model_family(cfg or {}) for name, cfg in registry.items()}
+    return authors, pool, effective, families
+
+
+@review.command("assign")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--json", "as_json", is_flag=True, help="Print the assignment as JSON.")
+def assign_cmd(slug, round_, as_json):
+    """Plan and record who reviews which draft in round N (review/round-N/assignment.json)."""
+    from scieflow.core.project import Project
+    from scieflow.core.review import assign
+    from scieflow.core.review.settings import SettingsError
+
+    project = Project.discover()
+    try:
+        ws = project.run_dir(slug)
+        if not ws.is_dir():
+            raise click.ClickException(f"no workspace {slug!r} under {project.workspace_root}")
+        authors, pool, effective, families = _assignment_inputs(project, slug)
+        plan = assign.plan(authors, pool, effective, families)
+        path = assign.write(ws, round_, plan)
+    except (assign.AssignmentError, SettingsError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(path.read_text(), nl=False)
+        return
+    click.echo(f"Round {round_} of workspace/{slug} ({plan['source']}; "
+               f"reviews_per_draft {plan['settings']['reviews_per_draft']}):")
+    for author in plan["authors"]:
+        name = author["agent"]
+        got = [p for p in plan["pairs"] if p["author"] == name]
+        marks = [p["reviewer"] + (" (self)" if p["self"] else "")
+                 + (" (same family)" if p["same_family"] and not p["self"] else "")
+                 for p in got]
+        click.echo(f"  {name:<20} <- {', '.join(marks)}")
+    for warning in plan["warnings"]:
+        click.echo(f"  warning: {warning}")
+    click.echo("every review is a fresh dispatch")
+    click.echo(f"written: {path.relative_to(project.root)}")
