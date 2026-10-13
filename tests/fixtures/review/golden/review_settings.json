@@ -1,0 +1,23 @@
+{
+  "allow_same_family_review": true,
+  "allow_self_review": false,
+  "matrix_override": {},
+  "pool": [
+    {
+      "agent": "claude-paper"
+    },
+    {
+      "agent": "codex-paper"
+    },
+    {
+      "agent": "agy"
+    },
+    {
+      "agent": "codex-review",
+      "covers": "all"
+    }
+  ],
+  "review_decisions": "human",
+  "reviews_per_draft": 1,
+  "scite": "approved"
+}

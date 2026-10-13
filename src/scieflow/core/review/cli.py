@@ -101,35 +101,6 @@ def configure(slug, sets, as_agent, yes):
     click.echo(f"written: workspace/{slug}/config.yml (review:)")
 
 
-def _assignment_inputs(project, slug: str):
-    """(authors, pool, settings, families) for a run, from its effective config."""
-    from scieflow.core import agent_config as ac
-    from scieflow.core.review import settings as rs
-    from scieflow.core.review.assign import AssignmentError
-
-    effective = rs.load(project, slug)
-    eff = ac.resolve(project.root, slug)
-    authors = eff.value(ac.DRAFT_AUTHORS)
-    authors = [authors] if isinstance(authors, str) else list(authors or [])
-    pool = effective["pool"]
-    if pool is None:
-        names = eff.value(ac.DRAFT_REVIEWERS)
-        names = [names] if isinstance(names, str) else list(names or [])
-        pool = [{"agent": n} for n in names]
-    registry = (ac._load_yaml(project.root / "config" / "agents.yml") or {}).get("agents") or {}
-    for name in authors:
-        if name not in registry:
-            raise AssignmentError(f"draft author {name!r} is not in config/agents.yml")
-    reviewers = [e.get("agent") for e in pool] + list(effective["matrix_override"] or {})
-    for name in reviewers:
-        if name not in registry:
-            raise AssignmentError(f"reviewer {name!r} is not in config/agents.yml")
-        if not (registry[name] or {}).get("enabled", True):
-            raise AssignmentError(f"reviewer {name!r} is disabled in config/agents.yml")
-    families = {name: ac.model_family(cfg or {}) for name, cfg in registry.items()}
-    return authors, pool, effective, families
-
-
 @review.command("assign")
 @click.argument("slug")
 @click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
@@ -145,7 +116,9 @@ def assign_cmd(slug, round_, as_json):
         ws = project.run_dir(slug)
         if not ws.is_dir():
             raise click.ClickException(f"no workspace {slug!r} under {project.workspace_root}")
-        authors, pool, effective, families = _assignment_inputs(project, slug)
+        from scieflow.core.review import service
+
+        authors, pool, effective, families = service.assignment_inputs(project, slug)
         plan = assign.plan(authors, pool, effective, families)
         path = assign.write(ws, round_, plan)
     except (assign.AssignmentError, SettingsError, ValueError) as exc:
@@ -166,3 +139,106 @@ def assign_cmd(slug, round_, as_json):
         click.echo(f"  warning: {warning}")
     click.echo("every review is a fresh dispatch")
     click.echo(f"written: {path.relative_to(project.root)}")
+
+
+def _pairs(values: tuple[str, ...], what: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for text in values:
+        key, sep, value = text.partition("=")
+        if not sep or not key.strip():
+            raise click.ClickException(f"{what} expects CLUSTER=VALUE, got {text!r}")
+        out[key.strip()] = value
+    return out
+
+
+@review.command("decide")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number.")
+@click.option("--decision", "decisions", multiple=True, required=True,
+              metavar="CLUSTER=accept|reject|defer", help="A decision (repeatable).")
+@click.option("--note", "notes", multiple=True, metavar="CLUSTER=TEXT",
+              help="Optional note on a decided cluster (repeatable).")
+@click.option("--overrule", "overrules", multiple=True, metavar="CLUSTER=REASON",
+              help="The user's reason for deciding a blocker cluster (required for blockers; "
+                   "a reject with a reason overrules the blocker).")
+@click.option("--rationale", default=None,
+              help="Rationale for every decision in this call (required with --as-agent).")
+@click.option("--as-agent", is_flag=True,
+              help="Decide as the coordinator agent (only with review_decisions: coordinator; "
+                   "never blockers).")
+@click.option("--yes", is_flag=True, help="Write without asking for confirmation.")
+def decide_cmd(slug, round_, decisions, notes, overrules, rationale, as_agent, yes):
+    """Record per-cluster decisions for round N (review/round-N/decisions.json)."""
+    from scieflow.core.project import Project
+    from scieflow.core.review import service
+    from scieflow.core.review.decisions import DecisionError
+
+    chosen = _pairs(decisions, "--decision")
+    extra = {"note": _pairs(notes, "--note"), "overrule_reason": _pairs(overrules, "--overrule")}
+    for field, values in extra.items():
+        stray = sorted(set(values) - set(chosen))
+        if stray:
+            raise click.ClickException(f"--{'overrule' if field != 'note' else 'note'} for "
+                                       f"{stray[0]!r}, which has no --decision")
+    batch = {}
+    for cluster, value in chosen.items():
+        entry = {"decision": value.strip()}
+        for field, values in extra.items():
+            if cluster in values:
+                entry[field] = values[cluster]
+        if rationale is not None:
+            entry["rationale"] = rationale
+        batch[cluster] = entry
+    actor = "agent" if as_agent else "human"
+    for cluster, entry in batch.items():
+        click.echo(f"  {cluster}: {entry['decision']}"
+                   + (" (overrule)" if "overrule_reason" in entry else ""))
+    if not yes:
+        if not sys.stdin.isatty():
+            raise click.ClickException("not written: pass --yes to confirm non-interactively")
+        if not click.confirm("Record these decisions?", default=False):
+            click.echo("not written")
+            return
+    project = Project.discover()
+    try:
+        service.decide(project, slug, round_, batch, actor)
+    except (DecisionError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"written: workspace/{slug}/review/round-{round_}/decisions.json")
+
+
+@review.command("status")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True, help="Print rounds, blockers and scite as JSON.")
+def status_cmd(slug, as_json):
+    """Review rounds of workspace/<SLUG>: files present, open blockers, scite."""
+    import json
+
+    from scieflow.core.project import Project
+    from scieflow.core.review import service
+
+    project = Project.discover()
+    try:
+        rounds = service.rounds(project, slug)
+        blockers = service.blockers(project, slug)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    scite = service.scite_status(project)
+    if as_json:
+        click.echo(json.dumps({"rounds": rounds, "blockers": blockers, "scite": scite},
+                              indent=2, ensure_ascii=False))
+        return
+    if not rounds:
+        click.echo(f"workspace/{slug}: no review rounds yet")
+    for r in rounds:
+        done = {ps: sum(1 for p in r["pairs"] if p[ps]) for ps in ("blind", "evidence")}
+        click.echo(f"round {r['round']}: {len(r['pairs'])} pairs, blind {done['blind']}, "
+                   f"evidence {done['evidence']}, bundle {'yes' if r['evidence'] else 'no'} "
+                   f"(scite {r['scite_status'] or '-'}), matrix "
+                   f"{'yes' if r['matrix'] else 'no'}, decisions "
+                   f"{'yes' if r['decisions'] else 'no'}")
+    for b in blockers:
+        refs = ", ".join(x.get("doi") or x.get("key", "?") for x in b["references"])
+        click.echo(f"  blocker {b['cluster'] or '(no cluster)'}: {b['reason']} {refs}"
+                   + (f" (decided: {b['decision']})" if b["decision"] else ""))
+    click.echo(f"scite: {'configured' if scite['configured'] else 'not configured'}")

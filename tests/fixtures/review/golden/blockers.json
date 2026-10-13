@@ -1,0 +1,19 @@
+[
+  {
+    "cluster": "K1",
+    "decision": null,
+    "flags": [
+      "F1"
+    ],
+    "reason": "retracted",
+    "references": [
+      {
+        "detail": "Crossref update-to: retraction (2023)",
+        "doi": "10.5555/rbd.2020.014",
+        "key": "novak2020"
+      }
+    ],
+    "round": 1,
+    "title": "Retracted source novak2020"
+  }
+]

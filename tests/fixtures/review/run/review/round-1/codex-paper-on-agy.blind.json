@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "round": 1,
+  "pass": "blind",
+  "agent": "codex-paper",
+  "reviewed": "agy",
+  "recommendation": "MAJOR REVISION",
+  "major": [
+    {
+      "id": "M1",
+      "location": "results.tex, para 2",
+      "problem": "The diagnostic-accuracy claim for actigraphy is stated without caveats.",
+      "why_it_matters": "It is the central claim of the paper.",
+      "resolution": "Qualify the claim and cite the contrasting replication."
+    }
+  ],
+  "minor": [
+    {
+      "id": "m1",
+      "location": "introduction.tex",
+      "comment": "Define RBD at first use."
+    }
+  ],
+  "summary": "codex-paper on agy: clear structure; the central claim needs qualifying."
+}

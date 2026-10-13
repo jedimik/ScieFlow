@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "round": 1,
+  "pass": "evidence",
+  "agent": "claude-paper",
+  "reviewed": "codex-paper",
+  "recommendation": "MAJOR REVISION",
+  "major": [
+    {
+      "id": "M1",
+      "location": "results.tex, para 2",
+      "problem": "The diagnostic-accuracy claim for actigraphy is stated without caveats.",
+      "why_it_matters": "It is the central claim of the paper.",
+      "resolution": "Qualify the claim and cite the contrasting replication.",
+      "evidence": [
+        {
+          "doi": "10.5555/rbd.2022.003",
+          "quote": "Wrist actigraphy flagged dream-enactment episodes confirmed by video-polysomnography.",
+          "stance": "supporting",
+          "source": "europepmc"
+        }
+      ],
+      "changed_from_blind": "weakened"
+    }
+  ],
+  "minor": [
+    {
+      "id": "m1",
+      "location": "introduction.tex",
+      "comment": "Define RBD at first use.",
+      "evidence": [],
+      "changed_from_blind": "unchanged"
+    }
+  ],
+  "summary": "claude-paper on codex-paper: the evidence bundle confirms the blind findings.",
+  "scite_status": "ok"
+}
