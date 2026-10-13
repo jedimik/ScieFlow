@@ -1,0 +1,58 @@
+{
+  "agent": "codex-paper",
+  "reviewed": "claude-paper",
+  "recommendation": "MAJOR REVISION",
+  "major": [
+    {
+      "id": "M1",
+      "location": "results.tex, para 2",
+      "problem": "Accuracy claim has no source comment.",
+      "why_it_matters": "Unverifiable central claim.",
+      "resolution": "Cite the source or drop the number.",
+      "evidence": [
+        {
+          "doi": "10.1038/s41586-020-2649-2",
+          "quote": "We could not replicate the reported effect.",
+          "stance": "contrasting",
+          "source": "scite_mcp"
+        }
+      ],
+      "changed_from_blind": "strengthened"
+    },
+    {
+      "id": "M2",
+      "location": "discussion.tex",
+      "problem": "Cited source was retracted.",
+      "why_it_matters": "The argument rests on it.",
+      "resolution": "Replace the citation.",
+      "evidence": [
+        {
+          "doi": "10.1000/xyz123",
+          "quote": "This article has been retracted.",
+          "stance": "neutral",
+          "source": "crossref"
+        }
+      ],
+      "changed_from_blind": "new"
+    }
+  ],
+  "minor": [
+    {
+      "id": "m1",
+      "location": "intro.tex",
+      "comment": "Define acronym.",
+      "changed_from_blind": "unchanged",
+      "evidence": []
+    }
+  ],
+  "summary": "Solid structure; the central Results claim is unsupported.",
+  "version": 1,
+  "round": 1,
+  "pass": "evidence",
+  "followup_requests": [
+    {
+      "query": "replication of tau PET staging in RBD",
+      "reason": "Check for newer replications."
+    }
+  ]
+}

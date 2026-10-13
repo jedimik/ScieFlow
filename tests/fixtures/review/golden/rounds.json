@@ -1,0 +1,48 @@
+[
+  {
+    "assignment": true,
+    "decisions": false,
+    "evidence": true,
+    "matrix": true,
+    "pairs": [
+      {
+        "author": "claude-paper",
+        "blind": true,
+        "evidence": true,
+        "reviewer": "agy"
+      },
+      {
+        "author": "claude-paper",
+        "blind": true,
+        "evidence": true,
+        "reviewer": "codex-review"
+      },
+      {
+        "author": "codex-paper",
+        "blind": true,
+        "evidence": true,
+        "reviewer": "claude-paper"
+      },
+      {
+        "author": "codex-paper",
+        "blind": true,
+        "evidence": true,
+        "reviewer": "codex-review"
+      },
+      {
+        "author": "agy",
+        "blind": true,
+        "evidence": true,
+        "reviewer": "codex-paper"
+      },
+      {
+        "author": "agy",
+        "blind": true,
+        "evidence": true,
+        "reviewer": "codex-review"
+      }
+    ],
+    "round": 1,
+    "scite_status": "ok"
+  }
+]

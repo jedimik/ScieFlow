@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scieflow.local/schemas/review-matrix.schema.json",
+  "title": "ScieFlow review matrix (review/round-N/matrix.json)",
+  "description": "Version 1. Core builds the skeleton (every comment of every pass, plus the bundle's flags); the coordinator clusters duplicates and fills agreement, evidence and a recommendation per cluster. Decisions are keyed by `cluster`.",
+  "type": "object",
+  "required": [
+    "version",
+    "round",
+    "clusters"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "round": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "generated": {
+      "type": "string",
+      "minLength": 1
+    },
+    "bundle_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "clusters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "cluster",
+          "members",
+          "agreement",
+          "evidence_for",
+          "evidence_against",
+          "blocker",
+          "scite_status",
+          "recommendation",
+          "rationale"
+        ],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "properties": {
+              "members": {
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "flags"
+            ],
+            "properties": {
+              "flags": {
+                "minItems": 1
+              }
+            }
+          }
+        ],
+        "properties": {
+          "cluster": {
+            "$ref": "#/$defs/cluster"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severity": {
+            "enum": [
+              "major",
+              "minor"
+            ]
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "reviewer",
+                "author",
+                "pass",
+                "id"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "reviewer": {
+                  "$ref": "#/$defs/name"
+                },
+                "author": {
+                  "$ref": "#/$defs/name"
+                },
+                "pass": {
+                  "enum": [
+                    "blind",
+                    "evidence"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[Mm][0-9]+$",
+                  "not": {
+                    "pattern": "[\\r\\n]"
+                  }
+                }
+              }
+            }
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^F[0-9]+$",
+              "not": {
+                "pattern": "[\\r\\n]"
+              }
+            }
+          },
+          "agreement": {
+            "enum": [
+              "single",
+              "consensus",
+              "majority",
+              "split"
+            ]
+          },
+          "evidence_for": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/evidence"
+            }
+          },
+          "evidence_against": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/evidence"
+            }
+          },
+          "blocker": {
+            "type": "boolean"
+          },
+          "blocker_reason": {
+            "enum": [
+              "retracted",
+              "unresolvable"
+            ]
+          },
+          "scite_status": {
+            "$ref": "#/$defs/scite_status"
+          },
+          "recommendation": {
+            "enum": [
+              "accept",
+              "reject",
+              "defer"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "if": {
+          "properties": {
+            "blocker": {
+              "const": true
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "blocker_reason"
+          ]
+        },
+        "else": {
+          "not": {
+            "required": [
+              "blocker_reason"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/\\\\\\s\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u061c\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff\\ufff9-\\ufffb]+$",
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      },
+      "allOf": [
+        {
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
+        }
+      ]
+    },
+    "cluster": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+      "not": {
+        "pattern": "[\\r\\n]"
+      }
+    },
+    "doi": {
+      "type": "string",
+      "maxLength": 300,
+      "pattern": "^10\\.[0-9]{4,9}/[^\\s]+$",
+      "not": {
+        "pattern": "(^|/)\\.\\.(/|$)"
+      },
+      "allOf": [
+        {
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
+        }
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "not": {
+        "pattern": "[\\r\\n]"
+      }
+    },
+    "source": {
+      "enum": [
+        "crossref",
+        "scite_public",
+        "europepmc",
+        "scite_mcp",
+        "pubtator",
+        "ctgov",
+        "openalex"
+      ]
+    },
+    "stance": {
+      "enum": [
+        "supporting",
+        "contrasting",
+        "neutral"
+      ]
+    },
+    "scite_status": {
+      "enum": [
+        "ok",
+        "off",
+        "quota",
+        "unavailable"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "doi",
+        "quote",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "doi": {
+          "$ref": "#/$defs/doi"
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "stance": {
+          "$ref": "#/$defs/stance"
+        },
+        "flag": {
+          "type": "string",
+          "pattern": "^F[0-9]+$",
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
+        }
+      }
+    }
+  }
+}

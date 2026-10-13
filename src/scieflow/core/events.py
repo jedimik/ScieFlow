@@ -29,6 +29,10 @@ TYPES = frozenset({
     "curation.changed", "curation.round",
     "provenance.synced", "provenance.skipped",
     "integration.call", "sync.pushed", "sync.pulled",
+    # Draft review and scite (docs/research/review-contract.md).
+    "review.assigned", "review.pass_done", "review.evidence_built",
+    "review.matrix_ready", "review.decided", "review.blocker",
+    "scite.quota_low", "scite.unavailable",
 })
 
 

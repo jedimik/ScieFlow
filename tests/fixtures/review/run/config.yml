@@ -1,0 +1,15 @@
+# Fixture run for the review contract (tests/fixtures/review/run/).
+assignments:
+  research.draft-authors: [claude-paper, codex-paper, agy]
+review:
+  scite: approved
+  reviews_per_draft: 1
+  allow_same_family_review: true
+  allow_self_review: false
+  review_decisions: human
+  pool:
+    - {agent: claude-paper}
+    - {agent: codex-paper}
+    - {agent: agy}
+    - {agent: codex-review, covers: all}
+  matrix_override: {}

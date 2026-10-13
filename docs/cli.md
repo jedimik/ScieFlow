@@ -181,6 +181,28 @@ writes without confirming. See
 [Agent configuration](agents.md) for the `--assign` shorthand and what each
 field means.
 
+## `scieflow review`
+
+Draft review: settings, reviewer assignment, status and decisions. The file
+layout, actor rules and the Python API behind these commands are in the
+[review contract](research/review-contract.md).
+
+```bash
+uv run scieflow review configure SLUG [--set KEY=VALUE ...] [--as-agent] [--yes]
+uv run scieflow review assign SLUG --round N [--json]
+uv run scieflow review status SLUG [--json]
+uv run scieflow review decide SLUG --round N --decision CLUSTER=accept|reject|defer ...
+    [--note CLUSTER=TEXT ...] [--overrule CLUSTER=REASON ...]
+    [--as-agent --rationale TEXT] [--yes]
+```
+`configure` shows or changes the run's `review:` block; `--as-agent` may only
+set `scite=off` and `reviews_per_draft`. `assign` plans who reviews which
+draft and writes `review/round-N/assignment.json`. `status` lists the review
+rounds, open blockers and whether scite is configured. `decide` records
+per-cluster decisions on the round's matrix; a blocker cluster needs the
+user's `--overrule` reason (a `reject` with a reason overrules it), and an
+agent may decide only when the run's `review_decisions` is `coordinator`.
+
 ## `scieflow workspace`
 
 Read-only views over `workspace/`.

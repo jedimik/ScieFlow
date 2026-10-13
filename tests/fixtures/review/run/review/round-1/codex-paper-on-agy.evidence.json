@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "round": 1,
+  "pass": "evidence",
+  "agent": "codex-paper",
+  "reviewed": "agy",
+  "recommendation": "MAJOR REVISION",
+  "major": [
+    {
+      "id": "M1",
+      "location": "results.tex, para 2",
+      "problem": "The diagnostic-accuracy claim for actigraphy is stated without caveats.",
+      "why_it_matters": "It is the central claim of the paper.",
+      "resolution": "Qualify the claim and cite the contrasting replication.",
+      "evidence": [
+        {
+          "doi": "10.5555/rbd.2019.001",
+          "quote": "In contrast to Smith et al., actigraphy alone did not separate RBD from periodic limb movements.",
+          "stance": "contrasting",
+          "source": "scite_mcp"
+        }
+      ],
+      "changed_from_blind": "strengthened"
+    },
+    {
+      "id": "M2",
+      "location": "discussion.tex, para 1",
+      "problem": "A cited source (novak2020) has been retracted.",
+      "why_it_matters": "The argument for screening rests on it.",
+      "resolution": "Replace or remove the citation.",
+      "evidence": [
+        {
+          "doi": "10.5555/rbd.2020.014",
+          "quote": "This article has been retracted at the request of the authors.",
+          "stance": "neutral",
+          "source": "crossref"
+        }
+      ],
+      "changed_from_blind": "new"
+    }
+  ],
+  "minor": [
+    {
+      "id": "m1",
+      "location": "introduction.tex",
+      "comment": "Define RBD at first use.",
+      "evidence": [],
+      "changed_from_blind": "unchanged"
+    }
+  ],
+  "summary": "codex-paper on agy: the evidence bundle confirms the blind findings.",
+  "scite_status": "ok"
+}

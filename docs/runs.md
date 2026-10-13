@@ -176,9 +176,11 @@ uv run scieflow run log <slug> note.idea --message "try sigma 2"
 
 Types cover the lifecycle (`run.created`, `phase.*`, `iteration.advanced`,
 `checkpoint`), jobs (`job.queued|started|finished|failed|timeout|cancelled|lost|refused`),
-gates (`gate.opened|answered|withdrawn`), budget (`budget.recorded`) and
-integrations. Agents add free-form `note.<name>` events alongside the prose in
-`log.md`. `actor` is `human`, `agent` or `system` — so an answer an agent gave
+gates (`gate.opened|answered|withdrawn`), budget (`budget.recorded`),
+draft review (`review.assigned|pass_done|evidence_built|matrix_ready|decided|blocker`),
+scite (`scite.quota_low|unavailable`) and integrations. Agents add free-form
+`note.<name>` events alongside the prose in `log.md`. `actor` is `human`,
+`agent` or `system` — so an answer an agent gave
 itself can never look like the user's.
 
 This is the run's own history — what happened and when, as events. A
@@ -317,6 +319,9 @@ The kinds live in `schemas/gates.yml`:
 | `scope-change` | **yes** | leave the approved question, scope or bounds |
 | `budget-extension` | **yes** | raise a budget limit |
 | `charter-adoption` | **yes** | adopt a proposed plan as this run's charter |
+| `review-decision` | no | accept, reject or defer each review-matrix comment (coordinator only with `review_decisions: coordinator`) |
+| `review-blocker` | **yes** | a retracted or unresolvable reference blocks merge: fix or overrule |
+| `scite-consent` | **yes** | send this run's sanitised query plan to scite |
 
 In a **gated** run (`approval: per-campaign`) you answer every gate. In an
 **autonomous** run the coordinator may answer a gate itself — only a kind that

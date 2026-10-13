@@ -1202,6 +1202,10 @@ def test_progress_adds_no_event_type():
         "curation.changed", "curation.round",
         "provenance.synced", "provenance.skipped",
         "integration.call", "sync.pushed", "sync.pulled",
+        # Added by the draft-review contract (scite M0), not by this panel.
+        "review.assigned", "review.pass_done", "review.evidence_built",
+        "review.matrix_ready", "review.decided", "review.blocker",
+        "scite.quota_low", "scite.unavailable",
     }), "the vocabulary is closed by design; this panel needs no new type"
 
 

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "round": 1,
+  "pass": "evidence",
+  "agent": "codex-review",
+  "reviewed": "claude-paper",
+  "recommendation": "MAJOR REVISION",
+  "major": [
+    {
+      "id": "M1",
+      "location": "results.tex, para 2",
+      "problem": "The diagnostic-accuracy claim for actigraphy is stated without caveats.",
+      "why_it_matters": "It is the central claim of the paper.",
+      "resolution": "Qualify the claim and cite the contrasting replication.",
+      "evidence": [
+        {
+          "doi": "10.5555/rbd.2019.001",
+          "quote": "In contrast to Smith et al., actigraphy alone did not separate RBD from periodic limb movements.",
+          "stance": "contrasting",
+          "source": "scite_mcp"
+        }
+      ],
+      "changed_from_blind": "strengthened"
+    }
+  ],
+  "minor": [
+    {
+      "id": "m1",
+      "location": "methods.tex",
+      "comment": "State the device sampling rate.",
+      "evidence": [],
+      "changed_from_blind": "unchanged"
+    }
+  ],
+  "summary": "codex-review on claude-paper: the evidence bundle confirms the blind findings.",
+  "scite_status": "ok"
+}
