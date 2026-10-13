@@ -34,6 +34,7 @@
     {
       "author": "claude-paper",
       "author_family": "claude",
+      "blind_sha256": "edaa5f08461d57878786a6b12d946461ab73481b6cdd7cd38c40988916b33554",
       "covers": "auto",
       "fresh_dispatch": true,
       "reviewer": "agy",
@@ -44,6 +45,7 @@
     {
       "author": "claude-paper",
       "author_family": "claude",
+      "blind_sha256": "d5662137c32607b75d3df051e7b71e62d750a24370b56176647877d9cb3264c5",
       "covers": "all",
       "fresh_dispatch": true,
       "reviewer": "codex-review",
@@ -54,6 +56,7 @@
     {
       "author": "codex-paper",
       "author_family": "openai",
+      "blind_sha256": "de839f61e11108ce983d78bf18c846606234f49cfda1fe4d09c35fb1b3bf0df8",
       "covers": "auto",
       "fresh_dispatch": true,
       "reviewer": "claude-paper",
@@ -64,6 +67,7 @@
     {
       "author": "codex-paper",
       "author_family": "openai",
+      "blind_sha256": "2b28125a4a954cf4fe17c80e2940fc4b9071e04e945795995cc8761d568cf717",
       "covers": "all",
       "fresh_dispatch": true,
       "reviewer": "codex-review",
@@ -74,6 +78,7 @@
     {
       "author": "agy",
       "author_family": "gemini",
+      "blind_sha256": "b0d4468f69eba06e15c364de0d0cf7d08e35d7c7d0271619273c377bbb9c2603",
       "covers": "auto",
       "fresh_dispatch": true,
       "reviewer": "codex-paper",
@@ -84,6 +89,7 @@
     {
       "author": "agy",
       "author_family": "gemini",
+      "blind_sha256": "2cbbccbb2becefe55225fa32e6b4525b990d6f38cf3c576fd80da3118187d2ea",
       "covers": "all",
       "fresh_dispatch": true,
       "reviewer": "codex-review",

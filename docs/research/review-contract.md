@@ -17,13 +17,14 @@ Everything lives inside the run's workspace, `workspace/<slug>/`:
 | Path | Written by | Schema |
 |---|---|---|
 | `config.yml` → `review:` block | `scieflow review configure`, `service.set_review_settings` | see [Settings](#settings) |
-| `review/round-N/assignment.json` | `scieflow review assign` | `review-assignment` |
+| `review/round-N/assignment.json` | `scieflow review assign`; `pairs[].blind_sha256` added by `scieflow review freeze` / `evidence` (M2) | `review-assignment` |
 | `review/round-N/<reviewer>-on-<author>.blind.json` | reviewer, pass A | `manuscript-review` (`pass: blind`, or no `pass`) |
 | `review/round-N/<reviewer>-on-<author>.evidence.json` | reviewer, pass B | `manuscript-review` (`pass: evidence`) |
 | `review/round-N/evidence/bundle.json` | core (`scieflow review evidence`, M1) | `evidence-bundle` |
 | `review/round-N/evidence/calls.json` | core: this build's scite ledger rows, free-source lookups, reuse counts | — |
 | `review/round-N/evidence/state.json` | core: successful answers, reused by later builds (round diff) | — |
-| `review/round-N/matrix.json` (+ `matrix.md`) | core skeleton + coordinator (M2) | `review-matrix` |
+| `review/round-N/matrix.skeleton.json` | core (`scieflow review matrix`, M2): every comment of every valid pass + every bundle flag | — |
+| `review/round-N/matrix.json` (+ `matrix.md`) | coordinator; checked and rendered by `scieflow review matrix --check` (M2) | `review-matrix` |
 | `review/round-N/decisions.json` | **only** `service.decide()` | `review-decisions` |
 
 `N` is an integer ≥ 1. Agent names (`reviewer`, `author`) become file names:
@@ -162,6 +163,11 @@ Closed vocabulary in `core/events.py`, on the run timeline
 `review.evidence_built`, `review.matrix_ready`, `review.decided`,
 `review.blocker`, `scite.quota_low`, `scite.unavailable`. M0 emits
 `review.decided`; the producers of the others arrive in M1–M2.
+`review.pass_done` (`{round, reviewer, author, pass, sha256}`) is emitted by
+`scieflow review check`, `review.matrix_ready` (`{round, clusters, blockers}`)
+by `scieflow review matrix --check`. A pass A changed after it was frozen
+emits the free-form `note.review_pass_a_tampered` (`{round, reviewer,
+author}`) when pass B is refused for that pair.
 
 ## Gates
 

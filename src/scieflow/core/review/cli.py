@@ -209,13 +209,41 @@ def evidence_cmd(slug, round_, plan_only, as_json):
     s = outcome.calls["summary"]
     if as_json:
         click.echo(json.dumps({"status": "built", "scite_status": outcome.scite_status,
-                               "calls": s}, indent=2, ensure_ascii=False))
+                               "calls": s, "frozen": _frozen_json(outcome.frozen)},
+                              indent=2, ensure_ascii=False))
         return
+    _show_frozen(outcome.frozen)
     click.echo(f"written: workspace/{slug}/review/round-{round_}/evidence/bundle.json "
                f"(scite {outcome.scite_status}; {s['mcp']} MCP, {s['rest']} REST, "
                f"{s['cached']} cached, {len(s['skipped'])} skipped)")
     for item in s["skipped"]:
         click.echo(f"  skipped ({item['reason']}): {item['query']}")
+
+
+_FREEZE_LABELS = (("missing", "no pass A yet"),
+                  ("late", "written after the evidence bundle, not frozen"),
+                  ("tampered", "CHANGED after it was frozen; pass B refused"))
+
+
+def _frozen_json(report: dict | None):
+    if report is None:
+        return None
+    return {k: [{"reviewer": rv, "author": au} for rv, au in report[k]]
+            for k in ("frozen", "already", "missing", "late", "tampered")} | {
+        "invalid": [{"reviewer": rv, "author": au, "reason": why}
+                    for (rv, au), why in report["invalid"]]}
+
+
+def _show_frozen(report: dict | None) -> None:
+    if report is None:
+        click.echo("  pass A not frozen: the round has no assignment")
+        return
+    click.echo(f"  pass A frozen: {len(report['frozen']) + len(report['already'])}")
+    for key, label in _FREEZE_LABELS:
+        for rv, au in report[key]:
+            click.echo(f"  {rv} on {au}: {label}")
+    for (rv, au), why in report["invalid"]:
+        click.echo(f"  {rv} on {au}: invalid, not frozen: {why}")
 
 
 def _pairs(values: tuple[str, ...], what: str) -> dict[str, str]:
@@ -319,3 +347,163 @@ def status_cmd(slug, as_json):
         click.echo(f"  blocker {b['cluster'] or '(no cluster)'}: {b['reason']} {refs}"
                    + (f" (decided: {b['decision']})" if b["decision"] else ""))
     click.echo(f"scite: {'configured' if scite['configured'] else 'not configured'}")
+
+
+def _run_ws(slug: str):
+    from scieflow.core.project import Project
+
+    project = Project.discover()
+    try:
+        ws = project.run_dir(slug)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if not ws.is_dir():
+        raise click.ClickException(f"no workspace {slug!r} under {project.workspace_root}")
+    return project, ws
+
+
+_PASS = click.Choice(["blind", "evidence"])
+
+
+@review.command("prompt")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--reviewer", required=True, help="The reviewing agent.")
+@click.option("--author", required=True, help="The author whose draft is reviewed.")
+@click.option("--pass", "pass_", type=_PASS, required=True,
+              help="blind (pass A) or evidence (pass B).")
+@click.option("--write", "write", is_flag=True,
+              help="Write workspace/<SLUG>/prompts/review-<pass>-<reviewer>-on-<author>-round-N.md "
+                   "instead of printing the prompt.")
+def prompt_cmd(slug, round_, reviewer, author, pass_, write):
+    """Build the pass-A or pass-B prompt for one assigned pair.
+
+    Pass B is refused when the pair's pass A was never frozen or changed after it was
+    frozen (the coordinator is told through a note.review_pass_a_tampered event).
+    """
+    from scieflow.core.review import passes
+
+    _project, ws = _run_ws(slug)
+    try:
+        build = passes.blind_prompt if pass_ == "blind" else passes.evidence_prompt
+        text = build(ws, round_, reviewer, author, slug=slug)
+    except (passes.PassError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    stem = f"review-{pass_}-{reviewer}-on-{author}-round-{round_}"
+    rel_prompt = f"workspace/{slug}/prompts/{stem}.md"
+    how = (f"fresh dispatch (no resume, no session id): uv run scieflow agent run "
+           f"--role {passes.ROLE} {reviewer} {rel_prompt} workspace/{slug}/logs/{stem}.log")
+    if not write:
+        click.echo(text, nl=False)
+        click.echo(f"# {how}", err=True)
+        return
+    path = ws / "prompts" / f"{stem}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    click.echo(f"written: {rel_prompt}")
+    click.echo(how)
+
+
+@review.command("check")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--reviewer", required=True, help="The reviewing agent.")
+@click.option("--author", required=True, help="The author whose draft was reviewed.")
+@click.option("--pass", "pass_", type=_PASS, required=True,
+              help="blind (pass A) or evidence (pass B).")
+def check_cmd(slug, round_, reviewer, author, pass_):
+    """Validate one review file and record review.pass_done.
+
+    Schema and identity fields; pass B also needs its frozen pass A unchanged, every
+    pass-A comment accounted for and every evidence quote verbatim from the bundle.
+    """
+    from scieflow.core import events
+    from scieflow.core.review import passes
+
+    _project, ws = _run_ws(slug)
+    try:
+        _data, digest = passes.check_pass(ws, round_, reviewer, author, pass_)
+    except passes.TamperError as exc:
+        passes.tampered(ws, round_, reviewer, author)
+        raise click.ClickException(str(exc)) from exc
+    except (passes.PassError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    events.emit(ws, "review.pass_done", **{"round": round_, "reviewer": reviewer,
+                                           "author": author, "pass": pass_, "sha256": digest})
+    click.echo(f"ok: review/round-{round_}/{passes.file_name(reviewer, author, pass_)} "
+               f"(sha256 {digest[:12]}…)")
+
+
+@review.command("freeze")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+def freeze_cmd(slug, round_):
+    """Record the sha256 of every valid pass-A file of round N in assignment.json.
+
+    `scieflow review evidence` does this itself before it builds the bundle; a pass A
+    written after the bundle is never frozen. Exit 1 when a frozen pass A changed.
+    """
+    from scieflow.core.review import passes
+
+    _project, ws = _run_ws(slug)
+    try:
+        report = passes.freeze(ws, round_)
+    except (passes.PassError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"round {round_}: frozen {len(report['frozen'])}, "
+               f"already frozen {len(report['already'])}")
+    for key, label in _FREEZE_LABELS:
+        for rv, au in report[key]:
+            click.echo(f"  {rv} on {au}: {label}")
+    for (rv, au), why in report["invalid"]:
+        click.echo(f"  {rv} on {au}: invalid, not frozen: {why}")
+    if report["tampered"]:
+        sys.exit(1)
+
+
+@review.command("matrix")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--check", "check_", is_flag=True,
+              help="Check the coordinator's matrix.json, write matrix.md and record "
+                   "review.matrix_ready.")
+def matrix_cmd(slug, round_, check_):
+    """Write the matrix skeleton of round N, or check the clustered matrix.
+
+    Without --check: review/round-N/matrix.skeleton.json (every comment of every
+    valid pass plus every evidence-bundle flag) for the coordinator to cluster
+    into matrix.json.
+    """
+    from scieflow.core import events
+    from scieflow.core.review import matrix as mx
+
+    _project, ws = _run_ws(slug)
+    rel = f"workspace/{slug}/review/round-{round_}"
+    if not check_:
+        try:
+            path = mx.write_skeleton(ws, round_)
+        except (mx.MatrixError, ValueError, OSError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        sk = json.loads(path.read_text(encoding="utf-8"))
+        click.echo(f"written: {rel}/{mx.SKELETON} ({len(sk['items'])} comments, "
+                   f"{len(sk['flags'])} flags, scite {sk['scite_status']})")
+        for m in sk["missing"]:
+            click.echo(f"  missing: {m['reviewer']} on {m['author']} ({m['pass']})")
+        for r in sk["refused"]:
+            click.echo(f"  refused: {r['reviewer']} on {r['author']} ({r['pass']}): "
+                       f"{r['reason']}")
+        click.echo(f"next: cluster it into {rel}/{mx.MATRIX}, then "
+                   f"`scieflow review matrix {slug} --round {round_} --check`")
+        return
+    try:
+        data = mx.check(ws, round_)
+        path = mx.write_md(ws, round_, data)
+    except mx.MatrixError as exc:
+        raise click.ClickException("matrix refused:\n  " + "\n  ".join(exc.problems)) from exc
+    except (ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    blockers = [c["cluster"] for c in data["clusters"] if c["blocker"]]
+    events.emit(ws, "review.matrix_ready", round=round_, clusters=len(data["clusters"]),
+                blockers=blockers)
+    click.echo(f"written: {rel}/{path.name} ({len(data['clusters'])} clusters, "
+               f"{len(blockers)} blocker(s))")

@@ -190,7 +190,11 @@ layout, actor rules and the Python API behind these commands are in the
 ```bash
 uv run scieflow review configure SLUG [--set KEY=VALUE ...] [--as-agent] [--yes]
 uv run scieflow review assign SLUG --round N [--json]
+uv run scieflow review prompt SLUG --round N --reviewer R --author A --pass blind|evidence [--write]
+uv run scieflow review check SLUG --round N --reviewer R --author A --pass blind|evidence
+uv run scieflow review freeze SLUG --round N
 uv run scieflow review evidence SLUG --round N [--plan] [--json]
+uv run scieflow review matrix SLUG --round N [--check]
 uv run scieflow review status SLUG [--json]
 uv run scieflow review decide SLUG --round N --decision CLUSTER=accept|reject|defer ...
     [--note CLUSTER=TEXT ...] [--overrule CLUSTER=REASON ...]
@@ -201,7 +205,20 @@ set `scite=off` and `reviews_per_draft`. `assign` plans who reviews which
 draft and writes `review/round-N/assignment.json`. `evidence` builds the
 round's shared evidence bundle (`review/round-N/evidence/`) from free sources
 and at most a few scite MCP calls; `--plan` prints the exact outgoing request
-list and sends nothing — see [scite evidence](research/scite.md). `status` lists the review
+list and sends nothing — see [scite evidence](research/scite.md). Before it
+builds the bundle, `evidence` freezes pass A: the sha256 of every valid
+`<reviewer>-on-<author>.blind.json` goes into `assignment.json` (`freeze` does
+the same on its own). `prompt` builds the pass-A prompt (persona and draft, no
+evidence) or the pass-B prompt (the frozen pass A verbatim, the draft, the
+bundle in a fenced data block and the rendered review instructions) for one
+assigned pair; pass B is refused when pass A was never frozen or changed after
+it was frozen. Each prompt is a fresh dispatch with
+`--role research.draft-reviewers`. `check` validates a returned review file
+(schema, identity, frozen pass A, every pass-A comment accounted for, evidence
+quotes verbatim from the bundle) and records `review.pass_done`. `matrix`
+writes `review/round-N/matrix.skeleton.json` (every comment of every valid
+pass plus every bundle flag); `--check` validates the coordinator's clustered
+`matrix.json`, writes `matrix.md` and records `review.matrix_ready`. `status` lists the review
 rounds, open blockers and whether scite is configured. `decide` records
 per-cluster decisions on the round's matrix; a blocker cluster needs the
 user's `--overrule` reason (a `reject` with a reason overrules it), and an

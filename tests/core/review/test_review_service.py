@@ -112,7 +112,12 @@ def test_fixture_shape_three_authors_one_extra_reviewer():
 def test_fixture_assignment_is_what_the_planner_writes(project):
     plan = service.preview_assignment(project, FX)
     stored = json.loads((RUN / R1 / "assignment.json").read_text())
-    assert assign.dumps({**plan, "round": 1}) == (RUN / R1 / "assignment.json").read_text()
+    # The fixture round is past pass A: every pair carries its frozen pass-A hash
+    # (ticket 11); apart from that the file is exactly what the planner writes.
+    for pair in stored["pairs"]:
+        blind = RUN / R1 / f"{pair['reviewer']}-on-{pair['author']}.blind.json"
+        assert pair.pop("blind_sha256") == hashlib.sha256(blind.read_bytes()).hexdigest()
+    assert assign.dumps({**plan, "round": 1}) == assign.dumps(stored)
     assert stored["version"] == 1
 
 

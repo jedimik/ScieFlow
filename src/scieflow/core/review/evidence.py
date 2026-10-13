@@ -57,6 +57,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from scieflow.core import events, store
+from scieflow.core.review import assign as assign_mod
 from scieflow.core.review import claims as claims_mod
 from scieflow.core.review import prompts as prompts_mod
 from scieflow.integrations.scite import policy as _policy
@@ -888,6 +889,7 @@ class Outcome:
     bundle: dict | None = None
     calls: dict | None = None
     plan: Plan | None = None
+    frozen: dict | None = None   # passes.freeze() report, taken before the bundle is built
 
 
 def execute(p: Plan, ws: Path, policy: _policy.Policy, *, ledger=None, cache=None,
@@ -971,4 +973,12 @@ def build(project, slug: str, round_: int, *, plan_only: bool = False, environ=N
     ok, why = consent(ws, setting)
     if not ok:
         raise ConsentError(why)
-    return execute(p, ws, policy, **kw)
+    frozen = None
+    if assign_mod.path(ws, round_).is_file():
+        # Pass A is frozen before the bundle exists (spec §5, Review Focus #6).
+        from scieflow.core.review import passes as passes_mod
+
+        frozen = passes_mod.freeze(ws, round_)
+    outcome = execute(p, ws, policy, **kw)
+    outcome.frozen = frozen
+    return outcome
