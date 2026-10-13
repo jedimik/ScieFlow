@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "round": 1,
+  "decisions": {
+    "K1": {
+      "decision": "accept",
+      "actor": "human",
+      "decided": "2026-10-13T13:00:00+00:00",
+      "note": "Agree."
+    },
+    "K2": {
+      "decision": "reject",
+      "actor": "human",
+      "decided": "2026-10-13T13:00:00+00:00",
+      "overrule_reason": "The retraction notice concerns a different figure; keeping the citation."
+    },
+    "K3": {
+      "decision": "defer",
+      "actor": "agent",
+      "decided": "2026-10-13T13:00:00+00:00",
+      "rationale": "Needs the next round's evidence."
+    }
+  }
+}

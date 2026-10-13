@@ -195,7 +195,14 @@
           ".",
           ".."
         ]
-      }
+      },
+      "allOf": [
+        {
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
+        }
+      ]
     }
   },
   "additionalProperties": false

@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "round": 1,
+  "generated": "2026-10-13T12:30:00+00:00",
+  "clusters": [
+    {
+      "cluster": "K1",
+      "members": [
+        {
+          "reviewer": "codex-paper",
+          "author": "claude-paper",
+          "pass": "blind",
+          "id": "M1"
+        },
+        {
+          "reviewer": "codex-paper",
+          "author": "claude-paper",
+          "pass": "evidence",
+          "id": "M1"
+        },
+        {
+          "reviewer": "codex-review",
+          "author": "claude-paper",
+          "pass": "evidence",
+          "id": "M3"
+        }
+      ],
+      "agreement": "consensus",
+      "evidence_for": [
+        {
+          "doi": "10.1038/s41586-020-2649-2",
+          "quote": "We could not replicate the reported effect.",
+          "source": "scite_mcp"
+        }
+      ],
+      "evidence_against": [],
+      "blocker": false,
+      "scite_status": "ok",
+      "recommendation": "accept",
+      "rationale": "Two reviewers and a contrasting statement agree."
+    },
+    {
+      "cluster": "K2",
+      "members": [],
+      "flags": [],
+      "agreement": "single",
+      "evidence_for": [],
+      "evidence_against": [],
+      "blocker": true,
+      "blocker_reason": "retracted",
+      "scite_status": "ok",
+      "recommendation": "accept",
+      "rationale": "A retracted source must be replaced."
+    }
+  ]
+}
