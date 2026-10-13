@@ -325,3 +325,62 @@ def test_cli_assign_refuses_disabled_pool_member(repo, write_ws):
 def test_cli_assign_unknown_run(repo):
     result = CliRunner().invoke(review, ["assign", "nope", "--round", "1"])
     assert result.exit_code != 0
+
+
+# --- review findings -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", ["../evil", "a/b", "x\ny", "a\\b", "..", ".", "\u202eab", "", None, 5])
+def test_path_shaped_or_non_string_author_is_refused(bad):
+    fams = {**FAMILIES, bad: "zz"} if isinstance(bad, str) else FAMILIES
+    with pytest.raises(assign.AssignmentError):
+        assign.plan(["claude-paper", bad], pool("codex-paper"), settings(), fams)
+
+
+@pytest.mark.parametrize("bad", ["../evil", "..", "a/b", "\u202eab"])
+def test_path_shaped_reviewer_is_refused(bad):
+    fams = {**FAMILIES, bad: "zz"}
+    with pytest.raises(assign.AssignmentError):
+        assign.plan(["claude-paper"], pool(bad), settings(), fams)
+    with pytest.raises(assign.AssignmentError):
+        assign.plan(["claude-paper"], [], settings(matrix_override={bad: ["claude-paper"]}), fams)
+
+
+def test_write_refuses_a_plan_that_breaks_the_schema(tmp_path):
+    plan = assign.plan(["claude-paper"], pool("codex-paper"), settings(), FAMILIES)
+    plan["pairs"][0]["author"] = "../evil"
+    with pytest.raises(assign.AssignmentError, match="schema"):
+        assign.write(tmp_path, 1, plan)
+    assert not (tmp_path / "review").exists()
+
+
+@pytest.mark.parametrize("name", ["..", ".", "a\u202eb", "x\u0007"])
+def test_schema_refuses_dot_names_and_control_characters(name):
+    plan = assign.plan(["claude-paper"], pool("codex-paper"), settings(), FAMILIES)
+    plan["pairs"][0]["author"] = name
+    assert list(Draft202012Validator(SCHEMA).iter_errors({"round": 1, **plan}))
+
+
+@pytest.mark.parametrize("where", ["top", "settings", "authors", "reviewers", "pairs", "coverage"])
+def test_schema_refuses_unknown_keys(where):
+    plan = {"round": 1, **assign.plan(["claude-paper"], pool("codex-paper"), settings(), FAMILIES)}
+    target = {"top": plan, "settings": plan["settings"], "authors": plan["authors"][0],
+              "reviewers": plan["reviewers"][0], "pairs": plan["pairs"][0],
+              "coverage": plan["coverage"]["claude-paper"]}[where]
+    target["typo"] = 1
+    assert list(Draft202012Validator(SCHEMA).iter_errors(plan))
+
+
+def test_same_family_error_does_not_suggest_self_review_when_family_switch_fixes_it():
+    fams = {"a": "claude", "b": "claude", "c": "claude"}
+    with pytest.raises(assign.AssignmentError) as exc:
+        assign.plan(["a", "b", "c"], pool("a", "b", "c"), settings(), fams)
+    assert "allow_same_family_review" in str(exc.value)
+    assert "allow_self_review" not in str(exc.value)
+
+
+def test_cli_unknown_author_is_reported_as_an_author(repo, write_ws):
+    write_ws(repo, {"assignments": {"research.draft-authors": ["claude", "ghost"]}})
+    result = CliRunner().invoke(review, ["assign", "run-1", "--round", "1"])
+    assert result.exit_code != 0
+    assert "draft author 'ghost'" in result.output

@@ -117,6 +117,9 @@ def _assignment_inputs(project, slug: str):
         names = [names] if isinstance(names, str) else list(names or [])
         pool = [{"agent": n} for n in names]
     registry = (ac._load_yaml(project.root / "config" / "agents.yml") or {}).get("agents") or {}
+    for name in authors:
+        if name not in registry:
+            raise AssignmentError(f"draft author {name!r} is not in config/agents.yml")
     reviewers = [e.get("agent") for e in pool] + list(effective["matrix_override"] or {})
     for name in reviewers:
         if name not in registry:

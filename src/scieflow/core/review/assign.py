@@ -17,8 +17,8 @@
   who is not the author, then pool order.
 - `matrix_override` (reviewer -> [authors]) replaces the planner; every pair
   in it is still checked against the same rules.
-- A draft below `reviews_per_draft` is reported in `coverage` and
-  `warnings`; a draft with no eligible reviewer at all is an AssignmentError
+- A draft below `reviews_per_draft` reviews in total (`covers: all`
+  reviews count) is reported in `coverage` and `warnings`; a draft with no eligible reviewer at all is an AssignmentError
   naming the switch that would fix it.
 - Every pair is a fresh dispatch (never the authoring session).
 """
@@ -26,9 +26,13 @@
 from __future__ import annotations
 
 import json
+from functools import cache
 from pathlib import Path
 
+from jsonschema import Draft202012Validator
+
 from scieflow.core import store
+from scieflow.core.drafts import DraftError, check_name
 
 VERSION = 1
 SAME_FAMILY = "allow_same_family_review"
@@ -39,7 +43,31 @@ class AssignmentError(ValueError):
     """The round cannot be staffed as configured; nothing was written."""
 
 
+SCHEMA_PATH = (Path(__file__).resolve().parents[2] / "research" / "schemas"
+               / "review-assignment.schema.json")
+
+
+@cache
+def _validator() -> Draft202012Validator:
+    return Draft202012Validator(json.loads(SCHEMA_PATH.read_text()))
+
+
+def _check(name, what: str) -> str:
+    """Agent names become file names (`<reviewer>-on-<author>…`): refuse path-shaped ones."""
+    if not isinstance(name, str):
+        raise AssignmentError(f"{what} {name!r} is not an agent name")
+    try:
+        check_name(name)
+    except DraftError as exc:
+        raise AssignmentError(f"{what} {name!r}: {exc}") from exc
+    if "\\" in name or any(c.isspace() for c in name):
+        # Also a path separator for Windows clients of the web view.
+        raise AssignmentError(f"{what} {name!r}: no backslashes or spaces in agent names")
+    return name
+
+
 def _family(families: dict, name: str, what: str) -> str:
+    _check(name, what)
     family = families.get(name)
     if not isinstance(family, str) or not family.strip():
         raise AssignmentError(
@@ -71,10 +99,13 @@ def _pair(reviewer: str, author: str, covers: str, families: dict) -> dict:
 
 
 def _no_reviewer(author: str, candidates: list[str], families: dict, settings: dict) -> str:
-    switches = sorted({s for r in candidates
-                       if (s := _blocked_by(r, author, families, settings))})
+    switches = {s for r in candidates if (s := _blocked_by(r, author, families, settings))}
+    if SAME_FAMILY in switches:
+        # Self-review alone would leave the draft to its own author: name the
+        # switch that brings in another agent.
+        switches = {SAME_FAMILY}
     if switches:
-        fix = " or ".join(f"turn on {s}" for s in switches)
+        fix = " or ".join(f"turn on {s}" for s in sorted(switches))
         return (f"draft {author!r} has no eligible reviewer: {fix} "
                 "(scieflow review configure), or add a reviewer of another model family "
                 "to the pool")
@@ -178,7 +209,10 @@ def _override(authors, override: dict, families, settings) -> tuple[list[dict], 
         targets = override[reviewer] or []
         if len(set(targets)) != len(targets):
             raise AssignmentError(f"matrix_override: {reviewer!r} lists an author twice")
+        if not isinstance(targets, list):
+            raise AssignmentError(f"matrix_override: {reviewer!r} -> {targets!r} is not a list")
         for author in targets:
+            _check(author, "matrix_override author")
             if author not in authors:
                 raise AssignmentError(
                     f"matrix_override: {reviewer!r} -> {author!r}: {author!r} is not a draft "
@@ -211,6 +245,8 @@ def plan(authors: list[str], pool: list[dict], settings: dict, families: dict) -
     override = settings.get("matrix_override") or {}
 
     if override:
+        if not isinstance(override, dict):
+            raise AssignmentError(f"matrix_override {override!r} is not a mapping")
         for reviewer in override:
             fams[reviewer] = _family(families, reviewer, "reviewer")
         reviewers, pairs = _override(authors, override, fams, settings)
@@ -274,7 +310,12 @@ def write(ws: Path, round_: int, plan_: dict) -> Path:
     """Persist a plan as review/round-N/assignment.json (atomic); returns the path."""
     if isinstance(round_, bool) or not isinstance(round_, int) or round_ < 1:
         raise AssignmentError(f"round {round_!r} is not an integer >= 1")
+    data = {**plan_, "round": round_}
+    errors = sorted(_validator().iter_errors(data), key=lambda e: e.json_path)
+    if errors:
+        raise AssignmentError(f"assignment does not match the review-assignment schema: "
+                              f"{errors[0].json_path}: {errors[0].message}")
     target = path(ws, round_)
     target.parent.mkdir(parents=True, exist_ok=True)
-    store._atomic_write(target, dumps({**plan_, "round": round_}))
+    store._atomic_write(target, dumps(data))
     return target
