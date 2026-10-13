@@ -65,7 +65,7 @@ WORKFLOWS: dict[str, dict] = {
     "paper-draft": {
         "skill": "src/scieflow/research/skills/paper-draft/SKILL.md",
         "ask": "What to draft from (a finished run slug, or a topic)",
-        "roles": ["research.outline", "research.draft-authors",
+        "roles": ["research.outline", "research.draft-authors", "research.draft-reviewers",
                   "research.cross-review", "research.consistency"],
     },
     "research-loop": {
@@ -529,7 +529,9 @@ def _pick_role(ui: UI, eff, attempt) -> None:
     enabled = [n for n, fields in eff.agents.items()
                if n != "stub" and fields.get("enabled") and fields["enabled"].value]
     current = eff.value(role)
-    if spec.many:
+    # `single_as_name` roles keep their one-agent picker here; a pool of
+    # several is set with `scieflow agent configure --assign ROLE=A,B`.
+    if spec.many and not spec.single_as_name:
         picked = ui.checkbox(f"{role}: agents (space toggles)",
                              [(_agent_label(n, eff), n) for n in enabled],
                              checked=current if isinstance(current, list) else [current])

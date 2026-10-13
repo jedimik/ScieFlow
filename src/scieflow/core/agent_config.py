@@ -32,6 +32,9 @@ class Role:
     many: bool          # fan-out role: a list of agents
     support_ok: bool    # support-tier agents allowed (always paired with a primary)
     help: str
+    #: A one-agent assignment is stored as a plain name, as older configs and
+    #: their readers expect (`research.reviewer` used to take exactly one).
+    single_as_name: bool = False
 
 
 ROLES: dict[str, Role] = {
@@ -43,12 +46,20 @@ ROLES: dict[str, Role] = {
     "research.gap-analysis": Role(True, False, "gap-discovery gap analysis fan-out"),
     "research.debate": Role(True, False, "perspective debate participants"),
     "research.journal-profile": Role(True, True, "journal profiling (web search)"),
-    "research.reviewer": Role(False, False, "paper-review reviewer"),
+    "research.reviewer": Role(True, False, "paper-review reviewer(s)", single_as_name=True),
     "research.submitter": Role(False, False, "paper-review submitter (differs from reviewer)"),
     "research.outline": Role(False, False, "paper-draft outline author"),
     "research.draft-authors": Role(True, False, "paper-draft independent draft authors"),
+    "research.draft-reviewers": Role(True, False, "paper-draft reviewer pool (default: the draft authors)"),
     "research.consistency": Role(False, False, "paper-draft consistency pass"),
 }
+
+#: Roles whose members are compared by model family (no reviewer reviews a
+#: draft of its own family unless the run allows it), so every member must
+#: resolve one: `model_family:`, falling back to `family:`.
+REVIEW_ROLES = ("research.draft-reviewers", "research.reviewer")
+DRAFT_REVIEWERS = "research.draft-reviewers"
+DRAFT_AUTHORS = "research.draft-authors"
 
 AGENT_FIELDS = ("model", "reasoning", "timeout_min", "cmd", "stdin_cmd", "enabled")
 # `enabled` is global: a run narrows participation through its assignments.
@@ -80,6 +91,22 @@ ROLE_OVERRIDE_FIELDS = ("model", "reasoning")
 DEFAULT = "default"
 WORKSPACE = "workspace"
 LEGACY = "workspace (legacy key)"
+FOLLOWS_AUTHORS = "default (= research.draft-authors)"
+
+
+def model_family(agent_cfg: dict) -> str | None:
+    """The model family an agent belongs to, for review separation.
+
+    `model_family:` is separate from `family:` on purpose: `family:` is the
+    output dialect `sessions.family_of` parses (and `can_converse` reads), so
+    two agents of one model family may speak different dialects. Falls back to
+    `family:` for agents that declare only that; None when neither is set.
+    """
+    for key in ("model_family", "family"):
+        value = agent_cfg.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 @dataclass
@@ -171,6 +198,8 @@ def resolve_data(registry: dict, defaults: dict, workspace: dict | None = None) 
     if isinstance(run_set, list):
         for role, setting in list(assignments.items()):
             spec = ROLES.get(role)
+            if role == DRAFT_REVIEWERS:
+                continue   # follows the (narrowed) authors unless the run names it
             if spec and spec.many and isinstance(setting.value, list):
                 narrowed = [a for a in setting.value if a in run_set]
                 # A legacy run set that shares no agent with a role never used
@@ -213,6 +242,7 @@ def resolve_data(registry: dict, defaults: dict, workspace: dict | None = None) 
         assignments[role] = Setting(names, setting.source)
         if extra:
             role_overrides[role] = {a: Setting(v, setting.source) for a, v in extra.items()}
+    _follow_authors(assignments)
 
     eff = Effective(agents=agents, tiers=tiers, menus=menus, assignments=assignments,
                     support_as_primary=exceptions, role_overrides=role_overrides)
@@ -221,6 +251,25 @@ def resolve_data(registry: dict, defaults: dict, workspace: dict | None = None) 
         if key in ws:
             eff.warnings.append(f"legacy key '{key}' ignored: {why}")
     return eff
+
+
+def _follow_authors(assignments: dict[str, Setting]) -> None:
+    """Draft reviewers default to the draft authors (authors review each other).
+
+    Shipped defaults leave the pool unnamed, so it follows the authors at every
+    level. Defaults that do name it still give way to a run that changes its
+    authors (by assignment, legacy key or `agents:` narrowing) without naming
+    its reviewers: that run gets its own authors, never the default pool.
+    """
+    reviewers = assignments.get(DRAFT_REVIEWERS)
+    authors = assignments.get(DRAFT_AUTHORS)
+    if authors is None:
+        return
+    names = [authors.value] if isinstance(authors.value, str) else authors.value
+    if not isinstance(names, list):
+        return
+    if reviewers is None or (reviewers.source == DEFAULT and authors.source != DEFAULT):
+        assignments[DRAFT_REVIEWERS] = Setting(list(names), FOLLOWS_AUTHORS)
 
 
 def resolve(root: Path, slug: str | None = None) -> Effective:
@@ -284,7 +333,10 @@ def validate(eff: Effective) -> tuple[list[str], list[str]]:
                 problems.append(f"role {role}: needs exactly one agent name")
                 continue
             names = [names]
-        promoted = role in eff.support_as_primary
+        promoted = role in eff.support_as_primary or (
+            # reviewers that follow the authors inherit the authors' exception
+            role == DRAFT_REVIEWERS and setting.source == FOLLOWS_AUTHORS
+            and DRAFT_AUTHORS in eff.support_as_primary)
         tiers_here = set()
         for name in names:
             if name not in eff.agents or name not in eff.tiers:
@@ -297,7 +349,7 @@ def validate(eff: Effective) -> tuple[list[str], list[str]]:
             if tier == "support" and promoted:
                 warnings.append(
                     f"role {role}: support-tier {name!r} acts as a primary agent here "
-                    f"(explicit exception, {eff.support_as_primary[role]})"
+                    f"(explicit exception, {eff.support_as_primary.get(role) or eff.support_as_primary[DRAFT_AUTHORS]})"
                 )
                 tier = "primary"
             tiers_here.add(tier)
@@ -338,7 +390,8 @@ def validate(eff: Effective) -> tuple[list[str], list[str]]:
             )
 
     reviewer, submitter = eff.value("research.reviewer"), eff.value("research.submitter")
-    if reviewer is not None and reviewer == submitter:
+    reviewers = reviewer if isinstance(reviewer, list) else [reviewer]
+    if reviewer is not None and submitter in reviewers:
         problems.append("research.reviewer and research.submitter must be different agents")
 
     for name, fields in eff.agents.items():

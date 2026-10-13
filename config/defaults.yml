@@ -50,4 +50,7 @@ assignments:
   research.submitter: codex-paper
   research.outline: codex-paper
   research.draft-authors: [codex-paper, claude-paper]
+  # research.draft-reviewers (paper-draft reviewer pool) is left unnamed on
+  # purpose: it then follows research.draft-authors here and in every run, so
+  # the authors review each other. Name it to staff a different pool.
   research.consistency: codex-review
