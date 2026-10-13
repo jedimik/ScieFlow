@@ -188,7 +188,7 @@ def test_blockers(project):
     assert got[0]["reason"] == "retracted"
 
 
-def test_scite_status_is_not_configured_until_m1(project):
+def test_scite_status_is_not_configured_without_config_scite_yml(project):
     got = service.scite_status(project)
     golden("scite_status", got)
     assert got["configured"] is False

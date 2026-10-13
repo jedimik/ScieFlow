@@ -450,7 +450,28 @@ def blockers(project: Project, slug: str) -> list[dict]:
 
 
 def scite_status(project: Project) -> dict:
-    """Whether scite is usable for this project. Not configured until M1 builds
-    the integration (integrations/scite/); the keys stay the same then."""
-    return {"configured": False, "tier": None, "quota_remaining": None, "last_error": None,
-            "reason": "scite integration not installed yet"}
+    """Whether scite is usable for this project: `configured` (config/scite.yml
+    present and valid), `tier` (`public` = REST only, `mcp`; None when not
+    configured), `quota_remaining` (MCP calls left today under
+    `max_mcp_calls_per_day`, None without a day budget), `last_error` (the
+    latest failed scite call today: `{"ts", "source", "op", "error"}`) and
+    `reason` (why scite or its MCP tier is unavailable). Never the token."""
+    from scieflow.integrations.scite import ledger as _ledger
+    from scieflow.integrations.scite import policy as _policy
+
+    try:
+        pol = _policy.load(project.root)
+    except _policy.PolicyError as exc:
+        return {"configured": False, "tier": None, "quota_remaining": None, "last_error": None,
+                "reason": str(exc)}
+    if not pol.enabled:
+        return {"configured": False, "tier": None, "quota_remaining": None, "last_error": None,
+                "reason": pol.reason}
+    led = _ledger.Ledger(None, pol)
+    last = None
+    for row in reversed(led.rows("day")):
+        if row.get("status") == "error":
+            last = {k: row.get(k) for k in ("ts", "source", "op", "error")}
+            break
+    return {"configured": True, "tier": pol.tier, "quota_remaining": led.remaining(None)["day"],
+            "last_error": last, "reason": pol.reason}

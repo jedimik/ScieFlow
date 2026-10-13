@@ -190,6 +190,7 @@ layout, actor rules and the Python API behind these commands are in the
 ```bash
 uv run scieflow review configure SLUG [--set KEY=VALUE ...] [--as-agent] [--yes]
 uv run scieflow review assign SLUG --round N [--json]
+uv run scieflow review evidence SLUG --round N [--plan] [--json]
 uv run scieflow review status SLUG [--json]
 uv run scieflow review decide SLUG --round N --decision CLUSTER=accept|reject|defer ...
     [--note CLUSTER=TEXT ...] [--overrule CLUSTER=REASON ...]
@@ -197,7 +198,10 @@ uv run scieflow review decide SLUG --round N --decision CLUSTER=accept|reject|de
 ```
 `configure` shows or changes the run's `review:` block; `--as-agent` may only
 set `scite=off` and `reviews_per_draft`. `assign` plans who reviews which
-draft and writes `review/round-N/assignment.json`. `status` lists the review
+draft and writes `review/round-N/assignment.json`. `evidence` builds the
+round's shared evidence bundle (`review/round-N/evidence/`) from free sources
+and at most a few scite MCP calls; `--plan` prints the exact outgoing request
+list and sends nothing — see [scite evidence](research/scite.md). `status` lists the review
 rounds, open blockers and whether scite is configured. `decide` records
 per-cluster decisions on the round's matrix; a blocker cluster needs the
 user's `--overrule` reason (a `reject` with a reason overrules it), and an
@@ -215,7 +219,9 @@ List runs with kind, state and last activity.
 ```bash
 uv run scieflow workspace doctor SLUG [--json]
 ```
-Read-only health report for one run.
+Read-only health report for one run, including scite readiness (configured,
+SDK group installed, token exposed to dispatches, harness MCP registrations
+by name).
 
 ```bash
 uv run scieflow workspace index

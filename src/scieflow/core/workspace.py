@@ -297,7 +297,15 @@ def doctor(slug: str, root: Path | None = None) -> dict:
         "absolute_self_links": self_links,
         "scripts_in_logs": logs_scripts,
         "per_file_dvc_pointer": (ws / f"{slug}.dvc").exists(),
+        "scite": _scite_report(root),
     }
+
+
+def _scite_report(root: Path) -> dict:
+    """scite readiness (configured, SDK group, token in env, harness registrations)."""
+    from scieflow.integrations.scite import doctor as scite_doctor
+
+    return scite_doctor.report(root)
 
 
 def _human(n: int) -> str:
@@ -428,3 +436,16 @@ def doctor_cmd(slug, as_json):
     if report["per_file_dvc_pointer"]:
         click.echo(f"  per-file DVC pointer workspace/{slug}.dvc — untrack it, "
                    "then push as a zip (docs/DVC_STORAGE.md)")
+    echo_scite(report.get("scite"))
+
+
+def echo_scite(scite: dict | None) -> None:
+    """Human-readable scite readiness lines (also `scieflow research scite status`)."""
+    if not scite:
+        return
+    state = f"configured, tier {scite['tier']}" if scite["configured"] else "not configured"
+    click.echo(f"  scite: {state}" + (f" — {scite['reason']}" if scite["reason"] else ""))
+    click.echo(f"  scite SDK group: {'installed' if scite['sdk_installed'] else 'not installed'}"
+               + ("" if scite["sdk_installed"] else f" ({scite['install_hint']})"))
+    for warning in scite["warnings"]:
+        click.echo(f"  warning: {warning}")
