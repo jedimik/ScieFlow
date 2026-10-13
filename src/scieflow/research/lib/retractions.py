@@ -8,13 +8,15 @@ one request covers both. A work that is itself a notice carries `update-to`
 
 Status (matching the evidence bundle's reference status):
 
-- `retracted`   — an update of type retraction / withdrawal / removal;
+- `retracted`   — an update of type retraction / withdrawal / removal, unless a
+                  dated reinstatement follows it (then `corrected`);
 - `corrected`   — correction, erratum, corrigendum, partial retraction,
                   expression of concern, addendum, clarification (advisory);
 - `ok`          — no such update; also a DOI that resolves at doi.org but is
                   not registered with Crossref (`registered: "other"`, e.g.
                   DataCite) — Crossref simply has no update data for it;
-- `unresolvable`— malformed (never sent anywhere) or Crossref 404 *and* doi.org
+- `unresolvable`— not DOI-shaped even after normalisation (`reason: "malformed
+                  DOI"`, never sent anywhere) or Crossref 404 *and* doi.org
                   answers "handle not found" (responseCode 100).
 
 Only an explicit "not found" makes a DOI unresolvable: network errors, 5xx,
@@ -77,6 +79,15 @@ def _year(msg: dict) -> int | None:
     return None
 
 
+def _reinstated(updates: list[dict]) -> bool:
+    """A dated reinstatement on or after every dated retraction. An undated
+    reinstatement proves nothing (conservative: the retraction stands)."""
+    retracted = [u["date"] for u in updates if u["type"] in RETRACTING]
+    return any(u["type"] == "reinstatement" and u["date"] is not None
+               and all(d is None or u["date"] >= d for d in retracted)
+               for u in updates)
+
+
 def classify(msg: dict) -> dict:
     """Status and updates from one Crossref work message (pure)."""
     updates = []
@@ -94,6 +105,8 @@ def classify(msg: dict) -> dict:
     kinds = {u["type"] for u in updates}
     status = ("retracted" if kinds & RETRACTING else
               "corrected" if kinds & CORRECTING else "ok")
+    if status == "retracted" and _reinstated(updates):
+        status = "corrected"     # retracted, then reinstated: advisory, not a blocker
     notice_of = []
     for u in msg.get("update-to") or []:
         if isinstance(u, dict) and _type(u.get("type")) and isinstance(u.get("DOI"), str):

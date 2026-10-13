@@ -200,6 +200,14 @@ def test_send_uses_limiter_for_every_attempt():
     ("doi:10.1/X", "10.1/x"),
     ("https://doi.org/10.1016/S0140-6736(97)11096-0", "10.1016/s0140-6736(97)11096-0"),
     ("  https://dx.doi.org/10.1093/brain/awn044 ", "10.1093/brain/awn044"),
+    ("https://www.doi.org/10.1000/XYZ", "10.1000/xyz"),
+    ("http://www.dx.doi.org/10.1000/xyz", "10.1000/xyz"),
+    ("doi.org/10.1000/xyz", "10.1000/xyz"),
+    ("www.doi.org/10.1000/xyz", "10.1000/xyz"),
+    ("DOI 10.1000/xyz", "10.1000/xyz"),
+    ("DOI: 10.1000/xyz", "10.1000/xyz"),
+    ("doi:10.1000/xyz", "10.1000/xyz"),
+    ("urn:doi:10.1000/xyz", "10.1000/xyz"),
 ])
 def test_doi_normalise(raw, norm):
     assert doi_mod.normalise(raw) == norm

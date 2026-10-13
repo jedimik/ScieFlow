@@ -177,13 +177,45 @@ def _sentences(text: str) -> list[str]:
     return [s for s in _SENTENCE_END.split(text) if s.strip()]
 
 
+def _trim(sentence: str, rx, max_chars: int) -> str:
+    """Cut an over-long sentence to `max_chars` around its first match."""
+    m = rx.search(sentence) if rx is not None else None
+    start = max(0, (m.start() if m else 0) - max_chars // 3)
+    piece = sentence[start:start + max_chars - 2]
+    if start > 0 and " " in piece:
+        piece = piece.split(" ", 1)[1]
+    if start + max_chars - 2 < len(sentence) and " " in piece:
+        piece = piece.rsplit(" ", 1)[0]
+    return ("…" if start > 0 else "") + piece + ("…" if start + len(piece) < len(sentence) else "")
+
+
+def _window(sents: list[str], si: int, context: int, max_chars: int, rxs: list) -> str:
+    """The hit sentence, plus up to `context` neighbours on each side while the
+    quote stays within `max_chars`. The hit sentence itself is never dropped."""
+    hit = sents[si]
+    if len(hit) > max_chars:
+        return _trim(hit, rxs[0] if rxs else None, max_chars)
+    lo = hi = si
+    for step in range(1, context + 1):
+        # extend each side one sentence at a time, contiguously, within max_chars
+        if si - step == lo - 1 and lo > 0 and len(" ".join(sents[lo - 1:hi + 1])) <= max_chars:
+            lo -= 1
+        if si + step == hi + 1 and hi + 1 < len(sents) \
+                and len(" ".join(sents[lo:hi + 2])) <= max_chars:
+            hi += 1
+    return " ".join(sents[lo:hi + 1])
+
+
 def passages(paragraphs: Iterable[dict], terms: Iterable[str], *, max_windows: int = 3,
              context: int = 1, max_chars: int = 600) -> list[dict]:
     keys = sorted({" ".join(t.split()).lower() for t in terms
                    if isinstance(t, str) and t.strip()})
     if not keys or max_windows < 1:
         return []
-    patterns = [(k, re.compile(r"(?<!\w)" + re.escape(k), re.IGNORECASE)) for k in keys]
+    # whole words, plus the plain inflections s / d / ing ("spindle" → "spindles",
+    # "nitrosylate" → "nitrosylated"); "cat" does not match "catalysis"
+    patterns = [(k, re.compile(r"(?<!\w)" + re.escape(k) + r"(?:s|d|ing)?(?!\w)",
+                               re.IGNORECASE)) for k in keys]
     paras = [_sentences(p["text"]) for p in paragraphs]
     sections = [p.get("section") or "Body" for p in paragraphs]
     candidates = []
@@ -202,12 +234,7 @@ def passages(paragraphs: Iterable[dict], terms: Iterable[str], *, max_windows: i
         chosen.append((neg, pi, si, hit))
     out = []
     for neg, pi, si, hit in chosen:
-        sents = paras[pi]
-        quote = " ".join(sents[max(0, si - context): si + context + 1])
-        if len(quote) > max_chars:
-            cut = quote[:max(1, max_chars - 1)]
-            cut = cut.rsplit(" ", 1)[0] if " " in cut else cut
-            quote = cut + "…"
+        quote = _window(paras[pi], si, context, max_chars, [rx for k, rx in patterns if k in hit])
         out.append({"section": sections[pi], "quote": quote, "terms": hit,
                     "score": -neg, "position": [pi, si]})
     return out

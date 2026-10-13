@@ -11,7 +11,9 @@ from __future__ import annotations
 import re
 from urllib.parse import quote as _quote
 
-_PREFIX = re.compile(r"^(?:doi:\s*|https?://(?:dx\.)?doi\.org/)", re.IGNORECASE)
+# doi:… / DOI … / urn:doi:… / [http(s)://][www.][dx.]doi.org/…
+_PREFIX = re.compile(r"^(?:urn:)?(?:doi[:\s]\s*|(?:https?://)?(?:www\.)?(?:dx\.)?doi\.org/)",
+                     re.IGNORECASE)
 _SHAPE = re.compile(r"^10\.[0-9]{4,9}/\S+\Z")
 _DOTDOT = re.compile(r"(^|/)\.\.(/|$)")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
@@ -19,7 +21,8 @@ MAX_LEN = 300
 
 
 def normalise(doi) -> str:
-    """Lower-cased, without `doi:` / `https://doi.org/` prefixes or outer whitespace."""
+    """Lower-cased, without `doi:` / `DOI ` / `https://(www.|dx.)doi.org/` prefixes or
+    outer whitespace."""
     return _PREFIX.sub("", str(doi).strip()).strip().lower()
 
 

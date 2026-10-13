@@ -113,6 +113,48 @@ def test_retraction_outranks_correction_regardless_of_order():
     assert retractions.classify(msg)["status"] == "retracted"
 
 
+def _upd(doi, typ, *date):
+    u = {"DOI": doi, "type": typ, "source": "retraction-watch"}
+    if date:
+        u["updated"] = {"date-parts": [list(date)]}
+    return u
+
+
+def test_later_reinstatement_clears_retraction():
+    msg = {"DOI": "10.1000/x", "updated-by": [_upd("10.1000/r", "retraction", 2015, 3, 1),
+                                             _upd("10.1000/i", "reinstatement", 2016, 1, 5)]}
+    r = retractions.classify(msg)
+    assert r["status"] == "corrected"           # advisory, not a blocker
+    assert [u["type"] for u in r["updates"]] == ["retraction", "reinstatement"]
+
+
+def test_reinstatement_before_a_later_retraction_does_not_clear_it():
+    msg = {"DOI": "10.1000/x", "updated-by": [_upd("10.1000/i", "reinstatement", 2014),
+                                             _upd("10.1000/r", "retraction", 2020, 6)]}
+    assert retractions.classify(msg)["status"] == "retracted"
+
+
+def test_undated_reinstatement_is_conservative():
+    msg = {"DOI": "10.1000/x", "updated-by": [_upd("10.1000/r", "retraction", 2015),
+                                             _upd("10.1000/i", "reinstatement")]}
+    assert retractions.classify(msg)["status"] == "retracted"
+
+
+def test_same_day_reinstatement_clears():
+    msg = {"DOI": "10.1000/x", "updated-by": [_upd("10.1000/i", "reinstatement", 2015, 3, 1),
+                                             _upd("10.1000/r", "retraction", 2015, 3, 1)]}
+    assert retractions.classify(msg)["status"] == "corrected"
+
+
+@pytest.mark.parametrize("spelling", ["https://www.doi.org/10.1371/journal.pone.0110232",
+                                      "doi.org/10.1371/journal.pone.0110232",
+                                      "DOI 10.1371/journal.pone.0110232"])
+@responses.activate
+def test_common_doi_spellings_are_looked_up_not_unresolvable(spelling):
+    responses.get(CR + "10.1371/journal.pone.0110232", json=fx("crossref", "work_ok.json"))
+    assert check(spelling)["status"] == "ok"
+
+
 def test_malformed_update_entries_ignored():
     msg = {"DOI": "10.1000/x", "updated-by": ["junk", {"type": 5}, None,
                                              {"DOI": "10.1000/c", "type": "correction"}]}

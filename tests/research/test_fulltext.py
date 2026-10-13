@@ -201,10 +201,36 @@ def test_passages_max_chars():
         assert len(p["quote"]) <= 120
 
 
-def test_passages_term_prefix_and_regex_safety():
-    paras = [{"section": "S", "text": "Proteins were S-nitrosylated. The (BST) method [x] works."}]
-    assert fulltext.passages(paras, ["nitrosylat"], context=0)[0]["quote"] == \
+def test_passages_keep_the_hit_sentence_when_context_is_too_long():
+    long = "Background " + "words " * 200 + "end."
+    paras = [{"section": "S", "text": long + " The drug reduced mortality. " + long}]
+    out = fulltext.passages(paras, ["mortality"], max_windows=1, context=1, max_chars=200)
+    assert "mortality" in out[0]["quote"]
+    assert len(out[0]["quote"]) <= 200
+    assert out[0]["quote"] == "The drug reduced mortality."
+
+
+def test_passages_long_hit_sentence_trimmed_around_the_term():
+    text = "Lead " + "alpha " * 150 + "the needle sits here " + "omega " * 150 + "end."
+    out = fulltext.passages([{"section": "S", "text": text}], ["needle"], context=0,
+                            max_chars=120)
+    assert "needle" in out[0]["quote"] and len(out[0]["quote"]) <= 120
+
+
+def test_passages_match_whole_words_with_simple_inflections():
+    paras = [{"section": "S", "text": "Catalysis rose. A cat sat. Two cats ran. Rates fell. "
+                                      "Spindles were counted. Proteins were S-nitrosylated."}]
+    quotes = [p["quote"] for p in fulltext.passages(paras, ["cat"], context=0, max_windows=9)]
+    assert quotes == ["A cat sat.", "Two cats ran."]
+    assert fulltext.passages(paras, ["rat"], context=0) == []
+    assert fulltext.passages(paras, ["spindle"], context=0)[0]["quote"] == \
+        "Spindles were counted."
+    assert fulltext.passages(paras, ["nitrosylate"], context=0)[0]["quote"] == \
         "Proteins were S-nitrosylated."
+
+
+def test_passages_term_regex_safety():
+    paras = [{"section": "S", "text": "Proteins were S-nitrosylated. The (BST) method [x] works."}]
     assert fulltext.passages(paras, ["(BST)"], context=0)[0]["quote"] == \
         "The (BST) method [x] works."
     assert fulltext.passages(paras, ["[x]"], context=0)  # literal, not a char class

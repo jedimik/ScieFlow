@@ -88,9 +88,10 @@ def test_bulk_tallies_one_request_recorded_fixture(env):
     assert sent == sorted(["10.1016/j.biopsych.2005.08.012", "10.1093/brain/awn044",
                            "10.1234/not-in-scite"])            # a JSON array of DOIs
     assert out["10.1016/j.biopsych.2005.08.012"] == {
-        "status": "ok", "supporting": 27, "contrasting": 6, "mentioning": 308,
-        "unclassified": 6, "total": 347, "citing_publications": 436}
-    assert out["10.1093/brain/awn044"]["contrasting"] == 1
+        "status": "ok", "citing_publications": 436,
+        "tally": {"supporting": 27, "contrasting": 6, "mentioning": 308,
+                  "unclassified": 6, "total": 347}}
+    assert out["10.1093/brain/awn044"]["tally"]["contrasting"] == 1
     assert out["10.1234/not-in-scite"] == {"status": "unknown"}   # absent from response
     rows = led.rows()
     assert [(r["source"], r["op"], r["results"], r["status"]) for r in rows] == [
@@ -109,6 +110,7 @@ def test_bulk_tallies_chunked_at_configured_max(env):
     assert [len(b) for b in bodies] == [2, 2, 1]
     assert sorted(sum(bodies, [])) == sorted(dois)
     assert all(out[d]["status"] == "ok" for d in dois)
+    assert all(out[d]["tally"]["total"] == 10 for d in dois)
     assert led.calls(source="rest") == 3
 
 
@@ -240,6 +242,23 @@ def test_public_tier_works_without_token(env):
     assert cl.policy.tier == "public"
     responses.add_callback(responses.POST, f"{API}/tallies", callback=echo_tallies)
     assert cl.tallies(["10.1000/a"], round=1)["10.1000/a"]["status"] == "ok"
+
+
+def test_tally_drops_into_a_valid_bundle_reference(env):
+    from jsonschema import Draft202012Validator
+
+    import scieflow.research
+
+    raw = fixture("tallies_bulk.json")["tallies"]["10.1093/brain/awn044"]
+    entry = public._entry(public._tally(raw))
+    bundle = {"version": 1, "round": 1, "manuscript_hash": "0" * 64, "scite_status": "ok",
+              "references": [{"doi": "10.1093/brain/awn044", "status": "ok",
+                              "sources": ["scite_public"], "tally": entry["tally"]}],
+              "claims": [], "flags": [],
+              "calls": {"mcp": 0, "rest": 1, "cached": 0, "skipped": []}}
+    schema = json.loads((Path(scieflow.research.__file__).parent / "schemas"
+                         / "evidence-bundle.schema.json").read_text())
+    assert list(Draft202012Validator(schema).iter_errors(bundle)) == []
 
 
 # --- papers ---------------------------------------------------------------------------

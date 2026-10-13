@@ -13,7 +13,7 @@ cache hit. The public tier never sends the scite token — not even when one is
 configured. Only DOI-shaped strings (`research.lib.doi.is_valid`) ever leave
 the machine; anything else is reported `invalid` without a request.
 
-Outcomes per DOI: `ok`, `unknown` (scite has no record: 404 / absent from the
+Outcomes per DOI: `ok` (with `tally` and `citing_publications`), `unknown` (scite has no record: 404 / absent from the
 bulk answer — cached like any answer), `invalid`, or `unavailable` with the
 failure classification (`RATE`, `TRANSIENT`, `MALFORMED`, …; never cached).
 `RATE` stops the remaining chunks: a refusal is a boundary, not a reason to
@@ -43,13 +43,18 @@ def _count(v) -> bool:
 
 
 def _tally(raw) -> dict | None:
-    """scite TallyResponse → bundle-shaped counts (`contradicting` → `contrasting`)."""
+    """scite TallyResponse → `{"tally": <bundle-shaped counts>, "citing_publications"}`.
+    The `tally` dict is exactly the evidence bundle's tally object
+    (`contradicting` → `contrasting`); citing publications are kept beside it."""
     if not isinstance(raw, dict) or not all(_count(raw.get(k)) for k, _ in _TALLY_FIELDS):
         return None
-    out = {new: raw[old] for old, new in _TALLY_FIELDS}
     cp = raw.get("citingPublications")
-    out["citing_publications"] = cp if _count(cp) else None
-    return out
+    return {"tally": {new: raw[old] for old, new in _TALLY_FIELDS},
+            "citing_publications": cp if _count(cp) else None}
+
+
+def _entry(t: dict | None) -> dict:
+    return {"status": "ok", **t} if isinstance(t, dict) else {"status": "unknown"}
 
 
 def _str(v) -> str | None:
@@ -163,8 +168,7 @@ class PublicClient:
                 continue
             value = res.value if isinstance(res.value, dict) else {}
             for d in chunk:
-                t = value.get(d)
-                out[d] = {"status": "ok", **t} if isinstance(t, dict) else {"status": "unknown"}
+                out[d] = _entry(value.get(d))
         return out
 
     def paper(self, doi: str, *, round: int | None = None) -> dict:  # noqa: A002
