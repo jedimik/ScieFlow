@@ -19,6 +19,8 @@ GROUPS = {
              "Approvals the protocols require, answered from terminal or browser."),
     "run": ("scieflow.core.run.cli", "run", None,
             "A run's state, history and lifecycle."),
+    "review": ("scieflow.core.review.cli", "review", None,
+               "Draft review: settings, reviewer assignment, evidence, decisions."),
     "serve": ("scieflow.web.serve", "serve", "web",
               "Open the local web app (loopback only)."),
     "experiment": (

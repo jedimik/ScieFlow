@@ -17,6 +17,20 @@ archive: true                 # push/pull a run as a single zip
                               # need DVC's per-file dedup for that run, and then
                               # push it with an explicit --no-archive.
 
+# Draft review defaults (docs/superpowers/specs/2026-10-13-scite-review-and-discovery-design.md).
+# A run's review: block overrides these key by key; change a run only with
+# `scieflow review configure <slug> --set KEY=VALUE`. A coordinator agent
+# (--as-agent) may only set scite=off and reviews_per_draft; everything else
+# here is the user's call.
+review:
+  scite: ask                      # off | ask | approved — scite-grounded second pass;
+                                  # only the user sets 'approved'
+  reviews_per_draft: 2
+  allow_same_family_review: false # let a reviewer review a draft of its own model family
+  allow_self_review: false        # let an agent review its own draft (fresh dispatch)
+  review_decisions: human         # human | coordinator — who accepts/rejects review comments
+  # pool: (unset) follows the research.draft-reviewers assignment
+
 # Research module workflow defaults (src/scieflow/research/AGENTS.md). A run's
 # workspace/<slug>/config.yml overrides any of these at top level.
 research:
