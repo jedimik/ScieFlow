@@ -139,16 +139,19 @@ def _check_agents(block: dict, registry: dict) -> None:
             raise SettingsError(f"review: unknown agent {name!r}")
         return registry[name] or {}
 
-    for entry in block.get("pool") or []:
-        cfg = known(entry["agent"])
+    def reviewer(key: str, name: str) -> None:
+        cfg = known(name)
         if not cfg.get("enabled", True):
-            raise SettingsError(f"review.pool: agent {entry['agent']!r} is disabled")
+            raise SettingsError(f"review.{key}: agent {name!r} is disabled")
         if ac.model_family(cfg) is None:
             raise SettingsError(
-                f"review.pool: agent {entry['agent']!r} declares no model_family "
+                f"review.{key}: agent {name!r} declares no model_family "
                 "(add model_family: to its entry in config/agents.yml)")
-    for reviewer, authors in (block.get("matrix_override") or {}).items():
-        known(reviewer)
+
+    for entry in block.get("pool") or []:
+        reviewer("pool", entry["agent"])
+    for name, authors in (block.get("matrix_override") or {}).items():
+        reviewer("matrix_override", name)
         for author in authors:
             known(author)
 
@@ -246,14 +249,22 @@ def write(project: Project, slug: str, changes: dict, actor: str) -> dict:
             raise SettingsError(f"workspace/{slug}/config.yml: review: is not a mapping")
         existing = doc.get("review")
         block = existing if isinstance(existing, CommentedMap) else CommentedMap()
+        for key, value in list(block.items()):
+            # ruamel reads a bare `off` as a string and would write it back
+            # bare, which YAML 1.1 readers (PyYAML) take for false: quote it.
+            if (isinstance(value, str) and not isinstance(value, SingleQuotedScalarString)
+                    and value.lower() in _YAML11_BOOLS):
+                block[key] = SingleQuotedScalarString(value)
         for key, value in changes.items():
             if value is None:
                 block.pop(key, None)
             elif key not in block or acf._plain(CommentedMap(v=block[key]))["v"] != value:
                 block[key] = _yaml_value(value)   # unchanged values keep their formatting
-        plain = acf._plain(CommentedMap(review=block)).get("review") or {}
+        plain = _block(acf._plain(CommentedMap(review=block)), f"workspace/{slug}/config.yml")
         effective = _merge(project, plain)
-        _check_agents(plain, registry)
+        # Only what this write names: a pool that went stale since (agent
+        # disabled later) must not block an unrelated change such as scite=off.
+        _check_agents({k: plain[k] for k in changes if k in plain}, registry)
         if block:
             doc["review"] = block
         else:

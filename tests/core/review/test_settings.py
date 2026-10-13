@@ -199,6 +199,48 @@ def test_matrix_override_agents_must_exist(repo):
                        actor="human")
 
 
+def _add_agent(repo, name, cfg):
+    registry_path = repo / "config" / "agents.yml"
+    registry = yaml.safe_load(registry_path.read_text())
+    registry["agents"][name] = cfg
+    registry_path.write_text(yaml.safe_dump(registry))
+
+
+def test_matrix_override_reviewer_needs_a_model_family(repo):
+    _add_agent(repo, "nofam", {"cmd": "x {prompt}", "tier": "primary", "enabled": True})
+    with pytest.raises(settings.SettingsError, match="model_family"):
+        settings.write(Project(repo), "run-1", {"matrix_override": {"nofam": ["claude"]}},
+                       actor="human")
+
+
+def test_matrix_override_reviewer_must_be_enabled(repo):
+    _add_agent(repo, "gone", {"cmd": "x {prompt}", "model_family": "x", "enabled": False})
+    with pytest.raises(settings.SettingsError, match="disabled"):
+        settings.write(Project(repo), "run-1", {"matrix_override": {"gone": ["claude"]}},
+                       actor="human")
+
+
+def test_a_stale_pool_does_not_block_turning_scite_off(repo):
+    project = Project(repo)
+    settings.write(project, "run-1", {"pool": [{"agent": "codex"}]}, actor="human")
+    registry_path = repo / "config" / "agents.yml"
+    registry = yaml.safe_load(registry_path.read_text())
+    registry["agents"]["codex"]["enabled"] = False
+    registry_path.write_text(yaml.safe_dump(registry))
+
+    got = settings.write(project, "run-1", {"scite": "off"}, actor="agent")
+
+    assert got["scite"] == "off"
+
+
+def test_human_write_after_a_hand_written_bare_off(repo):
+    (repo / "workspace" / "run-1" / "config.yml").write_text("review:\n  scite: off\n")
+    got = settings.write(Project(repo), "run-1", {"reviews_per_draft": 3}, actor="human")
+    assert got["scite"] == "off" and got["reviews_per_draft"] == 3
+    assert yaml.safe_load((repo / "workspace" / "run-1" / "config.yml").read_text()) == {
+        "review": {"scite": "off", "reviews_per_draft": 3}}
+
+
 def test_clearing_the_pool_returns_to_the_default(repo):
     project = Project(repo)
     settings.write(project, "run-1", {"pool": [{"agent": "codex"}]}, actor="human")
