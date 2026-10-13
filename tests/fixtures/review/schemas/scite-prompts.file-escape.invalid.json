@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "wildcards": {
+    "claim": {
+      "max_items": 40,
+      "max_chars": 300
+    }
+  },
+  "prompts": [
+    {
+      "id": "contrasting-evidence",
+      "stage": "review",
+      "applies_to": [
+        "results",
+        "discussion"
+      ],
+      "instruction": "Read {{file:../../config/scite.yml}}.",
+      "queries": [
+        {
+          "source": "scite_mcp",
+          "tool": "citation_graph",
+          "template": "{{seed_dois}}",
+          "limit": 10
+        },
+        {
+          "source": "scite_public",
+          "template": "{{doi}}"
+        }
+      ]
+    },
+    {
+      "id": "novelty",
+      "stage": "review",
+      "applies_to": [
+        "introduction"
+      ],
+      "enabled": false,
+      "instruction": "Check every novelty claim: {{novelty_claim}}.",
+      "queries": [
+        {
+          "source": "scite_mcp",
+          "tool": "search_literature",
+          "template": "{{novelty_claim}}",
+          "limit": 5
+        }
+      ]
+    }
+  ]
+}

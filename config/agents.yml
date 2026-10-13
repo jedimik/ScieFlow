@@ -11,8 +11,13 @@
 # run staffing (research module AGENTS.md, run configuration gate): available
 # models, reasoning levels, and how a choice maps to `agent_overrides:` in the
 # run's workspace config.yml. `menu:` is read by coordinators, not by code.
+# `model_family:` is the model vendor reviews are separated by (no reviewer
+# reviews a draft of its own family by default; agent_config.model_family,
+# falling back to `family:`). It is not `family:`, the output dialect
+# sessions.py parses for conversations. New agents must declare it.
 agents:
   claude:
+    model_family: claude
     cmd: "claude -p --dangerously-skip-permissions --model {model} {prompt}"
     stdin_cmd: "claude -p --dangerously-skip-permissions --model {model}"
     family: claude
@@ -37,6 +42,7 @@ agents:
           cmd: 'env MAX_THINKING_TOKENS=32000 claude -p
           --dangerously-skip-permissions --model {model} {prompt}'
   codex:
+    model_family: openai
     cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
     family: codex
     session_cmd: "codex exec --json --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
@@ -61,6 +67,7 @@ agents:
   # User-approved separate profiles: role-specific effort without changing
   # ordinary Codex work. Separate sessions, not independent model families.
   codex-paper:
+    model_family: openai
     cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
     model: gpt-6-astra
     reasoning: xhigh
@@ -77,6 +84,7 @@ agents:
   # paper-draft come from different model families and cross-review each other.
   # Extended thinking is on (Claude has no effort flag; the env prefix is how).
   claude-paper:
+    model_family: claude
     cmd: "env MAX_THINKING_TOKENS=32000 claude -p --dangerously-skip-permissions --model {model} {prompt}"
     stdin_cmd: "env MAX_THINKING_TOKENS=32000 claude -p --dangerously-skip-permissions --model {model}"
     model: claude-fable-5
@@ -96,6 +104,7 @@ agents:
           cmd). For default effort, drop the env prefix from cmd in
           agent_overrides.
   codex-review:
+    model_family: openai
     cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
     model: gpt-6-astra
     reasoning: xhigh
@@ -109,6 +118,7 @@ agents:
         levels: [low, medium, high, xhigh, max]
         how: "set `reasoning: <level>` in agent_overrides (fills {reasoning})"
   agy:
+    model_family: gemini
     cmd: "agy --print {prompt} --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions"
     # Piped prompts must not leave --print waiting for a positional value.
     stdin_cmd: "agy --model {model} --effort {reasoning} --print-timeout 55m --dangerously-skip-permissions"
@@ -138,6 +148,7 @@ agents:
       reasoning:
         how: "set `reasoning:` in agent_overrides (fills --effort {reasoning}); registry default high"
   stub:
+    model_family: stub
     cmd: "{python} -m scieflow.core.stub_agent {prompt}"
     tier: primary            # tests dispatch it into primary-only roles
     timeout_min: 1

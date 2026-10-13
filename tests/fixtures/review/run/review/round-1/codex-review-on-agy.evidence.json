@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "round": 1,
+  "pass": "evidence",
+  "agent": "codex-review",
+  "reviewed": "agy",
+  "recommendation": "MAJOR REVISION",
+  "major": [
+    {
+      "id": "M1",
+      "location": "results.tex, para 2",
+      "problem": "The diagnostic-accuracy claim for actigraphy is stated without caveats.",
+      "why_it_matters": "It is the central claim of the paper.",
+      "resolution": "Qualify the claim and cite the contrasting replication.",
+      "evidence": [
+        {
+          "doi": "10.5555/rbd.2019.001",
+          "quote": "In contrast to Smith et al., actigraphy alone did not separate RBD from periodic limb movements.",
+          "stance": "contrasting",
+          "source": "scite_mcp"
+        }
+      ],
+      "changed_from_blind": "strengthened"
+    }
+  ],
+  "minor": [
+    {
+      "id": "m1",
+      "location": "abstract.tex",
+      "comment": "'First wearable-only screening' is overstated.",
+      "evidence": [
+        {
+          "doi": "10.5555/rbd.2024.021",
+          "quote": "We present a wearable-only screening pipeline for isolated RBD.",
+          "stance": "contrasting",
+          "source": "scite_mcp"
+        }
+      ],
+      "changed_from_blind": "strengthened"
+    }
+  ],
+  "summary": "codex-review on agy: the evidence bundle confirms the blind findings.",
+  "scite_status": "ok",
+  "followup_requests": [
+    {
+      "query": "wearable screening isolated RBD",
+      "reason": "Check for newer screening studies."
+    }
+  ]
+}

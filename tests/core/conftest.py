@@ -13,16 +13,16 @@ STUB = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
 REGISTRY = {
     "agents": {
         "claude": {"cmd": "claude -p --model {model} {prompt}", "model": "fable",
-                   "tier": "primary", "timeout_min": 30, "enabled": True,
+                   "model_family": "claude", "tier": "primary", "timeout_min": 30, "enabled": True,
                    "menu": {"models": ["fable", "opus"],
                             "reasoning": {"levels": ["default", "extended-thinking"]}}},
         "codex": {"cmd": "codex exec --model {model} -c effort={reasoning} {prompt}",
-                  "model": "sol", "reasoning": "medium", "tier": "primary",
+                  "model": "sol", "reasoning": "medium", "model_family": "openai", "tier": "primary",
                   "timeout_min": 180, "enabled": True,
                   "menu": {"models": ["sol"],
                            "reasoning": {"levels": ["minimal", "low", "medium", "high"]}}},
         "agy": {"cmd": "agy --print {prompt} --model {model} --effort {reasoning}",
-                "model": "gem", "reasoning": "high", "tier": "support",
+                "model": "gem", "reasoning": "high", "model_family": "gemini", "tier": "support",
                 "timeout_min": 60, "enabled": True},
         "off": {"cmd": "off {prompt}", "tier": "primary", "enabled": False},
     }

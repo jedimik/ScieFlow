@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scieflow.local/schemas/scite-prompts.schema.json",
+  "title": "ScieFlow review prompts and wildcards (config/scite-prompts.yml)",
+  "description": "Version 1. Each prompt has an instruction (read by the reviewer in the evidence pass; costs no call) and queries (planned, deduplicated and sent by core). Wildcards come from a closed catalogue; `{{doi_usage}}`, `{{section:<name>}}` and `{{file:<run-relative path>}}` are instruction-only and never part of a query. A run may disable or add prompts, never add wildcard types.",
+  "type": "object",
+  "required": [
+    "version",
+    "prompts"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "wildcards": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "claim",
+          "claim_dois",
+          "doi",
+          "novelty_claim",
+          "topic",
+          "cited_dois",
+          "latest_cited_year",
+          "seed_dois",
+          "gap",
+          "hypothesis",
+          "doi_usage",
+          "section",
+          "file"
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": false,
+        "properties": {
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20000
+          },
+          "max_items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        }
+      }
+    },
+    "prompts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "stage",
+          "instruction"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "not": {
+              "pattern": "[\\r\\n]"
+            }
+          },
+          "stage": {
+            "enum": [
+              "review",
+              "gap",
+              "hypothesis"
+            ]
+          },
+          "applies_to": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "not": {
+                "pattern": "[\\r\\n]"
+              }
+            }
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "instruction": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "^(?:[^{]|\\{(?!\\{)|\\{\\{(?:latest_cited_year|novelty_claim|claim_dois|cited_dois|hypothesis|seed_dois|claim|topic|doi|gap|doi_usage|section:[A-Za-z0-9_-]+|file:[A-Za-z0-9_-](?:[A-Za-z0-9_-]|\\.(?!\\.)|/(?!/))*)\\}\\})*$"
+          },
+          "queries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "source",
+                "template"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "enum": [
+                    "crossref",
+                    "scite_public",
+                    "europepmc",
+                    "scite_mcp",
+                    "pubtator",
+                    "ctgov",
+                    "openalex"
+                  ]
+                },
+                "tool": {
+                  "enum": [
+                    "search_literature",
+                    "citation_graph"
+                  ]
+                },
+                "template": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500,
+                  "pattern": "^(?:[^{]|\\{(?!\\{)|\\{\\{(?:latest_cited_year|novelty_claim|claim_dois|cited_dois|hypothesis|seed_dois|claim|topic|doi|gap)\\}\\})*$"
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                }
+              },
+              "if": {
+                "properties": {
+                  "source": {
+                    "const": "scite_mcp"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "tool"
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "tool"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

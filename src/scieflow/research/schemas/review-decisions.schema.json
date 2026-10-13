@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scieflow.local/schemas/review-decisions.schema.json",
+  "title": "ScieFlow review decisions (review/round-N/decisions.json)",
+  "description": "Version 1. Written only by review.decide() (gate answer or web), never by hand; a decisions file without a matching review.decided event is ignored. An agent decision needs a rationale; a decision on a blocker cluster needs a human overrule_reason (checked by decide(), which knows the matrix).",
+  "type": "object",
+  "required": [
+    "version",
+    "round",
+    "decisions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "round": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "matrix_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "decisions": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/cluster"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "decision",
+          "actor",
+          "decided"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "accept",
+              "reject",
+              "defer"
+            ]
+          },
+          "note": {
+            "type": "string"
+          },
+          "overrule_reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actor": {
+            "enum": [
+              "human",
+              "agent"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decided": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "if": {
+          "properties": {
+            "actor": {
+              "const": "agent"
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "rationale"
+          ],
+          "not": {
+            "required": [
+              "overrule_reason"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "cluster": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+      "not": {
+        "pattern": "[\\r\\n]"
+      }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "not": {
+        "pattern": "[\\r\\n]"
+      }
+    }
+  }
+}

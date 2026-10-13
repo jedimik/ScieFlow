@@ -1,0 +1,130 @@
+{
+  "authors": [
+    {
+      "agent": "claude-paper",
+      "model_family": "claude"
+    },
+    {
+      "agent": "codex-paper",
+      "model_family": "openai"
+    },
+    {
+      "agent": "agy",
+      "model_family": "gemini"
+    }
+  ],
+  "coverage": {
+    "agy": {
+      "reviewers": 2,
+      "shortfall": 0,
+      "target": 1
+    },
+    "claude-paper": {
+      "reviewers": 2,
+      "shortfall": 0,
+      "target": 1
+    },
+    "codex-paper": {
+      "reviewers": 2,
+      "shortfall": 0,
+      "target": 1
+    }
+  },
+  "pairs": [
+    {
+      "author": "claude-paper",
+      "author_family": "claude",
+      "covers": "auto",
+      "fresh_dispatch": true,
+      "reviewer": "agy",
+      "reviewer_family": "gemini",
+      "same_family": false,
+      "self": false
+    },
+    {
+      "author": "claude-paper",
+      "author_family": "claude",
+      "covers": "all",
+      "fresh_dispatch": true,
+      "reviewer": "codex-review",
+      "reviewer_family": "openai",
+      "same_family": false,
+      "self": false
+    },
+    {
+      "author": "codex-paper",
+      "author_family": "openai",
+      "covers": "auto",
+      "fresh_dispatch": true,
+      "reviewer": "claude-paper",
+      "reviewer_family": "claude",
+      "same_family": false,
+      "self": false
+    },
+    {
+      "author": "codex-paper",
+      "author_family": "openai",
+      "covers": "all",
+      "fresh_dispatch": true,
+      "reviewer": "codex-review",
+      "reviewer_family": "openai",
+      "same_family": true,
+      "self": false
+    },
+    {
+      "author": "agy",
+      "author_family": "gemini",
+      "covers": "auto",
+      "fresh_dispatch": true,
+      "reviewer": "codex-paper",
+      "reviewer_family": "openai",
+      "same_family": false,
+      "self": false
+    },
+    {
+      "author": "agy",
+      "author_family": "gemini",
+      "covers": "all",
+      "fresh_dispatch": true,
+      "reviewer": "codex-review",
+      "reviewer_family": "openai",
+      "same_family": false,
+      "self": false
+    }
+  ],
+  "reviewers": [
+    {
+      "agent": "claude-paper",
+      "covers": "auto",
+      "model_family": "claude",
+      "reviews": 1
+    },
+    {
+      "agent": "codex-paper",
+      "covers": "auto",
+      "model_family": "openai",
+      "reviews": 1
+    },
+    {
+      "agent": "agy",
+      "covers": "auto",
+      "model_family": "gemini",
+      "reviews": 1
+    },
+    {
+      "agent": "codex-review",
+      "covers": "all",
+      "model_family": "openai",
+      "reviews": 3
+    }
+  ],
+  "round": 1,
+  "settings": {
+    "allow_same_family_review": true,
+    "allow_self_review": false,
+    "reviews_per_draft": 1
+  },
+  "source": "auto",
+  "version": 1,
+  "warnings": []
+}

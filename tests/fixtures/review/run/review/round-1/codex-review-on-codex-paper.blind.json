@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "round": 1,
+  "pass": "blind",
+  "agent": "codex-review",
+  "reviewed": "codex-paper",
+  "recommendation": "MAJOR REVISION",
+  "major": [
+    {
+      "id": "M1",
+      "location": "results.tex, para 2",
+      "problem": "The diagnostic-accuracy claim for actigraphy is stated without caveats.",
+      "why_it_matters": "It is the central claim of the paper.",
+      "resolution": "Qualify the claim and cite the contrasting replication."
+    }
+  ],
+  "minor": [
+    {
+      "id": "m1",
+      "location": "figures.tex",
+      "comment": "Figure 2 lacks a y-axis label."
+    }
+  ],
+  "summary": "codex-review on codex-paper: clear structure; the central claim needs qualifying."
+}
