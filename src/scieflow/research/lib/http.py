@@ -47,6 +47,10 @@ def get(url, params=None, headers=None, retries=3, backoff=1.0):
 # on 429, bounded jittered retries on 5xx / connection errors, an optional
 # per-second `RateLimiter`, and statuses the caller wants to see (404 → "not
 # found") returned instead of raised. Error messages never carry the URL query.
+# A 429 with Retry-After waits exactly that long (refused outright above
+# `max_retry_after`); a 429 without it gets the same bounded jittered backoff as
+# a 5xx, as scite's and Crossref's rate-limit docs prescribe. Either way the
+# attempts are bounded by `retries` and the final failure is RATE.
 
 _RETRYABLE_5XX = 500
 
