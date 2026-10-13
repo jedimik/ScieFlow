@@ -1,0 +1,140 @@
+# Review prompts and wildcards (validated against
+# src/scieflow/research/schemas/scite-prompts.schema.json; loader:
+# src/scieflow/core/review/prompts.py).
+#
+# instruction: what the reviewer is asked in the evidence pass. Read locally,
+#   costs no call. May use every wildcard, including the instruction-only
+#   {{doi_usage}}, {{section:<name>}} and {{file:<run-relative path>}}.
+# queries: what core fetches before the pass (planned, de-duplicated, sent by
+#   core only). Only literature wildcards that may leave the machine are allowed
+#   here; values are sanitised (no numbers, data references, paths) and a value
+#   that still looks like data is refused, never sent. A list wildcard sent to
+#   scite_mcp is OR-combined into one call; free sources get one query per item.
+#
+# Wildcards (closed catalogue; anything else is a load error):
+#   {{claim}} {{claim_dois}} {{doi}} {{doi_usage}} {{novelty_claim}} {{topic}}
+#   {{cited_dois}} {{latest_cited_year}} {{seed_dois}} {{gap}} {{hypothesis}}
+#   {{section:<name>}} {{file:<run-relative path>}}
+#
+# A run may disable or add prompts in workspace/<slug>/review/prompts.yml
+# (keys: version, disable, prompts); it may not add wildcard types or change
+# the limits below.
+version: 1
+
+wildcards:
+  claim: {max_chars: 300, max_items: 40}
+  novelty_claim: {max_chars: 300, max_items: 40}
+  doi: {max_chars: 300, max_items: 200}
+  doi_usage: {max_chars: 1000, max_items: 40}
+  topic: {max_chars: 300}
+  gap: {max_chars: 400, max_items: 40}
+  hypothesis: {max_chars: 400, max_items: 40}
+  section: {max_chars: 4000}
+  file: {max_chars: 4000}
+
+prompts:
+  # -- draft review (paper-draft Phase 4, paper-review) ----------------------
+  - id: claim-support
+    stage: review
+    applies_to: [results, discussion, introduction]
+    instruction: >-
+      For each citing claim below, decide whether the cited source supports it,
+      using only passages quoted in the evidence bundle. Quote verbatim, give the
+      DOI and say supporting, contrasting or neutral; mark abstract-only evidence
+      as such. Claims (with the DOIs they cite): {{claim}}
+      How each source is used in the manuscript: {{doi_usage}}
+    queries:
+      - {source: crossref, template: "{{doi}}"}
+      - {source: scite_public, template: "{{doi}}"}
+      - {source: europepmc, template: "{{doi}}"}
+
+  - id: contested-source
+    stage: review
+    instruction: >-
+      Some cited sources are contested: other papers contradict them. For every
+      contested source in the bundle, quote the contrasting statements and say
+      whether the manuscript acknowledges the disagreement where it cites the
+      source ({{doi_usage}}). Seeds checked: {{seed_dois}}.
+    queries:
+      - {source: scite_public, template: "{{doi}}"}
+      - {source: scite_mcp, tool: citation_graph, template: "{{seed_dois}}", limit: 10}
+
+  - id: novelty-claim
+    stage: review
+    applies_to: [abstract, introduction, discussion, conclusion]
+    instruction: >-
+      Check every novelty claim against the search hits in the bundle. If earlier
+      work already did this, quote it and give the DOI; otherwise say the claim
+      stands as far as the search reaches. Novelty claims: {{novelty_claim}}
+    queries:
+      - {source: scite_mcp, tool: search_literature, template: "{{novelty_claim}}", limit: 10}
+
+  - id: missing-literature
+    stage: review
+    instruction: >-
+      Using the topic search in the bundle, list relevant papers the manuscript
+      does not cite — especially contrasting ones and work newer than
+      {{latest_cited_year}}. Already cited: {{cited_dois}}. Topic: {{topic}}.
+    queries:
+      - {source: scite_mcp, tool: search_literature, template: "{{topic}}", limit: 20}
+
+  - id: claim-strength
+    stage: review
+    applies_to: [results, discussion]
+    instruction: >-
+      Compare the strength of the wording with the strength of the evidence:
+      flag claims stated as established that rest on a single source, abstract-only
+      evidence or sources with many contrasting citations (tallies in the bundle).
+      Results: {{section:results}} Discussion: {{section:discussion}}
+    queries:
+      - {source: scite_public, template: "{{doi}}"}
+
+  # -- gap discovery (M3) -----------------------------------------------------
+  - id: disputes
+    stage: gap
+    instruction: >-
+      From the contrasting citation statements in the evidence, name the open
+      disputes in {{topic}}: what is contested, by whom, and what evidence would
+      settle it. Quote every statement you rely on.
+    queries:
+      - {source: scite_mcp, tool: citation_graph, template: "{{seed_dois}}", limit: 10}
+
+  - id: stated-open-questions
+    stage: gap
+    instruction: >-
+      Collect questions that published papers on {{topic}} explicitly state as
+      open (future work, unresolved, unknown). Quote each one with its DOI.
+    queries:
+      - {source: scite_mcp, tool: search_literature, template: "{{topic}} future research open question unresolved", limit: 10}
+
+  - id: bridges
+    stage: gap
+    instruction: >-
+      Look for bridges: concepts, genes, chemicals or methods linked to {{topic}}
+      in one literature but not yet connected to it in another (PubTator links,
+      OpenAlex topics and trends). Each candidate needs a quoted evidence item.
+    queries:
+      - {source: pubtator, template: "{{topic}}"}
+      - {source: openalex, template: "{{topic}}"}
+      - {source: ctgov, template: "{{topic}}"}
+
+  # -- hypotheses (M3) -------------------------------------------------------
+  - id: hypothesis-novelty
+    stage: hypothesis
+    instruction: >-
+      For each hypothesis, say whether the search hits show it was already
+      proposed or tested; quote the closest hit with its DOI. Hypotheses: {{hypothesis}}
+    queries:
+      - {source: openalex, template: "{{hypothesis}}"}
+      - {source: europepmc, template: "{{hypothesis}}"}
+      - {source: scite_mcp, tool: search_literature, template: "{{hypothesis}}", limit: 5}
+
+  - id: hypothesis-counterevidence
+    stage: hypothesis
+    instruction: >-
+      For each hypothesis, find the strongest counter-evidence in the bundle
+      (contrasting statements, null results, registered trials without results)
+      and quote it. Hypotheses: {{hypothesis}}
+    queries:
+      - {source: scite_mcp, tool: search_literature, template: "{{hypothesis}} contradicting", limit: 5}
+      - {source: ctgov, template: "{{hypothesis}}"}

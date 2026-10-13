@@ -1,0 +1,22 @@
+{
+  "description": "tools/call search_literature: one text content item holding the documented {hits: [...]} JSON",
+  "http": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "<request id>",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"hits\": [{\"doi\": \"10.1038/s41586-020-2012-7\", \"title\": \"A pneumonia outbreak associated with a new coronavirus of probable bat origin\", \"authors\": [{\"authorName\": \"Peng Zhou\"}], \"abstract\": \"Since the outbreak of severe acute respiratory syndrome (SARS) 18 years ago...\", \"year\": 2020, \"journal\": \"Nature\", \"tally\": {\"supporting\": 32, \"contrasting\": 8, \"mentioning\": 5}, \"fulltextExcerpts\": [\"Relevant passage...\"], \"citations\": [{\"snippet\": \"These findings were confirmed in an independent cohort.\", \"type\": \"supporting\", \"section\": \"Results\", \"sourceDoi\": \"10.1000/citing.1\", \"targetDoi\": \"10.1038/s41586-020-2012-7\"}], \"editorialNotices\": []}, {\"doi\": \"10.1000/example.2\", \"title\": \"Second hit\", \"authors\": [], \"year\": 2021, \"journal\": \"Example\", \"tally\": {\"supporting\": 1, \"contrasting\": 3, \"mentioning\": 10}, \"citations\": [{\"snippet\": \"In contrast, we did not observe this effect.\", \"type\": \"contrasting\", \"section\": \"Discussion\", \"sourceDoi\": \"10.1000/citing.2\", \"targetDoi\": \"10.1000/example.2\"}], \"editorialNotices\": [{\"status\": \"retracted\", \"noticeDoi\": \"10.1000/notice.9\", \"date\": \"2022\"}]}]}"
+          }
+        ],
+        "isError": false
+      }
+    }
+  }
+}

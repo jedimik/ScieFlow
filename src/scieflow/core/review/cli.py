@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 
 import click
@@ -139,6 +140,82 @@ def assign_cmd(slug, round_, as_json):
         click.echo(f"  warning: {warning}")
     click.echo("every review is a fresh dispatch")
     click.echo(f"written: {path.relative_to(project.root)}")
+
+
+def _show_plan(p) -> None:
+    data = p.to_json()
+    c = data["counts"]
+    click.echo(f"Evidence plan for workspace/{p.slug} round {p.round}: {c['requests']} outgoing "
+               f"request(s), {c['mcp']} scite MCP call(s); nothing has been sent.")
+    for r in data["requests"]:
+        cond = f"  [{r['conditional']}]" if r.get("conditional") else ""
+        kind = f" ({r['kind']})" if r.get("kind") else ""
+        click.echo(f"  {r['id']:<4} {r['source']:<12} {r['op']}{kind}: "
+                   f"{json.dumps(r['sends'], ensure_ascii=False)}{cond}")
+    reused = {k: v for k, v in data["reused"].items() if v}
+    if reused:
+        click.echo("  reused from an earlier build (no call): "
+                   + ", ".join(f"{k} {v}" for k, v in reused.items()))
+    for r in data["refused"]:
+        where = ", ".join(f"{k} {v}" for k, v in r.items() if k != "reason")
+        click.echo(f"  refused ({where}): {r['reason']}")
+    for d in data["dropped"]:
+        click.echo(f"  not planned: {d['reason']}")
+    for u in data["unsent"]:
+        click.echo(f"  not sent ({u['kind']}, {u['tool']}): {u['detail']}")
+    for note in data["notes"]:
+        click.echo(f"  note: {note}")
+
+
+@review.command("evidence")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--plan", "plan_only", is_flag=True,
+              help="Print the exact outgoing request list and send nothing.")
+@click.option("--json", "as_json", is_flag=True, help="Print the plan or the outcome as JSON.")
+def evidence_cmd(slug, round_, plan_only, as_json):
+    """Build round N's shared evidence bundle (review/round-N/evidence/bundle.json).
+
+    Free sources first (Crossref, scite public tallies, Europe PMC); scite MCP only for
+    contested sources, the topic search, novelty claims and reviewer follow-ups, within
+    the budgets of config/scite.yml. Needs review.scite=approved, or 'ask' plus a
+    human-answered scite-consent gate. Exit 3 on a policy / consent / dispatch refusal.
+    """
+    from scieflow.core.project import Project
+    from scieflow.core.review import evidence
+    from scieflow.integrations.scite import policy as _policy
+
+    project = Project.discover()
+    try:
+        outcome = evidence.build(project, slug, round_, plan_only=plan_only)
+    except _policy.PolicyError as exc:
+        click.echo(f"refused: {exc}", err=True)
+        sys.exit(_policy.exit_code(exc))
+    except (ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if outcome.status == "off":
+        if as_json:
+            click.echo(json.dumps({"status": "off", "reason": outcome.reason}))
+        else:
+            click.echo(f"scite is off: {outcome.reason} — nothing sent, no bundle written "
+                       "(blind reviews still run)")
+        return
+    if outcome.status == "planned":
+        if as_json:
+            click.echo(json.dumps(outcome.plan.to_json(), indent=2, ensure_ascii=False))
+        else:
+            _show_plan(outcome.plan)
+        return
+    s = outcome.calls["summary"]
+    if as_json:
+        click.echo(json.dumps({"status": "built", "scite_status": outcome.scite_status,
+                               "calls": s}, indent=2, ensure_ascii=False))
+        return
+    click.echo(f"written: workspace/{slug}/review/round-{round_}/evidence/bundle.json "
+               f"(scite {outcome.scite_status}; {s['mcp']} MCP, {s['rest']} REST, "
+               f"{s['cached']} cached, {len(s['skipped'])} skipped)")
+    for item in s["skipped"]:
+        click.echo(f"  skipped ({item['reason']}): {item['query']}")
 
 
 def _pairs(values: tuple[str, ...], what: str) -> dict[str, str]:

@@ -58,6 +58,9 @@ docs = ["mkdocs-material>=9.5"]
 #   uv sync --group notebooklm
 # Pinned below 0.9 because the dist is renamed to gemini-notebook-py there.
 notebooklm = ["notebooklm-py>=0.8,<0.9"]
+# Optional: scite MCP client (src/scieflow/integrations/scite/mcp.py). Install with
+#   uv sync --group scite
+scite = ["mcp>=2.3,<3"]
 
 [build-system]
 requires = ["hatchling>=1.24"]
@@ -69,7 +72,7 @@ packages = ["src/scieflow"]
 [tool.pytest.ini_options]
 pythonpath = ["scripts"]
 testpaths = ["tests"]
-addopts = "-m 'not slow and not live' --import-mode=importlib"
+addopts = "-m 'not slow and not live and not scite_live' --import-mode=importlib"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 # nicegui.testing user plugin: GUI tests build pages in-process, no main.py
@@ -80,4 +83,5 @@ filterwarnings = ["ignore:Unknown config option. main_file:pytest.PytestConfigWa
 markers = [
     "slow: requires apptainer container builds",
     "live: invokes a real agent CLI (spends quota; run explicitly with -m live)",
+    "scite_live: one real scite REST + one MCP call (needs SCITE_TOKEN and uv sync --group scite; run explicitly with -m scite_live)",
 ]

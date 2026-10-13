@@ -1,0 +1,22 @@
+{
+  "description": "tools/call result flagged isError with a quota message (tool-level error)",
+  "http": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "<request id>",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Monthly MCP usage limit reached for this account."
+          }
+        ],
+        "isError": true
+      }
+    }
+  }
+}

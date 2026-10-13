@@ -1,0 +1,97 @@
+{
+  "description": "tools/list, trimmed to the two default tools; input schemas trimmed from scite's catalogue (2026-10-13)",
+  "http": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "<request id>",
+      "result": {
+        "tools": [
+          {
+            "name": "search_literature",
+            "description": "Search scientific literature and read full-text content from peer-reviewed papers.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "term": {
+                  "type": "string"
+                },
+                "dois": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "titles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "limit": {
+                  "type": "integer",
+                  "default": 10,
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                "offset": {
+                  "type": "integer",
+                  "default": 0,
+                  "minimum": 0
+                }
+              },
+              "required": []
+            }
+          },
+          {
+            "name": "citation_graph",
+            "description": "Traverse the scite citation graph from seed DOIs.",
+            "inputSchema": {
+              "type": "object",
+              "required": [
+                "seeds"
+              ],
+              "properties": {
+                "seeds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "maxItems": 10
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "in",
+                    "out",
+                    "both"
+                  ],
+                  "default": "both"
+                },
+                "depth": {
+                  "type": "integer",
+                  "default": 1,
+                  "minimum": 1,
+                  "maximum": 2
+                },
+                "max_edges": {
+                  "type": "integer",
+                  "default": 500,
+                  "maximum": 2000
+                },
+                "include_intent": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

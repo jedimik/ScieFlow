@@ -21,6 +21,8 @@ Everything lives inside the run's workspace, `workspace/<slug>/`:
 | `review/round-N/<reviewer>-on-<author>.blind.json` | reviewer, pass A | `manuscript-review` (`pass: blind`, or no `pass`) |
 | `review/round-N/<reviewer>-on-<author>.evidence.json` | reviewer, pass B | `manuscript-review` (`pass: evidence`) |
 | `review/round-N/evidence/bundle.json` | core (`scieflow review evidence`, M1) | `evidence-bundle` |
+| `review/round-N/evidence/calls.json` | core: this build's scite ledger rows, free-source lookups, reuse counts | — |
+| `review/round-N/evidence/state.json` | core: successful answers, reused by later builds (round diff) | — |
 | `review/round-N/matrix.json` (+ `matrix.md`) | core skeleton + coordinator (M2) | `review-matrix` |
 | `review/round-N/decisions.json` | **only** `service.decide()` | `review-decisions` |
 
@@ -95,6 +97,12 @@ Golden outputs for the fixture run are in `tests/fixtures/review/golden/`.
   `cluster: None`. A human overrule holds for the same reference (kind + DOI
   or bib key) in later rounds.
 - **`scite_status`** — `{"configured": bool, "tier", "quota_remaining", "last_error", "reason"}`.
+  Filled since M1: `tier` is `public` (REST only, no token) or `mcp` (`None` when not
+  configured); `quota_remaining` is the MCP calls left today under
+  `max_mcp_calls_per_day` (`None` without a day budget); `last_error` is the latest
+  failed scite call today, `{"ts", "source", "op", "error"}` (`error` = classification),
+  or `None`; `reason` says why scite or its MCP tier is unavailable (`None` when fully
+  usable). Never the token.
   Until the M1 integration lands it always says `configured: false`.
 
 ## Decisions

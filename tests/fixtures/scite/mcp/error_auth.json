@@ -1,0 +1,14 @@
+{
+  "description": "HTTP 401 on the MCP endpoint (missing / invalid bearer token)",
+  "http": {
+    "status": 401,
+    "headers": {
+      "content-type": "application/json",
+      "www-authenticate": "Bearer"
+    },
+    "body": {
+      "error": "unauthorized",
+      "message": "Invalid or missing access token"
+    }
+  }
+}

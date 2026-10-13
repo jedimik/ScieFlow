@@ -2,6 +2,6 @@
   "configured": false,
   "last_error": null,
   "quota_remaining": null,
-  "reason": "scite integration not installed yet",
+  "reason": "scite is off: config/scite.yml not found (copy config/scite.example.yml to enable it)",
   "tier": null
 }
