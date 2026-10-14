@@ -284,6 +284,27 @@ def test_the_matrix_page_degrades_without_the_research_extra(client, review_proj
     assert "review needs the research extra" in response.text
 
 
+def test_a_corrupt_gate_file_leaves_the_matrix_up_with_a_notice(client, review_project):
+    """O4: one unreadable gate file must not turn the matrix page into a 500."""
+    gates = ws_file(review_project, "gates")
+    gates.mkdir(exist_ok=True)
+    (gates / "zz-corrupt.json").write_text("{not json")
+    response = client.get(MATRIX_PAGE)
+    assert response.status_code == 200
+    assert "open gates could not be read" in response.text
+    assert "Diagnostic-accuracy claim overstated" in response.text
+
+
+def test_a_gate_file_that_is_not_an_object_is_a_notice_too(client, review_project):
+    gates = ws_file(review_project, "gates")
+    gates.mkdir(exist_ok=True)
+    (gates / "zz-list.json").write_text("[]")
+    response = client.get(MATRIX_PAGE)
+    assert response.status_code == 200
+    assert "open gates could not be read" in response.text
+    assert "Diagnostic-accuracy claim overstated" in response.text
+
+
 # --- W5: the blocker banner, the run page and the nav links ---------------------------
 
 

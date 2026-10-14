@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
+from scieflow.core import gates as core_gates
 from scieflow.core import service
 
 NEEDS_EXTRA = "review needs the research extra"
@@ -53,6 +54,19 @@ def review_call(name: str, *args, **kwargs):
         return getattr(svc, name)(*args, **kwargs), ""
     except ValueError as exc:
         return None, str(exc)
+
+
+def gates_safe(ws, state: str | None, label: str) -> tuple[list[dict], str]:
+    """core.gates.list_gates under the degradation rule (ledger O4).
+
+    list_gates parses every gate file and indexes `state`, so one corrupt,
+    non-object or state-less file raises here. That is one notice line
+    (escaped by the template), never a 500 on the page that asked.
+    """
+    try:
+        return core_gates.list_gates(Path(ws), state), ""
+    except (ValueError, OSError, TypeError, KeyError) as exc:
+        return [], f"{label} could not be read: {' '.join(str(exc).split())}"
 
 
 def _text(form, name: str) -> str:

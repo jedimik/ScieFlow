@@ -15,7 +15,6 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from scieflow.core import gates as core_gates
 from scieflow.web import auth, review_views
 from scieflow.web.app import TEMPLATES
 from scieflow.web.pages import MUTATE, _project, _run_dir_or_404
@@ -63,16 +62,17 @@ def _open_review_gates(project, ws, round_: int, decided: dict) -> tuple[list[di
         from scieflow.core.review import decision_gates
     except ImportError:
         return [], review_views.NEEDS_EXTRA
+    open_gates, notice = review_views.gates_safe(ws, "open", "open gates")
     found = []
-    for gate in core_gates.list_gates(ws, "open"):
-        if gate.get("kind") not in REVIEW_GATE_KINDS:
+    for gate in open_gates:
+        if not gate.get("id") or gate.get("kind") not in REVIEW_GATE_KINDS:
             continue
         ref = decision_gates.parse(gate)
         if ref is None or ref["round"] != round_ or ref["cluster"] in decided:
             continue
         found.append({"id": gate["id"], "kind": gate["kind"],
                       "cluster": ref["cluster"], "question": gate.get("question", "")})
-    return found, ""
+    return found, notice
 
 
 @router.get("/runs/{slug}/review", response_class=HTMLResponse)
