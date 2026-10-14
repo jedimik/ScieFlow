@@ -89,10 +89,10 @@ def test_absent_config_refuses_before_any_request(proj):
     assert not (ws / "scite" / "ledger.jsonl").exists()
 
 
-def test_shipped_example_enables_the_three_catalogue_providers(proj):
+def test_shipped_example_enables_every_catalogue_provider(proj):
     root, _, _ = proj
     pol = enable(root)
-    assert pol.enabled_providers() == ["ctgov", "openalex", "pubtator"]
+    assert pol.enabled_providers() == ["ctgov", "europepmc", "openalex", "pubtator"]
     for name, spec in providers.CATALOGUE.items():
         assert set(pol.hosts(name)) == set(spec["hosts"])
 

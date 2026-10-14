@@ -22,6 +22,10 @@ providers:
     enabled: true
     hosts: [api.openalex.org]
     rate_per_s: 5
+  europepmc:                      # Europe PMC search (hypothesis novelty pre-check)
+    enabled: true
+    hosts: [www.ebi.ac.uk]
+    rate_per_s: 5
 
 cache_ttl_days:
   metadata: 30                    # entity lookups, whole-literature counts

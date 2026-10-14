@@ -1,0 +1,39 @@
+{
+ "meta": {
+  "count": 880,
+  "page": 1,
+  "per_page": 5
+ },
+ "results": [
+  {
+   "id": "https://openalex.org/W4378516042",
+   "doi": "https://doi.org/10.3390/brainsci13050797",
+   "title": "Melatonin as a Chronobiotic/Cytoprotective Agent in REM Sleep Behavior Disorder",
+   "publication_year": 2023
+  },
+  {
+   "id": "https://openalex.org/W3037156928",
+   "doi": "https://doi.org/10.1016/j.nbd.2020.104996",
+   "title": "REM sleep behavior disorder (RBD)",
+   "publication_year": 2020
+  },
+  {
+   "id": "https://openalex.org/W1964514448",
+   "doi": "https://doi.org/10.1212/wnl.0b013e3181ca0166",
+   "title": "Severity of REM atonia loss in idiopathic REM sleep behavior disorder predicts Parkinson disease",
+   "publication_year": 2010
+  },
+  {
+   "id": "https://openalex.org/W4379517885",
+   "doi": "https://doi.org/10.3390/brainsci13060914",
+   "title": "Parkinson’s Disease: A Narrative Review on Potential Molecular Mechanisms of Sleep Disturbances, REM Behavior Disorder, and Melatonin",
+   "publication_year": 2023
+  },
+  {
+   "id": "https://openalex.org/W3036065862",
+   "doi": "https://doi.org/10.3389/fneur.2020.00610",
+   "title": "A Neurologist's Guide to REM Sleep Behavior Disorder",
+   "publication_year": 2020
+  }
+ ]
+}

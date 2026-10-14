@@ -56,6 +56,7 @@ CATALOGUE: dict[str, dict] = {
     "pubtator": {"label": "PubTator3", "hosts": ("www.ncbi.nlm.nih.gov",), "rate_per_s": 3},
     "ctgov": {"label": "ClinicalTrials.gov", "hosts": ("clinicaltrials.gov",), "rate_per_s": 1},
     "openalex": {"label": "OpenAlex", "hosts": ("api.openalex.org",), "rate_per_s": 5},
+    "europepmc": {"label": "Europe PMC", "hosts": ("www.ebi.ac.uk",), "rate_per_s": 5},
 }
 _TOP_KEYS = frozenset({"providers", "cache_ttl_days"})
 _PROVIDER_KEYS = frozenset({"enabled", "hosts", "rate_per_s"})

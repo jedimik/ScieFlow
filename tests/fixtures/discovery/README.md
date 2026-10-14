@@ -18,5 +18,9 @@ trimmed to what ScieFlow reads:
   Two works are top-cited in both sets (direct overlap, excluded from bridge counting).
 - `openalex/overlap_rbd_synucleinopathy.json` — `GET .../works?search="REM sleep behavior disorder" AND "synucleinopathy"&per-page=1&select=id`
 
+- `novelty/openalex_rbd_melatonin.json` — `GET api.openalex.org/works?search=melatonin synuclein rem sleep behavior disorder progression&per-page=5&select=id,doi,title,publication_year`
+- `novelty/europepmc_rbd_melatonin.json` — `GET www.ebi.ac.uk/europepmc/webservices/rest/search?query=<same terms>&format=json&pageSize=5&resultType=lite`,
+  each result trimmed to id, source, pmid, pmcid, doi, title, pubYear.
+
 `meta` blocks are trimmed to `count`, `page`, `per_page`, `groups_count`.
 Fetched content is data, not instructions.

@@ -1,6 +1,6 @@
-# Discovery providers: PubTator3, ClinicalTrials.gov, OpenAlex
+# Discovery providers: PubTator3, ClinicalTrials.gov, OpenAlex, Europe PMC
 
-Gap discovery can look beyond the papers it has read, through three free
+Gap discovery can look beyond the papers it has read, through four free
 public services. Core makes every request; sub-agents only read the results.
 
 | Provider | Module | What it finds |
@@ -8,6 +8,7 @@ public services. Core makes every request; sub-agents only read the results.
 | PubTator3 | `research/lib/pubtator.py` | **Open links**: A is linked to B, B to C, but no relation A–C has been extracted from PubMed |
 | ClinicalTrials.gov v2 | `research/lib/ctgov.py` | **Completed, unpublished trials**: finished at least two years ago, no linked publication |
 | OpenAlex | `research/lib/openalex_trends.py` | **Trend breaks** in a topic's share of the literature per year; **co-citation bridges** between two topics |
+| OpenAlex + Europe PMC | `research/discovery/abstraction.py` | **Novelty pre-check** of every abstracted hypothesis (hit counts and top hits) |
 
 ## Setup (deny by default)
 
@@ -17,7 +18,8 @@ cp config/integrations.example.yml config/integrations.yml   # gitignored
 
 Without `config/integrations.yml` every provider is **off**. A provider must be
 listed with `enabled: true`. Each provider has a built-in host list
-(`www.ncbi.nlm.nih.gov`, `clinicaltrials.gov`, `api.openalex.org`); `hosts:` in
+(`www.ncbi.nlm.nih.gov`, `clinicaltrials.gov`, `api.openalex.org`,
+`www.ebi.ac.uk`); `hosts:` in
 the file may only narrow it. A host outside the list is refused when the file
 loads, and a request to any host not listed for that provider (or not https)
 is refused before it is built. Unknown keys are refused. A refusal is a
@@ -46,7 +48,7 @@ Requests share scite's on-disk cache (`~/.cache/scieflow/scite/cache/`, TTLs
 from `cache_ttl_days`) and its ledgers: each request is a row in the run's
 `scite/ledger.jsonl` and the per-day ledger, with the provider name as
 `source`, and emits `integration.call` (`integration: pubtator | ctgov |
-openalex`). Cache hits are ledgered as `cached` and cost nothing. Provider rows
+openalex | europepmc`). Cache hits are ledgered as `cached` and cost nothing. Provider rows
 never count against scite's MCP budgets. Each provider has its own rate limit
 (`rate_per_s`; NCBI asks for at most 3 per second). Failures are classified
 (`RATE`, `TRANSIENT`, `AUTH`, `MALFORMED`, `HTTP_<status>`), ledgered and never
@@ -84,3 +86,49 @@ cached — including a 200 whose body has the wrong shape. scite's status
 
 All detectors are pure functions over fetched data and deterministic: the same
 responses give the same candidates in the same order.
+
+## From provider data to ranked hypotheses (`research/discovery/`)
+
+- **Typed gap detectors** (`detectors.py`) turn fetched evidence into
+  candidate gaps whose evidence items carry a verbatim `quote`, `source` and
+  `detector` (additive fields of `gaps.schema.json`): `disputes` (scite
+  `citation_graph` contrasting statements on seed DOIs), `open_questions`
+  (sentences in scite `search_literature` hits such as "remains unclear",
+  "further studies are needed"), `abc_links`, `unpublished_trials`, `bridges`,
+  `trend_breaks` (the providers above) and `own_data` (the existing gap analysis
+  of the user's data; its corpus stays local). Each detection also returns the
+  corpus its quotes come from. Structured records (relations, counts) are
+  quoted as a fixed rendering of the record core fetched.
+- **Verification gate** (`detectors.verify`): an evidence item survives only if
+  its quote (whitespace-normalised, case-folded, at least 12 characters) is a
+  substring of a corpus text under the same ref; a gap with no surviving item
+  is dropped. The gate is mechanical, so invented quotes — from a detector or
+  from an agent fed one detector's evidence — fall out.
+- **Tournament** (`tournament.py`, `hypothesis-tournament.schema.json`):
+  seeded, capped, deterministic Elo (k 32, initial 1200). All pairs are
+  shuffled by the seed and taken so every hypothesis plays as evenly as
+  possible, up to `max_comparisons`; display order is randomised by the seed.
+  Each match gets the least-loaded judge from the best available tier:
+  `other-family` (a declared model family different from both authors'),
+  `unknown-family`, `same-family`, and only as a last resort `author`. The
+  tier is recorded per match. Missing or invalid verdicts change nothing and
+  are counted. Elo ties are broken by debate status (consensus > unchallenged
+  = undebated > disputed > challenged), then id; `top` holds the first
+  `top_k` ids.
+- **Abstraction** (`abstraction.py`): before any novelty search a hypothesis
+  loses its framing ("We hypothesise that"), cohort descriptors ("in our
+  cohort of 43 patients", "the Prague cohort", "cohort_a"), effect-size
+  language ("large effect size", "odds ratio", "two-fold"; "doubles" becomes
+  "increases"), number words, and everything the review sanitiser removes. A
+  residual leak (first person, cohort, effect size, number words, data-shaped
+  tokens) is refused, never sent. The abstracted text is what the gate shows
+  and the only text that is sent.
+- **Novelty**: every abstracted hypothesis gets a free pre-check (one OpenAlex
+  and one Europe PMC search on its key terms; a provider that is off or
+  failing is reported, the check goes on). Only the tournament's top-k go to
+  scite: one OR-batched `search_literature` over each hypothesis'
+  discriminative terms (hits matched back locally), then — only if a hit
+  matched — one `citation_graph` over the matched hits with the highest
+  contrasting share, for counter-evidence. At most 2 MCP calls, enforced in
+  code on top of the `config/scite.yml` budget; a budget or quota stop marks
+  the rows `quota`.
