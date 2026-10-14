@@ -210,3 +210,20 @@ def record_decision(request: Request, slug: str, round: int,
     if notice:
         return RedirectResponse(f"{target}?error={quote(notice)}", status_code=303)
     return RedirectResponse(f"{target}?ok={quote('decision recorded')}", status_code=303)
+
+
+@router.get("/runs/{slug}/discovery", response_class=HTMLResponse)
+def discovery_page(request: Request, slug: str) -> HTMLResponse:
+    """The hypothesis tournament (ledger W7): read-only; an unknown run is 404."""
+    project = _project(request)
+    _run_dir_or_404(project, slug)
+    ws = project.run_dir(slug)
+    tournament, notice = review_views.load_tournament(ws)
+    gate, gate_notice = review_views.hypothesis_gate(ws)
+    return TEMPLATES.TemplateResponse(request, "discovery.html", {
+        "slug": slug,
+        "tournament": tournament,
+        "notice": notice,
+        "gate": gate,
+        "gate_notice": gate_notice,
+    })

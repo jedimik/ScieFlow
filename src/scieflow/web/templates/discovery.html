@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Discovery — {{ slug }} — ScieFlow{% endblock %}
+{% block nav %}<a href="/runs/{{ slug|urlencode }}">← {{ slug }}</a> <a href="/runs/{{ slug|urlencode }}/review">review</a>{% endblock %}
+{% block content %}
+<h1>Hypothesis tournament — {{ slug }}</h1>
+{% if notice %}<p class="state-failed" role="alert">{{ notice }}</p>{% endif %}
+
+{% if tournament %}
+<p class="dim">seed {{ tournament.seed }} · k {{ tournament.k }} · top {{ tournament.top_k }} · max comparisons {{ tournament.max_comparisons }} · no verdict {{ tournament.no_verdict }}</p>
+
+<h2>Elo ranking</h2>
+<table>
+  <thead>
+    <tr><th>rank</th><th>id</th><th>elo</th><th>debate</th><th>W/L/T</th><th>comparisons</th><th>author</th><th>family</th><th>top</th></tr>
+  </thead>
+  <tbody>
+    {% for h in tournament.hypotheses %}
+    <tr{% if h.id in tournament.top %} class="top"{% endif %}>
+      <td>{{ h.rank }}</td>
+      <td>{{ h.id }}</td>
+      <td>{{ "%.1f"|format(h.elo) }}</td>
+      <td>{{ h.debate_status }}</td>
+      <td>{{ h.wins }}/{{ h.losses }}/{{ h.ties }}</td>
+      <td>{{ h.comparisons }}</td>
+      <td>{{ h.author or "" }}</td>
+      <td>{{ h.family or "" }}</td>
+      <td>{% if h.id in tournament.top %}top{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Pairwise matches</h2>
+<table>
+  <thead>
+    <tr><th>match</th><th>a</th><th>b</th><th>judge</th><th>judge tier</th><th>result</th><th>winner</th></tr>
+  </thead>
+  <tbody>
+    {% for m in tournament.matches %}
+    <tr>
+      <td>{{ m.match }}</td>
+      <td>{{ m.a }}</td>
+      <td>{{ m.b }}</td>
+      <td>{{ m.judge }}</td>
+      <td>{{ m.judge_tier }}</td>
+      <td>{{ m.result }}</td>
+      <td>{{ m.winner or "" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% elif not notice %}
+<p class="dim">no tournament report yet</p>
+{% endif %}
+
+<h2>Hypothesis selection</h2>
+{% if gate_notice %}<p class="state-failed" role="alert">{{ gate_notice }}</p>{% endif %}
+{% if gate %}
+<p>{{ gate.state }} gate: {{ gate.question }}</p>
+{% if gate.answer %}<p>answer: {{ gate.answer }}{% if gate.answered_by %} (by {{ gate.answered_by }}){% endif %}</p>{% endif %}
+{% if gate.state == "open" %}<p><a href="/runs/{{ slug|urlencode }}#gate-{{ gate.id }}">answer on the run page</a></p>{% endif %}
+{% elif not gate_notice %}
+<p class="dim">no hypothesis-selection gate yet</p>
+{% endif %}
+
+<p class="dim">novelty verdicts: not yet available in the contract</p>
+{% endblock %}

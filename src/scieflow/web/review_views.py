@@ -10,6 +10,7 @@ so it is imported lazily: without it every review panel shows NEEDS_EXTRA.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from urllib.parse import quote
@@ -395,3 +396,66 @@ def drafts_review_context(project, slug: str, ws, fallback_authors) -> dict | No
     ws = Path(ws)
     return {"round": n, "notice": "", "authors": [
         _outcome_author(ws, n, author, revise.clusters_for) for author in authors]}
+
+
+# --- W7: the hypothesis tournament view ----------------------------------------------
+
+#: The largest tournament.json the page will read (ledger W7: refuse > 2 MiB).
+REPORT_LIMIT = 2 * 1024 * 1024
+
+
+def _decisions_module():
+    """The core decisions module (it validates the schema), or None without the extra."""
+    try:
+        from scieflow.core.review import decisions
+    except ImportError:
+        return None
+    return decisions
+
+
+def load_tournament(ws) -> tuple[dict | None, str]:
+    """ws/report/tournament.json, validated, or a notice saying why it is not shown.
+
+    The one fixed path the web reads (ledger F9): nothing request-derived. An absent
+    report is (None, "") so the page shows its empty state. A path that resolves
+    outside the workspace (a symlinked file or `report/` directory), an oversized
+    file, invalid JSON, a schema mismatch, or an unreadable file is a notice.
+    """
+    ws = Path(ws)
+    path = ws / "report" / "tournament.json"
+    if not path.exists() and not path.is_symlink():
+        return None, ""
+    try:
+        resolved = path.resolve()
+        if not resolved.is_relative_to(ws.resolve()):
+            return None, ("tournament.json resolves outside the run workspace; "
+                          "not shown")
+        if resolved.stat().st_size > REPORT_LIMIT:
+            return None, "tournament.json is larger than 2 MiB; not shown"
+        raw = resolved.read_bytes()
+    except (OSError, RuntimeError) as exc:
+        return None, f"tournament.json could not be read: {' '.join(str(exc).split())}"
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except ValueError as exc:
+        return None, f"tournament.json is not valid JSON: {' '.join(str(exc).split())}"
+    decisions = _decisions_module()
+    if decisions is None:
+        return None, NEEDS_EXTRA
+    error = decisions.schema_error("hypothesis-tournament", data)
+    if error:
+        return None, f"tournament.json does not match the contract: {error}"
+    return data, ""
+
+
+def hypothesis_gate(ws) -> tuple[dict | None, str]:
+    """The newest hypothesis-selection gate (any state), or (None, notice)."""
+    gates, notice = gates_safe(ws, None, "gates")
+    chosen = None
+    for gate in gates:
+        if gate.get("kind") != "hypothesis-selection" or not gate.get("id"):
+            continue
+        key = (gate.get("opened") or "", gate["id"])
+        if chosen is None or key > chosen[0]:
+            chosen = (key, gate)
+    return (chosen[1] if chosen else None), notice
