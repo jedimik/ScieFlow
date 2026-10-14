@@ -43,6 +43,8 @@
         <button>Overrule this blocker</button>
       </form>
     </div>
+  {% elif c.blocker and blocker_notice %}
+    <p class="state-failed" role="alert">blocker state unknown: {{ blocker_notice }}</p>
   {% elif c.blocker %}
     <p class="dim">overruled{% if c.verdict %} by {{ c.verdict.actor }}{% if c.verdict.overrule_reason %}: {{ c.verdict.overrule_reason }}{% endif %}{% endif %}</p>
   {% endif %}

@@ -11,7 +11,9 @@ so it is imported lazily: without it every review panel shows NEEDS_EXTRA.
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
 from pathlib import Path
 from urllib.parse import quote
 
@@ -24,8 +26,11 @@ BLANK_POOL_ROWS = 2
 #: The pool's `covers` values; mirrors scieflow.core.review.settings.COVERS.
 COVERS = ("all", "auto")
 
-_DOI = re.compile(r"10\.\d{4,9}/\S+")
+#: ASCII only: \d must not accept other Unicode digits in a DOI (R4 C6.1).
+_DOI = re.compile(r"10\.\d{4,9}/\S+", re.ASCII)
 _POOL_FIELD = re.compile(r"pool-(\d+)-(agent|covers)")
+#: What a RecursionError from json.loads on deep nesting says to the user (R4 C2).
+DEEP_NOTICE = "nested too deeply; not shown"
 
 
 class FormMapError(ValueError):
@@ -46,14 +51,17 @@ def review_call(name: str, *args, **kwargs):
 
     Returns (value, notice). The notice is "" on success, NEEDS_EXTRA when the
     review package cannot be imported, or the refusal's own text for a core
-    `ValueError`. Never raises a ValueError to the caller.
+    `ValueError`. A RecursionError (deep JSON, R4 C2) or an OSError is a notice
+    too. Never raises to the caller.
     """
     svc = _review()
     if svc is None:
         return None, NEEDS_EXTRA
     try:
         return getattr(svc, name)(*args, **kwargs), ""
-    except ValueError as exc:
+    except RecursionError:
+        return None, f"review file {DEEP_NOTICE}"
+    except (ValueError, OSError) as exc:
         return None, str(exc)
 
 
@@ -66,6 +74,8 @@ def gates_safe(ws, state: str | None, label: str) -> tuple[list[dict], str]:
     """
     try:
         return core_gates.list_gates(Path(ws), state), ""
+    except RecursionError:
+        return [], f"{label} could not be read: {DEEP_NOTICE}"
     except (ValueError, OSError, TypeError, KeyError) as exc:
         return [], f"{label} could not be read: {' '.join(str(exc).split())}"
 
@@ -345,6 +355,9 @@ def _outcome_author(ws, n: int, author: str, cluster_for) -> dict:
              "undecided": [], "notice": ""}
     try:
         view = cluster_for(ws, n, author)
+    except RecursionError:
+        entry["notice"] = f"review outcome for {author} could not be read: {DEEP_NOTICE}"
+        return entry
     except (ValueError, OSError) as exc:
         entry["notice"] = f"review outcome for {author} could not be read: " \
             f"{' '.join(str(exc).split())}"
@@ -418,8 +431,12 @@ def load_tournament(ws) -> tuple[dict | None, str]:
 
     The one fixed path the web reads (ledger F9): nothing request-derived. An absent
     report is (None, "") so the page shows its empty state. A path that resolves
-    outside the workspace (a symlinked file or `report/` directory), an oversized
-    file, invalid JSON, a schema mismatch, or an unreadable file is a notice.
+    outside the workspace (a symlinked `report/` directory), a symlink or non-regular
+    file at the path (a FIFO would block the page, R4 C1), an oversized file, invalid
+    or deeply nested JSON, a schema mismatch, or an unreadable file is a notice.
+
+    The file is opened once without blocking or following a final symlink, and the
+    checks run on that descriptor: the size is what was read, not what stat reported.
     """
     ws = Path(ws)
     path = ws / "report" / "tournament.json"
@@ -430,13 +447,26 @@ def load_tournament(ws) -> tuple[dict | None, str]:
         if not resolved.is_relative_to(ws.resolve()):
             return None, ("tournament.json resolves outside the run workspace; "
                           "not shown")
-        if resolved.stat().st_size > REPORT_LIMIT:
-            return None, "tournament.json is larger than 2 MiB; not shown"
-        raw = resolved.read_bytes()
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
     except (OSError, RuntimeError) as exc:
         return None, f"tournament.json could not be read: {' '.join(str(exc).split())}"
     try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            return None, "tournament.json is not a regular file; not shown"
+        if st.st_size > REPORT_LIMIT:
+            return None, "tournament.json is larger than 2 MiB; not shown"
+        raw = _read_bounded(fd)
+    except OSError as exc:
+        return None, f"tournament.json could not be read: {' '.join(str(exc).split())}"
+    finally:
+        os.close(fd)
+    if len(raw) > REPORT_LIMIT:
+        return None, "tournament.json is larger than 2 MiB; not shown"
+    try:
         data = json.loads(raw.decode("utf-8"))
+    except RecursionError:
+        return None, f"tournament.json is not valid JSON: {DEEP_NOTICE}"
     except ValueError as exc:
         return None, f"tournament.json is not valid JSON: {' '.join(str(exc).split())}"
     decisions = _decisions_module()
@@ -445,17 +475,133 @@ def load_tournament(ws) -> tuple[dict | None, str]:
     error = decisions.schema_error("hypothesis-tournament", data)
     if error:
         return None, f"tournament.json does not match the contract: {error}"
-    return data, ""
+    return _with_elo_text(data), ""
+
+
+def _read_bounded(fd: int) -> bytes:
+    """At most REPORT_LIMIT + 1 bytes from the descriptor: enough to see it is too big."""
+    chunks: list[bytes] = []
+    total = 0
+    while total <= REPORT_LIMIT:
+        chunk = os.read(fd, min(65536, REPORT_LIMIT + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
+
+
+def _elo_text(elo) -> str:
+    """An Elo for display: one decimal, or the value's own text capped at 32 chars.
+
+    The schema accepts any JSON number, so a 4 000-digit integer must not reach
+    `"%.1f"` (OverflowError, R4 C4).
+    """
+    try:
+        return f"{float(elo):.1f}"
+    except OverflowError:
+        return str(elo)[:32]
+
+
+def _with_elo_text(data: dict) -> dict:
+    """A copy of a validated tournament with each hypothesis's `elo_text` added."""
+    out = dict(data)
+    out["hypotheses"] = [dict(h, elo_text=_elo_text(h["elo"])) for h in data["hypotheses"]]
+    return out
 
 
 def hypothesis_gate(ws) -> tuple[dict | None, str]:
-    """The newest hypothesis-selection gate (any state), or (None, notice)."""
+    """The newest hypothesis-selection gate (any state), or (None, notice).
+
+    list_gates returns non-object gate files untouched when no state is asked for
+    (core/gates.py), so each entry is checked before it is read (R4 C4).
+    """
     gates, notice = gates_safe(ws, None, "gates")
     chosen = None
     for gate in gates:
-        if gate.get("kind") != "hypothesis-selection" or not gate.get("id"):
+        if (not isinstance(gate, dict) or gate.get("kind") != "hypothesis-selection"
+                or not gate.get("id")):
             continue
-        key = (gate.get("opened") or "", gate["id"])
+        key = (str(gate.get("opened") or ""), str(gate["id"]))
         if chosen is None or key > chosen[0]:
             chosen = (key, gate)
     return (chosen[1] if chosen else None), notice
+
+
+# --- R4 C3: a reviewer pass normalised before the round page renders it -----------------
+
+_PASS_LISTS = ("major", "minor")
+
+
+def _scalar(value):
+    """Display text for a scalar field, or None when the value is a container."""
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return None
+    return str(value)
+
+
+def _clean_mapping(mapping: dict, path: str, problems: list[str]) -> dict:
+    """Copy one item: scalar fields as text, `evidence` checked separately."""
+    out = {}
+    for key, value in mapping.items():
+        if key == "evidence":
+            continue
+        text = _scalar(value)
+        if text is None:
+            problems.append(f"{path}.{key}")
+            text = ""
+        out[key] = text
+    if "evidence" in mapping:
+        out["evidence"] = _clean_evidence(mapping["evidence"], f"{path}.evidence", problems)
+    return out
+
+
+def _clean_evidence(value, path: str, problems: list[str]) -> list[dict]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        problems.append(path)
+        return []
+    entries = []
+    for index, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            problems.append(f"{path}[{index}]")
+            continue
+        entries.append(_clean_mapping(entry, f"{path}[{index}]", problems))
+    return entries
+
+
+def clean_pass(doc) -> tuple[dict, list[str]]:
+    """A review pass the round page can render, and the fields it had to repair.
+
+    `major` and `minor` must be lists of objects and each `evidence` a list of
+    objects; anything else is dropped and named in the returned problems. Scalar
+    fields are shown as text (None as ""). The input is never changed: the result
+    is a new dict, so a cached document stays as core returned it (R4 C3).
+    """
+    if not isinstance(doc, dict):
+        return {}, ["pass file is not an object"]
+    problems: list[str] = []
+    clean = dict(doc)
+    for field in _PASS_LISTS:
+        if field not in doc:
+            continue
+        value = doc[field]
+        if value is None:
+            clean[field] = []
+            continue
+        if not isinstance(value, list):
+            problems.append(field)
+            clean[field] = []
+            continue
+        items = []
+        for index, item in enumerate(value):
+            if not isinstance(item, dict):
+                problems.append(f"{field}[{index}]")
+                continue
+            items.append(_clean_mapping(item, f"{field}[{index}]", problems))
+        clean[field] = items
+    return clean, problems
+

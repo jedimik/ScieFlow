@@ -111,8 +111,14 @@ def round_page(request: Request, slug: str, round: int, author: str = "") -> HTM
         for pass_ in PASSES:
             doc, pass_notice = review_views.review_call(
                 "review_pass", project, slug, round, pair["reviewer"], selected, pass_)
+            malformed = ""
+            if doc is not None:
+                doc, problems = review_views.clean_pass(doc)
+                if problems:
+                    malformed = "review file malformed: " + ", ".join(problems)
             panel[pass_] = doc
             panel[f"{pass_}_notice"] = pass_notice
+            panel[f"{pass_}_malformed"] = malformed
         panels.append(panel)
     summary, summary_notice = review_views.review_call(
         "evidence_summary", project, slug, round)

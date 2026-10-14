@@ -6,6 +6,7 @@ link helper, and the lazy import of the review package.
 """
 
 import builtins
+import copy
 
 import pytest
 
@@ -147,3 +148,58 @@ def test_a_missing_research_extra_is_a_notice_not_a_crash(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", without_review)
     assert rv._review() is None
     assert rv.review_call("review_settings", None, "rv1") == (None, rv.NEEDS_EXTRA)
+
+
+def test_a_deeply_nested_review_file_is_a_notice_not_a_crash(monkeypatch):
+    """R4 C2: json.loads raises RecursionError on deep nesting, which is not a ValueError."""
+    from scieflow.core.review import service as review_service
+
+    def deep(project, slug):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(review_service, "rounds", deep)
+    value, notice = rv.review_call("rounds", None, "rv1")
+    assert value is None
+    assert "nested too deeply" in notice
+
+
+def test_an_unreadable_outcome_author_gets_its_own_notice_for_recursion():
+    def deep(ws, n, author):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    entry = rv._outcome_author(None, 1, "claude-paper", deep)
+    assert entry["accepted"] == [] and "could not be read" in entry["notice"]
+
+
+def test_a_doi_with_non_ascii_digits_is_plain_text():
+    """R4 C6.1: \\d must not match Arabic-Indic digits in the DOI helper."""
+    assert rv.doi_link("10.\u0661\u0662\u0663\u0664/x") is None
+    assert rv.doi_link("10.1234/x") == "https://doi.org/10.1234/x"
+
+
+def test_clean_pass_keeps_a_well_formed_pass_unchanged():
+    doc = {"major": [{"id": "M1", "problem": "p",
+                      "evidence": [{"quote": "q", "doi": "10.1/x"}]}],
+           "minor": [{"id": "m1", "comment": "c"}]}
+    clean, problems = rv.clean_pass(doc)
+    assert problems == []
+    assert clean == doc
+
+
+def test_clean_pass_drops_wrong_types_reports_them_and_never_mutates_its_input():
+    doc = {"major": 5, "minor": [{"id": "m1", "comment": ["x"]}, "stray"]}
+    before = copy.deepcopy(doc)
+    clean, problems = rv.clean_pass(doc)
+    assert doc == before
+    assert clean["major"] == []
+    assert clean["minor"] == [{"id": "m1", "comment": ""}]
+    assert problems == ["major", "minor[0].comment", "minor[1]"]
+
+
+def test_clean_pass_coerces_scalars_to_text_without_a_problem():
+    clean, problems = rv.clean_pass({"major": [{"id": 7, "problem": None,
+                                                "evidence": [{"doi": 5}]}]})
+    assert problems == []
+    assert clean["major"][0] == {"id": "7", "problem": "",
+                                 "evidence": [{"doi": "5"}]}
+

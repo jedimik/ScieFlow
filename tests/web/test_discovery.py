@@ -7,7 +7,9 @@ Novelty verdicts are deferred: the page says so and never reads them.
 """
 
 import json
+import os
 import sys
+import threading
 
 from scieflow.core import gates as core_gates
 from scieflow.web import review_views
@@ -219,3 +221,120 @@ def test_script_text_in_the_report_and_gate_is_escaped(client, review_project):
     page = client.get(PAGE).text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page
     assert payload not in page
+
+
+# --- robustness: a corrupt or hostile report never 500s the page (R4 C1, C2, C4) --------
+
+
+def _release_blocked_reader(path, thread):
+    """A reader blocked opening a FIFO returns only when a writer opens it: do that so a
+    failing test ends instead of hanging the run."""
+    if thread.is_alive():
+        os.close(os.open(path, os.O_WRONLY))
+
+
+def _run_with_timeout(target, seconds=5):
+    box = {}
+
+    def run():
+        box["value"] = target()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    return thread, box
+
+
+def test_a_deeply_nested_tournament_is_a_notice_not_a_server_error(client, review_project):
+    path = report_path(review_project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[" * 400_000)
+    response = client.get(PAGE)
+    assert response.status_code == 200
+    assert "nested too deeply" in response.text
+
+
+def test_a_deeply_nested_gate_file_is_a_notice_on_the_discovery_page(client, review_project):
+    gates_dir = review_project.run_dir("rv1") / "gates"
+    gates_dir.mkdir(exist_ok=True)
+    (gates_dir / "zz-deep.json").write_text("[" * 100_000)
+    response = client.get(PAGE)
+    assert response.status_code == 200
+    assert "gates could not be read" in response.text
+
+
+def test_a_fifo_tournament_returns_promptly_with_a_notice(review_project):
+    path = report_path(review_project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.mkfifo(path)
+    thread, box = _run_with_timeout(
+        lambda: review_views.load_tournament(review_project.run_dir("rv1")))
+    returned_promptly = not thread.is_alive()
+    _release_blocked_reader(path, thread)
+    assert returned_promptly, "load_tournament blocked on a FIFO"
+    data, notice = box["value"]
+    assert data is None
+    assert "not a regular file" in notice
+
+
+def test_a_fifo_tournament_does_not_hang_the_page(client, review_project):
+    path = report_path(review_project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.mkfifo(path)
+    thread, box = _run_with_timeout(lambda: client.get(PAGE))
+    returned_promptly = not thread.is_alive()
+    _release_blocked_reader(path, thread)
+    assert returned_promptly, "the discovery page blocked on a FIFO"
+    assert box["value"].status_code == 200
+    assert "not a regular file" in box["value"].text
+
+
+def test_a_directory_at_the_tournament_path_is_a_notice(client, review_project):
+    path = report_path(review_project)
+    path.mkdir(parents=True)
+    response = client.get(PAGE)
+    assert response.status_code == 200
+    assert "not a regular file" in response.text
+
+
+def test_the_read_is_bounded_even_when_the_size_reports_small(review_project, monkeypatch):
+    """A file that lies about its size (fstat) is still read at most REPORT_LIMIT + 1 bytes.
+
+    Note: the old stat-based check also refuses this file, so this guards the new bounded
+    read rather than reproducing a RED state."""
+    path = report_path(review_project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b" " * (review_views.REPORT_LIMIT + 1))
+    real_fstat = os.fstat
+
+    def small(fd):
+        st = real_fstat(fd)
+        return os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink, st.st_uid,
+                               st.st_gid, 0, int(st.st_atime), int(st.st_mtime),
+                               int(st.st_ctime)))
+
+    monkeypatch.setattr(review_views.os, "fstat", small)
+    data, notice = review_views.load_tournament(review_project.run_dir("rv1"))
+    assert data is None
+    assert "larger than 2 MiB" in notice
+
+
+def test_a_gate_file_that_is_not_an_object_is_skipped_on_the_discovery_page(client,
+                                                                             review_project):
+    ws = review_project.run_dir("rv1")
+    gate = core_gates.open_gate(review_project, ws, "hypothesis-selection", "Pick them")
+    (ws / "gates" / "zz-bad.json").write_text("[1, 2]")
+    response = client.get(PAGE)
+    assert response.status_code == 200
+    assert f"/runs/rv1#gate-{gate['id']}" in response.text
+
+
+def test_a_huge_elo_is_shown_truncated_not_a_server_error(client, review_project):
+    doc = tournament()
+    doc["hypotheses"][0]["elo"] = int("1" * 4000)
+    write_report(review_project, doc)
+    response = client.get(PAGE)
+    assert response.status_code == 200
+    assert "1" * 32 in response.text
+    assert "1" * 33 not in response.text
+

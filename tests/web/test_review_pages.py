@@ -8,6 +8,7 @@ fixture.
 
 import json
 
+import pytest
 import yaml
 
 from scieflow.core.review import service as review_service
@@ -343,3 +344,71 @@ def test_the_discovery_link_appears_only_when_the_discovery_folder_exists(client
     assert 'href="/runs/rv1/discovery"' not in client.get("/runs/rv1").text
     ws_file(review_project, "discovery").mkdir()
     assert 'href="/runs/rv1/discovery"' in client.get("/runs/rv1").text
+
+
+# --- R4 robustness: a corrupt or hostile review file is a notice, never a 500 ----------
+
+
+def test_a_deeply_nested_matrix_is_a_notice_on_every_review_page(client, review_project):
+    ws_file(review_project, *MATRIX).write_text("[" * 100_000)
+    assert client.get("/runs/rv1").status_code == 200
+    review = client.get("/runs/rv1/review")
+    assert review.status_code == 200
+    assert "nested too deeply" in review.text
+    matrix = client.get(MATRIX_PAGE)
+    assert matrix.status_code == 200
+    assert "nested too deeply" in matrix.text
+
+
+def test_a_deeply_nested_review_pass_is_a_notice_on_the_round_page(client, review_project):
+    ws_file(review_project, *PASS_EVIDENCE).write_text("[" * 100_000)
+    response = client.get(ROUND_PAGE)
+    assert response.status_code == 200
+    assert "nested too deeply" in response.text
+
+
+MAJOR_ONE = [{"id": "M1", "problem": "p"}]
+WRONG_TYPED_PASSES = [
+    ({"major": 5}, True),
+    ({"major": "text"}, True),
+    ({"major": [{"id": "M1", "problem": "p", "evidence": 7}]}, True),
+    ({"major": [{"id": "M1", "problem": "p", "evidence": ["str"]}]}, True),
+    ({"major": [{"id": "M1", "problem": "p", "evidence": [{"doi": 5}]}]}, False),
+    ({"minor": [{"id": "m1", "comment": ["list", "for", "text"]}]}, True),
+    ({"major": MAJOR_ONE, "minor": [1, "stray"]}, True),
+]
+
+
+@pytest.mark.parametrize("change, notice", WRONG_TYPED_PASSES)
+def test_wrong_typed_pass_fields_are_normalised_not_a_server_error(client, review_project,
+                                                                     change, notice):
+    """R4 C3: `major: 5` or `evidence: 7` from a reviewer file was a 500 on the round page."""
+    path = ws_file(review_project, *PASS_EVIDENCE)
+    doc = json.loads(path.read_text())
+    doc.pop("major", None)
+    doc.pop("minor", None)
+    doc.update(change)
+    path.write_text(json.dumps(doc))
+    response = client.get(ROUND_PAGE)
+    assert response.status_code == 200
+    assert "Traceback" not in response.text
+    assert ("review file malformed" in response.text) is notice
+
+
+# --- R4 C5: a blocker-state read failure is not a 'overruled' status -------------------
+
+
+def test_a_blocker_read_failure_says_state_unknown_not_overruled(client, review_project,
+                                                                 monkeypatch):
+    from scieflow.core.review import service as review_service
+
+    def broken(project, slug):
+        raise ValueError("blockers could not be read in this test")
+
+    monkeypatch.setattr(review_service, "blockers", broken)
+    response = client.get(MATRIX_PAGE)
+    assert response.status_code == 200
+    assert "blocker state unknown" in response.text
+    assert "overruled" not in response.text
+    assert 'name="overrule_reason"' not in response.text
+

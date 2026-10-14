@@ -32,13 +32,13 @@
       <h3>blind</h3>
       {% if p.blind_notice %}<p class="state-failed" role="alert">{{ p.blind_notice }}</p>
       {% elif p.blind is none %}<p class="dim">blind pass not (yet) available</p>
-      {% else %}{{ findings(p.blind, doi_link) }}{% endif %}
+      {% else %}{% if p.blind_malformed %}<p class="state-failed" role="alert">{{ p.blind_malformed }}</p>{% endif %}{{ findings(p.blind, doi_link) }}{% endif %}
     </div>
     <div class="pass">
       <h3>evidence</h3>
       {% if p.evidence_notice %}<p class="state-failed" role="alert">{{ p.evidence_notice }}</p>
       {% elif p.evidence is none %}<p class="dim">evidence pass not (yet) available</p>
-      {% else %}{{ findings(p.evidence, doi_link) }}{% endif %}
+      {% else %}{% if p.evidence_malformed %}<p class="state-failed" role="alert">{{ p.evidence_malformed }}</p>{% endif %}{{ findings(p.evidence, doi_link) }}{% endif %}
     </div>
   </div>
 </section>

@@ -18,7 +18,7 @@
     <tr{% if h.id in tournament.top %} class="top"{% endif %}>
       <td>{{ h.rank }}</td>
       <td>{{ h.id }}</td>
-      <td>{{ "%.1f"|format(h.elo) }}</td>
+      <td>{{ h.elo_text }}</td>
       <td>{{ h.debate_status }}</td>
       <td>{{ h.wins }}/{{ h.losses }}/{{ h.ties }}</td>
       <td>{{ h.comparisons }}</td>
