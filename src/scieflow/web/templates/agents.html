@@ -77,7 +77,11 @@
 
     <fieldset>
       <legend>Reviewer pool</legend>
-      {% if review.inherits %}<p class="dim">This run inherits the project's research.draft-reviewers pool. Add rows to give it its own.</p>{% endif %}
+      {% if review.inherits %}
+        <p class="dim">This run inherits the project's research.draft-reviewers pool{% if review.inherited %}: {{ review.inherited|join(", ") }} (read only){% endif %}. Add rows to give it its own.</p>
+        {% if review.inherited_notice %}<p class="dim">{{ review.inherited_notice }}</p>{% endif %}
+        <input type="hidden" name="pool_inherits" value="1">
+      {% endif %}
       <input type="hidden" name="pool_present" value="1">
       {% for row in review.rows %}
         {% set names = review.agents + ([row.agent] if row.agent and row.agent not in review.agents else []) %}
@@ -87,6 +91,7 @@
             {% for name in names %}<option{% if name == row.agent %} selected{% endif %}>{{ name }}</option>{% endfor %}
           </select>
           <select name="pool-{{ loop.index0 }}-covers">
+            <option value=""{% if not row.covers %} selected{% endif %}>default</option>
             {% for c in review.covers %}<option value="{{ c }}"{% if c == row.covers %} selected{% endif %}>{{ c }}</option>{% endfor %}
           </select>
         </p>
@@ -104,7 +109,7 @@
 
     <p class="actions">
       <button>Apply</button>
-      <button formaction="/agents" formmethod="get" name="preview" value="1">Preview</button>
+      <button formaction="/runs/{{ slug|urlencode }}/review/preview">Preview</button>
       <button name="pool_reset" value="1">Reset pool to default</button>
     </p>
   </form>

@@ -342,30 +342,34 @@ def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
 
 @router.get("/agents", response_class=HTMLResponse)
 def agents_page(request: Request, slug: str = "", error: str = "", ok: str = "",
-                assign: list[str] = Query(default=[]), preview: str = "") -> HTMLResponse:
+                assign: list[str] = Query(default=[])) -> HTMLResponse:
     """Plain `def`: staffing and review settings read the run's YAML from disk.
 
-    `preview` (a GET from the review editor's Preview button) shows the form's
-    typed values and the assignment they would produce; it writes nothing."""
+    The review editor's live preview is a POST (`preview_review_settings`), not
+    a query on this page: a GET would carry the form's csrf_token in the URL
+    (owner finding O2)."""
+    project = _project(request)
+    review = review_views.editor_context(project, slug) if slug else None
+    return _agents_response(request, slug, error=error, ok=ok, assign=assign, review=review)
+
+
+def _agents_response(request: Request, slug: str, *, error: str = "", ok: str = "",
+                     assign=(), review=None) -> HTMLResponse:
     from scieflow.core import agent_config
 
     project = _project(request)
     preview_staffing, problem = None, error
     if assign:
         try:
-            preview_staffing = service.plan_staffing(project, assign, slug or None)
+            preview_staffing = service.plan_staffing(project, list(assign), slug or None)
         except service.ServiceError as exc:
             problem = str(exc)
-    review = None
-    if slug:
-        review = review_views.editor_context(
-            project, slug, submitted=request.query_params if preview else None)
     return TEMPLATES.TemplateResponse(request, "agents.html", {
         "slug": slug,
         "settings": service.agent_settings(project, slug or None),
         "roles": list(agent_config.ROLES),
         "runs": service.list_runs(project),
-        "assign": assign,
+        "assign": list(assign),
         "preview": preview_staffing,
         "review": review,
         "error": problem,
@@ -383,6 +387,18 @@ def _run_dir_or_404(project, slug: str):
     if not ws.is_dir():
         raise HTTPException(status_code=404, detail="no such run")
     return ws
+
+
+@router.post("/runs/{slug}/review/preview", dependencies=MUTATE)
+def preview_review_settings(request: Request, slug: str,
+                            form: FormData = Depends(_conversation_form)) -> HTMLResponse:
+    """The review editor's live preview: the typed values and the assignment
+    they would produce, on the agents page. Writes nothing. The same mapper as
+    Apply (`review_views.review_changes_from_form`) builds the preview."""
+    project = _project(request)
+    _run_dir_or_404(project, slug)
+    review = review_views.editor_context(project, slug, submitted=form)
+    return _agents_response(request, slug, review=review)
 
 
 @router.post("/runs/{slug}/review/settings", dependencies=MUTATE)

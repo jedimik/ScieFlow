@@ -146,20 +146,24 @@ def _pool_rows(form) -> list[dict]:
 
 def review_changes_from_form(form, *, scite_enabled: bool = True) -> dict:
     """The review changes one form describes. The ONE mapper, used by the live
-    preview (GET) and by Apply (POST), so the preview shows what Apply writes.
+    preview (POST) and by Apply (POST), so the preview shows what Apply writes.
 
     It owns exactly: pool, reviews_per_draft, allow_same_family_review,
     allow_self_review and scite. A key is included only when its section was
     shown (a sentinel field), so an unrelated form never wipes a setting.
     "Reset to default" (pool_reset) yields {"pool": None}: the key is removed,
     so the run inherits research.draft-reviewers, which is not an empty list.
+    An inheriting run (pool_inherits, owner finding O1) that gained no filled
+    row keeps inheriting: its pool is left out, not written as [].
     A garbage reviews_per_draft raises FormMapError without reaching core.
     """
     if _text(form, "pool_reset"):
         return {"pool": None}
     changes: dict = {}
     if _text(form, "pool_present"):
-        changes["pool"] = _pool_rows(form)
+        rows = _pool_rows(form)
+        if not (_text(form, "pool_inherits") and not rows):
+            changes["pool"] = rows
     if "reviews_per_draft" in form.keys():
         raw = _text(form, "reviews_per_draft")
         try:
@@ -180,13 +184,23 @@ def review_changes_from_form(form, *, scite_enabled: bool = True) -> dict:
 
 
 def apply_changes(project, slug: str, form) -> tuple[bool, str]:
-    """Apply the form's review changes to a run. Returns (ok, message)."""
+    """Apply the form's review changes to a run. Returns (ok, message).
+
+    Only keys whose mapped value differs from the run's current effective
+    setting are written (owner finding O1): an unchanged key is never pinned
+    into the run's config, so applying one section cannot rewrite another.
+    """
     svc = _review()
     if svc is None:
         return False, NEEDS_EXTRA
     try:
         changes = review_changes_from_form(
             form, scite_enabled=scite_control(project)["enabled"])
+        current = svc.review_settings(project, slug)
+        changes = {key: value for key, value in changes.items()
+                   if current.get(key) != value}
+        if not changes:
+            return True, "no review settings changed"
         svc.set_review_settings(project, slug, changes, actor="human")
     except ValueError as exc:
         return False, str(exc)
@@ -196,7 +210,7 @@ def apply_changes(project, slug: str, form) -> tuple[bool, str]:
 def editor_context(project, slug: str, submitted=None) -> dict:
     """The agents page's review section for one run.
 
-    `submitted` is the GET preview's query (or None). When it is given the
+    `submitted` is the POST preview's form (or None). When it is given the
     editor shows what was typed and a live preview of the assignment (nothing
     is written); otherwise it shows the run's saved settings.
     """
@@ -234,7 +248,14 @@ def editor_context(project, slug: str, submitted=None) -> dict:
             scite = changes.get("scite", scite)
             preview, preview_notice = _preview(svc, project, slug, changes)
     rows = [dict(row) for row in (pool or [])]
-    rows += [{"agent": "", "covers": "auto"} for _ in range(BLANK_POOL_ROWS)]
+    rows += [{"agent": "", "covers": ""} for _ in range(BLANK_POOL_ROWS)]
+    inherited, inherited_notice = [], ""
+    if pool is None:
+        plan, inherited_notice = review_call("preview_assignment", project, slug)
+        for reviewer in (plan or {}).get("reviewers", []):
+            name = reviewer.get("agent") if isinstance(reviewer, dict) else None
+            if name and name not in inherited:
+                inherited.append(name)
     return {
         "available": True,
         "notice": notice,
@@ -244,6 +265,8 @@ def editor_context(project, slug: str, submitted=None) -> dict:
         "rows": rows,
         "covers": COVERS,
         "inherits": pool is None,
+        "inherited": inherited,
+        "inherited_notice": inherited_notice,
         "same": same,
         "self": self_review,
         "reviews": reviews,

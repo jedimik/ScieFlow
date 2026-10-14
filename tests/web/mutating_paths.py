@@ -38,6 +38,7 @@ MUTATING_PATHS = {
     "/start": {"post"},
     "/api/v1/runs": {"post"},
     "/runs/{slug}/review/settings": {"post"},
+    "/runs/{slug}/review/preview": {"post"},
 }
 
 #: Placeholder ids for the templated paths above. Guard tests never resolve
@@ -74,6 +75,7 @@ SAMPLES: dict[str, dict] = {
     "/start": {"slug": "guard-start", "goal": "a goal"},
     "/api/v1/runs": {"slug": "guard-api-runs", "goal": "a goal"},
     "/runs/{slug}/review/settings": {"scite_present": "1", "scite_use": "on"},
+    "/runs/{slug}/review/preview": {"scite_present": "1", "scite_use": "on"},
 }
 
 

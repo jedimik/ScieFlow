@@ -55,6 +55,25 @@ def test_the_pool_is_untouched_without_its_sentinel():
     assert "pool" not in changes
 
 
+def test_an_inheriting_pool_with_only_blank_rows_is_not_written():
+    # Owner finding O1: a run that inherits research.draft-reviewers must keep
+    # inheriting unless the user fills a row.
+    form = {"pool_present": "1", "pool_inherits": "1", "pool-0-agent": "",
+            "pool-1-agent": ""}
+    assert "pool" not in rv.review_changes_from_form(form)
+
+
+def test_an_inheriting_pool_with_a_filled_row_is_written():
+    form = {"pool_present": "1", "pool_inherits": "1", "pool-0-agent": "agy",
+            "pool-1-agent": ""}
+    assert rv.review_changes_from_form(form)["pool"] == [{"agent": "agy"}]
+
+
+def test_a_blank_covers_choice_is_the_core_default_not_all():
+    form = {"pool_present": "1", "pool-0-agent": "claude-paper", "pool-0-covers": ""}
+    assert rv.review_changes_from_form(form)["pool"] == [{"agent": "claude-paper"}]
+
+
 def test_switches_are_false_when_unchecked_and_absent_when_not_shown():
     both_off = rv.review_changes_from_form({"switches_present": "1"})
     assert both_off["allow_same_family_review"] is False
