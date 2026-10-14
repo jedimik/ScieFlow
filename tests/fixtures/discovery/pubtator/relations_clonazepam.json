@@ -1,0 +1,50 @@
+[
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Clonazepam",
+  "target": "@DISEASE_Seizures",
+  "publications": 398
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Clonazepam",
+  "target": "@DISEASE_Epilepsy",
+  "publications": 233
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Clonazepam",
+  "target": "@DISEASE_Myoclonus",
+  "publications": 189
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Clonazepam",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 108
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Clonazepam",
+  "target": "@DISEASE_Panic_Disorder",
+  "publications": 107
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Clonazepam",
+  "target": "@DISEASE_Status_Epilepticus",
+  "publications": 79
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Clonazepam",
+  "target": "@DISEASE_Bipolar_Disorder",
+  "publications": 70
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Clonazepam",
+  "target": "@DISEASE_Burning_Mouth_Syndrome",
+  "publications": 66
+ }
+]

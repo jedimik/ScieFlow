@@ -1,0 +1,32 @@
+# Copy to config/integrations.yml (gitignored) to let gap discovery query the free
+# discovery providers. Deny-by-default: without config/integrations.yml every
+# provider is off; a provider that is not listed with `enabled: true` is off.
+# Unknown keys are refused. Agents never edit this file. Docs:
+# docs/research/discovery-providers.md.
+#
+# `hosts` may only narrow the built-in host list of a provider (a host outside it
+# is refused at load); a request to any other host is refused before it is built.
+# Only leak-checked search terms and provider ids are sent; requests are cached,
+# rate limited and written to the run's scite/ledger.jsonl with the provider name.
+
+providers:
+  pubtator:                       # PubTator3 entity search + relations (A->B->C open links)
+    enabled: true
+    hosts: [www.ncbi.nlm.nih.gov]
+    rate_per_s: 3                 # NCBI asks for at most 3 requests per second
+  ctgov:                          # ClinicalTrials.gov v2 (completed trials without publications)
+    enabled: true
+    hosts: [clinicaltrials.gov]
+    rate_per_s: 1
+  openalex:                       # OpenAlex counts by year, co-citation bridges
+    enabled: true
+    hosts: [api.openalex.org]
+    rate_per_s: 5
+  europepmc:                      # Europe PMC search (hypothesis novelty pre-check)
+    enabled: true
+    hosts: [www.ebi.ac.uk]
+    rate_per_s: 5
+
+cache_ttl_days:
+  metadata: 30                    # entity lookups, whole-literature counts
+  search: 7                       # relations, trial searches, topic counts

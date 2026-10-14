@@ -1,0 +1,308 @@
+{
+ "studies": [
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT03072940",
+     "briefTitle": "Brain Imaging in the Idiopathic REM Sleep Behavior Disorder (ALICE)"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2015-12"
+     }
+    },
+    "designModule": {
+     "studyType": "OBSERVATIONAL"
+    },
+    "referencesModule": {
+     "references": [
+      {
+       "pmid": "26920675",
+       "type": "RESULT",
+       "citation": "Ehrminger M, Latimier A, Pyatigorskaya N, Garcia-Lorenzo D, Leu-Semenescu S, Vidailhet M, Lehericy S, Arnulf I. The coer"
+      }
+     ]
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT02640339",
+     "briefTitle": "Retinal Abnormalities as Biomarker of Disease Progression and Early Diagnosis of Parkinson Disease"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2020-10-31"
+     }
+    },
+    "designModule": {
+     "studyType": "OBSERVATIONAL"
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT04739423",
+     "briefTitle": "A Study of Clenbuterol (CST-103) Co-administered With Nadolol (CST-107) in Subjects With Neurodegenerative Disorders"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2022-08-31"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "PHASE2"
+     ]
+    }
+   },
+   "hasResults": true
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT02824341",
+     "briefTitle": "Exploration of the Reward System by Functional MRI in Parkinson's Disease Patients With and Without REM Sleep Behavior Disorder"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2017-10"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "NA"
+     ]
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT02708186",
+     "briefTitle": "Study Evaluating Nelotanserin for Treatment of REM Sleep Behavior Disorder in Subjects With Dementia (DLB or PDD)"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2018-05"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "PHASE2"
+     ]
+    },
+    "referencesModule": {
+     "references": [
+      {
+       "pmid": "33714847",
+       "type": "DERIVED",
+       "citation": "Stefani A, Santamaria J, Iranzo A, Hackner H, Schenck CH, Hogl B. Nelotanserin as symptomatic treatment for rapid eye mo"
+      }
+     ]
+    }
+   },
+   "hasResults": true
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT05976971",
+     "briefTitle": "Microstructural and Sodium 7 Tesla Brain MRI in Idiopathic REM Sleep Behaviour Disorder"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2025-12-09"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "NA"
+     ]
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT03255642",
+     "briefTitle": "Efficacy and Safety of Melatonin and Clonazepam for IRBD"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2020-12-01"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "NA"
+     ]
+    },
+    "referencesModule": {
+     "references": [
+      {
+       "pmid": "23098778",
+       "type": "BACKGROUND",
+       "citation": "Ferri R, Marelli S, Ferini-Strambi L, Oldani A, Colli F, Schenck CH, Zucconi M. An observational clinical and video-poly"
+      },
+      {
+       "pmid": "20561180",
+       "type": "BACKGROUND",
+       "citation": "Kunz D, Mahlberg R. A two-part, double-blind, placebo-controlled trial of exogenous melatonin in REM sleep behaviour dis"
+      },
+      {
+       "pmid": "23352028",
+       "type": "BACKGROUND",
+       "citation": "McCarter SJ, Boswell CL, St Louis EK, Dueffert LG, Slocumb N, Boeve BF, Silber MH, Olson EJ, Tippmann-Peikert M. Treatme"
+      },
+      {
+       "pmid": "25454845",
+       "type": "BACKGROUND",
+       "citation": "McGrane IR, Leung JG, St Louis EK, Boeve BF. Melatonin therapy for REM sleep behavior disorder: a critical review of evi"
+      },
+      {
+       "pmid": "23542221",
+       "type": "BACKGROUND",
+       "citation": "Nardone R, Golaszewski S, Holler Y, Christova M, Trinka E, Brigo F. Neurophysiological insights into the pathophysiology"
+      },
+      {
+       "pmid": "16781987",
+       "type": "BACKGROUND",
+       "citation": "Iranzo A, Molinuevo JL, Santamaria J, Serradell M, Marti MJ, Valldeoriola F, Tolosa E. Rapid-eye-movement sleep behaviou"
+      },
+      {
+       "pmid": "35141811",
+       "type": "DERIVED",
+       "citation": "Byun JI, Shin YY, Seong YA, Yoon SM, Hwang KJ, Jung YJ, Cha KS, Jung KY, Shin WC. Comparative efficacy of prolonged-rele"
+      }
+     ]
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT03595475",
+     "briefTitle": "Prodromal Markers of First-degree Relatives of Patients With Psychiatric Disorders Comorbid With RBD"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2022-03-31"
+     }
+    },
+    "designModule": {
+     "studyType": "OBSERVATIONAL"
+    },
+    "referencesModule": {
+     "references": [
+      {
+       "pmid": "37399287",
+       "type": "DERIVED",
+       "citation": "Wang J, Lam SP, Huang B, Liu Y, Zhang J, Yu MWM, Tsang JCC, Zhou L, Chau SWH, Chan NY, Chan JWY, Schenck CH, Li SX, Mok "
+      }
+     ]
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT07609537",
+     "briefTitle": "Imagery Control Therapy and Lucid Dreaming for REM-Related Symptoms in Narcolepsy"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2025-06-15"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "NA"
+     ]
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT03060239",
+     "briefTitle": "Exploration of the Mechanism of Movement Improvement During RBD in Parkinson's Disease Using NIRS"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2019-04-12"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "NA"
+     ]
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT03671772",
+     "briefTitle": "Progression of Prodromal Markers of α-synucleinopathy Neurodegeneration in the FDRs of Patients With RBD"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2020-04-27"
+     }
+    },
+    "designModule": {
+     "studyType": "OBSERVATIONAL"
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT01547481",
+     "briefTitle": "MRI Study of Brain Activity in Healthy Adults and Individuals With Parkinsonism and Rapid Eye Movement Disorder."
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2015-12-31"
+     }
+    },
+    "designModule": {
+     "studyType": "OBSERVATIONAL"
+    }
+   },
+   "hasResults": false
+  }
+ ],
+ "nextPageToken": "ZVNj7o2Elu8o3lpzCt6q57L2mpOQJJxrZPKg2PcdkA"
+}

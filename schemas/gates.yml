@@ -18,4 +18,6 @@ kinds:
   review-decision:     {requires_human: false, help: "Accept, reject or defer each review-matrix comment"}
   review-blocker:      {requires_human: true,  help: "A retracted or unresolvable reference blocks merge: fix or overrule"}
   scite-consent:       {requires_human: true,  help: "Send this run's sanitised query plan to scite"}
+  # Gap discovery (src/scieflow/research/skills/gap-discovery/SKILL.md, step 11).
+  hypothesis-selection: {requires_human: true, help: "Pick the hypotheses paper-draft carries forward"}
 states: [open, answered, withdrawn]

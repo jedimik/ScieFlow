@@ -1,0 +1,53 @@
+{
+ "version": "6.9",
+ "hitCount": 406,
+ "resultList": {
+  "result": [
+   {
+    "id": "42295033",
+    "source": "MED",
+    "pmid": "42295033",
+    "pmcid": "PMC13267431",
+    "doi": "10.1002/cns.70991",
+    "title": "Exercise Intervention for REM Sleep Behavior Disorder in Parkinson's Disease: Mechanisms and Implications for Neurorehabilitation.",
+    "pubYear": "2026"
+   },
+   {
+    "id": "42337864",
+    "source": "MED",
+    "pmid": "42337864",
+    "pmcid": "PMC13312846",
+    "doi": "10.12659/ajcr.952151",
+    "title": "Coexisting Amyloid Positivity and Probable Dementia With Lewy Bodies in a Patient With Rapid Eye Movement Sleep Behavior Disorder.",
+    "pubYear": "2026"
+   },
+   {
+    "id": "42634290",
+    "source": "MED",
+    "pmid": "42634290",
+    "pmcid": "PMC13526502",
+    "doi": "10.3349/ymj.2025.0495",
+    "title": "The Glymphatic System in α-Synucleinopathies.",
+    "pubYear": "2026"
+   },
+   {
+    "id": "42769842",
+    "source": "MED",
+    "pmid": "42769842",
+    "pmcid": "PMC13591387",
+    "doi": "10.3389/fnins.2026.1879617",
+    "title": "Exercise timing as a potential temporal regulator of neurolymphatic physiology in neurodegenerative proteinopathies: a mechanistic framework.",
+    "pubYear": "2026"
+   },
+   {
+    "id": "42589377",
+    "source": "MED",
+    "pmid": "42589377",
+    "pmcid": "PMC13466467",
+    "doi": "10.3390/ijms27156719",
+    "title": "Bidirectional Mechanisms Linking Circadian Rhythm Disruption and Parkinson's Disease: Chronobiomarkers and Therapeutic Implications.",
+    "pubYear": "2026"
+   }
+  ]
+ }
+}

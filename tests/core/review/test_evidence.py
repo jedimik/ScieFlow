@@ -503,6 +503,42 @@ def test_scite_status_configured_mcp_tier_with_day_quota_and_last_error(project,
     assert TOKEN not in json.dumps(got)
 
 
+def test_scite_status_last_error_ignores_discovery_provider_rows(project, monkeypatch):
+    """Free discovery providers share the ledger; their failures are not scite's."""
+    from scieflow.core.review import service
+    from scieflow.integrations.scite import ledger as _ledger
+
+    write_policy(project.root, max_mcp_calls_per_day=10)
+    monkeypatch.setenv("SCITE_TOKEN", TOKEN)
+    err = smcp.RPCError("Server error", status=503)
+    build(project, fakes=Fakes(mcp_errors=[None, err, err, err]))
+    led = _ledger.Ledger(ws(project), pol.load(project.root, HOST_ENV))
+    led.record(source="ctgov", op="studies", round=None, results=0, status="error",
+               error="HTTP_500")
+    got = service.scite_status(project)
+    assert got["last_error"]["source"] == "mcp" and got["last_error"]["error"] == "TRANSIENT"
+
+
+def test_calls_json_holds_only_scite_rows(project, monkeypatch):
+    """A discovery-provider row written to the run ledger while a bundle is being
+    built (e.g. a concurrent gap-discovery command) is not part of calls.json."""
+    from scieflow.integrations.scite import ledger as _ledger
+
+    monkeypatch.setenv("SCITE_TOKEN", TOKEN)
+
+    class Interleaved(Fakes):
+        def crossref(self, doi):
+            if not self.crossref_calls:
+                _ledger.Ledger(ws(project), pol.load(project.root, HOST_ENV)).record(
+                    source="openalex", op="counts_by_year", round=None, results=3)
+            return super().crossref(doi)
+
+    build(project, fakes=Interleaved())
+    calls = json.loads((ws(project) / "review" / "round-1" / "evidence" / "calls.json").read_text())
+    assert calls["ledger"] and {r["source"] for r in calls["ledger"]} <= {"mcp", "rest"}
+    assert any(r["source"] == "openalex" for r in ledger_rows(project))
+
+
 def test_scite_status_public_tier_without_token(project, monkeypatch):
     from scieflow.core.review import service
 

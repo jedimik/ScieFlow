@@ -1,0 +1,475 @@
+{
+ "meta": {
+  "count": 57160,
+  "page": 1,
+  "per_page": 200,
+  "groups_count": 93
+ },
+ "group_by": [
+  {
+   "key": "2025",
+   "key_display_name": "2025",
+   "count": 7519
+  },
+  {
+   "key": "2023",
+   "key_display_name": "2023",
+   "count": 6319
+  },
+  {
+   "key": "2024",
+   "key_display_name": "2024",
+   "count": 5498
+  },
+  {
+   "key": "2026",
+   "key_display_name": "2026",
+   "count": 5446
+  },
+  {
+   "key": "2022",
+   "key_display_name": "2022",
+   "count": 3971
+  },
+  {
+   "key": "2021",
+   "key_display_name": "2021",
+   "count": 3508
+  },
+  {
+   "key": "2020",
+   "key_display_name": "2020",
+   "count": 3024
+  },
+  {
+   "key": "2019",
+   "key_display_name": "2019",
+   "count": 2682
+  },
+  {
+   "key": "2018",
+   "key_display_name": "2018",
+   "count": 2217
+  },
+  {
+   "key": "2017",
+   "key_display_name": "2017",
+   "count": 2022
+  },
+  {
+   "key": "2016",
+   "key_display_name": "2016",
+   "count": 1680
+  },
+  {
+   "key": "2015",
+   "key_display_name": "2015",
+   "count": 1589
+  },
+  {
+   "key": "2014",
+   "key_display_name": "2014",
+   "count": 1435
+  },
+  {
+   "key": "2013",
+   "key_display_name": "2013",
+   "count": 1419
+  },
+  {
+   "key": "2012",
+   "key_display_name": "2012",
+   "count": 1157
+  },
+  {
+   "key": "2011",
+   "key_display_name": "2011",
+   "count": 962
+  },
+  {
+   "key": "2010",
+   "key_display_name": "2010",
+   "count": 811
+  },
+  {
+   "key": "2009",
+   "key_display_name": "2009",
+   "count": 686
+  },
+  {
+   "key": "2008",
+   "key_display_name": "2008",
+   "count": 585
+  },
+  {
+   "key": "2007",
+   "key_display_name": "2007",
+   "count": 529
+  },
+  {
+   "key": "2003",
+   "key_display_name": "2003",
+   "count": 444
+  },
+  {
+   "key": "2006",
+   "key_display_name": "2006",
+   "count": 406
+  },
+  {
+   "key": "2005",
+   "key_display_name": "2005",
+   "count": 380
+  },
+  {
+   "key": "2004",
+   "key_display_name": "2004",
+   "count": 315
+  },
+  {
+   "key": "2001",
+   "key_display_name": "2001",
+   "count": 308
+  },
+  {
+   "key": "2002",
+   "key_display_name": "2002",
+   "count": 267
+  },
+  {
+   "key": "2000",
+   "key_display_name": "2000",
+   "count": 194
+  },
+  {
+   "key": "1998",
+   "key_display_name": "1998",
+   "count": 157
+  },
+  {
+   "key": "1997",
+   "key_display_name": "1997",
+   "count": 140
+  },
+  {
+   "key": "1999",
+   "key_display_name": "1999",
+   "count": 136
+  },
+  {
+   "key": "1996",
+   "key_display_name": "1996",
+   "count": 101
+  },
+  {
+   "key": "1994",
+   "key_display_name": "1994",
+   "count": 98
+  },
+  {
+   "key": "1995",
+   "key_display_name": "1995",
+   "count": 87
+  },
+  {
+   "key": "1992",
+   "key_display_name": "1992",
+   "count": 77
+  },
+  {
+   "key": "1993",
+   "key_display_name": "1993",
+   "count": 73
+  },
+  {
+   "key": "1990",
+   "key_display_name": "1990",
+   "count": 57
+  },
+  {
+   "key": "1989",
+   "key_display_name": "1989",
+   "count": 55
+  },
+  {
+   "key": "1991",
+   "key_display_name": "1991",
+   "count": 51
+  },
+  {
+   "key": "1987",
+   "key_display_name": "1987",
+   "count": 47
+  },
+  {
+   "key": "1986",
+   "key_display_name": "1986",
+   "count": 45
+  },
+  {
+   "key": "1985",
+   "key_display_name": "1985",
+   "count": 38
+  },
+  {
+   "key": "1983",
+   "key_display_name": "1983",
+   "count": 36
+  },
+  {
+   "key": "1984",
+   "key_display_name": "1984",
+   "count": 34
+  },
+  {
+   "key": "1988",
+   "key_display_name": "1988",
+   "count": 34
+  },
+  {
+   "key": "1980",
+   "key_display_name": "1980",
+   "count": 30
+  },
+  {
+   "key": "1978",
+   "key_display_name": "1978",
+   "count": 28
+  },
+  {
+   "key": "1979",
+   "key_display_name": "1979",
+   "count": 28
+  },
+  {
+   "key": "1982",
+   "key_display_name": "1982",
+   "count": 27
+  },
+  {
+   "key": "1975",
+   "key_display_name": "1975",
+   "count": 24
+  },
+  {
+   "key": "1973",
+   "key_display_name": "1973",
+   "count": 23
+  },
+  {
+   "key": "1981",
+   "key_display_name": "1981",
+   "count": 23
+  },
+  {
+   "key": "1977",
+   "key_display_name": "1977",
+   "count": 22
+  },
+  {
+   "key": "1972",
+   "key_display_name": "1972",
+   "count": 16
+  },
+  {
+   "key": "1976",
+   "key_display_name": "1976",
+   "count": 14
+  },
+  {
+   "key": "1974",
+   "key_display_name": "1974",
+   "count": 13
+  },
+  {
+   "key": "1971",
+   "key_display_name": "1971",
+   "count": 10
+  },
+  {
+   "key": "1969",
+   "key_display_name": "1969",
+   "count": 9
+  },
+  {
+   "key": "1967",
+   "key_display_name": "1967",
+   "count": 8
+  },
+  {
+   "key": "1970",
+   "key_display_name": "1970",
+   "count": 8
+  },
+  {
+   "key": "1961",
+   "key_display_name": "1961",
+   "count": 7
+  },
+  {
+   "key": "1968",
+   "key_display_name": "1968",
+   "count": 7
+  },
+  {
+   "key": "1949",
+   "key_display_name": "1949",
+   "count": 5
+  },
+  {
+   "key": "1962",
+   "key_display_name": "1962",
+   "count": 5
+  },
+  {
+   "key": "1935",
+   "key_display_name": "1935",
+   "count": 4
+  },
+  {
+   "key": "1931",
+   "key_display_name": "1931",
+   "count": 3
+  },
+  {
+   "key": "1951",
+   "key_display_name": "1951",
+   "count": 3
+  },
+  {
+   "key": "1952",
+   "key_display_name": "1952",
+   "count": 3
+  },
+  {
+   "key": "1965",
+   "key_display_name": "1965",
+   "count": 3
+  },
+  {
+   "key": "1911",
+   "key_display_name": "1911",
+   "count": 2
+  },
+  {
+   "key": "1959",
+   "key_display_name": "1959",
+   "count": 2
+  },
+  {
+   "key": "1963",
+   "key_display_name": "1963",
+   "count": 2
+  },
+  {
+   "key": "1964",
+   "key_display_name": "1964",
+   "count": 2
+  },
+  {
+   "key": "1835",
+   "key_display_name": "1835",
+   "count": 1
+  },
+  {
+   "key": "1891",
+   "key_display_name": "1891",
+   "count": 1
+  },
+  {
+   "key": "1902",
+   "key_display_name": "1902",
+   "count": 1
+  },
+  {
+   "key": "1909",
+   "key_display_name": "1909",
+   "count": 1
+  },
+  {
+   "key": "1916",
+   "key_display_name": "1916",
+   "count": 1
+  },
+  {
+   "key": "1917",
+   "key_display_name": "1917",
+   "count": 1
+  },
+  {
+   "key": "1925",
+   "key_display_name": "1925",
+   "count": 1
+  },
+  {
+   "key": "1928",
+   "key_display_name": "1928",
+   "count": 1
+  },
+  {
+   "key": "1933",
+   "key_display_name": "1933",
+   "count": 1
+  },
+  {
+   "key": "1936",
+   "key_display_name": "1936",
+   "count": 1
+  },
+  {
+   "key": "1937",
+   "key_display_name": "1937",
+   "count": 1
+  },
+  {
+   "key": "1940",
+   "key_display_name": "1940",
+   "count": 1
+  },
+  {
+   "key": "1941",
+   "key_display_name": "1941",
+   "count": 1
+  },
+  {
+   "key": "1942",
+   "key_display_name": "1942",
+   "count": 1
+  },
+  {
+   "key": "1947",
+   "key_display_name": "1947",
+   "count": 1
+  },
+  {
+   "key": "1948",
+   "key_display_name": "1948",
+   "count": 1
+  },
+  {
+   "key": "1953",
+   "key_display_name": "1953",
+   "count": 1
+  },
+  {
+   "key": "1954",
+   "key_display_name": "1954",
+   "count": 1
+  },
+  {
+   "key": "1955",
+   "key_display_name": "1955",
+   "count": 1
+  },
+  {
+   "key": "1960",
+   "key_display_name": "1960",
+   "count": 1
+  },
+  {
+   "key": "1966",
+   "key_display_name": "1966",
+   "count": 1
+  }
+ ]
+}

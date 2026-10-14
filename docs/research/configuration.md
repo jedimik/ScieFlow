@@ -46,6 +46,9 @@ research:
   max_debate_rounds: 2          # perspective debate: discussion rounds after propose
   max_gaps: 10                  # gap-discovery: per-agent cap
   max_hypotheses: 5             # gap-discovery: per-agent cap
+  evolution_rounds: 1           # gap-discovery: refine the tournament's top-k this many times
+  tournament_top_k: 8           # gap-discovery: hypotheses that reach the scite check
+  max_tournament_comparisons: 28  # gap-discovery: pairwise judgements per tournament round
   auto_approve_outline: false   # paper-draft: pause for user outline approval
   zotero:
     library: user               # or "group:<id>"

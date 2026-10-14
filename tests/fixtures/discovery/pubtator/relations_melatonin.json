@@ -1,0 +1,50 @@
+[
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Melatonin",
+  "target": "@DISEASE_Inflammation",
+  "publications": 1799
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Melatonin",
+  "target": "@DISEASE_Neoplasms",
+  "publications": 1049
+ },
+ {
+  "type": "negative_correlate",
+  "source": "@CHEMICAL_Melatonin",
+  "target": "@CHEMICAL_Reactive_Oxygen_Species",
+  "publications": 697
+ },
+ {
+  "type": "negative_correlate",
+  "source": "@CHEMICAL_Free_Radicals",
+  "target": "@CHEMICAL_Melatonin",
+  "publications": 677
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Melatonin",
+  "target": "@DISEASE_Sleep_Wake_Disorders",
+  "publications": 674
+ },
+ {
+  "type": "negative_correlate",
+  "source": "@CHEMICAL_Malondialdehyde",
+  "target": "@CHEMICAL_Melatonin",
+  "publications": 636
+ },
+ {
+  "type": "negative_correlate",
+  "source": "@CHEMICAL_Lipids",
+  "target": "@CHEMICAL_Melatonin",
+  "publications": 578
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Melatonin",
+  "target": "@DISEASE_Sleep_Initiation_and_Maintenance_Disorders",
+  "publications": 448
+ }
+]

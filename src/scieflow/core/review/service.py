@@ -496,7 +496,8 @@ def scite_status(project: Project) -> dict:
     led = _ledger.Ledger(None, pol)
     last = None
     for row in reversed(led.rows("day")):
-        if row.get("status") == "error":
+        # the day ledger also holds the free discovery providers' rows
+        if row.get("status") == "error" and row.get("source") in ("mcp", "rest"):
             last = {k: row.get(k) for k in ("ts", "source", "op", "error")}
             break
     return {"configured": True, "tier": pol.tier, "quota_remaining": led.remaining(None)["day"],
