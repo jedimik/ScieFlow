@@ -1,0 +1,130 @@
+"""Shared review helpers for the web layer (ledger §1, §5 W1/W2).
+
+Pure functions and the degradation rules: the scite toggle mapping, the one
+form mapper that serves both the live preview and Apply, the hardened DOI
+link helper, and the lazy import of the review package.
+"""
+
+import builtins
+
+import pytest
+
+from scieflow.web import review_views as rv
+
+
+# --- W1: the scite toggle maps to one value (or nothing) -------------------------
+
+
+@pytest.mark.parametrize("form, expected", [
+    ({}, None),                                                        # sentinel absent: write nothing
+    ({"scite_present": "1"}, "off"),                                   # sentinel, unchecked
+    ({"scite_present": "1", "scite_use": "on"}, "ask"),                # checked
+    ({"scite_present": "1", "scite_use": "on", "scite_no_ask": "on"}, "approved"),
+    ({"scite_present": "1", "scite_no_ask": "on"}, "off"),             # no-ask without use
+])
+def test_scite_value_maps_each_case(form, expected):
+    assert rv.scite_value(form) == expected
+
+
+# --- W2: one mapper for preview and Apply -----------------------------------------
+
+
+def test_pool_rows_keep_their_order_and_drop_blank_agents():
+    form = {"pool_present": "1",
+            "pool-2-agent": "codex-review", "pool-2-covers": "all",
+            "pool-0-agent": "claude-paper", "pool-0-covers": "auto",
+            "pool-1-agent": "", "pool-1-covers": "all",
+            "pool-3-agent": "  "}
+    changes = rv.review_changes_from_form(form)
+    assert changes["pool"] == [{"agent": "claude-paper", "covers": "auto"},
+                               {"agent": "codex-review", "covers": "all"}]
+
+
+def test_an_empty_pool_is_an_empty_list_not_a_reset():
+    assert rv.review_changes_from_form({"pool_present": "1"})["pool"] == []
+
+
+def test_reset_to_default_sends_only_the_pool_key_as_none():
+    form = {"pool_present": "1", "pool_reset": "1", "pool-0-agent": "claude-paper",
+            "reviews_per_draft": "5", "scite_present": "1", "scite_use": "on"}
+    assert rv.review_changes_from_form(form) == {"pool": None}
+
+
+def test_the_pool_is_untouched_without_its_sentinel():
+    changes = rv.review_changes_from_form({"pool-0-agent": "claude-paper"})
+    assert "pool" not in changes
+
+
+def test_switches_are_false_when_unchecked_and_absent_when_not_shown():
+    both_off = rv.review_changes_from_form({"switches_present": "1"})
+    assert both_off["allow_same_family_review"] is False
+    assert both_off["allow_self_review"] is False
+    one_on = rv.review_changes_from_form({"switches_present": "1", "allow_self_review": "on"})
+    assert one_on["allow_self_review"] is True and one_on["allow_same_family_review"] is False
+    assert "allow_self_review" not in rv.review_changes_from_form({})
+
+
+@pytest.mark.parametrize("raw", ["lots", "", "0", "-1", "2.5"])
+def test_a_garbage_reviews_per_draft_is_refused_by_the_mapper(raw):
+    with pytest.raises(rv.FormMapError):
+        rv.review_changes_from_form({"reviews_per_draft": raw})
+
+
+def test_a_valid_reviews_per_draft_is_an_int():
+    assert rv.review_changes_from_form({"reviews_per_draft": " 3 "})["reviews_per_draft"] == 3
+
+
+def test_the_scite_key_is_omitted_when_scite_is_not_enabled():
+    form = {"scite_present": "1", "scite_use": "on"}
+    assert rv.review_changes_from_form(form, scite_enabled=False).get("scite") is None
+    assert rv.review_changes_from_form(form, scite_enabled=True)["scite"] == "ask"
+    assert "scite" not in rv.review_changes_from_form({})
+
+
+# --- §1: hardened DOI link helper -----------------------------------------------
+
+
+def test_a_plain_doi_becomes_a_doi_org_link():
+    assert rv.doi_link("10.1000/abc.def") == "https://doi.org/10.1000/abc.def"
+
+
+@pytest.mark.parametrize("doi", [
+    "10.1000/a?b",            # query smuggling
+    "10.1000/a#b",            # fragment smuggling
+    "10.1000/../x",           # path traversal
+    "javascript:alert(1)",    # scheme
+    "not a doi",
+    "10.1000/a b",            # whitespace
+    "",
+    None,
+])
+def test_a_non_doi_or_unsafe_value_gets_no_link(doi):
+    assert rv.doi_link(doi) is None
+
+
+# --- §1: lazy import and degradation ----------------------------------------------
+
+
+def test_a_core_refusal_is_degraded_to_a_notice(monkeypatch):
+    from scieflow.core.review import service as review_service
+
+    def refuse(project, slug):
+        raise ValueError("review.pool: 'x' listed more than once")
+
+    monkeypatch.setattr(review_service, "review_settings", refuse)
+    value, notice = rv.review_call("review_settings", None, "rv1")
+    assert value is None
+    assert "listed more than once" in notice
+
+
+def test_a_missing_research_extra_is_a_notice_not_a_crash(monkeypatch):
+    real_import = builtins.__import__
+
+    def without_review(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("scieflow.core.review"):
+            raise ImportError("No module named 'jsonschema'")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", without_review)
+    assert rv._review() is None
+    assert rv.review_call("review_settings", None, "rv1") == (None, rv.NEEDS_EXTRA)

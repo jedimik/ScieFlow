@@ -26,7 +26,8 @@ from starlette.datastructures import FormData
 
 from scieflow.core import jobs as jobs_mod
 from scieflow.core import service
-from scieflow.web import auth
+from scieflow.core.project import ProjectError
+from scieflow.web import auth, review_views
 from scieflow.web.app import TEMPLATES
 
 router = APIRouter(dependencies=[Depends(auth.require_session)])
@@ -217,6 +218,8 @@ def _start_form(defaults: dict, submitted: dict | None = None) -> dict:
     which is also what an empty `submitted` (the first visit) resolves to."""
     submitted = submitted or {}
     return {
+        "scite_use": ("on" if "scite_use" not in submitted else submitted["scite_use"]),
+        "scite_no_ask": submitted.get("scite_no_ask", ""),
         "slug": submitted.get("slug", ""),
         "goal": submitted.get("goal", ""),
         "workflow": submitted.get("workflow") or DEFAULT_WORKFLOW,
@@ -233,10 +236,15 @@ def _start_form(defaults: dict, submitted: dict | None = None) -> dict:
 
 def _render_start(request: Request, project, *, error: str = "",
                   submitted: dict | None = None) -> HTMLResponse:
+    submitted = submitted or {}
+    use = "scite_use" not in submitted or bool(submitted["scite_use"])
+    scite = review_views.scite_control(project, use=use,
+                                       no_ask=bool(submitted.get("scite_no_ask")))
     return TEMPLATES.TemplateResponse(request, "start.html", {
         "workflows": service.workflows(),
         "agents": service.conversational_agents(project),
         "form": _start_form(project.defaults(), submitted),
+        "scite": scite,
         "error": error,
         "csrf": auth.csrf_token(request),
     })
@@ -260,7 +268,8 @@ def start_page(request: Request) -> HTMLResponse:
 def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
               workflow: str = Form(""), agent: str = Form(""), approval: str = Form(""),
               max_iterations: int = Form(0), max_experiment_runs: int = Form(0),
-              max_wall_minutes: int = Form(0)):
+              max_wall_minutes: int = Form(0), scite_present: str = Form(""),
+              scite_use: str = Form(""), scite_no_ask: str = Form("")):
     """Plain `def`, not `async def` — see `say` below: creating a run writes
     several files under a lock, and that blocking work belongs in Starlette's
     threadpool, not on the event loop.
@@ -299,11 +308,15 @@ def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
     re-rendered with what was typed.
     """
     project = _project(request)
+    scite = review_views.start_scite(project, {"scite_present": scite_present,
+                                               "scite_use": scite_use,
+                                               "scite_no_ask": scite_no_ask})
     submitted = {"slug": slug, "goal": goal, "workflow": workflow, "agent": agent,
                 "approval": approval,
                 "max_iterations": max_iterations or None,
                 "max_experiment_runs": max_experiment_runs or None,
-                "max_wall_minutes": max_wall_minutes or None}
+                "max_wall_minutes": max_wall_minutes or None,
+                "scite_use": scite_use, "scite_no_ask": scite_no_ask}
     try:
         result = service.start_run(
             project, slug, goal, agent, workflow=workflow,
@@ -312,35 +325,80 @@ def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
             max_experiment_runs=max_experiment_runs or None,
             max_wall_minutes=max_wall_minutes or None)
     except service.RunStartedError as exc:
-        return RedirectResponse(f"/runs/{quote(exc.slug)}?error={quote(str(exc))}",
+        # The run exists: its scite choice is still recorded, and a refusal of
+        # that write is shown alongside the run's own error.
+        problem = " ".join(part for part in (
+            str(exc), review_views.write_scite(project, exc.slug, scite)) if part)
+        return RedirectResponse(f"/runs/{quote(exc.slug)}?error={quote(problem)}",
                                 status_code=303)
     except service.ServiceError as exc:
         return _render_start(request, project, error=str(exc), submitted=submitted)
+    problem = review_views.write_scite(project, result["slug"], scite)
+    if problem:
+        return RedirectResponse(f"/runs/{quote(result['slug'])}?error={quote(problem)}",
+                                status_code=303)
     return RedirectResponse(f"/runs/{quote(result['slug'])}", status_code=303)
 
 
 @router.get("/agents", response_class=HTMLResponse)
-def agents_page(request: Request, slug: str = "", error: str = "",
-                assign: list[str] = Query(default=[])) -> HTMLResponse:
+def agents_page(request: Request, slug: str = "", error: str = "", ok: str = "",
+                assign: list[str] = Query(default=[]), preview: str = "") -> HTMLResponse:
+    """Plain `def`: staffing and review settings read the run's YAML from disk.
+
+    `preview` (a GET from the review editor's Preview button) shows the form's
+    typed values and the assignment they would produce; it writes nothing."""
     from scieflow.core import agent_config
 
     project = _project(request)
-    preview, problem = None, error
+    preview_staffing, problem = None, error
     if assign:
         try:
-            preview = service.plan_staffing(project, assign, slug or None)
+            preview_staffing = service.plan_staffing(project, assign, slug or None)
         except service.ServiceError as exc:
             problem = str(exc)
+    review = None
+    if slug:
+        review = review_views.editor_context(
+            project, slug, submitted=request.query_params if preview else None)
     return TEMPLATES.TemplateResponse(request, "agents.html", {
         "slug": slug,
         "settings": service.agent_settings(project, slug or None),
         "roles": list(agent_config.ROLES),
         "runs": service.list_runs(project),
         "assign": assign,
-        "preview": preview,
+        "preview": preview_staffing,
+        "review": review,
         "error": problem,
+        "ok": ok,
         "csrf": auth.csrf_token(request),
     })
+
+
+def _run_dir_or_404(project, slug: str):
+    """The run's workspace, or 404. The web's only derived path is `project.run_dir`."""
+    try:
+        ws = project.run_dir(slug)
+    except ProjectError:
+        raise HTTPException(status_code=404, detail="no such run") from None
+    if not ws.is_dir():
+        raise HTTPException(status_code=404, detail="no such run")
+    return ws
+
+
+@router.post("/runs/{slug}/review/settings", dependencies=MUTATE)
+def apply_review_settings(request: Request, slug: str,
+                          form: FormData = Depends(_conversation_form)):
+    """Apply the review editor's settings (scite toggle + reviewer pool) for a run.
+
+    One mapper, `review_views.review_changes_from_form`, serves this and the
+    live preview. Any refusal (core `ValueError` or a garbage field) goes back
+    to the agents page as `?error=`; nothing is written for it."""
+    project = _project(request)
+    _run_dir_or_404(project, slug)
+    target = "/agents?slug=" + quote(slug)
+    ok, message = review_views.apply_changes(project, slug, form)
+    key = "ok" if ok else "error"
+    return RedirectResponse(f"{target}&{key}={quote(message)}", status_code=303)
 
 
 @router.post("/agents", dependencies=MUTATE)

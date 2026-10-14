@@ -4,6 +4,7 @@
 {% block content %}
 <h1>Agents</h1>
 {% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
+{% if ok %}<p class="note" role="status">{{ ok }}</p>{% endif %}
 <p class="dim">
   {% if slug %}Editing run <strong>{{ slug }}</strong> — a workspace only stores
   what differs from the defaults.{% else %}Editing the project defaults.{% endif %}
@@ -59,5 +60,61 @@
       <button>Apply these changes</button>
     </form>
   {% endif %}
+{% endif %}
+
+{% if review %}
+<h2>Review for run {{ slug }}</h2>
+{% if not review.available %}
+  <p class="state-failed" role="alert">{{ review.notice }}</p>
+{% else %}
+  {% if review.notice %}<p class="state-failed" role="alert">{{ review.notice }}</p>{% endif %}
+  {% if review.preview_notice %}<p class="state-failed" role="alert">{{ review.preview_notice }}</p>{% endif %}
+  <form method="post" action="/runs/{{ slug|urlencode }}/review/settings">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="slug" value="{{ slug }}">
+    {% from "review_controls.html" import scite_control %}
+    {{ scite_control(review.scite) }}
+
+    <fieldset>
+      <legend>Reviewer pool</legend>
+      {% if review.inherits %}<p class="dim">This run inherits the project's research.draft-reviewers pool. Add rows to give it its own.</p>{% endif %}
+      <input type="hidden" name="pool_present" value="1">
+      {% for row in review.rows %}
+        {% set names = review.agents + ([row.agent] if row.agent and row.agent not in review.agents else []) %}
+        <p>
+          <select name="pool-{{ loop.index0 }}-agent">
+            <option value="">— none —</option>
+            {% for name in names %}<option{% if name == row.agent %} selected{% endif %}>{{ name }}</option>{% endfor %}
+          </select>
+          <select name="pool-{{ loop.index0 }}-covers">
+            {% for c in review.covers %}<option value="{{ c }}"{% if c == row.covers %} selected{% endif %}>{{ c }}</option>{% endfor %}
+          </select>
+        </p>
+      {% endfor %}
+    </fieldset>
+
+    <fieldset>
+      <legend>Separation</legend>
+      <input type="hidden" name="switches_present" value="1">
+      <label><input type="checkbox" name="allow_same_family_review" value="on"{% if review.same %} checked{% endif %}> allow same-family review</label>
+      <label><input type="checkbox" name="allow_self_review" value="on"{% if review.self %} checked{% endif %}> allow self review</label>
+      <p class="dim">a fresh agent, never the authoring thread</p>
+      <label>reviews per draft <input name="reviews_per_draft" type="number" min="1" value="{{ review.reviews }}"></label>
+    </fieldset>
+
+    <p class="actions">
+      <button>Apply</button>
+      <button formaction="/agents" formmethod="get" name="preview" value="1">Preview</button>
+      <button name="pool_reset" value="1">Reset pool to default</button>
+    </p>
+  </form>
+
+  {% if review.preview %}
+    <h3>Assignment preview (nothing written)</h3>
+    <ul>
+      {% for pair in review.preview.pairs %}<li>{{ pair.reviewer }} reviews {{ pair.author }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+{% endif %}
 {% endif %}
 {% endblock %}

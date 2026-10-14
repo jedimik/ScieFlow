@@ -37,12 +37,14 @@ MUTATING_PATHS = {
     "/runs/{slug}/say": {"post"},
     "/start": {"post"},
     "/api/v1/runs": {"post"},
+    "/runs/{slug}/review/settings": {"post"},
 }
 
 #: Placeholder ids for the templated paths above. Guard tests never resolve
 #: these against real data — the request is refused before routing looks
 #: anything up — so a fixed placeholder is enough.
-PLACEHOLDERS = {"slug": "r1", "gate_id": "no-such-gate", "job_id": "no-such-job"}
+PLACEHOLDERS = {"slug": "r1", "gate_id": "no-such-gate", "job_id": "no-such-job",
+                "round": "1"}
 
 #: A sample form body for each mutating path, keyed by the same template.
 SAMPLES: dict[str, dict] = {
@@ -71,6 +73,7 @@ SAMPLES: dict[str, dict] = {
                          "selection_revision": "0"},
     "/start": {"slug": "guard-start", "goal": "a goal"},
     "/api/v1/runs": {"slug": "guard-api-runs", "goal": "a goal"},
+    "/runs/{slug}/review/settings": {"scite_present": "1", "scite_use": "on"},
 }
 
 

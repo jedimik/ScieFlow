@@ -1,3 +1,4 @@
+import shutil
 import sys
 from pathlib import Path
 
@@ -91,3 +92,43 @@ def running_job(project):
     yield job
     jobs.cancel(job)
     jobs.wait(job, proc)
+
+
+@pytest.fixture
+def review_project(project):
+    """The base project plus the review fixture run, copied to slug `rv1` (never
+    `r1`). The real `config/agents.yml` and `config/defaults.yml` are copied in so
+    pool agents and their families resolve. Variants are written by tests into
+    `workspace/rv1/config.yml`; the committed fixture is never edited."""
+    root = Path(__file__).resolve().parents[2]
+    for name in ("agents.yml", "defaults.yml"):
+        shutil.copy(root / "config" / name, project.root / "config" / name)
+    shutil.copytree(root / "tests" / "fixtures" / "review" / "run",
+                    project.root / "workspace" / "rv1")
+    ws = project.run_dir("rv1")
+    status.write_status(ws, status.new_status("rv1", "autonomous"))
+    budget.write_budget(ws, budget.new_budget(3, 10, 60))
+    events.emit(ws, "run.created", "human", slug="rv1")
+    return project
+
+
+@pytest.fixture
+def scite_on(monkeypatch):
+    """scite reads as configured (no network, no token): the toggle is live."""
+    from scieflow.core.review import service as review_service
+
+    status_ = {"configured": True, "tier": "public", "quota_remaining": 42,
+               "last_error": None, "reason": None}
+    monkeypatch.setattr(review_service, "scite_status", lambda project: dict(status_))
+    return status_
+
+
+@pytest.fixture
+def scite_off(monkeypatch):
+    """scite reads as not configured: the toggle is disabled and never written."""
+    from scieflow.core.review import service as review_service
+
+    status_ = {"configured": False, "tier": None, "quota_remaining": None,
+               "last_error": None, "reason": "config/scite.yml is absent"}
+    monkeypatch.setattr(review_service, "scite_status", lambda project: dict(status_))
+    return status_
