@@ -203,3 +203,46 @@ def test_clean_pass_coerces_scalars_to_text_without_a_problem():
     assert clean["major"][0] == {"id": "7", "problem": "",
                                  "evidence": [{"doi": "5"}]}
 
+
+# --- R5 N1: evidence is cleaned two levels deep, never recursively ----------------------
+
+
+def nested_evidence(levels):
+    """An evidence entry nested `levels` times, built by a loop and never by recursion."""
+    node = {"quote": "q"}
+    for _ in range(levels):
+        node = {"evidence": [node]}
+    return {"major": [{"id": "M1", "problem": "p", "evidence": [node]}]}
+
+
+@pytest.mark.parametrize("levels", [700, 3000])
+def test_clean_pass_survives_evidence_nested_deeply(levels):
+    clean, problems = rv.clean_pass(nested_evidence(levels))
+    assert problems == ["major[0].evidence[0].evidence"]
+    assert clean["major"][0]["evidence"] == [{}]
+
+
+def test_clean_pass_drops_a_nested_container_inside_an_evidence_entry():
+    doc = {"major": [{"id": "M1", "evidence": [{"quote": "q", "meta": {"a": 1}}]}]}
+    clean, problems = rv.clean_pass(doc)
+    assert problems == ["major[0].evidence[0].meta"]
+    assert clean["major"][0]["evidence"] == [{"quote": "q"}]
+
+
+# --- R5 NIT-1: the problems list is capped and its names truncated ----------------------
+
+
+def test_clean_pass_names_ten_problems_then_says_how_many_more():
+    clean, problems = rv.clean_pass({"major": [1] * 25})
+    assert len(problems) == 11
+    assert problems[0] == "major[0]"
+    assert problems[-1] == "and 15 more"
+
+
+def test_a_long_problem_name_is_truncated_to_sixty_characters():
+    key = "k" * 500
+    clean, problems = rv.clean_pass({"minor": [{"id": "m1", key: {"x": 1}}]})
+    assert len(problems) == 1
+    assert problems[0].startswith("minor[0].kkk") and problems[0].endswith("\u2026")
+    assert len(problems[0]) <= 61
+

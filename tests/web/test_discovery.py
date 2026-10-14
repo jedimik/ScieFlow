@@ -135,7 +135,7 @@ def test_a_report_symlinked_outside_the_workspace_is_refused(client, review_proj
     path.symlink_to(outside)
     response = client.get(PAGE)
     assert response.status_code == 200
-    assert "resolves outside the run workspace" in response.text
+    assert "reached through a symlink; not shown" in response.text
     assert 'class="top"' not in response.text
 
 
@@ -148,8 +148,55 @@ def test_a_report_directory_symlinked_outside_the_workspace_is_refused(client, r
     report.symlink_to(outside, target_is_directory=True)
     response = client.get(PAGE)
     assert response.status_code == 200
-    assert "resolves outside the run workspace" in response.text
+    assert "reached through a symlink; not shown" in response.text
     assert 'class="top"' not in response.text
+
+
+def test_a_report_directory_symlinked_inside_the_workspace_is_refused(client, review_project):
+    """O7: a symlink at report/ is refused even when its target is inside the run."""
+    ws = review_project.run_dir("rv1")
+    real = ws / "elsewhere-in-run"
+    real.mkdir()
+    (real / "tournament.json").write_text(json.dumps(tournament()))
+    (ws / "report").symlink_to(real, target_is_directory=True)
+    response = client.get(PAGE)
+    assert response.status_code == 200
+    assert "reached through a symlink; not shown" in response.text
+    assert 'class="top"' not in response.text
+
+
+def test_a_report_file_symlinked_inside_the_workspace_is_refused(client, review_project):
+    """O7: a symlink at tournament.json is refused even when its target is inside the run."""
+    real = review_project.run_dir("rv1") / "real-tournament.json"
+    real.write_text(json.dumps(tournament()))
+    path = report_path(review_project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.symlink_to(real)
+    response = client.get(PAGE)
+    assert response.status_code == 200
+    assert "reached through a symlink; not shown" in response.text
+    assert 'class="top"' not in response.text
+
+
+def test_a_report_that_is_a_regular_file_is_a_notice(client, review_project):
+    (review_project.run_dir("rv1") / "report").write_text("not a directory")
+    response = client.get(PAGE)
+    assert response.status_code == 200
+    assert "report/ is not a directory; tournament.json not shown" in response.text
+
+
+def test_the_loader_leaks_no_descriptors_on_any_path(review_project):
+    ws = review_project.run_dir("rv1")
+    write_report(review_project, tournament())
+    before = len(os.listdir("/proc/self/fd"))
+    for _ in range(50):
+        assert review_views.load_tournament(ws)[1] == ""
+    path = report_path(review_project)
+    path.rename(ws / "moved.json")
+    path.symlink_to(ws / "moved.json")
+    for _ in range(50):
+        assert "reached through a symlink" in review_views.load_tournament(ws)[1]
+    assert len(os.listdir("/proc/self/fd")) == before
 
 
 def test_a_report_missing_the_research_extra_says_so(client, review_project, monkeypatch):

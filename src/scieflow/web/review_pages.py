@@ -113,7 +113,11 @@ def round_page(request: Request, slug: str, round: int, author: str = "") -> HTM
                 "review_pass", project, slug, round, pair["reviewer"], selected, pass_)
             malformed = ""
             if doc is not None:
-                doc, problems = review_views.clean_pass(doc)
+                try:
+                    doc, problems = review_views.clean_pass(doc)
+                except RecursionError:
+                    doc, problems = None, []
+                    pass_notice = f"review file malformed: {review_views.DEEP_NOTICE}"
                 if problems:
                     malformed = "review file malformed: " + ", ".join(problems)
             panel[pass_] = doc

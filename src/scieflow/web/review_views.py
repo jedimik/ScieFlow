@@ -10,6 +10,7 @@ so it is imported lazily: without it every review panel shows NEEDS_EXTRA.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -416,6 +417,53 @@ def drafts_review_context(project, slug: str, ws, fallback_authors) -> dict | No
 #: The largest tournament.json the page will read (ledger W7: refuse > 2 MiB).
 REPORT_LIMIT = 2 * 1024 * 1024
 
+_SYMLINK_NOTICE = "tournament.json is reached through a symlink; not shown"
+_NOT_DIR_NOTICE = "report/ is not a directory; tournament.json not shown"
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+_FILE_FLAGS = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
+
+
+class _Refused(Exception):
+    """A symlink or a non-directory on the report path; its message is the notice."""
+
+
+def _is_symlink(dir_fd: int, name: str) -> bool:
+    try:
+        return stat.S_ISLNK(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)
+    except OSError:
+        return False
+
+
+def _open_report(ws: Path) -> int:
+    """Open ws/report/tournament.json by a descriptor chain that never follows a symlink (O7).
+
+    ws -> report (a directory, no follow) -> tournament.json (no follow). Each hop is opened
+    relative to the descriptor before it, so no path is resolved by name after a check.
+    Raises FileNotFoundError for an absent entry, _Refused for a symlink or non-directory at
+    report/, and OSError otherwise. Every directory descriptor is closed on every path.
+    """
+    ws_fd = os.open(ws, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        try:
+            rep_fd = os.open("report", _DIR_FLAGS, dir_fd=ws_fd)
+        except OSError as exc:
+            if exc.errno == errno.ELOOP or (exc.errno == errno.ENOTDIR
+                                            and _is_symlink(ws_fd, "report")):
+                raise _Refused(_SYMLINK_NOTICE) from None
+            if exc.errno == errno.ENOTDIR:
+                raise _Refused(_NOT_DIR_NOTICE) from None
+            raise
+        try:
+            return os.open("tournament.json", _FILE_FLAGS, dir_fd=rep_fd)
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise _Refused(_SYMLINK_NOTICE) from None
+            raise
+        finally:
+            os.close(rep_fd)
+    finally:
+        os.close(ws_fd)
+
 
 def _decisions_module():
     """The core decisions module (it validates the schema), or None without the extra."""
@@ -430,25 +478,21 @@ def load_tournament(ws) -> tuple[dict | None, str]:
     """ws/report/tournament.json, validated, or a notice saying why it is not shown.
 
     The one fixed path the web reads (ledger F9): nothing request-derived. An absent
-    report is (None, "") so the page shows its empty state. A path that resolves
-    outside the workspace (a symlinked `report/` directory), a symlink or non-regular
-    file at the path (a FIFO would block the page, R4 C1), an oversized file, invalid
-    or deeply nested JSON, a schema mismatch, or an unreadable file is a notice.
+    report is (None, "") so the page shows its empty state. A symlink at report/ or at
+    tournament.json, a non-directory at report/, a symlink or non-regular file at the
+    path (a FIFO would block the page, R4 C1), an oversized file, invalid or deeply
+    nested JSON, a schema mismatch, or an unreadable file is a notice.
 
-    The file is opened once without blocking or following a final symlink, and the
+    The path is opened by a descriptor chain that never follows a symlink (O7), and the
     checks run on that descriptor: the size is what was read, not what stat reported.
     """
-    ws = Path(ws)
-    path = ws / "report" / "tournament.json"
-    if not path.exists() and not path.is_symlink():
-        return None, ""
     try:
-        resolved = path.resolve()
-        if not resolved.is_relative_to(ws.resolve()):
-            return None, ("tournament.json resolves outside the run workspace; "
-                          "not shown")
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
-    except (OSError, RuntimeError) as exc:
+        fd = _open_report(Path(ws))
+    except FileNotFoundError:
+        return None, ""
+    except _Refused as exc:
+        return None, str(exc)
+    except OSError as exc:
         return None, f"tournament.json could not be read: {' '.join(str(exc).split())}"
     try:
         st = os.fstat(fd)
@@ -542,8 +586,8 @@ def _scalar(value):
     return str(value)
 
 
-def _clean_mapping(mapping: dict, path: str, problems: list[str]) -> dict:
-    """Copy one item: scalar fields as text, `evidence` checked separately."""
+def _item(mapping: dict, path: str, problems: list[str]) -> dict:
+    """Copy one major/minor item: scalar fields as text; its `evidence` list is checked."""
     out = {}
     for key, value in mapping.items():
         if key == "evidence":
@@ -554,11 +598,12 @@ def _clean_mapping(mapping: dict, path: str, problems: list[str]) -> dict:
             text = ""
         out[key] = text
     if "evidence" in mapping:
-        out["evidence"] = _clean_evidence(mapping["evidence"], f"{path}.evidence", problems)
+        out["evidence"] = _evidence(mapping["evidence"], f"{path}.evidence", problems)
     return out
 
 
-def _clean_evidence(value, path: str, problems: list[str]) -> list[dict]:
+def _evidence(value, path: str, problems: list[str]) -> list[dict]:
+    """The evidence list of one item. Each entry is scalar-only (R5 N1)."""
     if value is None:
         return []
     if not isinstance(value, list):
@@ -569,8 +614,38 @@ def _clean_evidence(value, path: str, problems: list[str]) -> list[dict]:
         if not isinstance(entry, dict):
             problems.append(f"{path}[{index}]")
             continue
-        entries.append(_clean_mapping(entry, f"{path}[{index}]", problems))
+        entries.append(_entry(entry, f"{path}[{index}]", problems))
     return entries
+
+
+def _entry(mapping: dict, path: str, problems: list[str]) -> dict:
+    """One evidence entry: scalar fields only. A container value, a nested `evidence` included,
+    is left out and named in problems. The walk stops here, so depth never matters (R5 N1)."""
+    out = {}
+    for key, value in mapping.items():
+        text = _scalar(value)
+        if text is None:
+            problems.append(f"{path}.{key}")
+            continue
+        out[key] = text
+    return out
+
+
+#: R5 NIT-1: at most this many problem names, each cut to this many characters.
+PROBLEM_LIMIT = 10
+PROBLEM_NAME_LIMIT = 60
+
+
+def _capped(problems: list[str]) -> list[str]:
+    """The problem names the notice shows: the first PROBLEM_LIMIT, names truncated, then a count."""
+    names = []
+    for name in problems[:PROBLEM_LIMIT]:
+        if len(name) > PROBLEM_NAME_LIMIT:
+            name = name[:PROBLEM_NAME_LIMIT] + "\u2026"
+        names.append(name)
+    if len(problems) > PROBLEM_LIMIT:
+        names.append(f"and {len(problems) - PROBLEM_LIMIT} more")
+    return names
 
 
 def clean_pass(doc) -> tuple[dict, list[str]]:
@@ -580,6 +655,9 @@ def clean_pass(doc) -> tuple[dict, list[str]]:
     objects; anything else is dropped and named in the returned problems. Scalar
     fields are shown as text (None as ""). The input is never changed: the result
     is a new dict, so a cached document stays as core returned it (R4 C3).
+
+    The walk is exactly two levels deep (item, evidence entry) and never recursive
+    (R5 N1). The problem names are capped (R5 NIT-1).
     """
     if not isinstance(doc, dict):
         return {}, ["pass file is not an object"]
@@ -601,7 +679,7 @@ def clean_pass(doc) -> tuple[dict, list[str]]:
             if not isinstance(item, dict):
                 problems.append(f"{field}[{index}]")
                 continue
-            items.append(_clean_mapping(item, f"{field}[{index}]", problems))
+            items.append(_item(item, f"{field}[{index}]", problems))
         clean[field] = items
-    return clean, problems
+    return clean, _capped(problems)
 

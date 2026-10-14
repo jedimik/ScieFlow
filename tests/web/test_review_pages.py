@@ -412,3 +412,26 @@ def test_a_blocker_read_failure_says_state_unknown_not_overruled(client, review_
     assert "overruled" not in response.text
     assert 'name="overrule_reason"' not in response.text
 
+
+# --- R5 N1 / belt-and-braces: a pass the cleaner cannot walk is a notice, not a 500 -------
+
+
+def test_a_deeply_nested_evidence_entry_is_a_notice_on_the_round_page(client, review_project):
+    """R5 N1: 700 evidence levels were a 500 while clean_pass recursed per level."""
+    body = ('{"major": [{"id": "M1", "problem": "p", "evidence": ['
+            + '{"evidence": [' * 700 + '{"quote": "q"}' + ']}' * 700 + ']}]}')
+    ws_file(review_project, *PASS_EVIDENCE).write_text(body)
+    response = client.get(ROUND_PAGE)
+    assert response.status_code == 200
+    assert "review file malformed: major[0].evidence[0].evidence" in response.text
+
+
+def test_a_recursion_error_while_cleaning_a_pass_is_a_notice(client, review_project, monkeypatch):
+    def too_deep(doc):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(review_views, "clean_pass", too_deep)
+    response = client.get(ROUND_PAGE)
+    assert response.status_code == 200
+    assert "review file malformed: nested too deeply" in response.text
+
