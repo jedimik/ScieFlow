@@ -67,7 +67,9 @@ You are the **coordinator**. Phases run in order; each is resumable via
 4. Read `workspace/<slug>/config.yml`. Relevant keys:
    - `gaps_from: workspace/<other-slug>` — copy that run's
      `report/hypotheses.json`, `report/gaps.md`, and
-     `report/selected_dois.txt` into `report/` as framing input.
+     `report/selected_dois.txt` into `report/` as framing input; if it has
+     `report/selected_hypotheses.json` (the user's gap-discovery selection),
+     copy it too and frame the draft on those hypotheses only.
    - `journal:` — run the journal-profiling phase from
      `src/scieflow/research/skills/paper-review/SKILL.md` (same cache in `config/journals/`),
      copy the profile to `workspace/<slug>/journal/profile.md`.
