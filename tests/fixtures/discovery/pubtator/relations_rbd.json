@@ -46,5 +46,77 @@
   "source": "@DISEASE_REM_Sleep_Behavior_Disorder",
   "target": "@GENE_HCRT",
   "publications": 22
+ },
+ {
+  "type": "associate",
+  "source": "@CHEMICAL_Melatonin",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 15
+ },
+ {
+  "type": "associate",
+  "source": "@CHEMICAL_Lipids",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 3
+ },
+ {
+  "type": "cause",
+  "source": "@CHEMICAL_Clonazepam",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 3
+ },
+ {
+  "type": "associate",
+  "source": "@CHEMICAL_Clonazepam",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 2
+ },
+ {
+  "type": "associate",
+  "source": "@CHEMICAL_Reactive_Oxygen_Species",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 2
+ },
+ {
+  "type": "inhibit",
+  "source": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "target": "@GENE_SNCA",
+  "publications": 2
+ },
+ {
+  "type": "associate",
+  "source": "@CHEMICAL_Malondialdehyde",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 1
+ },
+ {
+  "type": "cause",
+  "source": "@CHEMICAL_Lipids",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 1
+ },
+ {
+  "type": "cause",
+  "source": "@CHEMICAL_Malondialdehyde",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 1
+ },
+ {
+  "type": "stimulate",
+  "source": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "target": "@GENE_SNCA",
+  "publications": 1
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Lipids",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 1
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Reactive_Oxygen_Species",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 1
  }
 ]

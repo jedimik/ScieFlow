@@ -5,14 +5,14 @@ question someone answered (or tried to) without the literature hearing back.
 
 - `search_completed(gw, condition)` — `GET /api/v2/studies` for one condition
   (and optionally an intervention), `filter.overallStatus=COMPLETED`, paged
-  with `pageToken` until `totalCount` or `max_pages`. Only the condition text
-  leaves the machine (leak-checked).
+  with `pageToken` until `totalCount` or `max_pages`; `complete` says whether
+  the list is whole. Only the condition text leaves the machine (leak-checked).
 - `normalise(study)` — NCT id, title, status, completion date, registry
   results flag, study type, phases, linked publications and the number of
   background references.
 - `unpublished(studies, as_of=…)` — pure and deterministic: completed trials
-  with no linked publication, completed at least `grace_months` before
-  `as_of`, oldest first. A *linked publication* is a registry reference of
+  with no linked publication, completed at least `grace_months` whole months
+  before `as_of` (a bare month or year counts from its last day), oldest first. A *linked publication* is a registry reference of
   type RESULT (entered by the sponsor) or DERIVED (matched by PubMed on the
   NCT id); BACKGROUND references cite earlier work and do not count. Results
   posted on the registry (`has_results`) are reported but are not a paper.
@@ -42,31 +42,41 @@ def _count(value) -> int:
     return len(studies) if isinstance(studies, list) else 0
 
 
+def _is_page(value) -> None:
+    if not isinstance(value, dict) or not isinstance(value.get("studies"), list):
+        raise http.HTTPFailure("ClinicalTrials.gov response has no studies", "MALFORMED")
+
+
 def search_completed(gw, condition: str, *, intervention: str | None = None,
-                     page_size: int = 100, max_pages: int = 5) -> list[dict]:
-    params = {"query.cond": condition, "filter.overallStatus": "COMPLETED",
-              "pageSize": int(page_size), "countTotal": "true", "fields": FIELDS}
-    if intervention is not None:
-        params["query.intr"] = intervention
+                     page_size: int = 100, max_pages: int = 5) -> dict:
+    """`{"studies": [...], "total": int | None, "complete": bool}` — `complete` is
+    False when `max_pages` (or an unusable page token) stopped the paging before
+    `totalCount` was reached: the caller then holds a partial list."""
+    fixed = {"filter.overallStatus": "COMPLETED", "pageSize": int(page_size),
+             "countTotal": "true", "fields": FIELDS}
+    text = {"query.cond": condition, "query.intr": intervention}
     out: list[dict] = []
     total = None
     token = None
+    pages = 0
     for _ in range(max(1, int(max_pages))):
-        page = dict(params, **({"pageToken": token} if token else {}))
-        body = gw.get_json(PROVIDER, "studies", API, page, text=("query.cond", "query.intr"),
-                           ttl_class="search", count=_count)
-        studies = body.get("studies") if isinstance(body, dict) else None
-        if not isinstance(studies, list):
-            raise http.HTTPFailure("ClinicalTrials.gov response has no studies", "MALFORMED")
+        body = gw.get_json(PROVIDER, "studies", API, text=text,
+                           ids={"pageToken": token} if token else None, fixed=fixed,
+                           ttl_class="search", count=_count, validate=_is_page)
+        pages += 1
+        studies = body["studies"]
         if total is None and isinstance(body.get("totalCount"), int):
             total = body["totalCount"]
         out.extend(normalise(s) for s in studies if isinstance(s, dict))
         token = body.get("nextPageToken")
-        if not studies or not isinstance(token, str) or not _TOKEN.match(token) \
-                or (total is not None and len(out) >= total):
+        if not isinstance(token, str) or not _TOKEN.match(token):
+            token = None
+        if not studies or token is None or (total is not None and len(out) >= total):
             break
     seen: set = set()
-    return [s for s in out if s["nct_id"] and not (s["nct_id"] in seen or seen.add(s["nct_id"]))]
+    studies = [s for s in out if s["nct_id"] and not (s["nct_id"] in seen or seen.add(s["nct_id"]))]
+    complete = (len(out) >= total) if total is not None else token is None
+    return {"studies": studies, "total": total, "complete": bool(complete), "pages": pages}
 
 
 def normalise(study: dict) -> dict:
@@ -100,12 +110,26 @@ def normalise(study: dict) -> dict:
     }
 
 
-def _ym(value) -> tuple[int, int] | None:
+def _end(value) -> date | None:
+    """The completion date; a bare month or year counts from its last day
+    (conservative: never flags a trial early)."""
+    import calendar
+
     m = _DATE.match(value) if isinstance(value, str) else None
     if not m:
         return None
-    month = int(m.group(2) or 12)        # a bare year counts from its end (conservative)
-    return (int(m.group(1)), month) if 1 <= month <= 12 else None
+    y, mo = int(m.group(1)), int(m.group(2) or 12)
+    if not 1 <= mo <= 12:
+        return None
+    last = calendar.monthrange(y, mo)[1]
+    d = int(m.group(3)) if m.group(3) else last
+    return date(y, mo, d) if 1 <= d <= last else None
+
+
+def months_between(start: date, end: date) -> int:
+    """Whole calendar months from `start` to `end` (negative if `end` is earlier)."""
+    months = (end.year - start.year) * 12 + (end.month - start.month)
+    return months - 1 if end.day < start.day else months
 
 
 def unpublished(studies, *, as_of: date, grace_months: int = 24) -> list[dict]:
@@ -113,10 +137,10 @@ def unpublished(studies, *, as_of: date, grace_months: int = 24) -> list[dict]:
     for s in studies:
         if (s.get("status") or "COMPLETED") != "COMPLETED" or s.get("publications"):
             continue
-        ym = _ym(s.get("completion_date"))
-        if ym is None:
+        done = _end(s.get("completion_date"))
+        if done is None:
             continue
-        months = (as_of.year - ym[0]) * 12 + (as_of.month - ym[1])
+        months = months_between(done, as_of)
         if months < grace_months:
             continue
         out.append({"nct_id": s.get("nct_id"), "title": s.get("title"),

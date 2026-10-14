@@ -138,7 +138,7 @@ def test_host_outside_the_provider_list_is_refused(proj):
         openalex_trends.counts_by_year(gw, "gut microbiome")
     # a provider may only reach its own hosts, whatever URL a caller builds
     with pytest.raises(providers.ProviderRefused, match="host"):
-        gw.get_json("pubtator", "relations", OA, params={})
+        gw.get_json("pubtator", "relations", OA)
     with pytest.raises(providers.ProviderRefused, match="https"):
         gw.get_json("pubtator", "relations", PT.replace("https", "http") + "/relations")
     assert len(responses.calls) == 0
@@ -162,10 +162,51 @@ def test_free_text_that_looks_like_data_never_leaves(proj, term):
 @responses.activate
 def test_entity_ids_are_shape_checked(proj):
     gw = gateway(proj)
-    for bad in ["melatonin", "@CHEMICAL_../../x", "@DISEASE_a b", "@GENE_" + "x" * 200]:
+    for bad in ["melatonin", "@CHEMICAL_../../x", "@DISEASE_a b", "@GENE_" + "x" * 200,
+                # data dressed up as an entity id: refused like the same free text
+                "@DISEASE_cohort_a_n_43", "@CHEMICAL_visits.csv", "@GENE_RBD043_p_.001",
+                "@DISEASE_95.3_CI_90.3-97.6", "@DISEASE_sub-01_Day-28"]:
         with pytest.raises(LeakError):
             pubtator.relations(gw, bad)
     assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_entity_ids_the_provider_returned_may_be_sent_back(proj):
+    odd = "@CHEMICAL_6_sulfatoxymelatonin"       # digit-led: refused as caller input
+    gw = gateway(proj)
+    with pytest.raises(LeakError):
+        pubtator.relations(gw, odd)
+    assert len(responses.calls) == 0
+    responses.add(responses.GET, f"{PT}/entity/autocomplete/",
+                  json=[{"_id": odd, "biotype": "chemical", "name": "6-sulfatoxymelatonin"}])
+    responses.add(responses.GET, f"{PT}/relations", json=[])
+    [hit] = pubtator.autocomplete(gw, "sulfatoxymelatonin")
+    assert pubtator.relations(gw, hit["id"]) == []
+    assert responses.calls[-1].request.params == {"e1": odd}
+
+
+def test_every_parameter_is_classified(proj):
+    gw = gateway(proj)
+    with pytest.raises(TypeError):
+        gw.get_json("openalex", "x", OA, {"search": "free text"})   # unclassified params
+    with pytest.raises(ValueError, match="fixed"):
+        gw.get_json("openalex", "x", OA, fixed={"q": ["not", "a", "scalar"]})
+
+
+@responses.activate
+def test_redirects_are_never_followed(proj):
+    root, ws, home = proj
+    responses.add(responses.GET, f"{PT}/relations", status=302,
+                  headers={"Location": "https://evil.example.org/x"})
+    responses.add(responses.GET, "https://evil.example.org/x", json=[])
+    gw = gateway(proj)
+    with pytest.raises(HTTPFailure) as exc:
+        pubtator.relations(gw, RBD)
+    assert exc.value.classification == "HTTP_302"
+    assert [c.request.url.split("?")[0] for c in responses.calls] == [f"{PT}/relations"]
+    rows = [json.loads(x) for x in (ws / "scite" / "ledger.jsonl").read_text().splitlines()]
+    assert [(r["status"], r["error"]) for r in rows] == [("error", "HTTP_302")]
 
 
 def test_requests_belong_to_a_run(proj):
@@ -189,12 +230,12 @@ def test_cache_ledger_and_event(proj):
     rows = [json.loads(x) for x in (ws / "scite" / "ledger.jsonl").read_text().splitlines()]
     assert [(r["source"], r["op"], r["cached"], r["status"]) for r in rows] == [
         ("pubtator", "relations", False, "ok"), ("pubtator", "relations", True, "ok")]
-    assert rows[0]["results"] == 8 and rows[0]["request"]["e1"] == RBD
+    assert rows[0]["results"] == 20 and rows[0]["request"]["e1"] == RBD
     day = list((home / "day").glob("ledger-*.jsonl"))
     assert len(day) == 1 and len(day[0].read_text().splitlines()) == 2
     evs = events.read(ws, types=("integration.call",))
     assert len(evs) == 1
-    assert evs[0]["data"]["integration"] == "pubtator" and evs[0]["data"]["results"] == 8
+    assert evs[0]["data"]["integration"] == "pubtator" and evs[0]["data"]["results"] == 20
 
 
 @responses.activate
@@ -245,6 +286,28 @@ def test_malformed_body_is_a_classified_failure(proj):
     with pytest.raises(HTTPFailure) as exc:
         pubtator.relations(gateway(proj), RBD)
     assert exc.value.classification == "MALFORMED"
+
+
+@responses.activate
+@pytest.mark.parametrize("call,url,body", [
+    (lambda gw: pubtator.relations(gw, RBD), f"{PT}/relations", {"detail": "unavailable"}),
+    (lambda gw: pubtator.autocomplete(gw, "melatonin"), f"{PT}/entity/autocomplete/", {}),
+    (lambda gw: ctgov.search_completed(gw, "insomnia"), CT, {"error": "busy"}),
+    (lambda gw: openalex_trends.counts_by_year(gw, "insomnia"), OA, {"meta": {}}),
+    (lambda gw: openalex_trends.references(gw, "insomnia"), OA, {"meta": {"count": 3}}),
+])
+def test_wrong_shape_is_ledgered_as_error_and_never_cached(proj, call, url, body):
+    root, ws, home = proj
+    responses.add(responses.GET, url, json=body)
+    gw = gateway(proj)
+    for _ in range(2):
+        with pytest.raises(HTTPFailure) as exc:
+            call(gw)
+        assert exc.value.classification == "MALFORMED"
+    assert len(responses.calls) == 2
+    rows = [json.loads(x) for x in (ws / "scite" / "ledger.jsonl").read_text().splitlines()]
+    assert [(r["cached"], r["status"], r["error"]) for r in rows] == [
+        (False, "error", "MALFORMED")] * 2
 
 
 # --- PubTator3 ------------------------------------------------------------------------
@@ -328,6 +391,15 @@ def test_open_links_end_to_end_on_recorded_relations(proj):
     cs = [lk["c"] for lk in out["links"]]
     # bottleneck score min(AB, BC): the clonazepam neighbours (AB 108) lead, ties by id
     assert cs[:3] == ["@DISEASE_Epilepsy", "@DISEASE_Myoclonus", "@DISEASE_Seizures"]
+    # melatonin neighbours RBD already has a (weak) relation with are known, not open
+    for known in ("@CHEMICAL_Lipids", "@CHEMICAL_Reactive_Oxygen_Species",
+                  "@CHEMICAL_Malondialdehyde"):
+        assert known not in cs
+    # relation types merge: A-B uses the best-published edge (clonazepam: treat, 108)
+    sz = next(lk for lk in out["links"] if lk["c"] == "@DISEASE_Seizures")
+    assert (sz["via"][0]["ab_type"], sz["via"][0]["ab_publications"]) == ("treat", 108)
+    # PubTator3 extracts no disease-disease relations, so RBD -> Parkinson disease is
+    # "open" by construction (documented limitation)
     pd = next(lk for lk in out["links"] if lk["c"] == "@DISEASE_Parkinson_Disease")
     assert pd["score"] == 92 and [v["b"] for v in pd["via"]] == ["@GENE_SNCA"]
     assert pd["via"][0]["bc_publications"] == 9947
@@ -348,14 +420,25 @@ def _ct_callback(request):
 @responses.activate
 def test_ctgov_search_pages_and_normalises(proj):
     responses.add_callback(responses.GET, CT, callback=_ct_callback)
-    studies = ctgov.search_completed(gateway(proj), "REM sleep behavior disorder")
+    res = ctgov.search_completed(gateway(proj), "REM sleep behavior disorder")
+    studies = res["studies"]
     assert len(studies) == 24 and len(responses.calls) == 2   # stops at totalCount
+    assert res["total"] == 24 and res["complete"] is True
+
+
     q = responses.calls[0].request.params
     assert q["query.cond"] == "REM sleep behavior disorder"
     assert q["filter.overallStatus"] == "COMPLETED"
     s = next(x for x in studies if x["nct_id"] == "NCT03072940")
     assert s["completion_date"] == "2015-12" and s["has_results"] is False
     assert s["publications"] == [{"type": "RESULT", "pmid": s["publications"][0]["pmid"]}]
+
+
+@responses.activate
+def test_ctgov_truncation_is_reported(proj):
+    responses.add_callback(responses.GET, CT, callback=_ct_callback)
+    res = ctgov.search_completed(gateway(proj), "REM sleep behavior disorder", max_pages=1)
+    assert len(res["studies"]) == 12 and res["total"] == 24 and res["complete"] is False
 
 
 def test_completed_trials_without_publications():
@@ -375,10 +458,25 @@ def test_completed_trials_without_publications():
     assert ids[:2] == ["NCT01401413", "NCT00695136"]  # oldest completion first
     posted = gaps[1]                                  # results posted on the registry, no paper
     assert posted["completion_date"] == "2011-01" and posted["has_results"] is True
-    assert posted["months_since_completion"] == (2026 - 2011) * 12 + (10 - 1)
+    # whole months since the END of the completion month (Jan 2011 -> 14 Oct 2026)
+    assert posted["months_since_completion"] == (2026 - 2011) * 12 + (10 - 1) - 1
     assert "NCT03675282" in ids                       # 2024-04: 30 months, past the grace period
     assert ctgov.unpublished(list(reversed(studies)), as_of=date(2026, 10, 14)) == gaps
     assert len(ids) == 14
+
+
+def test_grace_period_counts_whole_months():
+    def s(d):
+        return {"nct_id": "NCT1", "title": "t", "completion_date": d, "has_results": False,
+                "publications": [], "status": "COMPLETED"}
+    as_of = date(2026, 10, 1)
+    assert ctgov.unpublished([s("2024-10-31")], as_of=as_of) == []    # 23 months and a day
+    assert ctgov.unpublished([s("2024-10")], as_of=as_of) == []       # month end: not yet
+    assert ctgov.unpublished([s("2024-09-30")], as_of=as_of)[0]["months_since_completion"] == 24
+    assert ctgov.unpublished([s("2024-09-30")], as_of=date(2026, 9, 29)) == []
+    assert ctgov.unpublished([s("2024")], as_of=date(2026, 12, 30)) == []   # year end
+    assert ctgov.unpublished([s("2024")], as_of=date(2026, 12, 31)) != []
+    assert ctgov.unpublished([s("2024-02-29")], as_of=date(2026, 2, 28)) == []
 
 
 def test_unpublished_skips_unparseable_dates():
@@ -440,16 +538,23 @@ def test_trend_fetches_baseline_once(proj):
     again = openalex_trends.trend(gw, "REM sleep behavior disorder", until_year=2025)
     assert out == again and len(responses.calls) == 2
     assert out["term"] == "REM sleep behavior disorder" and out["normalised"] is True
-    assert isinstance(out["breaks"], list) and max(out["counts"]) <= 2025
+    assert max(out["counts"]) <= 2025
+    base = fx("openalex/years_all.json")
+    want = openalex_trends.trend_breaks(
+        {int(g["key"]): g["count"] for g in fx("openalex/years_rbd.json")["group_by"]
+         if int(g["key"]) <= 2025},
+        until_year=2025, baseline={int(g["key"]): g["count"] for g in base["group_by"]})
+    assert out["breaks"] == want and want, "the recorded series has at least one break"
+    assert all(b["normalised"] for b in want)
 
 
-def _refs(ids_lists):
-    return [{"id": f"W{i}", "referenced_works": refs} for i, refs in enumerate(ids_lists)]
+def _refs(ids_lists, side="a"):
+    return [{"id": f"W{side}{i}", "referenced_works": refs} for i, refs in enumerate(ids_lists)]
 
 
 def test_bridges_deterministic():
     a = _refs([["X1", "X2", "X3"], ["X1", "X2"], ["X1", "Y9"]])
-    b = _refs([["X1", "X3", "Z1"], ["X1", "X2", "X3"], ["X2", "X3", "X3"]])
+    b = _refs([["X1", "X3", "Z1"], ["X1", "X2", "X3"], ["X2", "X3", "X3"]], "b")
     out = openalex_trends.bridges(a, b, min_each=2)
     assert [(x["work"], x["a_citing"], x["b_citing"]) for x in out] == [
         ("X1", 3, 2), ("X2", 2, 2)]
@@ -459,20 +564,35 @@ def test_bridges_deterministic():
         {"work": "X1", "a_citing": 3, "b_citing": 2, "score": 2}]
 
 
+def test_papers_in_both_top_sets_are_not_bridges():
+    shared = {"id": "https://openalex.org/WS", "referenced_works": ["X1", "X2"]}
+    a = _refs([["X1"], ["X2"]]) + [shared]
+    b = _refs([["X1"], ["X3"]], "b") + [dict(shared)]
+    # without the shared paper X1 is cited once per side: no bridge at min_each=2
+    assert openalex_trends.bridges(a, b, min_each=2) == []
+    assert [x["work"] for x in openalex_trends.bridges(a, b, min_each=1)] == ["X1"]
+
+
 @responses.activate
 def test_bridge_gap_recorded(proj):
     def cb(request):
         s = request.params.get("search", "")
-        name = ("overlap_rbd_gut.json" if " AND " in s else
-                "refs_rbd.json" if s == "REM sleep behavior disorder" else "refs_gut.json")
+        name = ("overlap_rbd_synucleinopathy.json" if " AND " in s else
+                "refs_rbd.json" if s == "REM sleep behavior disorder"
+                else "refs_synucleinopathy.json")
         return 200, {}, json.dumps(fx("openalex/" + name))
     responses.add_callback(responses.GET, OA, callback=cb)
-    out = openalex_trends.bridge_gap(gateway(proj), "REM sleep behavior disorder",
-                                     "gut microbiome", top=5)
-    assert out["n_ab"] == fx("openalex/overlap_rbd_gut.json")["meta"]["count"]
-    assert out["n_a"] == fx("openalex/refs_rbd.json")["meta"]["count"]
-    assert out["overlap"] == round(out["n_ab"] / min(out["n_a"], out["n_b"]), 6)
-    assert out["bridges"] == []          # these two top-cited sets share no reference
+    gw = gateway(proj)
+    out = openalex_trends.bridge_gap(gw, "REM sleep behavior disorder", "synucleinopathy", top=8)
+    assert (out["n_a"], out["n_b"], out["n_ab"]) == (57160, 28632, 4481)
+    assert out["overlap"] == round(4481 / 28632, 6)
+    # two papers are top-cited in both literatures: direct overlap, not a bridge; their
+    # shared references would otherwise make three spurious bridges at min_each=2
+    assert out["shared_top"] == ["W2623521763", "W4206481149"]
+    assert out["bridges"] == []
+    one = openalex_trends.bridge_gap(gw, "REM sleep behavior disorder", "synucleinopathy",
+                                     top=8, min_each=1)
+    assert [b["work"] for b in one["bridges"]] == ["W2014670147", "W2146729934"]
     sent = [c.request.params.get("search") for c in responses.calls]
-    assert '"REM sleep behavior disorder" AND "gut microbiome"' in sent
+    assert '"REM sleep behavior disorder" AND "synucleinopathy"' in sent
     assert all(re.fullmatch(r"[\w\s\"]+", s) for s in sent)

@@ -125,9 +125,11 @@ def _classify(status: int) -> str:
 def send(method: str, url: str, *, params=None, json=None, headers=None, retries: int = 3,
          backoff: float = 1.0, max_retry_after: float = 60.0, limiter: RateLimiter | None = None,
          sleep=time.sleep, passthrough=(404,), timeout: float = 30, jitter=None,
-         session=None) -> requests.Response:
+         session=None, allow_redirects: bool = True) -> requests.Response:
     """One logical request with at most `retries` attempts. Returns a 2xx response
-    or one whose status is in `passthrough`; raises `HTTPFailure` otherwise."""
+    or one whose status is in `passthrough`; raises `HTTPFailure` otherwise.
+    `allow_redirects=False` turns a 3xx into `HTTPFailure` (`HTTP_3xx`) instead of
+    following it to a host the caller never checked."""
     import random
 
     jitter = jitter or random.random
@@ -139,8 +141,9 @@ def send(method: str, url: str, *, params=None, json=None, headers=None, retries
         if limiter is not None:
             limiter.wait()
         try:
+            extra = {} if allow_redirects else {"allow_redirects": False}
             resp = http.request(method, url, params=params, json=json, headers=hdrs,
-                                timeout=timeout)
+                                timeout=timeout, **extra)
         except requests.RequestException as exc:
             failure = HTTPFailure(f"{method} request failed ({type(exc).__name__})", "TRANSIENT")
             delay = backoff * (2 ** attempt) + jitter() * backoff

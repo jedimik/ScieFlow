@@ -13,7 +13,9 @@
   is not mistaken for a break.
 - `bridges(refs_a, refs_b)` — pure: works referenced by at least `min_each`
   of the top papers of both topics (co-citation bridges), scored by the
-  smaller of the two citing counts; ties by total, then id.
+  smaller of the two citing counts; ties by total, then id. A paper that is
+  top-cited in *both* topics is direct overlap (`shared_top`), so its
+  references count on neither side.
 - `bridge_gap(gw, a, b)` — the whole path: the top-cited works per topic with
   their reference lists, plus the number of works matching both topics
   (`"a" AND "b"`). Shared foundations with little direct overlap mark a gap
@@ -63,15 +65,15 @@ def _n_results(value) -> int:
 
 
 def counts_by_year(gw, term: str) -> dict[int, int]:
-    return _years(gw.get_json(PROVIDER, "counts_by_year", API,
-                              {"search": term, "group_by": "publication_year"},
-                              text=("search",), ttl_class="search", count=_n_groups))
+    return _years(gw.get_json(PROVIDER, "counts_by_year", API, text={"search": term},
+                              fixed={"group_by": "publication_year"}, ttl_class="search",
+                              count=_n_groups, validate=_groups))
 
 
 def baseline_counts(gw) -> dict[int, int]:
     return _years(gw.get_json(PROVIDER, "counts_by_year_all", API,
-                              {"group_by": "publication_year"}, ttl_class="metadata",
-                              count=_n_groups))
+                              fixed={"group_by": "publication_year"}, ttl_class="metadata",
+                              count=_n_groups, validate=_groups))
 
 
 def trend_breaks(counts: Mapping[int, int], *, until_year: int, window: int = 3,
@@ -152,13 +154,11 @@ def _short(work_id) -> str | None:
 
 
 def references(gw, term: str, *, top: int = 25) -> tuple[int, list[dict]]:
-    body = gw.get_json(PROVIDER, "top_cited", API,
-                       {"search": term, "per-page": int(top), "sort": "cited_by_count:desc",
-                        "select": "id,doi,publication_year,referenced_works"},
-                       text=("search",), ttl_class="search", count=_n_results)
-    rows = body.get("results") if isinstance(body, dict) else None
-    if not isinstance(rows, list):
-        raise http.HTTPFailure("OpenAlex response has no results", "MALFORMED")
+    body = gw.get_json(PROVIDER, "top_cited", API, text={"search": term},
+                       fixed={"per-page": int(top), "sort": "cited_by_count:desc",
+                              "select": "id,doi,publication_year,referenced_works"},
+                       ttl_class="search", count=_n_results, validate=_is_works)
+    rows = body["results"]
     works = []
     for r in rows:
         if not isinstance(r, dict) or _short(r.get("id")) is None:
@@ -170,6 +170,12 @@ def references(gw, term: str, *, top: int = 25) -> tuple[int, list[dict]]:
     return _meta_count(body), works
 
 
+def _is_works(body) -> None:
+    if not isinstance(body, dict) or not isinstance(body.get("results"), list):
+        raise http.HTTPFailure("OpenAlex response has no results", "MALFORMED")
+    _meta_count(body)
+
+
 def _meta_count(body) -> int:
     n = (body.get("meta") or {}).get("count") if isinstance(body, dict) else None
     if not isinstance(n, int) or isinstance(n, bool) or n < 0:
@@ -177,11 +183,24 @@ def _meta_count(body) -> int:
     return n
 
 
+def shared_top(refs_a: Iterable[Mapping], refs_b: Iterable[Mapping]) -> list[str]:
+    """Works among the top papers of both topics (direct overlap, sorted)."""
+    ids = [{_short(w.get("id")) for w in refs} - {None} for refs in (refs_a, refs_b)]
+    return sorted(ids[0] & ids[1])
+
+
 def bridges(refs_a: Iterable[Mapping], refs_b: Iterable[Mapping], *, min_each: int = 2,
             limit: int = 20) -> list[dict]:
+    refs_a, refs_b = list(refs_a), list(refs_b)
+    # a paper top-cited in both topics is direct overlap: its references would be
+    # counted on both sides and pass for a bridge, so it counts on neither
+    both = set(shared_top(refs_a, refs_b))
+
     def citing(works):
         c: Counter = Counter()
         for w in works:
+            if _short(w.get("id")) in both:
+                continue
             c.update({s for s in map(_short, w.get("referenced_works") or []) if s})
         return c
     ca, cb = citing(refs_a), citing(refs_b)
@@ -199,10 +218,11 @@ def bridge_gap(gw, a: str, b: str, *, top: int = 25, min_each: int = 2, limit: i
     n_a, works_a = references(gw, a, top=top)
     n_b, works_b = references(gw, b, top=top)
     both = '"{}" AND "{}"'.format(a.replace('"', " ").strip(), b.replace('"', " ").strip())
-    n_ab = _meta_count(gw.get_json(PROVIDER, "co_occurrence", API,
-                                   {"search": both, "per-page": 1, "select": "id"},
-                                   text=("search",), ttl_class="search", count=lambda _v: 1))
+    n_ab = _meta_count(gw.get_json(PROVIDER, "co_occurrence", API, text={"search": both},
+                                   fixed={"per-page": 1, "select": "id"}, ttl_class="search",
+                                   count=lambda _v: 1, validate=_meta_count))
     low = min(n_a, n_b)
     return {"a": a, "b": b, "n_a": n_a, "n_b": n_b, "n_ab": n_ab,
             "overlap": round(n_ab / low, 6) if low else None,
+            "shared_top": shared_top(works_a, works_b),
             "bridges": bridges(works_a, works_b, min_each=min_each, limit=limit)}

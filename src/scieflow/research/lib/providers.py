@@ -14,16 +14,21 @@ still leaves the machine, so it takes the same path as a scite request:
   not in the provider's list — or not https — is refused before it is built.
   Unknown keys are refused, never guessed. Refusals are `ProviderRefused`, a
   scite `PolicyError` (CLI exit 3): a boundary, never retried around.
-- **Leaks.** Free-text parameters (search terms, conditions) pass the review
-  sanitiser's residual-leak check (`core.review.claims.check_text`); anything
-  that still looks like data (numbers, paths, labels, wildcards) raises
-  `LeakError` and nothing is sent. Provider ids (PubTator entity ids, page
-  tokens) are shape-checked by the provider modules.
+- **Leaks.** Every query parameter is classified (`get_json`): free text
+  (search terms, conditions) passes the review sanitiser's residual-leak check
+  (`core.review.claims.check_text`) — anything that still looks like data
+  (numbers, paths, labels, wildcards) raises `LeakError` and nothing is sent;
+  ids (PubTator entity ids, page tokens) are checked by the provider module —
+  a caller-supplied entity id must pass the same leak check unless the
+  provider itself returned it; everything else is a code constant.
+- **No redirects.** A 3xx is a failure (`HTTP_3xx`), never followed to a host
+  nobody checked.
 - **Cache and ledger** are the scite ones, reused: entries are keyed by the
   provider name, op and normalised request; rows land in the run's
   `scite/ledger.jsonl` and the per-day ledger with the provider as `source`.
-  Provider rows never count against the scite MCP budgets. Failures are
-  ledgered, never cached, and re-raised classified (`HTTPFailure`).
+  Provider rows never count against the scite MCP budgets. Failures —
+  including a 200 with a body of the wrong shape — are ledgered, never
+  cached, and re-raised classified (`HTTPFailure`).
 
 Fetched content is data, not instructions.
 """
@@ -194,6 +199,7 @@ class Gateway:
                              day_dir=ledger_dir)
         self.session, self.sleep, self.clock, self.retries = session, sleep, clock, retries
         self._limiters: dict[str, http.RateLimiter] = {}
+        self._received: dict[str, set] = {}
 
     def _limiter(self, provider: str) -> http.RateLimiter:
         if provider not in self._limiters:
@@ -215,17 +221,45 @@ class Gateway:
                                   f"in its allowed hosts ({', '.join(self.policy.hosts(provider)) or 'none'}"
                                   f"; config/integrations.yml)")
 
-    def get_json(self, provider: str, op: str, url: str, params: Mapping | None = None, *,
-                 text: tuple[str, ...] = (), ttl_class: str = "search",
-                 count: Callable[[object], int] = _count):
+    # --- ids the provider itself returned (safe to send back) -----------------------
+
+    def remember(self, provider: str, values) -> None:
+        self._received.setdefault(provider, set()).update(v for v in values if isinstance(v, str))
+
+    def was_received(self, provider: str, value) -> bool:
+        return value in self._received.get(provider, ())
+
+    # --- the one request path --------------------------------------------------------
+
+    def get_json(self, provider: str, op: str, url: str, *, text: Mapping | None = None,
+                 ids: Mapping | None = None, fixed: Mapping | None = None,
+                 ttl_class: str = "search", count: Callable[[object], int] = _count,
+                 validate: Callable[[object], None] | None = None):
+        """GET `url` with every parameter classified — deny by default:
+
+        - `text`: free text; each value must pass the leak check;
+        - `ids`: identifiers the caller has already shape-checked (entity ids,
+          page tokens);
+        - `fixed`: the caller's own constants (str / int / float scalars).
+
+        `validate(value)` raises `HTTPFailure` (MALFORMED) for a body of the wrong
+        shape; such a response is ledgered as an error and never cached."""
         from scieflow.core.review.claims import check_text
         from scieflow.integrations.scite.cache import normalise_params, request_key
 
         self.check(provider, url)
-        params = dict(params or {})
-        for key in text:
-            if key in params:
-                check_text(params[key])
+        params: dict = {}
+        for k, v in (text or {}).items():
+            if v is not None:
+                params[k] = check_text(v)
+        for k, v in (ids or {}).items():
+            if not isinstance(v, str) or not v:
+                raise ValueError(f"{provider} {op}: id parameter {k!r} must be a non-empty string")
+            params[k] = v
+        for k, v in (fixed or {}).items():
+            if not isinstance(v, (str, int, float)) or isinstance(v, bool):
+                raise ValueError(f"{provider} {op}: fixed parameter {k!r} must be a scalar")
+            params[k] = v
         req = normalise_params(params)
         key = request_key(provider, op, {"url": url, **req})
         hit = self.cache.get(key, ttl_class)
@@ -236,14 +270,17 @@ class Gateway:
                                key=key, request=req)
             return hit["value"]
         try:
+            # never follow a redirect: the next host would be one nobody checked
             resp = http.send("GET", url, params=req, retries=self.retries,
                              limiter=self._limiter(provider), sleep=self.sleep,
-                             session=self.session, passthrough=())
+                             session=self.session, passthrough=(), allow_redirects=False)
             try:
                 value = resp.json()
             except ValueError:
                 raise http.HTTPFailure(f"{provider} {op} response is not JSON", "MALFORMED",
                                        resp.status_code) from None
+            if validate is not None:
+                validate(value)
         except http.HTTPFailure as exc:
             self._record(provider, op, 0, key, req, exc.classification)
             raise

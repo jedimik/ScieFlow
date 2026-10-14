@@ -6,10 +6,14 @@ link* worth a look.
 
 - `autocomplete(gw, query)` — free text → PubTator entity ids
   (`@DISEASE_REM_Sleep_Behavior_Disorder`); the text passes the leak check.
+  An id given by the caller is sent only if its name passes the same check,
+  or if PubTator returned it to this gateway (`check_entity`).
 - `relations(gw, entity)` — every extracted relation touching the entity,
   `{source, target, type, publications}`; `partner` restricts the other end's
   type (`GENE`, `DISEASE`, `CHEMICAL`, …), `rel_type` the relation type.
   Relations are treated as undirected links: the neighbour is the other end.
+  PubTator3 extracts chemical/gene/variant–disease and gene/chemical pairs,
+  not disease–disease pairs, so a disease C is never "known" to a disease A.
 - `abc_open_links(a, a_edges, b_edges)` — pure and deterministic: every C
   reached through some B that is neither A nor one of A's neighbours, with
   the A–B and B–C publication counts per path. Score = Σ over B of
@@ -26,7 +30,8 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping
 
-from scieflow.core.review.claims import LeakError
+from scieflow.core.review.claims import LeakError, check_text
+from scieflow.research.lib.http import HTTPFailure
 
 BASE = "https://www.ncbi.nlm.nih.gov/research/pubtator3-api"
 PROVIDER = "pubtator"
@@ -35,6 +40,7 @@ REL_TYPES = ("associate", "cause", "compare", "cotreat", "drug_interact", "inhib
              "negative_correlate", "positive_correlate", "prevent", "stimulate", "treat")
 
 _ENTITY = re.compile(r"^@([A-Z]+)_[A-Za-z0-9][A-Za-z0-9_.,'()+\-]{0,119}\Z")
+_CALLER_NAME = re.compile(r"^[A-Za-z0-9_'(),\-]+\Z")
 
 
 def entity_type(entity: str) -> str:
@@ -42,34 +48,43 @@ def entity_type(entity: str) -> str:
     return m.group(1) if m else ""
 
 
-def check_entity(entity) -> str:
-    """A PubTator entity id may be sent as-is; anything else is refused unsent."""
+def check_entity(entity, gw=None) -> str:
+    """An entity id may be sent if it has the PubTator shape AND either PubTator
+    itself returned it to this gateway (autocomplete / relations) or its name —
+    underscores read as spaces — passes the same leak check as free text.
+    Anything else (data dressed up as `@TYPE_…`) is refused unsent."""
     if not isinstance(entity, str) or not _ENTITY.match(entity) or ".." in entity:
         raise LeakError("refused: not a PubTator entity id (@TYPE_Name)")
+    if gw is not None and gw.was_received(PROVIDER, entity):
+        return entity
+    name = entity.split("_", 1)[1]
+    if not _CALLER_NAME.match(name):
+        raise LeakError("refused: entity id still looks like data (character)")
+    check_text(name.replace("_", " "))
     return entity
 
 
-def _list(value) -> list:
+def _is_list(value) -> None:
     if not isinstance(value, list):
-        from scieflow.research.lib.http import HTTPFailure
         raise HTTPFailure("PubTator response is not a list", "MALFORMED")
-    return value
 
 
 def autocomplete(gw, query: str, *, concept: str | None = None, limit: int = 5) -> list[dict]:
-    params: dict = {"query": query}
+    fixed: dict = {}
     if concept is not None:
         if concept.upper() not in TYPES:
             raise ValueError(f"concept must be one of {', '.join(TYPES)} (any case)")
-        params["concept"] = concept.lower()
-    params["limit"] = int(limit)
-    rows = _list(gw.get_json(PROVIDER, "autocomplete", f"{BASE}/entity/autocomplete/", params,
-                             text=("query",), ttl_class="metadata"))
+        fixed["concept"] = concept.lower()
+    fixed["limit"] = int(limit)
+    rows = gw.get_json(PROVIDER, "autocomplete", f"{BASE}/entity/autocomplete/",
+                       text={"query": query}, fixed=fixed, ttl_class="metadata",
+                       validate=_is_list)
     out = []
     for r in rows:
         if isinstance(r, dict) and isinstance(r.get("_id"), str) and _ENTITY.match(r["_id"]):
             out.append({"id": r["_id"], "name": r.get("name"), "biotype": r.get("biotype"),
                         "db": r.get("db"), "db_id": r.get("db_id")})
+    gw.remember(PROVIDER, [r["id"] for r in out])
     return out[:limit]
 
 
@@ -85,18 +100,21 @@ def _edge(r) -> dict | None:
 
 def relations(gw, entity: str, *, partner: str | None = None,
               rel_type: str | None = None) -> list[dict]:
-    params = {"e1": check_entity(entity)}
+    ids = {"e1": check_entity(entity, gw)}
+    fixed: dict = {}
     if rel_type is not None:
         if rel_type not in REL_TYPES:
             raise ValueError(f"rel_type must be one of {', '.join(REL_TYPES)}")
-        params["type"] = rel_type
+        fixed["type"] = rel_type
     if partner is not None:
         if partner.upper() not in TYPES:
             raise ValueError(f"partner must be one of {', '.join(TYPES)}")
-        params["e2"] = partner.upper()
-    rows = _list(gw.get_json(PROVIDER, "relations", f"{BASE}/relations", params,
-                             ttl_class="search"))
-    return [e for e in (_edge(r) for r in rows) if e is not None]
+        fixed["e2"] = partner.upper()
+    rows = gw.get_json(PROVIDER, "relations", f"{BASE}/relations", ids=ids, fixed=fixed,
+                       ttl_class="search", validate=_is_list)
+    edges = [e for e in (_edge(r) for r in rows) if e is not None]
+    gw.remember(PROVIDER, [x for e in edges for x in (e["source"], e["target"])])
+    return edges
 
 
 def _neighbours(entity: str, edges: Iterable[Mapping]) -> dict[str, dict]:

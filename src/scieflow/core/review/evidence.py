@@ -927,7 +927,8 @@ def execute(p: Plan, ws: Path, policy: _policy.Policy, *, ledger=None, cache=Non
     b.run_mcp()
     generated = (now or (lambda: datetime.now(timezone.utc)))().isoformat(timespec="seconds")
     bundle = _assemble(b, generated)
-    rows = ledger.rows("run")[before:]
+    # this build's scite rows (discovery providers share the run ledger)
+    rows = [r for r in ledger.rows("run")[before:] if r.get("source") in ("mcp", "rest")]
     summary = {
         "mcp": sum(1 for r in rows if r.get("source") == "mcp" and not r.get("cached")),
         "rest": sum(1 for r in rows if r.get("source") == "rest" and not r.get("cached")),
