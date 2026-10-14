@@ -333,3 +333,23 @@ def test_record_final_consumption_revalidation(project, monkeypatch):
         with jobs.locate_artifacts(project, value.id, run_dir=ws):
             pass
     assert reached == [value.id]
+
+
+@pytest.mark.parametrize('global_mode', [False, True])
+def test_task6_live_location_append_lifetime_and_selectors(project, global_mode):
+    ws = project.run_dir('r1')
+    value = record(project, None if global_mode else ws)
+    before = set(os.listdir('/proc/self/fd'))
+    with jobs.locate_artifacts(project, value.id, run_dir=None if global_mode else ws) as location:
+        with location.open_live_log() as source:
+            assert source.read_available(0, 65536) == b'raw-log'
+            with Path(value.log).open('ab') as f:
+                f.write(b'-append')
+            assert source.extent() == 14 and source.read_available(7, 65536) == b'-append'
+        with location.open_live_log('stderr') as source:
+            assert source.read_available(0, 65536) == b'raw-error'
+        for bad in ('other', None, 1):
+            with pytest.raises(jobs.JobArtifactError):
+                with location.open_live_log(bad):
+                    pass
+    assert set(os.listdir('/proc/self/fd')) == before

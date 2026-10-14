@@ -894,3 +894,17 @@ def test_display6a_no_whole_read_or_path_reopen_with_sentinel(tmp_path, monkeypa
     with pytest.raises(ValueError):
         output.display_panel(path)
     assert output.display_panel(handle).reason == 'source-invalidated'
+
+
+def test_display6b_public_chunks_positive_and_lazy_consumption():
+    assert output.display_chunks(iter([b'\x1b[31mred', b'\x1b[0m\r'])) == output.DisplayPanel('red\\x0d', False, '')
+    observed = []
+    def infinite():
+        while True:
+            observed.append(65536)
+            yield b'x' * 65536
+    panel = output.display_chunks(infinite())
+    assert panel.truncated and units6a(panel.text) <= 200000 and len(observed) <= 5
+    assert 'raw artifact retained' in panel.text
+    with pytest.raises(ValueError):
+        output.display_chunks(iter([b'x' * 65537]))
