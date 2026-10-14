@@ -1,0 +1,50 @@
+[
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Clonazepam",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 108
+ },
+ {
+  "type": "associate",
+  "source": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "target": "@GENE_SNCA",
+  "publications": 92
+ },
+ {
+  "type": "treat",
+  "source": "@CHEMICAL_Melatonin",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 71
+ },
+ {
+  "type": "cause",
+  "source": "@CHEMICAL_Carbachol",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 58
+ },
+ {
+  "type": "associate",
+  "source": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "target": "@GENE_SLC6A3",
+  "publications": 42
+ },
+ {
+  "type": "associate",
+  "source": "@CHEMICAL_Dopamine",
+  "target": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "publications": 28
+ },
+ {
+  "type": "associate",
+  "source": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "target": "@GENE_GBA",
+  "publications": 23
+ },
+ {
+  "type": "associate",
+  "source": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "target": "@GENE_HCRT",
+  "publications": 22
+ }
+]

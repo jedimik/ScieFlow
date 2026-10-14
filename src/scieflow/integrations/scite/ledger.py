@@ -6,7 +6,8 @@ Two append-only JSONL files get the same row for every request:
 - per day: `~/.cache/scieflow/scite/ledger-YYYY-MM-DD.jsonl` (UTC; shared by
   every run on this machine, so the daily budget spans runs)
 
-Each row records the source (`mcp` or `rest`), the operation, the round,
+Each row records the source (`mcp`, `rest`, or a free discovery provider:
+`pubtator`, `ctgov`, `openalex`), the operation, the round,
 the result count (scite's metering per call vs per result is undocumented, so
 both are kept), whether it was served from cache, and its status. Cache hits
 cost nothing; only uncached MCP calls count against `max_mcp_calls_per_round`,
@@ -34,7 +35,10 @@ from filelock import FileLock
 from scieflow.core import events, store
 from scieflow.integrations.scite.policy import Policy, PolicyError
 
-SOURCES = ("mcp", "rest")
+# Free discovery providers (research/lib/providers.py) reuse this ledger with their
+# own name as the source; only uncached `mcp` rows count against the budgets.
+PROVIDER_SOURCES = ("pubtator", "ctgov", "openalex")
+SOURCES = ("mcp", "rest", *PROVIDER_SOURCES)
 LOW_FRACTION = 0.10
 # An MCP call holds the budget lock from check to record, so concurrent runs
 # cannot both spend the last call of the day. Calls are few and bounded.
