@@ -605,6 +605,9 @@ def drafts_page(request: Request, slug: str, error: str = "",
         "previews": previews,
         "preview_busy": service.preview_busy(project, slug),
         "csrf": auth.csrf_token(request),
+        # W6, read-only. Its own name: core's workbench view must never use it (tested).
+        "review_outcome": review_views.drafts_review_context(
+            project, slug, project.run_dir(slug), view["agents"]),
         **view})
 
 

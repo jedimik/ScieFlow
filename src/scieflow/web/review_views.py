@@ -328,3 +328,70 @@ def run_review_context(project, slug: str, ws) -> dict:
         "blocker_notice": notice,
         "newest_round": max((b["round"] for b in blockers), default=None),
     }
+
+
+# --- W6: the workbench's read-only review outcome --------------------------------------
+
+
+def _comment_text(comment: dict) -> str:
+    """A major comment carries `problem`, a minor one `comment` (revise._comments)."""
+    return str(comment.get("problem") or comment.get("comment") or "")
+
+
+def _outcome_author(ws, n: int, author: str, cluster_for) -> dict:
+    """One draft's accepted clusters and the ids decided otherwise, or a notice."""
+    entry = {"author": author, "accepted": [], "rejected": [], "deferred": [],
+             "undecided": [], "notice": ""}
+    try:
+        view = cluster_for(ws, n, author)
+    except (ValueError, OSError) as exc:
+        entry["notice"] = f"review outcome for {author} could not be read: " \
+            f"{' '.join(str(exc).split())}"
+        return entry
+    for cluster in view["accepted"]:
+        decision = cluster["decision"]
+        entry["accepted"].append({
+            "id": cluster["cluster"],
+            "title": cluster.get("title") or "",
+            "severity": cluster.get("severity") or "",
+            "decision": decision.get("decision") or "",
+            "actor": decision.get("actor") or "",
+            "note": decision.get("note") or "",
+            "comments": [{"reviewer": c.get("reviewer", ""), "pass": c.get("pass", ""),
+                          "severity": c.get("severity", ""), "id": c.get("id", ""),
+                          "text": _comment_text(c)} for c in cluster["comments"]],
+        })
+    for key in ("rejected", "deferred", "undecided"):
+        entry[key] = list(view[key])
+    return entry
+
+
+def drafts_review_context(project, slug: str, ws, fallback_authors) -> dict | None:
+    """The workbench's review outcome for the latest round with recorded decisions.
+
+    None when no round is decided, so the page shows no panel. Read-only, and it
+    never raises (ledger F7, D2): a missing research extra or a core refusal is one
+    notice line, and a draft whose review cannot be read gets its own notice.
+    The authors are the decided round's assignment pairs, else `fallback_authors`.
+    """
+    rounds, notice = review_call("rounds", project, slug)
+    if rounds is None:
+        return {"round": None, "notice": notice, "authors": []}
+    decided = [row for row in rounds if row.get("decisions")]
+    if not decided:
+        return None
+    row = max(decided, key=lambda r: r["round"])
+    n = row["round"]
+    authors: list[str] = []
+    for pair in row.get("pairs", []):
+        if pair["author"] not in authors:
+            authors.append(pair["author"])
+    if not authors:
+        authors = list(fallback_authors)
+    try:
+        from scieflow.core.review import revise
+    except ImportError:
+        return {"round": n, "notice": NEEDS_EXTRA, "authors": []}
+    ws = Path(ws)
+    return {"round": n, "notice": "", "authors": [
+        _outcome_author(ws, n, author, revise.clusters_for) for author in authors]}
