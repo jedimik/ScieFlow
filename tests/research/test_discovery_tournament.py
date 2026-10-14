@@ -172,3 +172,36 @@ def test_every_pair_at_most_once_and_no_self_match():
     assert [m["match"] for m in s] == list(range(1, 11))
     assert {frozenset((m["a"], m["b"])) for m in s} == \
         {frozenset(p) for p in itertools.combinations([f"H{i}" for i in range(1, 6)], 2)}
+
+
+# --- review findings (ticket 15) --------------------------------------------------------------
+
+
+def test_families_are_normalised_before_tiering():
+    h = [{"id": "H1", "author": "a1", "family": "", "debate_status": "unchallenged"},
+         {"id": "H2", "author": "a2", "family": "OpenAI", "debate_status": "unchallenged"}]
+    m = T.schedule(h, [{"agent": "g", "family": "google"}], seed=1, max_comparisons=1)[0]
+    assert m["judge_tier"] == "unknown-family"
+    h[0]["family"] = "Google "
+    m = T.schedule(h, [{"agent": "g", "family": "google"},
+                       {"agent": "z", "family": "zhipu"}], seed=1, max_comparisons=1)[0]
+    assert (m["judge"], m["judge_tier"]) == ("z", "other-family")
+    m = T.schedule(h, [{"agent": "o", "family": "openai"}], seed=1, max_comparisons=1)[0]
+    assert m["judge_tier"] == "same-family"
+
+
+def test_ambiguous_ids_and_duplicate_judges_are_refused():
+    h = hyps(3)
+    h[1]["id"] = "H01"
+    with pytest.raises(T.TournamentError, match="duplicate"):
+        T.schedule(h, JUDGES, seed=1, max_comparisons=3)
+    with pytest.raises(T.TournamentError, match="judge"):
+        T.schedule(hyps(3), JUDGES + [{"agent": "glm-d", "family": "other"}], seed=1,
+                   max_comparisons=3)
+
+
+def test_verdicts_keyed_by_strings_count():
+    h = hyps(2)
+    s = T.schedule(h, JUDGES, seed=1, max_comparisons=1)
+    d = T.build(h, JUDGES, {str(s[0]["match"]): s[0]["a"]}, seed=1, max_comparisons=1, top_k=1)
+    assert d["no_verdict"] == 0 and d["top"] == [s[0]["a"]]

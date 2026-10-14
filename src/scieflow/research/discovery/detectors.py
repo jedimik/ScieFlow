@@ -124,8 +124,9 @@ def disputes(graph, *, seeds: Iterable[str], max_statements: int = MAX_STATEMENT
             snippets = [e["snippet"]] if isinstance(e.get("snippet"), str) else []
         for snip in snippets:
             text = _str(snip.get("text") if isinstance(snip, dict) else snip)
+            text = _clip(re.sub(r"\s+", " ", text)) if text else None
             if text and (s, text) not in by[t] and len(by[t]) < max_statements:
-                by[t].append((s, _clip(text)))
+                by[t].append((s, text))
     for seed, statements in by.items():
         if not statements:
             continue
@@ -317,8 +318,10 @@ def verify(gaps: Iterable[Mapping], corpus: Mapping[str, Iterable[str]]) -> dict
     not changed. Returns {kept, dropped: [{id, detector, reason}], dropped_evidence}."""
     if not isinstance(corpus, Mapping):
         raise TypeError("corpus must map evidence refs to the texts fetched for them")
-    index = {str(k).strip().casefold(): [t for t in v if isinstance(t, str)]
-             for k, v in corpus.items()}
+    index: dict[str, list[str]] = {}
+    for k, v in corpus.items():         # keys differing only by case are one ref
+        index.setdefault(str(k).strip().casefold(), []).extend(
+            t for t in v if isinstance(t, str))
     kept, dropped, n_dropped = [], [], 0
     for g in gaps:
         evidence = g.get("evidence") if isinstance(g, Mapping) else None

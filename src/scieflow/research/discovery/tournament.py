@@ -53,31 +53,40 @@ def _natural(hid: str):
     return [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", hid)]
 
 
+def _family(value) -> str | None:
+    """Model families compare case- and whitespace-insensitively; blank is unknown."""
+    return value.strip().lower() or None if isinstance(value, str) else None
+
+
 def _check(hypotheses: Iterable[Mapping]) -> list[dict]:
     out, seen = [], set()
     for h in hypotheses:
         hid = h.get("id")
         if not isinstance(hid, str) or not hid:
             raise TournamentError("every hypothesis needs an id")
-        if hid in seen:
+        key = tuple(map(str, _natural(hid)))
+        if key in seen:                 # H1 and H01 would sort ambiguously
             raise TournamentError(f"duplicate hypothesis id {hid}")
-        seen.add(hid)
+        seen.add(key)
         status = h.get("debate_status", "undebated")
         if status == "withdrawn":
             raise TournamentError(f"{hid} was withdrawn in the debate; leave it out")
         if status not in DEBATE_RANK:
             raise TournamentError(f"{hid}: unknown debate status {status!r} "
                                   f"({', '.join(DEBATE_RANK)})")
-        out.append({"id": hid, "author": h.get("author"), "family": h.get("family"),
+        out.append({"id": hid, "author": h.get("author"), "family": _family(h.get("family")),
                     "debate_status": status})
     return sorted(out, key=lambda h: _natural(h["id"]))
 
 
 def _judges(judges: Iterable[Mapping]) -> list[dict]:
-    out = [{"agent": j["agent"], "family": j.get("family") or None} for j in judges
+    out = [{"agent": j["agent"], "family": _family(j.get("family"))} for j in judges
            if isinstance(j, Mapping) and isinstance(j.get("agent"), str) and j["agent"]]
     if not out:
         raise TournamentError("no judges: assign at least one agent to judge the tournament")
+    names = [j["agent"] for j in out]
+    if len(set(names)) != len(names):
+        raise TournamentError("duplicate judge agent: list every judge once")
     return sorted(out, key=lambda j: j["agent"])
 
 
@@ -144,8 +153,15 @@ def build(hypotheses: Iterable[Mapping], judges: Iterable[Mapping],
     rating = {h["id"]: float(initial) for h in hs}
     stats = {h["id"]: {"wins": 0, "losses": 0, "ties": 0, "comparisons": 0} for h in hs}
     out_matches, no_verdict = [], 0
+    by_match: dict[int, str | None] = {}
+    for key, v in (verdicts.items() if isinstance(verdicts, Mapping) else ()):
+        # verdicts read back from JSON have string keys
+        if isinstance(key, str) and key.strip().isdigit():
+            key = int(key)
+        if isinstance(key, int) and not isinstance(key, bool):
+            by_match[key] = v
     for m in matches:
-        v = verdicts.get(m["match"]) if isinstance(verdicts, Mapping) else None
+        v = by_match.get(m["match"])
         a, b = m["a"], m["b"]
         if v is None:
             result = "no-verdict"

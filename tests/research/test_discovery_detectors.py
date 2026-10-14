@@ -266,3 +266,21 @@ def test_verify_on_detector_output_keeps_everything_and_drops_tampering():
 def test_verify_refuses_a_non_mapping_corpus():
     with pytest.raises(TypeError):
         detectors.verify([], ["not", "a", "mapping"])
+
+
+# --- review findings (ticket 15) --------------------------------------------------------------
+
+
+def test_disputes_deduplicate_long_snippets_after_clipping():
+    long = "In contrast, " + "we did not find it " * 60
+    graph = {"edges": [{"s": "10.1000/c.1", "t": "10.1000/seed.1", "type": "contrasting",
+                        "snippets": [{"text": long}, {"text": long + " "}, {"text": long}]}]}
+    det = detectors.disputes(graph, seeds=["10.1000/seed.1"])
+    assert len(det["gaps"][0]["evidence"]) == 1
+
+
+def test_verify_merges_corpus_keys_that_differ_only_by_case():
+    corpus = {"10.1/B": ["Alpha beta gamma delta epsilon."], "10.1/b": ["Zeta eta theta iota."]}
+    gap = {"id": "G1", "statement": "s", "novelty_rationale": "r",
+           "evidence": [{"kind": "paper", "ref": "10.1/b", "quote": "alpha beta gamma delta"}]}
+    assert detectors.verify([gap], corpus)["kept"]

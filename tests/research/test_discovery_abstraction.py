@@ -266,7 +266,7 @@ def test_scite_check_quota_and_budget_stop_and_mark_rows():
     assert out["skipped"][0]["reason"] == "budget"
     mcp = FakeMCP(fail={1: PolicyError("scite is off")})
     out = A.scite_check(items(3), top=["H1"], mcp=mcp, round_=1)
-    assert out["status"] == "unavailable" and len(mcp.calls) == 1
+    assert out["status"] == "policy" and len(mcp.calls) == 1
 
 
 def test_scite_check_sends_only_abstracted_ok_items():
@@ -275,6 +275,97 @@ def test_scite_check_sends_only_abstracted_ok_items():
     out = A.scite_check(its, top=["H3"], mcp=mcp, round_=1)
     assert mcp.calls == []
     assert out["results"]["H3"]["scite_status"] == "refused"
-    with pytest.raises(LeakError):
-        A.scite_check([{"id": "H1", "status": "ok", "abstract": "cohort_a 43 melatonin"}],
-                      top=["H1"], mcp=FakeMCP(), round_=1)
+    mcp = FakeMCP()
+    out = A.scite_check([{"id": "H1", "status": "ok", "abstract": "cohort_a 43 melatonin"}],
+                        top=["H1"], mcp=mcp, round_=1)
+    assert mcp.calls == [] and out["results"]["H1"]["scite_status"] == "refused"
+
+
+# --- review findings (ticket 15) --------------------------------------------------------------
+
+STILL_LEAKY = [
+    "Melatonin slows conversion in one hundred and twelve patients.",
+    "Melatonin slows conversion by one third.",
+    "Melatonin slows conversion by half.",
+    "Melatonin predicts conversion with an AUC of point nine.",
+    "Melatonin halves conversion with HR around zero point five.",
+    "Melatonin has an effect d of eight tenths on conversion.",
+    "Melatonin slows conversion in \u216b patients.",
+    "Melatonin slows conversion in XLIII patients.",
+    "Melatonin slows conversion in f\u0456fty patients.",
+    "Melatonin slows conversion, Cohen d large.",
+    "Melatonin slows conversion, Cohen\u2019s d large.",
+    "Melatonin slows conversion with SMD large.",
+    "Melatonin slows conversion with a large standardized mean difference.",
+    "Melatonin slows conversion with an odds-ratio above unity.",
+    "Melatonin slows conversion with \u03b7\u00b2 large.",
+    "Melatonin slows conversion by a factor of three.",
+    "Melatonin slows conversion in the Mayo Clinic series.",
+    "Melatonin slows conversion in subjects of the Brno sleep clinic.",
+    "Melatonin slows conversion in the ICEBERG study.",
+    "Melatonin slows conversion at the VA Palo Alto site.",
+    "Melatonin slows conversion in Prague.",
+    "Melatonin slows conversion among older Czech men.",
+    "Melatonin slows conversion in Hispanic women living in Texas.",
+    "Melatonin slows conversion in my patients.",
+    "Melatonin slows conversion in PD12 participants.",
+]
+SECRETS = ["hundred", "twelve", "third", "half", "nine", "zero", "five", "eight", "tenths",
+           "xii", "xliii", "f\u0456fty", "cohen", "smd", "standardized", "odds", "\u03b7",
+           "factor", "mayo", "brno", "iceberg", "palo", "va", "prague", "czech", "hispanic",
+           "texas", "my", "pd12", "point"]
+
+
+@pytest.mark.parametrize("text", STILL_LEAKY)
+def test_review_leaks_are_stripped_or_refused(text):
+    try:
+        out = A.abstract(text)
+    except LeakError:
+        return                                   # refused: nothing is sent
+    words = set(re.findall(r"[^\W_]+", out.lower()))
+    assert not words & set(SECRETS), (text, out)
+    assert "melatonin" in words
+
+
+def test_review_scientific_terms_survive():
+    for text, keep in [
+        ("Melatonin slows conversion in Parkinson disease.", "parkinson"),
+        ("Type I interferon signalling precedes Lewy body pathology.", "lewy"),
+        ("Stage III sleep loss precedes conversion.", "stage"),
+        ("Mild cognitive impairment (MCI) precedes conversion.", "mci"),
+        ("\u03b1-synuclein seeding in skin predicts conversion.", "synuclein"),
+    ]:
+        assert keep in A.abstract(text).lower(), text
+
+
+def test_scite_check_caps_the_top_k():
+    mcp = FakeMCP()
+    out = A.scite_check(items(10), top=[f"H{i}" for i in range(1, 11)], mcp=mcp, round_=1,
+                        top_k=8)
+    assert set(out["results"]) == {f"H{i}" for i in range(1, 9)}
+    term = mcp.calls[0][1]["term"]
+    assert "orthostatic" not in term and "cognition" not in term     # H9, H10
+    plan = A.scite_plan(items(10), top=[f"H{i}" for i in range(1, 11)], top_k=8)
+    assert "cognition" not in plan["requests"][0]["args"]["term"]
+    assert A.DEFAULT_TOP_K == 8
+
+
+def test_one_leaky_top_item_is_refused_and_the_rest_go_ahead():
+    its = items(2) + [{"id": "H3", "status": "ok", "abstract": "melatonin in cohort A"},
+                      {"id": "H4", "status": "ok", "abstract": "the and of with"}]
+    mcp = FakeMCP()
+    out = A.scite_check(its, top=["H1", "H3", "H4", "H2"], mcp=mcp, round_=1)
+    assert out["results"]["H3"]["scite_status"] == "refused"
+    assert out["results"]["H4"]["scite_status"] == "refused"
+    assert out["results"]["H1"]["scite_status"] == "ok"
+    assert "cohort" not in mcp.calls[0][1]["term"]
+    plan = A.scite_plan(its, top=["H1", "H3", "H4"])
+    assert plan["refused"] == ["H3", "H4"]
+
+
+def test_policy_refusal_is_a_boundary_not_an_outage():
+    mcp = FakeMCP(fail={1: PolicyError("scite is off")})
+    out = A.scite_check(items(2), top=["H1"], mcp=mcp, round_=1)
+    assert out["status"] == "policy"
+    assert out["results"]["H1"]["scite_status"] == "policy"
+    assert len(mcp.calls) == 1
