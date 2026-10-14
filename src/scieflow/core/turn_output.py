@@ -439,3 +439,8 @@ def display_panel(handle: RegularArtifact) -> DisplayPanel:
         prefix.accept(panel.text)
         return prefix.finish(reason)
     return panel
+
+
+def display_chunks(chunks) -> DisplayPanel:
+    """Lazy public adapter for bounded raw chunks; no whole-input join."""
+    return _display_chunks((chunk, False) for chunk in chunks)
