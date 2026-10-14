@@ -743,3 +743,41 @@ def test_a_blockers_failure_is_a_service_error_not_a_crash(project, curated, mon
         service.merge_round(project, "r1")
     assert "matrix.json is corrupt" in str(info.value)
     assert calls == []
+
+
+@pytest.mark.parametrize("error", [RecursionError("maximum recursion depth exceeded"),
+                                   OSError("matrix.json is unreadable")])
+def test_an_unreadable_blocker_state_refuses_the_merge_fail_closed(project, curated,
+                                                                   monkeypatch, error):
+    """R4 C2: a deeply nested or unreadable review file is a ServiceError, not a raw crash."""
+    from scieflow.core.review import service as review_service
+
+    def broken(project, slug):
+        raise error
+
+    monkeypatch.setattr(review_service, "blockers", broken)
+    calls = _spy_say(monkeypatch)
+    with pytest.raises(service.ServiceError) as info:
+        service.merge_round(project, "r1")
+    assert calls == [], "an unreadable blocker state must not reach say"
+    assert "merge refused" in str(info.value)
+    assert "Traceback" not in str(info.value)
+
+
+def test_a_missing_review_package_refuses_the_merge_fail_closed(project, monkeypatch):
+    """R4 C6.3: the lazy review import failing refuses the merge; say is never called."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def without_review(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "scieflow.core.review" and "service" in (fromlist or ()):
+            raise ImportError("No module named 'jsonschema'")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", without_review)
+    calls = _spy_say(monkeypatch)
+    with pytest.raises(service.ServiceError) as info:
+        service.merge_round(project, "r1")
+    assert calls == []
+    assert "research extra" in str(info.value)

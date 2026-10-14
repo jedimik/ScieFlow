@@ -949,8 +949,14 @@ def merge_round(project: Project, slug: str) -> dict:
             f"(review needs the research extra): {exc}") from exc
     try:
         open_blockers = review_service.blockers(project, slug)
-    except ValueError as exc:
-        raise ServiceError(str(exc)) from exc
+    except (ValueError, OSError, RecursionError) as exc:
+        if isinstance(exc, ValueError):
+            raise ServiceError(str(exc)) from exc
+        # Fail closed: an unreadable or deeply nested review file refuses the merge
+        # with a message, never a raw RecursionError/OSError (R4 C2).
+        raise ServiceError(
+            f"merge refused: the open blockers of workspace/{slug} could not be read "
+            f"({type(exc).__name__}); fix the review files and try again") from exc
     if open_blockers:
         raise ServiceError(
             f"merge refused: workspace/{slug} has {len(open_blockers)} open blocker(s); "
