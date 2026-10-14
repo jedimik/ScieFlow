@@ -1,0 +1,76 @@
+{
+  "abstract_only": 1,
+  "blockers": [
+    "F1"
+  ],
+  "calls": {
+    "cached": 0,
+    "mcp": 3,
+    "rest": 4,
+    "skipped": []
+  },
+  "claims": 3,
+  "contested": 1,
+  "flags": [
+    {
+      "blocker": true,
+      "detail": "Crossref update-to: retraction (2023)",
+      "doi": "10.5555/rbd.2020.014",
+      "id": "F1",
+      "key": "novak2020",
+      "kind": "retracted"
+    },
+    {
+      "blocker": false,
+      "detail": "6 contrasting of 50 citation statements",
+      "doi": "10.5555/rbd.2019.001",
+      "id": "F2",
+      "kind": "contested"
+    },
+    {
+      "blocker": false,
+      "claim": "C2",
+      "detail": "No open-access full text; passage taken from the abstract",
+      "doi": "10.5555/rbd.2021.007",
+      "id": "F3",
+      "kind": "abstract_only"
+    },
+    {
+      "blocker": false,
+      "claim": "C3",
+      "detail": "A 2024 study matches the novelty claim",
+      "doi": "10.5555/rbd.2024.021",
+      "id": "F4",
+      "kind": "novelty_hit"
+    }
+  ],
+  "generated": "2026-10-13T12:00:00+00:00",
+  "manuscript_hash": "3f1c2a9b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a",
+  "passages": 3,
+  "quota": null,
+  "references": {
+    "by_status": {
+      "corrected": 0,
+      "ok": 3,
+      "retracted": 1,
+      "unresolvable": 0
+    },
+    "total": 4
+  },
+  "round": 1,
+  "scite_status": "ok",
+  "searches": [
+    {
+      "id": "S1",
+      "kind": "topic",
+      "results": 1,
+      "source": "scite_mcp"
+    },
+    {
+      "id": "S2",
+      "kind": "novelty",
+      "results": 1,
+      "source": "scite_mcp"
+    }
+  ]
+}

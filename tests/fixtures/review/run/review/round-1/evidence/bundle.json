@@ -1,0 +1,219 @@
+{
+  "version": 1,
+  "round": 1,
+  "manuscript_hash": "3f1c2a9b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a",
+  "generated": "2026-10-13T12:00:00+00:00",
+  "scite_status": "ok",
+  "references": [
+    {
+      "doi": "10.5555/rbd.2019.001",
+      "key": "smith2019",
+      "status": "ok",
+      "title": "Actigraphy in REM sleep behaviour disorder",
+      "year": 2019,
+      "tally": {
+        "supporting": 4,
+        "contrasting": 6,
+        "mentioning": 40,
+        "total": 50
+      },
+      "oa": true,
+      "sources": [
+        "crossref",
+        "scite_public"
+      ]
+    },
+    {
+      "doi": "10.5555/rbd.2020.014",
+      "key": "novak2020",
+      "status": "retracted",
+      "title": "Wearable screening for parasomnias",
+      "year": 2020,
+      "tally": {
+        "supporting": 2,
+        "contrasting": 1,
+        "mentioning": 12,
+        "total": 15
+      },
+      "oa": false,
+      "sources": [
+        "crossref",
+        "scite_public"
+      ]
+    },
+    {
+      "doi": "10.5555/rbd.2021.007",
+      "key": "lee2021",
+      "status": "ok",
+      "title": "Movement bursts in REM sleep",
+      "year": 2021,
+      "tally": {
+        "supporting": 5,
+        "contrasting": 0,
+        "mentioning": 22,
+        "total": 27
+      },
+      "oa": false,
+      "sources": [
+        "crossref",
+        "scite_public"
+      ]
+    },
+    {
+      "doi": "10.5555/rbd.2022.003",
+      "key": "garcia2022",
+      "status": "ok",
+      "title": "Video-confirmed actigraphy events",
+      "year": 2022,
+      "tally": {
+        "supporting": 9,
+        "contrasting": 1,
+        "mentioning": 30,
+        "total": 40
+      },
+      "oa": true,
+      "sources": [
+        "crossref",
+        "scite_public",
+        "europepmc"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "C1",
+      "section": "results",
+      "text": "Actigraphy distinguishes RBD from healthy controls",
+      "dois": [
+        "10.5555/rbd.2019.001",
+        "10.5555/rbd.2020.014"
+      ],
+      "passages": [
+        {
+          "doi": "10.5555/rbd.2019.001",
+          "quote": "Actigraphy separated RBD patients from controls in a single-centre sample.",
+          "source": "europepmc",
+          "abstract_only": false
+        }
+      ]
+    },
+    {
+      "id": "C2",
+      "section": "discussion",
+      "text": "Wrist movement bursts precede dream enactment",
+      "dois": [
+        "10.5555/rbd.2021.007",
+        "10.5555/rbd.2022.003"
+      ],
+      "passages": [
+        {
+          "doi": "10.5555/rbd.2021.007",
+          "quote": "Bursts of wrist movement clustered in REM sleep.",
+          "source": "europepmc",
+          "abstract_only": true
+        },
+        {
+          "doi": "10.5555/rbd.2022.003",
+          "quote": "Wrist actigraphy flagged dream-enactment episodes confirmed by video-polysomnography.",
+          "source": "europepmc",
+          "stance": "supporting",
+          "abstract_only": false
+        }
+      ]
+    },
+    {
+      "id": "C3",
+      "section": "abstract",
+      "text": "This is the first wearable-only screening approach for RBD",
+      "dois": [],
+      "passages": []
+    }
+  ],
+  "contested": [
+    {
+      "doi": "10.5555/rbd.2019.001",
+      "statements": [
+        {
+          "citing_doi": "10.5555/rbd.2023.042",
+          "quote": "In contrast to Smith et al., actigraphy alone did not separate RBD from periodic limb movements.",
+          "stance": "contrasting"
+        }
+      ]
+    }
+  ],
+  "searches": [
+    {
+      "id": "S1",
+      "kind": "topic",
+      "source": "scite_mcp",
+      "query": "actigraphy REM sleep behaviour disorder screening",
+      "results": [
+        {
+          "doi": "10.5555/rbd.2024.021",
+          "title": "Wearable-only screening for isolated RBD",
+          "year": 2024,
+          "tally": {
+            "supporting": 3,
+            "contrasting": 0,
+            "mentioning": 8,
+            "total": 11
+          }
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "kind": "novelty",
+      "source": "scite_mcp",
+      "query": "first wearable-only screening RBD",
+      "results": [
+        {
+          "doi": "10.5555/rbd.2024.021",
+          "quote": "We present a wearable-only screening pipeline for isolated RBD.",
+          "claims": [
+            "C3"
+          ]
+        }
+      ]
+    }
+  ],
+  "flags": [
+    {
+      "id": "F1",
+      "kind": "retracted",
+      "doi": "10.5555/rbd.2020.014",
+      "key": "novak2020",
+      "blocker": true,
+      "detail": "Crossref update-to: retraction (2023)"
+    },
+    {
+      "id": "F2",
+      "kind": "contested",
+      "doi": "10.5555/rbd.2019.001",
+      "blocker": false,
+      "detail": "6 contrasting of 50 citation statements"
+    },
+    {
+      "id": "F3",
+      "kind": "abstract_only",
+      "doi": "10.5555/rbd.2021.007",
+      "claim": "C2",
+      "blocker": false,
+      "detail": "No open-access full text; passage taken from the abstract"
+    },
+    {
+      "id": "F4",
+      "kind": "novelty_hit",
+      "doi": "10.5555/rbd.2024.021",
+      "claim": "C3",
+      "blocker": false,
+      "detail": "A 2024 study matches the novelty claim"
+    }
+  ],
+  "calls": {
+    "mcp": 3,
+    "rest": 4,
+    "cached": 0,
+    "skipped": []
+  }
+}

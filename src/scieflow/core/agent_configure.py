@@ -283,6 +283,42 @@ def _refuse_problems(eff: ac.Effective) -> None:
                              + "\n  - ".join(eff.problems))
 
 
+def _normalise_assign(op: Op) -> Op:
+    """Store a one-agent assignment as a plain name where the role asks for it."""
+    spec = ac.ROLES.get(op.key)
+    if spec and spec.single_as_name and isinstance(op.value, list) and len(op.value) == 1:
+        return Op(op.kind, op.key, op.value[0])
+    return op
+
+
+def _check_review_families(op: Op, registry: dict) -> None:
+    """Review roles compare model families; refuse members without one."""
+    if op.key not in ac.REVIEW_ROLES:
+        return
+    names, _ = ac._split_entries(op.value)
+    for name in names if isinstance(names, list) else [names]:
+        entry = registry.get(name)
+        if isinstance(entry, dict) and ac.model_family(entry) is None:
+            raise ConfigureError(
+                f"role {op.key}: agent {name!r} has no model family; add "
+                f"`model_family:` to its entry in config/agents.yml (falls back "
+                "to `family:`), since reviewers are separated by model family"
+            )
+
+
+def _check_following_reviewers(eff: ac.Effective, ops: list[Op], registry: dict) -> None:
+    """New authors become reviewers when the pool follows them; check them too."""
+    setting = eff.assignments.get(ac.DRAFT_REVIEWERS)
+    touched = any(op.kind == "assign" and op.key == ac.DRAFT_AUTHORS for op in ops)
+    if not touched or setting is None or setting.source != ac.FOLLOWS_AUTHORS:
+        return
+    try:
+        _check_review_families(Op("assign", ac.DRAFT_REVIEWERS, setting.value), registry)
+    except ConfigureError as exc:
+        raise ConfigureError(f"{exc} (the reviewer pool follows research.draft-authors; "
+                             "or name the pool with --assign research.draft-reviewers=...)") from exc
+
+
 def _split_agent_key(key: str) -> tuple[str, str]:
     agent, _, field_name = key.partition(".")
     return agent, field_name
@@ -306,6 +342,8 @@ def plan_defaults(root: Path, ops: list[Op]) -> Plan:
                 roles = [r for r in roles if r != op.key]
             _set_exceptions(defaults_doc, roles)
         elif op.kind == "assign":
+            op = _normalise_assign(op)
+            _check_review_families(op, _plain(agents_doc).get("agents") or {})
             _child(defaults_doc, "assignments")[op.key] = _flow(op.value)
         elif op.kind == "set":
             agent, field_name = _split_agent_key(op.key)
@@ -315,6 +353,9 @@ def plan_defaults(root: Path, ops: list[Op]) -> Plan:
                 raise ConfigureError(f"cannot set {field_name!r} (settable: {', '.join(ac.AGENT_FIELDS)})")
             registry[agent][field_name] = op.value
         elif op.kind == "unset":
+            if op.key == ac.DRAFT_REVIEWERS:
+                (defaults_doc.get("assignments") or {}).pop(op.key, None)
+                continue   # back to following the draft authors
             if op.key in ac.ROLES:
                 raise ConfigureError("the defaults must assign every role; use --assign to change it")
             agent, field_name = _split_agent_key(op.key)
@@ -324,6 +365,7 @@ def plan_defaults(root: Path, ops: list[Op]) -> Plan:
 
     eff = ac.resolve_data(_plain(agents_doc), _plain(defaults_doc))
     _refuse_problems(eff)
+    _check_following_reviewers(eff, ops, _plain(agents_doc).get("agents") or {})
     changes = [c for c in (
         _change(agents_path, agents_before, agents_doc, agents_style),
         _change(defaults_path, defaults_before, defaults_doc, defaults_style),
@@ -345,6 +387,7 @@ def plan_workspace(root: Path, slug: str, ops: list[Op]) -> Plan:
     has_run_set = isinstance(doc.get("agents"), list)
 
     default_exceptions = defaults.get("support_as_primary") or []
+    reviewers_op: Op | None = None
     for op in ops:
         if op.kind in ("promote", "demote"):
             roles = _exceptions(doc)
@@ -360,8 +403,12 @@ def plan_workspace(root: Path, slug: str, ops: list[Op]) -> Plan:
                 )
             _set_exceptions(doc, roles)
         elif op.kind == "assign":
+            op = _normalise_assign(op)
+            _check_review_families(op, registry_agents)
             spec = ac.ROLES[op.key]
             shadowed = op.key in legacy_roles or (has_run_set and spec.many)
+            if op.key == ac.DRAFT_REVIEWERS:
+                reviewers_op = op
             if op.value == baseline.value(op.key) and not shadowed:
                 (doc.get("assignments") or {}).pop(op.key, None)
             else:
@@ -369,6 +416,8 @@ def plan_workspace(root: Path, slug: str, ops: list[Op]) -> Plan:
             _prune(doc, "assignments")
         elif op.kind in ("set", "unset"):
             if op.kind == "unset" and op.key in ac.ROLES:
+                if op.key == ac.DRAFT_REVIEWERS:
+                    reviewers_op = None
                 (doc.get("assignments") or {}).pop(op.key, None)
                 _prune(doc, "assignments")
                 continue
@@ -393,8 +442,17 @@ def plan_workspace(root: Path, slug: str, ops: list[Op]) -> Plan:
             _prune(overrides, agent)
             _prune(doc, "agent_overrides")
 
+    if reviewers_op is not None:
+        # Reviewers equal to the default pool were dropped above, but a run
+        # with its own authors would then follow those authors instead.
+        assigned = doc.get("assignments") or {}
+        own_authors = ac.DRAFT_AUTHORS in assigned or "draft_agents" in doc
+        if own_authors and ac.DRAFT_REVIEWERS not in assigned:
+            _child(doc, "assignments")[ac.DRAFT_REVIEWERS] = _flow(reviewers_op.value)
+
     eff = ac.resolve_data(registry, defaults, _plain(doc))
     _refuse_problems(eff)
+    _check_following_reviewers(eff, ops, registry_agents)
     change = _change(path, before, doc, style)
     plan = Plan([change] if change else [], warnings=eff.warnings)
     if change and not (ws_dir / "status.yml").exists():

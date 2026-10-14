@@ -1,0 +1,10 @@
+{
+  "description": "tools/call answered with a body that is not JSON",
+  "http": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "raw": "{\"jsonrpc\": \"2.0\", \"id\": "
+  }
+}

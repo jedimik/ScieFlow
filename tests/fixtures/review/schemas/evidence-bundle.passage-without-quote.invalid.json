@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "round": 1,
+  "manuscript_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "generated": "2026-10-13T12:00:00+00:00",
+  "scite_status": "ok",
+  "references": [
+    {
+      "doi": "10.1038/s41586-020-2649-2",
+      "key": "harris2020",
+      "status": "ok",
+      "title": "Array programming with NumPy",
+      "year": 2020,
+      "tally": {
+        "supporting": 12,
+        "contrasting": 1,
+        "mentioning": 300,
+        "total": 313
+      },
+      "sources": [
+        "crossref",
+        "scite_public"
+      ]
+    },
+    {
+      "doi": "10.1000/xyz123",
+      "key": "retracted2019",
+      "status": "retracted",
+      "sources": [
+        "crossref"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "C1",
+      "section": "results",
+      "text": "Array programming underpins the analysis",
+      "dois": [
+        "10.1038/s41586-020-2649-2"
+      ],
+      "passages": [
+        {
+          "doi": "10.1038/s41586-020-2649-2",
+          "quote": "",
+          "source": "europepmc",
+          "abstract_only": false
+        }
+      ]
+    }
+  ],
+  "contested": [
+    {
+      "doi": "10.1038/s41586-020-2649-2",
+      "statements": [
+        {
+          "citing_doi": "10.1101/2021.01.01.000001",
+          "quote": "In contrast to Harris et al., we find ...",
+          "stance": "contrasting"
+        }
+      ]
+    }
+  ],
+  "searches": [
+    {
+      "id": "S1",
+      "kind": "topic",
+      "source": "scite_mcp",
+      "query": "array programming scientific python",
+      "results": [
+        {
+          "doi": "10.1101/2021.01.01.000001",
+          "title": "A later study",
+          "year": 2021
+        }
+      ]
+    }
+  ],
+  "flags": [
+    {
+      "id": "F1",
+      "kind": "retracted",
+      "doi": "10.1000/xyz123",
+      "blocker": true,
+      "detail": "Crossref update-to: retraction"
+    },
+    {
+      "id": "F2",
+      "kind": "contested",
+      "doi": "10.1038/s41586-020-2649-2",
+      "blocker": false,
+      "detail": "1 contrasting statement"
+    }
+  ],
+  "calls": {
+    "mcp": 2,
+    "rest": 3,
+    "cached": 0,
+    "skipped": [
+      {
+        "query": "S2",
+        "reason": "budget"
+      }
+    ]
+  }
+}

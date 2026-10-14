@@ -151,11 +151,99 @@ CANNED_TEXT = {
         "# Debate response — stub\n\n"
         "P1: AGREE — consistent with [data:tbl-metrics].\n"
     ),
+    "manuscript-response": "# Response letter — stub\n\nNo comment to address.\n",
+    # gap discovery: blind reflection on the pooled hypotheses (spec §7 step 6)
+    "critique": (
+        "# Critique — stub\n\n"
+        "H1: plausible, but the prediction needs a stated time window.\n"
+    ),
     "tex-section": (
         "\\section{Stub Section}\n"
         "Stub prose citing \\cite{stub}. % source: [data:tbl-metrics]\n"
     ),
 }
+
+
+_TWO_PASS = re.compile(r'pass \"(blind|evidence)\", round (\d+), agent \"([^\"]+)\", '
+                       r'reviewed \"([^\"]+)\"')
+_SCITE_STATUS = re.compile(r'^- scite_status: \"(ok|off|quota|unavailable)\"', re.M)
+
+
+def _two_pass_review(prompt: str) -> dict | None:
+    """A two-pass review (`scieflow review prompt`) names its pass, round, reviewer
+    and author; answer in kind so `scieflow review check` accepts it. Pass B keeps
+    every pass-A comment (the stub's pass A is always M1 + m1) and cites nothing."""
+    match = _TWO_PASS.search(prompt)
+    if not match:
+        return None
+    pass_, round_, reviewer, author = match.groups()
+    data = json.loads(json.dumps(CANNED_JSON["manuscript-review"]))
+    data.update({"version": 1, "pass": pass_, "round": int(round_),
+                 "agent": reviewer, "reviewed": author})
+    if pass_ == "evidence":
+        status = _SCITE_STATUS.search(prompt)
+        data["scite_status"] = status.group(1) if status else "ok"
+        data["major"][0]["changed_from_blind"] = "unchanged"
+        data["minor"][0]["changed_from_blind"] = "weakened"
+        data["summary"] = "Stub evidence pass: the bundle changes nothing material."
+    return data
+
+
+_ORDER = re.compile(r"in this order:\n([^\n]+)")
+
+
+def _response_letter(prompt: str) -> str | None:
+    """A revision prompt (`scieflow review revise`) lists the accepted cluster ids;
+    the stub rebuts each one under its own heading, so the coverage check passes."""
+    match = _ORDER.search(prompt)
+    if not match:
+        return None
+    ids = [i.strip() for i in match.group(1).split(",") if i.strip()]
+    return "# Response letter — stub\n\n" + "".join(
+        f"## {cid}\nRebuttal: the stub keeps its text; the comment is noted.\n\n" for cid in ids)
+
+
+CANNED_JSON["tournament-verdict"] = {"match": 1, "winner": "tie", "rationale": "stub"}
+
+_LINE = {name: re.compile(rf"^{name}:[ \t]*(\S[^\n]*)$", re.M)
+         for name in ("match", "a", "b", "detector", "quote-ref", "quote", "gap-id")}
+
+
+def _line(prompt: str, name: str) -> str | None:
+    m = _LINE[name].search(prompt)
+    return m.group(1).strip() if m else None
+
+
+def _natural(hid: str) -> list:
+    return [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", hid)]
+
+
+def _verdict(prompt: str) -> dict | None:
+    """A tournament judge prompt (`scieflow research discover schedule`) names its
+    match and both hypotheses; the stub always prefers the lower id."""
+    match, a, b = _line(prompt, "match"), _line(prompt, "a"), _line(prompt, "b")
+    if not (match and match.isdigit() and a and b):
+        return None
+    return {"match": int(match), "winner": min(a, b, key=_natural),
+            "rationale": "stub: lower id wins"}
+
+
+def _gaps(prompt: str) -> dict | None:
+    """A detector-fed gap prompt may name one evidence item to quote (`quote-ref:`,
+    `quote:`, `detector:`) and the verified gap a hypothesis must address
+    (`gap-id:`); the stub quotes exactly that, so the verification gate keeps it."""
+    ref, quote, gap_id = _line(prompt, "quote-ref"), _line(prompt, "quote"), _line(prompt, "gap-id")
+    if not (ref and quote) and not gap_id:
+        return None
+    data = json.loads(json.dumps(CANNED_JSON["gaps"]))
+    g = data["gaps"][0]
+    if ref and quote:
+        g["evidence"] = [{"kind": "paper", "ref": ref, "source": "scite_mcp", "quote": quote}]
+        if _line(prompt, "detector"):
+            g["detector"] = _line(prompt, "detector")
+    if gap_id:
+        data["hypotheses"][0]["gap"] = gap_id
+    return data
 
 
 def _converse(prompt: str) -> None:
@@ -187,9 +275,13 @@ def main() -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     k = kind.group(1)
     if k in CANNED_JSON:
-        path.write_text(json.dumps(CANNED_JSON[k], indent=2))
+        special = {"manuscript-review": _two_pass_review, "tournament-verdict": _verdict,
+                   "gaps": _gaps}.get(k)
+        data = (special(prompt) if special else None) or CANNED_JSON[k]
+        path.write_text(json.dumps(data, indent=2))
     elif k in CANNED_TEXT:
-        path.write_text(CANNED_TEXT[k])
+        text = _response_letter(prompt) if k == "manuscript-response" else None
+        path.write_text(text or CANNED_TEXT[k])
     else:
         path.write_text(CANNED_MARKDOWN[k])
     print(f"stub: wrote {path}")

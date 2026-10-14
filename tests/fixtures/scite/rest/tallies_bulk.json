@@ -1,0 +1,22 @@
+{
+ "tallies": {
+  "10.1016/j.biopsych.2005.08.012": {
+   "citingPublications": 436,
+   "contradicting": 6,
+   "doi": "10.1016/j.biopsych.2005.08.012",
+   "mentioning": 308,
+   "supporting": 27,
+   "total": 347,
+   "unclassified": 6
+  },
+  "10.1093/brain/awn044": {
+   "citingPublications": 50,
+   "contradicting": 1,
+   "doi": "10.1093/brain/awn044",
+   "mentioning": 34,
+   "supporting": 3,
+   "total": 38,
+   "unclassified": 0
+  }
+ }
+}

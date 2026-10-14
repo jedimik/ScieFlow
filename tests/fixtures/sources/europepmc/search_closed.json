@@ -1,0 +1,34 @@
+{
+ "version": "6.9",
+ "hitCount": 1,
+ "request": {
+  "queryString": "DOI:\"10.1016/j.biopsych.2005.08.012\"",
+  "resultType": "core",
+  "cursorMark": "*",
+  "pageSize": 1,
+  "sort": "",
+  "synonym": false
+ },
+ "resultList": {
+  "result": [
+   {
+    "id": "16256956",
+    "source": "MED",
+    "pmid": "16256956",
+    "doi": "10.1016/j.biopsych.2005.08.012",
+    "title": "Association between amygdala hyperactivity to harsh faces and severity of social anxiety in generalized social phobia.",
+    "pubYear": "2006",
+    "abstractText": "<h4>Background</h4>Previous functional brain imaging studies of social anxiety have implicated amygdala hyperactivity in response to social threat, though its relationship to quantitative measures of clinical symptomatology remains unknown. The primary aim of this study was to examine the association between response to emotionally harsh faces in the amygdala, a region implicated in social and threat-related processing, and severity of social anxiety symptoms in patients with generalized social phobia (GSP).<h4>Methods</h4>Ten subjects with GSP naive to psychotropic medications and without psychiatric comorbidity and ten healthy comparison subjects matched on age, gender, ethnicity, and education completed the Liebowitz Social Anxiety Scale and underwent high-field (4Tesla) functional magnetic resonance imaging while viewing blocks of emotionally salient faces.<h4>Results</h4>Relative to happy faces, activation of the amygdala in response to harsh (angry, disgusted, fearful) faces was greater in GSP patients than in controls, and the extent of amygdala activation was positively correlated with severity of social anxiety symptoms, but not general state or trait anxiety levels.<h4>Conclusions</h4>Our findings suggest that amygdala activation to interpersonal threat can be specifically linked to the severity of social anxiety symptoms of individual GSP patients, and thus, may serve as a useful functional marker of disease severity.",
+    "isOpenAccess": "N",
+    "inEPMC": "N",
+    "inPMC": "N",
+    "hasPDF": "N",
+    "journalInfo": {
+     "journal": {
+      "title": "Biological psychiatry"
+     }
+    }
+   }
+  ]
+ }
+}

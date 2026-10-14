@@ -54,3 +54,43 @@ def test_manuscript_review_kind_is_schema_valid(tmp_path):
         capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stdout
+
+
+def run_stub_prompt(tmp_path, prompt):
+    proc = subprocess.run(
+        [sys.executable, "-m", "scieflow.core.stub_agent", prompt], capture_output=True, text=True
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_tournament_verdict_kind_picks_the_lower_id_deterministically(tmp_path):
+    out = tmp_path / "v.json"
+    run_stub_prompt(tmp_path, f"judge\noutput: {out}\nkind: tournament-verdict\n"
+                              "match: 3\na: H10\nb: H2\n")
+    assert json.loads(out.read_text()) == {"match": 3, "winner": "H2",
+                                           "rationale": "stub: lower id wins"}
+
+
+def test_critique_kind_writes_markdown(tmp_path):
+    out = tmp_path / "c.md"
+    run_stub_prompt(tmp_path, f"critique\noutput: {out}\nkind: critique\n")
+    assert out.read_text().startswith("# Critique")
+
+
+def test_gaps_kind_quotes_the_evidence_it_was_fed(tmp_path):
+    out = tmp_path / "g.json"
+    run_stub_prompt(tmp_path, f"gaps\noutput: {out}\nkind: gaps\n"
+                              "detector: open_questions\nquote-ref: 10.1000/open.1\n"
+                              "quote: remains unclear in prospective work\ngap-id: G2\n")
+    doc = json.loads(out.read_text())
+    g = doc["gaps"][0]
+    assert g["detector"] == "open_questions"
+    assert g["evidence"][0] == {"kind": "paper", "ref": "10.1000/open.1",
+                                "source": "scite_mcp",
+                                "quote": "remains unclear in prospective work"}
+    assert doc["hypotheses"][0]["gap"] == "G2"
+    proc = subprocess.run(
+        [sys.executable, "-m", "scieflow.research.validate", str(out), "--schema", "gaps"],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stdout

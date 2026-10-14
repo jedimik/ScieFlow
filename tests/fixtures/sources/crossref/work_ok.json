@@ -1,0 +1,25 @@
+{
+ "status": "ok",
+ "message-type": "work",
+ "message-version": "1.0.0",
+ "message": {
+  "DOI": "10.1371/journal.pone.0110232",
+  "type": "journal-article",
+  "title": [
+   "Computational Prediction of Candidate Proteins for S-Nitrosylation in Arabidopsis thaliana"
+  ],
+  "container-title": [
+   "PLoS ONE"
+  ],
+  "published": {
+   "date-parts": [
+    [
+     2014,
+     10,
+     21
+    ]
+   ]
+  },
+  "URL": "https://doi.org/10.1371/journal.pone.0110232"
+ }
+}

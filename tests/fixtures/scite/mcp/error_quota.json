@@ -1,0 +1,17 @@
+{
+  "description": "tools/call answered with a JSON-RPC error saying the plan's usage quota is exhausted",
+  "http": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "<request id>",
+      "error": {
+        "code": -32000,
+        "message": "Usage quota exceeded for your plan. Upgrade or wait until your quota resets."
+      }
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scieflow.local/schemas/hypothesis-tournament.schema.json",
+  "title": "ScieFlow hypothesis tournament (gap discovery, report/tournament.json)",
+  "description": "Version 1. Built by core (research.discovery.tournament.build) from the seeded, capped match schedule and the judges' verdicts. Elo with fixed k and initial rating; ties in Elo broken by debate status, then id. `top` (the first top_k ids) is the only set that goes on to the scite novelty / counter-evidence check.",
+  "type": "object",
+  "required": ["version", "seed", "k", "initial", "max_comparisons", "top_k", "hypotheses", "matches", "no_verdict", "top"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"const": 1},
+    "seed": {"type": "integer"},
+    "k": {"type": "number", "exclusiveMinimum": 0},
+    "initial": {"type": "number"},
+    "max_comparisons": {"type": "integer", "minimum": 0},
+    "top_k": {"type": "integer", "minimum": 0},
+    "no_verdict": {"type": "integer", "minimum": 0},
+    "top": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "hypotheses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "author", "family", "debate_status", "elo", "rank", "wins", "losses", "ties", "comparisons"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "author": {"type": ["string", "null"]},
+          "family": {"type": ["string", "null"]},
+          "debate_status": {"enum": ["consensus", "unchallenged", "undebated", "disputed", "challenged"]},
+          "elo": {"type": "number"},
+          "rank": {"type": "integer", "minimum": 1},
+          "wins": {"type": "integer", "minimum": 0},
+          "losses": {"type": "integer", "minimum": 0},
+          "ties": {"type": "integer", "minimum": 0},
+          "comparisons": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "matches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["match", "a", "b", "judge", "judge_family", "judge_tier", "result"],
+        "additionalProperties": false,
+        "properties": {
+          "match": {"type": "integer", "minimum": 1},
+          "a": {"type": "string", "minLength": 1},
+          "b": {"type": "string", "minLength": 1},
+          "judge": {"type": "string", "minLength": 1},
+          "judge_family": {"type": ["string", "null"]},
+          "judge_tier": {"enum": ["other-family", "unknown-family", "same-family", "author"]},
+          "result": {"enum": ["a", "b", "tie", "no-verdict", "invalid"]},
+          "winner": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

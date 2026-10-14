@@ -1,0 +1,14 @@
+{
+  "description": "HTTP 429 with Retry-After on tools/call",
+  "http": {
+    "status": 429,
+    "headers": {
+      "content-type": "application/json",
+      "retry-after": "2"
+    },
+    "body": {
+      "error": "too_many_requests",
+      "message": "Too many requests"
+    }
+  }
+}

@@ -1,0 +1,371 @@
+{
+ "totalCount": 24,
+ "studies": [
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT01401413",
+     "briefTitle": "Study to Determine Whether Ramelteon Helps People With REM Sleep Behavior Disorder"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2010-09"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "PHASE4"
+     ]
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT01280097",
+     "briefTitle": "Study of Sleep and Delirium in the Intensive Care Unit (ICU)"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2012-11"
+     }
+    },
+    "designModule": {
+     "studyType": "OBSERVATIONAL"
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT03645226",
+     "briefTitle": "Gut Microbiota Across Early Stages of Synucleinopathy: From High-risk Relatives, REM Sleep Behavior Disorder to Early Parkinson's Disease"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2023-03-29"
+     }
+    },
+    "designModule": {
+     "studyType": "OBSERVATIONAL"
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT02312908",
+     "briefTitle": "Effect of Clonazepam on REM Sleep Behavior Disorder in Patients With Parkinsonism"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2016-03"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "PHASE2"
+     ]
+    },
+    "referencesModule": {
+     "references": [
+      {
+       "pmid": "22447623",
+       "type": "BACKGROUND",
+       "citation": "Arnulf I. REM sleep behavior disorder: motor manifestations and pathophysiology. Mov Disord. 2012 May;27(6):677-89. doi:"
+      },
+      {
+       "pmid": "21832215",
+       "type": "BACKGROUND",
+       "citation": "Sixel-Doring F, Trautmann E, Mollenhauer B, Trenkwalder C. Associated factors for REM sleep behavior disorder in Parkins"
+      },
+      {
+       "pmid": "22322798",
+       "type": "BACKGROUND",
+       "citation": "Postuma RB, Bertrand JA, Montplaisir J, Desjardins C, Vendette M, Rios Romenets S, Panisset M, Gagnon JF. Rapid eye move"
+      },
+      {
+       "pmid": "16966533",
+       "type": "BACKGROUND",
+       "citation": "Gagnon JF, Postuma RB, Montplaisir J. Update on the pharmacology of REM sleep behavior disorder. Neurology. 2006 Sep 12;"
+      },
+      {
+       "pmid": "10607098",
+       "type": "BACKGROUND",
+       "citation": "Schenck CH, Hurwitz TD, Mahowald MW. Symposium: Normal and abnormal REM sleep regulation: REM sleep behaviour disorder: "
+      },
+      {
+       "pmid": "10648440",
+       "type": "BACKGROUND",
+       "citation": "Olson EJ, Boeve BF, Silber MH. Rapid eye movement sleep behaviour disorder: demographic, clinical and laboratory finding"
+      },
+      {
+       "pmid": "22171203",
+       "type": "BACKGROUND",
+       "citation": "Howell MJ, Arneson PA, Schenck CH. A novel therapy for REM sleep behavior disorder (RBD). J Clin Sleep Med. 2011 Dec 15;"
+      },
+      {
+       "pmid": "20191945",
+       "type": "BACKGROUND",
+       "citation": "Aurora RN, Zak RS, Maganti RK, Auerbach SH, Casey KR, Chowdhuri S, Karippot A, Ramar K, Kristo DA, Morgenthaler TI; Stan"
+      },
+      {
+       "pmid": "18398415",
+       "type": "BACKGROUND",
+       "citation": "De Cock VC, Vidailhet M, Arnulf I. Sleep disturbances in patients with parkinsonism. Nat Clin Pract Neurol. 2008 May;4(5"
+      },
+      {
+       "pmid": "22729987",
+       "type": "BACKGROUND",
+       "citation": "Postuma RB, Arnulf I, Hogl B, Iranzo A, Miyamoto T, Dauvilliers Y, Oertel W, Ju YE, Puligheddu M, Jennum P, Pelletier A,"
+      },
+      {
+       "pmid": "20561180",
+       "type": "BACKGROUND",
+       "citation": "Kunz D, Mahlberg R. A two-part, double-blind, placebo-controlled trial of exogenous melatonin in REM sleep behaviour dis"
+      }
+     ]
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT00695136",
+     "briefTitle": "The Effect of Donepezil (Aricept(Registered Trademark)) on REM Sleep in Children With Autism"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2011-01"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "PHASE1",
+      "PHASE2"
+     ]
+    },
+    "referencesModule": {
+     "references": [
+      {
+       "pmid": "203966",
+       "type": "BACKGROUND",
+       "citation": "McGrath MJ, Cohen DB. REM sleep facilitation of adaptive waking behavior: a review of the literature. Psychol Bull. 1978"
+      },
+      {
+       "pmid": "7059812",
+       "type": "BACKGROUND",
+       "citation": "Mirmiran M, van den Dungen H, Uylings HB. Sleep patterns during rearing under different environmental conditions in juve"
+      },
+      {
+       "pmid": "16825295",
+       "type": "BACKGROUND",
+       "citation": "Guzman-Marin R, Ying Z, Suntsova N, Methippara M, Bashir T, Szymusiak R, Gomez-Pinilla F, McGinty D. Suppression of hipp"
+      }
+     ]
+    }
+   },
+   "hasResults": true
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT02984137",
+     "briefTitle": "Prospective Neuroimaging Investigation of Idiopathic REM Sleep Behavior Disorder"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2018-08"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "NA"
+     ]
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT03353207",
+     "briefTitle": "Striatal Dopamine Transmission in Individuals With Isolated Rapid Eye Movement Sleep With Atonia: a Search for Precursor Biomarker for Neurodegeneration"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2021-02-08"
+     }
+    },
+    "designModule": {
+     "studyType": "OBSERVATIONAL"
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT03675282",
+     "briefTitle": "Quantitative Mapping of Substantia Nigra Iron in Parkinson's Disease (Stages I-IV, REM Sleep Behavior Disorder) and Controls"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2024-04-23"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "PHASE1",
+      "PHASE2"
+     ]
+    }
+   },
+   "hasResults": true
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT06738862",
+     "briefTitle": "[18F] - FD17 PET Imaging of α-synuclein: A Clinical Study in α-synucleinopathy Patients"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2025-12-25"
+     }
+    },
+    "designModule": {
+     "studyType": "OBSERVATIONAL"
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT06812702",
+     "briefTitle": "Parkinson's Disease Biomarker Study"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2026-03-01"
+     }
+    },
+    "designModule": {
+     "studyType": "OBSERVATIONAL"
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT07190287",
+     "briefTitle": "Wearable Neural Interfacing System for REM Sleep Restoration and Enhancement"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2025-10-03"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "NA"
+     ]
+    },
+    "referencesModule": {
+     "references": [
+      {
+       "pmid": "40436843",
+       "type": "BACKGROUND",
+       "citation": "Tang KWK, Jeong J, Hsieh JC, Yao M, Ding H, Wang W, Liu X, Pyatnitskiy I, He W, Moscoso-Barrera WD, Lozano AR, Artman B,"
+      },
+      {
+       "pmid": "15033145",
+       "type": "BACKGROUND",
+       "citation": "Cicolin A, Lopiano L, Zibetti M, Torre E, Tavella A, Guastamacchia G, Terreni A, Makrydakis G, Fattori E, Lanotte MM, Be"
+      },
+      {
+       "pmid": "24413698",
+       "type": "BACKGROUND",
+       "citation": "Legon W, Sato TF, Opitz A, Mueller J, Barbour A, Williams A, Tyler WJ. Transcranial focused ultrasound modulates the act"
+      },
+      {
+       "pmid": "42243115",
+       "type": "DERIVED",
+       "citation": "Tang KWK, Baird B, Moscoso-Barrera WD, Yu M, Yao M, Jeong J, Pyatnitskiy I, Romero Lozano A, Wang J, Hsieh JC, Chae TS, "
+      }
+     ]
+    }
+   },
+   "hasResults": false
+  },
+  {
+   "protocolSection": {
+    "identificationModule": {
+     "nctId": "NCT04006925",
+     "briefTitle": "Treatment of REM Sleep Behavior Disorder (RBD) With Sodium Oxybate"
+    },
+    "statusModule": {
+     "overallStatus": "COMPLETED",
+     "completionDateStruct": {
+      "date": "2022-02-01"
+     }
+    },
+    "designModule": {
+     "studyType": "INTERVENTIONAL",
+     "phases": [
+      "PHASE4"
+     ]
+    },
+    "referencesModule": {
+     "references": [
+      {
+       "pmid": "19483483",
+       "type": "BACKGROUND",
+       "citation": "Shneerson JM. Successful treatment of REM sleep behavior disorder with sodium oxybate. Clin Neuropharmacol. 2009 May-Jun"
+      },
+      {
+       "pmid": "26595534",
+       "type": "BACKGROUND",
+       "citation": "Liebenthal J, Valerio J, Ruoff C, Mahowald M. A Case of Rapid Eye Movement Sleep Behavior Disorder in Parkinson Disease "
+      },
+      {
+       "pmid": "28366329",
+       "type": "BACKGROUND",
+       "citation": "Moghadam KK, Pizza F, Primavera A, Ferri R, Plazzi G. Sodium oxybate for idiopathic REM sleep behavior disorder: a repor"
+      },
+      {
+       "pmid": "37052688",
+       "type": "DERIVED",
+       "citation": "During EH, Hernandez B, Miglis MG, Sum-Ping O, Hekmat A, Cahuas A, Ekelmans A, Yoshino F, Mignot E, Kushida CA. Sodium o"
+      }
+     ]
+    }
+   },
+   "hasResults": true
+  }
+ ],
+ "nextPageToken": "ZVNj7o2Elu8o3lpzCt6q57L2mpOQJJxtZPam2PQZkA"
+}

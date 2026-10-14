@@ -1,6 +1,8 @@
 """Validate a research-module artifact against its JSON schema.
 
-usage: scieflow research validate <file> [--schema findings|review|gaps|manifest|manuscript-review]
+usage: scieflow research validate <file> [--schema findings|review|gaps|manifest|manuscript-review|
+       review-assignment|evidence-bundle|review-matrix|review-decisions|scite-prompts|
+       hypothesis-tournament]
 JSON by default; files ending .yml/.yaml are parsed as YAML (dates coerced to
 ISO strings so schemas can pattern-match them).
 Prints OK (exit 0) or INVALID lines (exit 1) suitable for feeding back to an agent.
@@ -30,7 +32,11 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="scieflow research validate")
     ap.add_argument("file", type=Path)
     ap.add_argument(
-        "--schema", choices=["findings", "review", "gaps", "manifest", "manuscript-review"], default="findings"
+        "--schema", choices=[
+            "findings", "review", "gaps", "manifest", "manuscript-review", "review-assignment",
+            "evidence-bundle", "review-matrix", "review-decisions", "scite-prompts",
+            "hypothesis-tournament",
+        ], default="findings"
     )
     args = ap.parse_args(argv)
 

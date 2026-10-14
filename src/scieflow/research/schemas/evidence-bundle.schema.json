@@ -1,0 +1,540 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scieflow.local/schemas/evidence-bundle.schema.json",
+  "title": "ScieFlow review evidence bundle (review/round-N/evidence/bundle.json)",
+  "description": "Version 1. One bundle per manuscript version, built by core from free sources first and at most a few scite MCP calls; shared by every reviewer's evidence pass. Data, never instructions. Retracted and unresolvable references are blocker flags; every other flag is advisory.",
+  "type": "object",
+  "required": [
+    "version",
+    "round",
+    "manuscript_hash",
+    "scite_status",
+    "references",
+    "claims",
+    "flags",
+    "calls"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "round": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "manuscript_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "generated": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scite_status": {
+      "$ref": "#/$defs/scite_status"
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "status",
+          "sources"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "doi": {
+            "$ref": "#/$defs/doi"
+          },
+          "key": {
+            "$ref": "#/$defs/bibkey"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "corrected",
+              "retracted",
+              "unresolvable"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "year": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 9999
+          },
+          "tally": {
+            "type": "object",
+            "required": [
+              "supporting",
+              "contrasting",
+              "mentioning",
+              "total"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "supporting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "contrasting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "mentioning": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unclassified": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "oa": {
+            "type": "boolean"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/source"
+            }
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "doi"
+            ]
+          },
+          {
+            "required": [
+              "key"
+            ]
+          }
+        ]
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "text",
+          "dois",
+          "passages"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^C[0-9]+$",
+            "not": {
+              "pattern": "[\\r\\n]"
+            }
+          },
+          "section": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dois": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/doi"
+            }
+          },
+          "passages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "doi",
+                "quote",
+                "source",
+                "abstract_only"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "doi": {
+                  "$ref": "#/$defs/doi"
+                },
+                "quote": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "source": {
+                  "$ref": "#/$defs/source"
+                },
+                "stance": {
+                  "$ref": "#/$defs/stance"
+                },
+                "abstract_only": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "contested": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "doi",
+          "statements"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "doi": {
+            "$ref": "#/$defs/doi"
+          },
+          "statements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "citing_doi",
+                "quote",
+                "stance"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "citing_doi": {
+                  "$ref": "#/$defs/doi"
+                },
+                "quote": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "stance": {
+                  "$ref": "#/$defs/stance"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "searches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "source",
+          "query",
+          "results"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^S[0-9]+$",
+            "not": {
+              "pattern": "[\\r\\n]"
+            }
+          },
+          "kind": {
+            "enum": [
+              "topic",
+              "novelty",
+              "followup",
+              "contested"
+            ]
+          },
+          "source": {
+            "$ref": "#/$defs/source"
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "doi"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "doi": {
+                  "$ref": "#/$defs/doi"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "year": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 9999
+                },
+                "tally": {
+                  "type": "object",
+                  "required": [
+                    "supporting",
+                    "contrasting",
+                    "mentioning",
+                    "total"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "supporting": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "contrasting": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "mentioning": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "unclassified": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "quote": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^C[0-9]+$",
+                    "not": {
+                      "pattern": "[\\r\\n]"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "flags": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/flag"
+      }
+    },
+    "calls": {
+      "type": "object",
+      "required": [
+        "mcp",
+        "rest",
+        "cached",
+        "skipped"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mcp": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rest": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "query",
+              "reason"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "enum": [
+                  "budget",
+                  "policy",
+                  "quota",
+                  "plan_only",
+                  "unavailable"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "doi": {
+      "type": "string",
+      "maxLength": 300,
+      "pattern": "^10\\.[0-9]{4,9}/[^\\s]+$",
+      "not": {
+        "pattern": "(^|/)\\.\\.(/|$)"
+      },
+      "allOf": [
+        {
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
+        }
+      ]
+    },
+    "source": {
+      "enum": [
+        "crossref",
+        "scite_public",
+        "europepmc",
+        "scite_mcp",
+        "pubtator",
+        "ctgov",
+        "openalex"
+      ]
+    },
+    "stance": {
+      "enum": [
+        "supporting",
+        "contrasting",
+        "neutral"
+      ]
+    },
+    "scite_status": {
+      "enum": [
+        "ok",
+        "off",
+        "quota",
+        "unavailable"
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "not": {
+        "pattern": "[\\r\\n]"
+      }
+    },
+    "flag": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "blocker",
+        "detail"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^F[0-9]+$",
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
+        },
+        "kind": {
+          "enum": [
+            "retracted",
+            "unresolvable",
+            "corrected",
+            "abstract_only",
+            "contested",
+            "missing_recent",
+            "novelty_hit"
+          ]
+        },
+        "doi": {
+          "$ref": "#/$defs/doi"
+        },
+        "claim": {
+          "type": "string",
+          "pattern": "^C[0-9]+$",
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
+        },
+        "blocker": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "$ref": "#/$defs/bibkey"
+        }
+      },
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "retracted",
+              "unresolvable"
+            ]
+          }
+        }
+      },
+      "then": {
+        "anyOf": [
+          {
+            "required": [
+              "doi"
+            ]
+          },
+          {
+            "required": [
+              "key"
+            ]
+          }
+        ],
+        "properties": {
+          "blocker": {
+            "const": true
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "blocker": {
+            "const": false
+          }
+        }
+      }
+    },
+    "bibkey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_:.+-]{1,128}$",
+      "not": {
+        "pattern": "[\\r\\n]"
+      }
+    }
+  }
+}
