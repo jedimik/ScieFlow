@@ -237,9 +237,13 @@ def cache_dir(base: Path) -> Path:
 
 
 def environment(base: Path, env: dict | None = None) -> dict:
-    """`env` (default: this process's) with uv pointed at the dispatch's cache."""
+    """`env` (default: this process's) with uv pointed at the dispatch's cache.
+
+    Also marks the environment as a dispatch (`SCIEFLOW_DISPATCH=1`): the scite
+    MCP refuses inside any dispatch that carries the marker."""
     out = dict(os.environ if env is None else env)
     out["UV_CACHE_DIR"] = str(cache_dir(base))
+    out["SCIEFLOW_DISPATCH"] = "1"
     return out
 
 
