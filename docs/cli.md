@@ -190,7 +190,15 @@ layout, actor rules and the Python API behind these commands are in the
 ```bash
 uv run scieflow review configure SLUG [--set KEY=VALUE ...] [--as-agent] [--yes]
 uv run scieflow review assign SLUG --round N [--json]
+uv run scieflow review prompt SLUG --round N --reviewer R --author A --pass blind|evidence [--write]
+uv run scieflow review check SLUG --round N --reviewer R --author A --pass blind|evidence
+uv run scieflow review freeze SLUG --round N
 uv run scieflow review evidence SLUG --round N [--plan] [--json]
+uv run scieflow review matrix SLUG --round N [--check]
+uv run scieflow review gates SLUG --round N
+uv run scieflow review revise SLUG --round N --author A [--write]
+uv run scieflow review coverage SLUG --round N --author A
+uv run scieflow review merge-check SLUG
 uv run scieflow review status SLUG [--json]
 uv run scieflow review decide SLUG --round N --decision CLUSTER=accept|reject|defer ...
     [--note CLUSTER=TEXT ...] [--overrule CLUSTER=REASON ...]
@@ -198,14 +206,43 @@ uv run scieflow review decide SLUG --round N --decision CLUSTER=accept|reject|de
 ```
 `configure` shows or changes the run's `review:` block; `--as-agent` may only
 set `scite=off` and `reviews_per_draft`. `assign` plans who reviews which
-draft and writes `review/round-N/assignment.json`. `evidence` builds the
+draft and writes `review/round-N/assignment.json`. In a paper-review run
+(`status.yml` `workflow: paper-review`) the one reviewed author is
+`research.submitter`, the default pool is `research.reviewer`, and every
+command reads the manuscript under `manuscript/` instead of a draft. `evidence` builds the
 round's shared evidence bundle (`review/round-N/evidence/`) from free sources
 and at most a few scite MCP calls; `--plan` prints the exact outgoing request
-list and sends nothing — see [scite evidence](research/scite.md). `status` lists the review
+list and sends nothing — see [scite evidence](research/scite.md). Before it
+builds the bundle, `evidence` freezes pass A: the sha256 of every valid
+`<reviewer>-on-<author>.blind.json` goes into `assignment.json` (`freeze` does
+the same on its own). `prompt` builds the pass-A prompt (persona and draft, no
+evidence) or the pass-B prompt (the frozen pass A verbatim, the draft, the
+bundle in a fenced data block and the rendered review instructions) for one
+assigned pair; pass B is refused when pass A was never frozen or changed after
+it was frozen. Each prompt is a fresh dispatch with
+`--role research.draft-reviewers` (`--role research.reviewer` in paper-review). `check` validates a returned review file
+(schema, identity, frozen pass A, every pass-A comment accounted for, evidence
+quotes verbatim from the bundle) and records `review.pass_done`. `matrix`
+writes `review/round-N/matrix.skeleton.json` (every comment of every valid
+pass plus every bundle flag); `--check` validates the coordinator's clustered
+`matrix.json`, writes `matrix.md` and records `review.matrix_ready`. `status` lists the review
 rounds, open blockers and whether scite is configured. `decide` records
 per-cluster decisions on the round's matrix; a blocker cluster needs the
 user's `--overrule` reason (a `reject` with a reason overrules it), and an
 agent may decide only when the run's `review_decisions` is `coordinator`.
+
+`gates` (also run by `matrix --check`) opens one `review-decision` gate per
+undecided cluster (`accept|reject|defer`) and one human-only `review-blocker`
+gate per open blocker (`overrule|fixed`, with a `review.blocker` event).
+Answering one with `scieflow gate answer` records the decision through the
+same writer as `decide`: an overrule needs the user's reason as `--note`,
+`fixed` records nothing (the blocker clears when a later round's evidence no
+longer flags the reference). `revise` builds an author's revision prompt with
+the accepted clusters only; it refuses without recorded decisions (a
+hand-written `decisions.json` is ignored). `coverage` checks that every
+accepted cluster id heads a section (`## K2`) with text under it in
+`review/round-N/response-<author>.md` (exit 1 if not). An agent never
+changes a decision the user made. `merge-check` exits 1 while a blocker is open.
 
 ## `scieflow workspace`
 

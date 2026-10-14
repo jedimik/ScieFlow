@@ -1,0 +1,50 @@
+[
+ {
+  "type": "associate",
+  "source": "@DISEASE_Parkinson_Disease",
+  "target": "@GENE_SNCA",
+  "publications": 9947
+ },
+ {
+  "type": "associate",
+  "source": "@DISEASE_Lewy_Body_Disease",
+  "target": "@GENE_SNCA",
+  "publications": 2959
+ },
+ {
+  "type": "associate",
+  "source": "@DISEASE_Neurodegenerative_Diseases",
+  "target": "@GENE_SNCA",
+  "publications": 1900
+ },
+ {
+  "type": "associate",
+  "source": "@DISEASE_Synucleinopathies",
+  "target": "@GENE_SNCA",
+  "publications": 1295
+ },
+ {
+  "type": "associate",
+  "source": "@DISEASE_Multiple_System_Atrophy",
+  "target": "@GENE_SNCA",
+  "publications": 951
+ },
+ {
+  "type": "associate",
+  "source": "@DISEASE_Nerve_Degeneration",
+  "target": "@GENE_SNCA",
+  "publications": 775
+ },
+ {
+  "type": "associate",
+  "source": "@DISEASE_Drug_Related_Side_Effects_and_Adverse_Reactions",
+  "target": "@GENE_SNCA",
+  "publications": 650
+ },
+ {
+  "type": "associate",
+  "source": "@DISEASE_Alzheimer_Disease",
+  "target": "@GENE_SNCA",
+  "publications": 596
+ }
+]

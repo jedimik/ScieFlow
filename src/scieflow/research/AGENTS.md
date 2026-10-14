@@ -137,6 +137,15 @@ manuscript, reviews, and evidence packages) to an external model provider.
    support agent act as primary for that role only (root AGENTS.md rule
    10). Never promote on your own initiative.
 
+10. **Draft and manuscript review** (paper-draft Phase 4, paper-review):
+    the reviewer pool (`research.draft-reviewers` / `research.reviewer`,
+    primary agents only, like every review role in rule 9), the two passes (blind, then evidence), the matrix and
+    the decisions go through `uv run scieflow review …` — see those
+    protocols. Reviewers never call scite or any literature service; the
+    coordinator builds the evidence bundle under root AGENTS.md rule 17.
+    Decisions are written only through `review-decision` gates or `scieflow
+    review decide`; a blocker needs a human.
+
 ## Workflows
 
 | Workflow | Protocol |

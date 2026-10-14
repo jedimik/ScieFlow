@@ -306,11 +306,31 @@ def path(ws: Path, round_: int) -> Path:
     return Path(ws) / "review" / f"round-{round_}" / "assignment.json"
 
 
+def _keep_frozen(ws: Path, round_: int, data: dict) -> None:
+    """Carry the frozen pass-A hashes (`blind_sha256`) of pairs that stay assigned over
+    from the existing assignment, so re-planning a round cannot reopen freezing."""
+    try:
+        old = json.loads(path(ws, round_).read_text(encoding="utf-8"))
+        frozen = {(p["reviewer"], p["author"]): p["blind_sha256"]
+                  for p in old.get("pairs", []) if isinstance(p, dict) and "blind_sha256" in p}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return
+    pairs = []
+    for p in data.get("pairs", []):
+        key = (p.get("reviewer"), p.get("author")) if isinstance(p, dict) else None
+        if key in frozen and "blind_sha256" not in p:
+            p = {**p, "blind_sha256": frozen[key]}
+        pairs.append(p)
+    if "pairs" in data:
+        data["pairs"] = pairs
+
+
 def write(ws: Path, round_: int, plan_: dict) -> Path:
     """Persist a plan as review/round-N/assignment.json (atomic); returns the path."""
     if isinstance(round_, bool) or not isinstance(round_, int) or round_ < 1:
         raise AssignmentError(f"round {round_!r} is not an integer >= 1")
     data = {**plan_, "round": round_}
+    _keep_frozen(ws, round_, data)
     errors = sorted(_validator().iter_errors(data), key=lambda e: e.json_path)
     if errors:
         raise AssignmentError(f"assignment does not match the review-assignment schema: "

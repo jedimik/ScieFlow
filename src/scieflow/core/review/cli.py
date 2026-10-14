@@ -57,9 +57,9 @@ def parse_set(text: str) -> tuple[str, object]:
     return key, raw
 
 
-def _show(block: dict) -> None:
+def _show(block: dict, default_pool: str = "research.draft-reviewers") -> None:
     for key, value in block.items():
-        shown = "(research.draft-reviewers)" if key == "pool" and value is None else value
+        shown = f"({default_pool})" if key == "pool" and value is None else value
         click.echo(f"  {key:<26} {shown}")
 
 
@@ -81,8 +81,14 @@ def configure(slug, sets, as_agent, yes):
     try:
         current = settings.load(project, slug)
         if not sets:
+            from scieflow.core.review import claims
+
             click.echo(f"Review settings of workspace/{slug}:")
-            _show(current)
+            try:
+                manuscript = claims.reviews_manuscript(project.run_dir(slug))
+            except ValueError:
+                manuscript = False
+            _show(current, "research.reviewer" if manuscript else "research.draft-reviewers")
             return
         changes = dict(parse_set(s) for s in sets)
         actor = "agent" if as_agent else "human"
@@ -209,13 +215,41 @@ def evidence_cmd(slug, round_, plan_only, as_json):
     s = outcome.calls["summary"]
     if as_json:
         click.echo(json.dumps({"status": "built", "scite_status": outcome.scite_status,
-                               "calls": s}, indent=2, ensure_ascii=False))
+                               "calls": s, "frozen": _frozen_json(outcome.frozen)},
+                              indent=2, ensure_ascii=False))
         return
+    _show_frozen(outcome.frozen)
     click.echo(f"written: workspace/{slug}/review/round-{round_}/evidence/bundle.json "
                f"(scite {outcome.scite_status}; {s['mcp']} MCP, {s['rest']} REST, "
                f"{s['cached']} cached, {len(s['skipped'])} skipped)")
     for item in s["skipped"]:
         click.echo(f"  skipped ({item['reason']}): {item['query']}")
+
+
+_FREEZE_LABELS = (("missing", "no pass A yet"),
+                  ("late", "written after the evidence bundle, not frozen"),
+                  ("tampered", "CHANGED after it was frozen; pass B refused"))
+
+
+def _frozen_json(report: dict | None):
+    if report is None:
+        return None
+    return {k: [{"reviewer": rv, "author": au} for rv, au in report[k]]
+            for k in ("frozen", "already", "missing", "late", "tampered")} | {
+        "invalid": [{"reviewer": rv, "author": au, "reason": why}
+                    for (rv, au), why in report["invalid"]]}
+
+
+def _show_frozen(report: dict | None) -> None:
+    if report is None:
+        click.echo("  pass A not frozen: the round has no assignment")
+        return
+    click.echo(f"  pass A frozen: {len(report['frozen']) + len(report['already'])}")
+    for key, label in _FREEZE_LABELS:
+        for rv, au in report[key]:
+            click.echo(f"  {rv} on {au}: {label}")
+    for (rv, au), why in report["invalid"]:
+        click.echo(f"  {rv} on {au}: invalid, not frozen: {why}")
 
 
 def _pairs(values: tuple[str, ...], what: str) -> dict[str, str]:
@@ -319,3 +353,290 @@ def status_cmd(slug, as_json):
         click.echo(f"  blocker {b['cluster'] or '(no cluster)'}: {b['reason']} {refs}"
                    + (f" (decided: {b['decision']})" if b["decision"] else ""))
     click.echo(f"scite: {'configured' if scite['configured'] else 'not configured'}")
+
+
+def _run_ws(slug: str):
+    from scieflow.core.project import Project
+
+    project = Project.discover()
+    try:
+        ws = project.run_dir(slug)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if not ws.is_dir():
+        raise click.ClickException(f"no workspace {slug!r} under {project.workspace_root}")
+    return project, ws
+
+
+_PASS = click.Choice(["blind", "evidence"])
+
+
+@review.command("prompt")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--reviewer", required=True, help="The reviewing agent.")
+@click.option("--author", required=True, help="The author whose draft is reviewed.")
+@click.option("--pass", "pass_", type=_PASS, required=True,
+              help="blind (pass A) or evidence (pass B).")
+@click.option("--write", "write", is_flag=True,
+              help="Write workspace/<SLUG>/prompts/review-<pass>-<reviewer>-on-<author>-round-N.md "
+                   "instead of printing the prompt.")
+def prompt_cmd(slug, round_, reviewer, author, pass_, write):
+    """Build the pass-A or pass-B prompt for one assigned pair.
+
+    Pass B is refused when the pair's pass A was never frozen or changed after it was
+    frozen (the coordinator is told through a note.review_pass_a_tampered event).
+    """
+    from scieflow.core.review import passes
+
+    _project, ws = _run_ws(slug)
+    try:
+        build = passes.blind_prompt if pass_ == "blind" else passes.evidence_prompt
+        text = build(ws, round_, reviewer, author, slug=slug)
+    except (passes.PassError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    stem = f"review-{pass_}-{reviewer}-on-{author}-round-{round_}"
+    rel_prompt = f"workspace/{slug}/prompts/{stem}.md"
+    how = (f"fresh dispatch (no resume, no session id): uv run scieflow agent run "
+           f"--role {passes.role(ws)} {reviewer} {rel_prompt} workspace/{slug}/logs/{stem}.log")
+    if not write:
+        click.echo(text, nl=False)
+        click.echo(f"# {how}", err=True)
+        return
+    path = ws / "prompts" / f"{stem}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    click.echo(f"written: {rel_prompt}")
+    click.echo(how)
+
+
+@review.command("check")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--reviewer", required=True, help="The reviewing agent.")
+@click.option("--author", required=True, help="The author whose draft was reviewed.")
+@click.option("--pass", "pass_", type=_PASS, required=True,
+              help="blind (pass A) or evidence (pass B).")
+def check_cmd(slug, round_, reviewer, author, pass_):
+    """Validate one review file and record review.pass_done.
+
+    Schema and identity fields; pass B also needs its frozen pass A unchanged, every
+    pass-A comment accounted for and every evidence quote verbatim from the bundle.
+    """
+    from scieflow.core import events
+    from scieflow.core.review import passes
+
+    _project, ws = _run_ws(slug)
+    try:
+        _data, digest = passes.check_pass(ws, round_, reviewer, author, pass_)
+    except passes.TamperError as exc:
+        passes.tampered(ws, round_, reviewer, author)
+        raise click.ClickException(str(exc)) from exc
+    except (passes.PassError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    events.emit(ws, "review.pass_done", **{"round": round_, "reviewer": reviewer,
+                                           "author": author, "pass": pass_, "sha256": digest})
+    click.echo(f"ok: review/round-{round_}/{passes.file_name(reviewer, author, pass_)} "
+               f"(sha256 {digest[:12]}…)")
+
+
+@review.command("freeze")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+def freeze_cmd(slug, round_):
+    """Record the sha256 of every valid pass-A file of round N in assignment.json.
+
+    `scieflow review evidence` does this itself before it builds the bundle; a pass A
+    written after the bundle is never frozen. Exit 1 when a frozen pass A changed.
+    """
+    from scieflow.core.review import passes
+
+    _project, ws = _run_ws(slug)
+    try:
+        report = passes.freeze(ws, round_)
+    except (passes.PassError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"round {round_}: frozen {len(report['frozen'])}, "
+               f"already frozen {len(report['already'])}")
+    for key, label in _FREEZE_LABELS:
+        for rv, au in report[key]:
+            click.echo(f"  {rv} on {au}: {label}")
+    for (rv, au), why in report["invalid"]:
+        click.echo(f"  {rv} on {au}: invalid, not frozen: {why}")
+    if report["tampered"]:
+        sys.exit(1)
+
+
+@review.command("matrix")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--check", "check_", is_flag=True,
+              help="Check the coordinator's matrix.json, write matrix.md and record "
+                   "review.matrix_ready.")
+def matrix_cmd(slug, round_, check_):
+    """Write the matrix skeleton of round N, or check the clustered matrix.
+
+    Without --check: review/round-N/matrix.skeleton.json (every comment of every
+    valid pass plus every evidence-bundle flag) for the coordinator to cluster
+    into matrix.json.
+    """
+    from scieflow.core import events
+    from scieflow.core.review import matrix as mx
+
+    _project, ws = _run_ws(slug)
+    rel = f"workspace/{slug}/review/round-{round_}"
+    if not check_:
+        try:
+            path = mx.write_skeleton(ws, round_)
+        except (mx.MatrixError, ValueError, OSError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        sk = json.loads(path.read_text(encoding="utf-8"))
+        click.echo(f"written: {rel}/{mx.SKELETON} ({len(sk['items'])} comments, "
+                   f"{len(sk['flags'])} flags, scite {sk['scite_status']})")
+        for m in sk["missing"]:
+            click.echo(f"  missing: {m['reviewer']} on {m['author']} ({m['pass']})")
+        for r in sk["refused"]:
+            click.echo(f"  refused: {r['reviewer']} on {r['author']} ({r['pass']}): "
+                       f"{r['reason']}")
+        click.echo(f"next: cluster it into {rel}/{mx.MATRIX}, then "
+                   f"`scieflow review matrix {slug} --round {round_} --check`")
+        return
+    try:
+        data = mx.check(ws, round_)
+        path = mx.write_md(ws, round_, data)
+    except mx.MatrixError as exc:
+        raise click.ClickException("matrix refused:\n  " + "\n  ".join(exc.problems)) from exc
+    except (ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    blockers = [c["cluster"] for c in data["clusters"] if c["blocker"]]
+    events.emit(ws, "review.matrix_ready", round=round_, clusters=len(data["clusters"]),
+                blockers=blockers)
+    click.echo(f"written: {rel}/{path.name} ({len(data['clusters'])} clusters, "
+               f"{len(blockers)} blocker(s))")
+    _open_gates(_project, ws, round_)
+
+
+def _open_gates(project, ws, round_) -> None:
+    from scieflow.core.review import decision_gates as dg
+
+    try:
+        report = dg.open_gates(project, ws, round_)
+    except (dg.DecisionGateError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"review gates of round {round_}: opened {len(report['opened'])}, "
+               f"already there {len(report['existing'])}, withdrawn {len(report['withdrawn'])}")
+    for g in report["opened"]:
+        who = "human only" if g["requires_human"] else (
+            "user, or the coordinator with a rationale" if g["in_scope"] else "user")
+        click.echo(f"  {g['id']} {g['kind']} ({who}): {dg.parse(g)['cluster']} "
+                   f"[{'|'.join(g['options'])}]")
+    if report["opened"]:
+        click.echo(f"answer with `scieflow gate answer {ws.name} <gate id> <option> "
+                   "[--note TEXT]` (an overrule needs the user's reason as --note)")
+
+
+@review.command("gates")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+def gates_cmd(slug, round_):
+    """Open round N's review-decision and review-blocker gates (idempotent).
+
+    One review-decision gate per undecided cluster (accept|reject|defer) and one
+    human-only review-blocker gate per open blocker (overrule|fixed). Gates of an
+    earlier matrix are withdrawn. `review matrix --check` runs this too.
+    """
+    project, ws = _run_ws(slug)
+    _open_gates(project, ws, round_)
+
+
+@review.command("revise")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--author", required=True, help="The author whose draft is revised.")
+@click.option("--write", "write", is_flag=True,
+              help="Write workspace/<SLUG>/prompts/revise-<author>-round-N.md instead of "
+                   "printing the prompt.")
+def revise_cmd(slug, round_, author, write):
+    """Build the author's revision prompt with the ACCEPTED clusters only.
+
+    Needs decisions recorded by `review decide` or a review-decision gate; a
+    hand-written decisions.json is ignored. Exit 1 when nothing is accepted.
+    """
+    from scieflow.core.review import revise
+
+    _project, ws = _run_ws(slug)
+    try:
+        text = revise.revision_prompt(ws, round_, author, slug=slug)
+        got = revise.clusters_for(ws, round_, author)
+    except (revise.RevisionError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    stem = f"revise-{author}-round-{round_}"
+    rel_prompt = f"workspace/{slug}/prompts/{stem}.md"
+    how = (f"dispatch: uv run scieflow agent run --role {revise.role(ws)} {author} {rel_prompt} "
+           f"workspace/{slug}/logs/{stem}.log")
+    summary = (f"accepted {', '.join(c['cluster'] for c in got['accepted'])}; "
+               f"undecided {', '.join(got['undecided']) or 'none'}")
+    if not write:
+        click.echo(text, nl=False)
+        click.echo(f"# {summary}\n# {how}", err=True)
+        return
+    path = ws / "prompts" / f"{stem}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    click.echo(f"written: {rel_prompt} ({summary})")
+    click.echo(how)
+
+
+@review.command("coverage")
+@click.argument("slug")
+@click.option("--round", "round_", type=int, required=True, help="Review round number (>= 1).")
+@click.option("--author", required=True, help="The author whose response letter is checked.")
+def coverage_cmd(slug, round_, author):
+    """Check that response-<author>.md addresses every accepted cluster id (exit 1 if not)."""
+    from scieflow.core.review import revise
+
+    _project, ws = _run_ws(slug)
+    try:
+        got = revise.coverage(ws, round_, author)
+    except (revise.RevisionError, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    name = f"review/round-{round_}/{revise.response_name(author)}"
+    if got["ok"]:
+        click.echo(f"ok: {name} covers {', '.join(got['required']) or 'no accepted cluster'}")
+        return
+    if not got["response"]:
+        click.echo(f"missing: {name} does not exist (accepted: {', '.join(got['required'])})")
+    else:
+        click.echo(f"missing in {name}: {', '.join(got['missing'])}")
+    sys.exit(1)
+
+
+@review.command("merge-check")
+@click.argument("slug")
+def merge_check_cmd(slug):
+    """Refuse merge (exit 1) while a retracted / unresolvable reference blocker is open."""
+    from scieflow.core.review import service
+
+    project, _ws = _run_ws(slug)
+    try:
+        open_ = service.blockers(project, slug)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if not open_:
+        click.echo(f"ok: workspace/{slug} has no open blockers")
+        return
+    click.echo(f"merge refused: workspace/{slug} has {len(open_)} open blocker(s)")
+    for b in open_:
+        refs = ", ".join(" ".join(x for x in (r.get("doi"), f"({r['key']})" if r.get("key")
+                                              else None) if x) for r in b["references"])
+        click.echo(f"  round {b['round']} {b['cluster'] or '(no cluster)'}: {b['reason']} "
+                   f"{refs}" + (f" (decided: {b['decision']})" if b["decision"] else ""))
+    click.echo("fix the citation and build the evidence of a new round, or let the user "
+               "overrule it:")
+    for b in open_:
+        if b["cluster"]:
+            click.echo(f"  scieflow review decide {slug} --round {b['round']} --decision "
+                       f"{b['cluster']}=reject --overrule {b['cluster']}=REASON --yes")
+    click.echo(f"  (or answer its open review-blocker gate: scieflow gate answer {slug} <gate id> "
+               "overrule --note REASON; `scieflow gate list` shows it)")
+    sys.exit(1)

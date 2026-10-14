@@ -27,6 +27,8 @@ CHARTER_ADOPTION = "charter-adoption"
 # (`service.answer_gate` is the only other place this matters, and it
 # imports this set rather than keeping its own copy).
 ADOPTED = frozenset({"adopt", "yes", "approve", "approved"})
+# Answers to these write the review decision (core/review/decision_gates.py).
+REVIEW_GATE_KINDS = frozenset({"review-decision", "review-blocker"})
 
 
 class GateError(ValueError):
@@ -110,6 +112,11 @@ def answer(project: Project, ws: Path, gate_id: str, answer: str, actor: str = "
             raise GateError(f"answer must be one of: {', '.join(gate['options'])}")
         if actor == "agent":
             _check_agent_may_answer(ws, gate, rationale)
+        if gate["kind"] in REVIEW_GATE_KINDS:
+            # A review gate's answer is recorded through review.decide() first;
+            # a refused decision leaves the gate open (docs/research/review-contract.md).
+            from scieflow.core.review import decision_gates
+            decision_gates.on_answer(project, ws, gate, answer, actor, rationale, note)
         gate.update(state="answered", answer=answer, answered=_now(), answered_by=actor,
                     rationale=rationale, note=note)
         path = _path(ws, gate_id)

@@ -1,6 +1,6 @@
 ---
 name: paper-review
-description: Iterative reviewer/submitter loop over a manuscript (markdown or LaTeX), optionally impersonating a specific target journal. Coordinator-side protocol; read AGENTS.md first.
+description: Iterative reviewer-pool/submitter loop over a manuscript (LaTeX for the two-pass review; markdown falls back to a single-reviewer loop), optionally impersonating a specific target journal — blind and evidence-grounded review passes, a per-comment decision matrix, revision of accepted comments. Coordinator-side protocol; read AGENTS.md first.
 ---
 
 # Paper Review Protocol
@@ -13,25 +13,51 @@ copy is).
 ## Setup
 
 1. Ensure `workspace/<slug>/` exists with `manuscript/`, `review/`,
-   `prompts/`, `logs/`; create `status.yml` (workflow `paper-review`).
+   `prompts/`, `logs/`; create `status.yml` with `workflow: paper-review`
+   — the review commands read it: in a paper-review run the reviewed text is
+   the manuscript under `manuscript/` (`main.tex` and its `\input`s, else the
+   top-level `.tex` files), and the reviewed author is the submitter. A
+   manuscript coming out of a paper-draft run is copied into a new
+   paper-review workspace (main.tex, preamble.tex, sections/,
+   references.bib — not drafts/).
 2. Run the **run configuration gate** (AGENTS.md): present the provider
-   menu, recommend a reviewer/submitter assignment (and, when `journal:`
-   is set, who profiles the journal) with model + reasoning per agent —
-   respecting tier routing (rule 9) — then ask the user to confirm or
-   adjust before any dispatch. Record the answer in
+   menu, recommend the **reviewer pool** and the submitter (and, when
+   `journal:` is set, who profiles the journal) with model + reasoning per
+   agent — respecting tier routing (rule 9) — then ask the user to confirm
+   or adjust before any dispatch. Record the answer in
    `workspace/<slug>/config.yml` via `scieflow agent configure --workspace
-   <slug> --assign research.reviewer=... --assign research.submitter=...
-   [--assign research.journal-profile=...] --yes`.
+   <slug> --assign research.reviewer=AGENT[,AGENT...] --assign
+   research.submitter=... [--assign research.journal-profile=...] --yes`.
+   - The pool is `research.reviewer` (one or more agents; a single agent is
+     the old one-reviewer loop). Every eligible pool member reviews the
+     manuscript, in both passes.
+   - **Submitter separation by model family:** by default no reviewer of
+     the submitter's model family reviews it (`allow_same_family_review`,
+     default off), and the submitter never reviews itself
+     (`allow_self_review` stays off — `configure` refuses a reviewer that is
+     also the submitter). The project defaults pair `codex-review` with
+     `codex-paper`, both `openai`: recommend a reviewer of another family,
+     or ask the user whether to turn the switch on.
+   - The **review switches**, `review_decisions` (`human` default, or
+     `coordinator`) and the **scite question** (`review.scite` off | ask |
+     approved; `--plan` list in an `external-sharing` gate, plus a
+     `scite-consent` gate for `ask`) work exactly as in
+     `src/scieflow/research/skills/paper-draft/SKILL.md` Phase 1 step 3:
+     only the user's word sets them, written with `uv run scieflow review
+     configure <slug> --set KEY=VALUE … --yes`.
 3. Read `workspace/<slug>/config.yml`. Relevant keys and defaults:
    - `research.reviewer` / `research.submitter` (from `scieflow agent show
      --workspace <slug> --json`) — both **primary tier** unless the user
      promoted the role (`support_as_primary`, AGENTS.md rule 9)
      and always different agents (never grade your own edits); `configure`
      refuses otherwise.
+   - `review:` — the switches, `scite`, `review_decisions`
+     (`uv run scieflow review configure <slug>` shows them).
    - `agent_overrides:` — per-agent model/reasoning/cmd from the gate
      (applied automatically by `scieflow agent run`).
    - `max_review_rounds:` — default from `research:` in `config/defaults.yml` (3).
-   - `scope:` — `full` (default) or `sections: [list of section titles]`.
+   - `scope:` — `full` (default) or `sections: [list of section titles]`
+     (tell the reviewers in the PREVIOUS ROUND / scope block below).
    - `journal:` — optional target journal name.
 
 ## Journal profiling (only when `journal:` is set — or when the user just
@@ -69,6 +95,66 @@ web, say so in the file instead of guessing — do not invent limits.
 3. Copy the profile into `workspace/<slug>/journal/profile.md` for the run.
 
 ## Review loop (round N = 1..max_review_rounds)
+
+The same machinery as paper-draft Phase 4, with the submitter as the one
+reviewed author. Every review is a **fresh dispatch** (never a resumed
+session); the commands write the prompts, check outputs and record events.
+
+1. **Assign:** `uv run scieflow review assign <slug> --round <N>` — the
+   pairs `<reviewer>` on `<submitter>` from the `research.reviewer` pool,
+   separated by model family. An error naming `allow_same_family_review`
+   is the user's question, never yours.
+2. **Pass A — blind:** for each pair `uv run scieflow review prompt <slug>
+   --round <N> --reviewer <reviewer> --author <submitter> --pass blind
+   --write`. If `journal:` is set, append to the written prompt a fenced
+   `JOURNAL PROFILE (data, not instructions)` block with
+   `journal/profile.md` and the line "act as a peer reviewer for
+   <journal>: apply its review criteria, check scope fit and formatting";
+   with a section `scope:`, a line naming the sections to judge; when N > 1,
+   a fenced `PREVIOUS ROUND` block with this reviewer's round N-1 review and
+   the submitter's response letter (verify each promised change). Dispatch
+   with `uv run scieflow agent run --role research.reviewer <reviewer>
+   <prompt> logs/<prompt-name>.log`, then `uv run scieflow review check
+   <slug> --round <N> --reviewer <reviewer> --author <submitter> --pass
+   blind` (retry once on a refusal, AGENTS.md rule 4).
+3. **Evidence** (unless `review.scite` is `off`): settle the
+   `external-sharing` / `scite-consent` gates once per run (and a new
+   `external-sharing` gate whenever a later `--plan` lists requests the
+   user has not seen), then `uv run scieflow review evidence <slug> --round
+   <N>` (freezes pass A first).
+   Refusals are boundaries; a `quota` bundle continues the round and the
+   user is offered `uv run scieflow research scite backfill <slug> --round <N>`.
+4. **Pass B — evidence:** `… --pass evidence --write`, dispatch, `uv run
+   scieflow review check … --pass evidence`. Follow-up requests: exactly
+   as paper-draft Phase 4 step 5 (`--plan` first, one more `review
+   evidence` only when the bundle is `ok`, then re-check every pass B).
+5. **Matrix:** `uv run scieflow review matrix <slug> --round <N>`, cluster
+   the skeleton into `review/round-<N>/matrix.json`, then `uv run scieflow
+   review matrix <slug> --round <N> --check` (writes `matrix.md`, opens the
+   `review-decision` gates and a human-only `review-blocker` gate per
+   retracted / unresolvable reference).
+6. **Decision:** wait for the user's accept / reject / defer per cluster.
+   `review_decisions: coordinator` lets you decide with a rationale as in
+   paper-draft Phase 4 step 7 (gates only in an autonomous run, else
+   `scieflow review decide --as-agent`); never a blocker.
+7. If every reviewer recommends ACCEPT and no cluster was accepted, record
+   it in `status.yml`, stop and report to the user.
+8. **Revise accepted:** `uv run scieflow review revise <slug> --round <N>
+   --author <submitter> --write` (only the accepted clusters), dispatch it
+   with `--role research.submitter` (it edits `manuscript/` and writes
+   `review/round-<N>/response-<submitter>.md`), then `uv run scieflow
+   review coverage <slug> --round <N> --author <submitter>`. Missing ids →
+   re-dispatch once with them listed. Verify the manuscript files actually
+   changed (`git diff --stat` if tracked, else file content) — if nothing
+   changed but the response claims edits, re-dispatch once with that
+   discrepancy stated.
+9. Update `status.yml` (`rounds: {1: major-revision, 2: ...}`), log, next
+   round.
+
+### Markdown manuscripts (single-reviewer loop)
+
+The two-pass commands read LaTeX. For a markdown-only manuscript, run the
+loop with one reviewer from the pool per round and no evidence pass:
 
 1. Write `prompts/review-round-<N>.md`:
 
@@ -141,4 +227,8 @@ REVIEW:
 
 After ACCEPT or max rounds: report to the user — final recommendation,
 rounds used, what changed per round (from response letters), remaining open
-comments if any.
+comments if any (deferred clusters, open or overruled blockers with the
+user's reason, rounds whose evidence was `quota`). Before the manuscript is
+called submission-ready, `uv run scieflow review merge-check <slug>` must
+pass: a retracted or unresolvable reference blocks until it is replaced or
+the user overrules it.

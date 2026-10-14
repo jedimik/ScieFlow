@@ -144,6 +144,11 @@
           },
           "fresh_dispatch": {
             "const": true
+          },
+          "blind_sha256": {
+            "description": "sha256 of the pass-A (blind) review file, recorded when it was frozen, before the round's evidence bundle was built. Optional (added in M2); pass B is dispatched only for a pair whose blind file still has this hash.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           }
         },
         "additionalProperties": false

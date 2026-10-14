@@ -1,0 +1,10 @@
+[
+ {
+  "_id": "@DISEASE_REM_Sleep_Behavior_Disorder",
+  "biotype": "disease",
+  "db_id": "D020187",
+  "db": "ncbi_mesh",
+  "name": "REM Sleep Behavior Disorder",
+  "match": "Multiple matches"
+ }
+]

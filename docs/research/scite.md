@@ -72,8 +72,10 @@ uv run scieflow review evidence SLUG --round N --plan   # print the outgoing lis
 uv run scieflow review evidence SLUG --round N          # build review/round-N/evidence/
 ```
 
-`scieflow research scite plan|run SLUG --round N` are the same commands.
-Both refuse inside a ScieFlow dispatch (exit 3), as do consent and policy
+`scieflow research scite plan|run SLUG --round N` are the same commands;
+`scieflow research scite backfill SLUG --round N` fills a round left short by a quota
+stop (see below).
+They all refuse inside a ScieFlow dispatch (exit 3), as do consent and policy
 refusals.
 
 Output in `workspace/<slug>/review/round-N/evidence/`:
@@ -131,7 +133,18 @@ retried around:
 Cache hits cost nothing. When a budget runs out mid-build, the remaining MCP
 calls are recorded as `skipped: budget`, the bundle says `scite_status:
 quota`, and the round completes with what it has. A quota error from scite
-(`QUOTA`) does the same and emits `scite.unavailable` once per run; at 10 %
+(`QUOTA`) does the same. Either way the user is told once per run
+(`scite.unavailable`), the matrix rows of that round say `scite_status:
+quota`, and the review goes on blind-only where evidence is missing. Later,
+`uv run scieflow research scite backfill SLUG --round N` fills only what is
+missing: every answer the earlier build got is reused without a call, the
+skipped requests are sent within the same budgets, and it refuses when the
+manuscript changed since (build a new round instead). A round that already
+has a matrix is refused unless `--force`: the new bundle invalidates the
+matrix, its decisions and the pass-B reviews checked against the old one, so
+re-run pass B and the matrix afterwards. A plain `scieflow review evidence`
+of a round whose bundle says `quota` is refused (exit 3): it would retry the
+refused calls, which only `backfill` may do. At 10 %
 of a run or day budget left, `scite.quota_low` is emitted once. Where a call
 is not possible at all (no token, SDK missing, auth failure, tool not allowed)
 the bundle says `unavailable`.
