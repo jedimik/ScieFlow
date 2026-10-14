@@ -501,3 +501,26 @@ def test_boundaries_direct_readback_failure_permanently_invalidates(tmp_path, mo
             target.write(b'no new baseline')
     assert path.read_bytes() == b'intended bytes'
     assert set(os.listdir('/proc/self/fd')) == before_fds
+
+
+@pytest.mark.parametrize('during_acquisition', [False, True])
+def test_live6b_append_between_fd_and_named_observations(tmp_path, monkeypatch, during_acquisition):
+    path = tmp_path / 'live'
+    path.write_bytes(b'prefix')
+    original = os.stat
+    appended = []
+    def changing(name, *args, **kwargs):
+        if name == 'live' and not appended:
+            with path.open('ab') as f:
+                f.write(b'-append')
+            appended.append(True)
+        return original(name, *args, **kwargs)
+    with artifacts.pin_artifact_root(tmp_path) as root:
+        if during_acquisition:
+            monkeypatch.setattr(os, 'stat', changing)
+        with artifacts.open_live_artifact(root, 'live') as source:
+            if not during_acquisition:
+                monkeypatch.setattr(os, 'stat', changing)
+            assert source.extent() == 13
+            assert source.read_available(0, 65536) == b'prefix-append'
+    assert appended == [True]
