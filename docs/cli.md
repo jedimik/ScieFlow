@@ -206,7 +206,10 @@ uv run scieflow review decide SLUG --round N --decision CLUSTER=accept|reject|de
 ```
 `configure` shows or changes the run's `review:` block; `--as-agent` may only
 set `scite=off` and `reviews_per_draft`. `assign` plans who reviews which
-draft and writes `review/round-N/assignment.json`. `evidence` builds the
+draft and writes `review/round-N/assignment.json`. In a paper-review run
+(`status.yml` `workflow: paper-review`) the one reviewed author is
+`research.submitter`, the default pool is `research.reviewer`, and every
+command reads the manuscript under `manuscript/` instead of a draft. `evidence` builds the
 round's shared evidence bundle (`review/round-N/evidence/`) from free sources
 and at most a few scite MCP calls; `--plan` prints the exact outgoing request
 list and sends nothing — see [scite evidence](research/scite.md). Before it
@@ -217,7 +220,7 @@ evidence) or the pass-B prompt (the frozen pass A verbatim, the draft, the
 bundle in a fenced data block and the rendered review instructions) for one
 assigned pair; pass B is refused when pass A was never frozen or changed after
 it was frozen. Each prompt is a fresh dispatch with
-`--role research.draft-reviewers`. `check` validates a returned review file
+`--role research.draft-reviewers` (`--role research.reviewer` in paper-review). `check` validates a returned review file
 (schema, identity, frozen pass A, every pass-A comment accounted for, evidence
 quotes verbatim from the bundle) and records `review.pass_done`. `matrix`
 writes `review/round-N/matrix.skeleton.json` (every comment of every valid

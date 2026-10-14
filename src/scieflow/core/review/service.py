@@ -36,10 +36,13 @@ from scieflow.core import agent_config as ac
 from scieflow.core.drafts import DraftError, check_name
 from scieflow.core.project import Project, ProjectError
 from scieflow.core.review import assign as _assign
+from scieflow.core.review import claims as _claims
 from scieflow.core.review import decisions as _decisions
 from scieflow.core.review import settings as _settings
 
 PASSES = ("blind", "evidence")
+PAPER_REVIEW_AUTHOR = "research.submitter"     # the reviewed author in a paper-review run
+PAPER_REVIEW_POOL = "research.reviewer"        # its default reviewer pool
 _ROUND_DIR = re.compile(r"^round-([1-9][0-9]{0,5})$")
 _REFERENCE_STATUSES = ("ok", "corrected", "retracted", "unresolvable")
 
@@ -163,18 +166,41 @@ def assignment_inputs(project: Project, slug: str, settings: dict | None = None)
     """(authors, pool, settings, families) the planner needs, from the run's config."""
     effective = settings if settings is not None else _settings.load(project, slug)
     eff = ac.resolve(project.root, slug)
-    authors = eff.value(ac.DRAFT_AUTHORS)
-    authors = [authors] if isinstance(authors, str) else list(authors or [])
+    # A paper-review run reviews the submitter's manuscript with the
+    # research.reviewer pool; a paper-draft run the drafts of research.draft-authors
+    # with the research.draft-reviewers pool. Same planner, same switches.
+    try:
+        manuscript = _claims.reviews_manuscript(project.run_dir(slug))
+    except ProjectError:
+        manuscript = False
+    if manuscript:
+        submitter = eff.value(PAPER_REVIEW_AUTHOR)
+        if not submitter or not isinstance(submitter, str):
+            raise _assign.AssignmentError(
+                f"paper-review run: {PAPER_REVIEW_AUTHOR} is not set (assign the submitter "
+                f"with `scieflow agent configure --workspace {slug} --assign "
+                f"{PAPER_REVIEW_AUTHOR}=AGENT --yes`)")
+        authors = [submitter]
+    else:
+        authors = eff.value(ac.DRAFT_AUTHORS)
+        authors = [authors] if isinstance(authors, str) else list(authors or [])
     pool = effective["pool"]
     if pool is None:
-        names = eff.value(ac.DRAFT_REVIEWERS)
+        names = eff.value(PAPER_REVIEW_POOL if manuscript else ac.DRAFT_REVIEWERS)
         names = [names] if isinstance(names, str) else list(names or [])
         pool = [{"agent": n} for n in names]
     registry = (ac._load_yaml(project.root / "config" / "agents.yml") or {}).get("agents") or {}
     for name in authors:
         if name not in registry:
-            raise _assign.AssignmentError(f"draft author {name!r} is not in config/agents.yml")
+            what = "submitter" if manuscript else "draft author"
+            raise _assign.AssignmentError(f"{what} {name!r} is not in config/agents.yml")
     reviewers = [e.get("agent") for e in pool] + list(effective["matrix_override"] or {})
+    if manuscript and authors[0] in reviewers:
+        # paper-review: the submitter never grades its own edits, switch or not.
+        raise _assign.AssignmentError(
+            f"paper-review run: the submitter {authors[0]!r} may not review its own "
+            "manuscript (allow_self_review does not apply to paper-review); remove it from "
+            "the reviewer pool / matrix_override")
     for name in reviewers:
         if name not in registry:
             raise _assign.AssignmentError(f"reviewer {name!r} is not in config/agents.yml")

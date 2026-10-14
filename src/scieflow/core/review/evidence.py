@@ -85,6 +85,19 @@ class ConsentError(_policy.PolicyError):
     """The run has not consented to sending its query plan. A boundary (exit 3)."""
 
 
+class QuotaRoundError(_policy.PolicyError):
+    """A rebuild of a round whose bundle stopped at the quota or budget would retry
+    the refused calls; only `scite backfill` may do that. A boundary (exit 3)."""
+
+
+def _quota_round(ws: Path, round_: int) -> bool:
+    try:
+        data = json.loads((_rd(ws, round_) / EVIDENCE / "bundle.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("scite_status") == "quota"
+
+
 # --- the plan ---------------------------------------------------------------------------------
 
 
@@ -977,6 +990,11 @@ def build(project, slug: str, round_: int, *, plan_only: bool = False, environ=N
     p = plan(ws, round_, policy, slug=slug)
     if plan_only:
         return Outcome("planned", "ok", plan=p)
+    if not kw.get("backfill") and _quota_round(ws, round_):
+        raise QuotaRoundError(
+            f"round {round_}'s evidence stopped at the scite quota or budget: rebuilding it "
+            "would retry the refused calls. Continue the round with this bundle, or later run "
+            f"`scieflow research scite backfill {slug} --round {round_}`")
     ok, why = consent(ws, setting)
     if not ok:
         raise ConsentError(why)

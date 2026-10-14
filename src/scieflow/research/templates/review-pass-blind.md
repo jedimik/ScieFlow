@@ -12,7 +12,7 @@ work only from the material below.
 
 ${persona}
 ${context}
-THE DRAFT (workspace/${slug}/manuscript/drafts/${author}/, one block per file):
+THE DRAFT (workspace/${slug}/${draft_dir}, one block per file):
 ${draft}
 Write the output JSON matching src/scieflow/research/schemas/manuscript-review.schema.json:
 version 1, pass "blind", round ${round}, agent "${reviewer}", reviewed "${author}",

@@ -280,10 +280,26 @@ def quote_problem(index: dict[str, list[str]], doi: str, quote: str) -> str | No
 # --- drafts and prompt text ----------------------------------------------------------------
 
 
+def draft_dir(ws: Path, author: str) -> str:
+    """The run-relative directory of the text `author` is reviewed on (with a
+    trailing slash): `manuscript/drafts/<author>/`, or `manuscript/` in a
+    paper-review run, where the reviewed author is the submitter."""
+    if claims_mod.reviews_manuscript(ws):
+        return claims_mod.MANUSCRIPT_DIR.as_posix() + "/"
+    return (claims_mod.DRAFTS_DIR / author).as_posix() + "/"
+
+
+def role(ws: Path) -> str:
+    """The `--role` a review of this run is dispatched with."""
+    return "research.reviewer" if claims_mod.reviews_manuscript(ws) else ROLE
+
+
 def draft_files(ws: Path, author: str) -> tuple[Path, list[Path]]:
     """(draft root, its .tex files: main.tex and its confined inputs, else every top-level .tex)."""
-    root = Path(ws) / claims_mod.DRAFTS_DIR / author
+    root = Path(ws) / draft_dir(ws, author)
     if root.is_symlink() or not root.is_dir():
+        if claims_mod.reviews_manuscript(ws):
+            raise PassError("no manuscript under manuscript/ (paper-review run)")
         raise PassError(f"no draft by {author} under manuscript/drafts/")
     _confined(ws, root)
     main = root / "main.tex"
@@ -294,7 +310,7 @@ def draft_files(ws: Path, author: str) -> tuple[Path, list[Path]]:
             if path not in files:
                 files.append(path)
     if not files:
-        raise PassError(f"the draft by {author} has no .tex files")
+        raise PassError(f"the draft by {author} ({draft_dir(ws, author)}) has no .tex files")
     return root, files
 
 
@@ -374,7 +390,8 @@ def blind_prompt(ws: Path, round_: int, reviewer: str, author: str, *,
     _pair(assignment(ws, n), n, reviewer, author)
     root, files = draft_files(ws, author)
     return _template("review-pass-blind.md", slug=slug or ws.name, round=n, reviewer=reviewer,
-                     author=author, persona=_persona(), context=_context_blocks(ws),
+                     author=author, draft_dir=draft_dir(ws, author), persona=_persona(),
+                     context=_context_blocks(ws),
                      draft=_draft_blocks(ws, author, root, files))
 
 
@@ -402,7 +419,8 @@ def evidence_prompt(ws: Path, round_: int, reviewer: str, author: str, *,
     digest = sha256(blind)
     return _template(
         "review-pass-evidence.md", slug=slug or ws.name, round=n, reviewer=reviewer,
-        author=author, blind_sha256=digest, persona=_persona(), context=_context_blocks(ws),
+        author=author, draft_dir=draft_dir(ws, author), blind_sha256=digest,
+        persona=_persona(), context=_context_blocks(ws),
         draft=_draft_blocks(ws, author, root, files),
         pass_a=_fenced(f"YOUR FROZEN pass A REVIEW (sha256 {digest})",
                        blind.decode("utf-8", errors="replace")),

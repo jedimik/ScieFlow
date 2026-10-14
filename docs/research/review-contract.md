@@ -27,6 +27,15 @@ Everything lives inside the run's workspace, `workspace/<slug>/`:
 | `review/round-N/matrix.json` (+ `matrix.md`) | coordinator; checked and rendered by `scieflow review matrix --check` (M2) | `review-matrix` |
 | `review/round-N/decisions.json` | **only** `service.decide()` | `review-decisions` |
 
+**paper-review runs** (M2, ticket 13): when the run's `status.yml` says
+`workflow: paper-review`, the reviewed author is `research.submitter` (the
+only author in `assignment.json`), the default pool is `research.reviewer`,
+and the reviewed text is the manuscript under `manuscript/` (`main.tex` and
+its inputs, else the top-level `.tex` files) instead of
+`manuscript/drafts/<author>/` — for the prompts, the evidence claims and the
+revision prompt alike. The file layout above is unchanged; the same family
+and self switches apply.
+
 `N` is an integer ≥ 1. Agent names (`reviewer`, `author`) become file names:
 they pass `drafts.check_name` and may not contain `/`, `\`, whitespace, line
 breaks or bidi controls, and are never `.`/`..`. A round directory that is a

@@ -37,6 +37,24 @@ from scieflow.research.lib import doi as doi_lib
 DRAFTS_DIR = Path("manuscript") / "drafts"
 MANUSCRIPT_DIR = Path("manuscript")
 BIB_NAME = "references.bib"
+STATUS_NAME = "status.yml"
+PAPER_REVIEW = "paper-review"
+
+
+def reviews_manuscript(ws: Path) -> bool:
+    """True for a `paper-review` run (its status.yml says `workflow: paper-review`):
+    the reviewed text is the submitter's manuscript under `manuscript/`, not a
+    draft under `manuscript/drafts/<agent>/`."""
+    import yaml
+
+    path = Path(ws) / STATUS_NAME
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError):
+        return False
+    return isinstance(data, dict) and data.get("workflow") == PAPER_REVIEW
 
 
 def parser():
@@ -409,11 +427,12 @@ def _confined_tex(entry: Path, root: Path) -> list[Path]:
 def sources(ws: Path) -> list[tuple[Path, Path]]:
     """(file, label root) for every manuscript file to read, in a fixed order:
     each draft under `manuscript/drafts/<agent>/` (agents sorted), else the merged
-    manuscript (`main.tex` and its inputs, or the top-level `.tex` files)."""
+    manuscript (`main.tex` and its inputs, or the top-level `.tex` files). A
+    paper-review run always reads the merged manuscript."""
     man = Path(ws) / MANUSCRIPT_DIR
     drafts = Path(ws) / DRAFTS_DIR
     roots: list[Path] = []
-    if drafts.is_dir():
+    if drafts.is_dir() and not reviews_manuscript(ws):
         roots = sorted(p for p in drafts.iterdir() if p.is_dir() and not p.is_symlink())
     if not roots and man.is_dir():
         roots = [man]

@@ -142,7 +142,9 @@ skipped requests are sent within the same budgets, and it refuses when the
 manuscript changed since (build a new round instead). A round that already
 has a matrix is refused unless `--force`: the new bundle invalidates the
 matrix, its decisions and the pass-B reviews checked against the old one, so
-re-run pass B and the matrix afterwards. At 10 %
+re-run pass B and the matrix afterwards. A plain `scieflow review evidence`
+of a round whose bundle says `quota` is refused (exit 3): it would retry the
+refused calls, which only `backfill` may do. At 10 %
 of a run or day budget left, `scite.quota_low` is emitted once. Where a call
 is not possible at all (no token, SDK missing, auth failure, tool not allowed)
 the bundle says `unavailable`.

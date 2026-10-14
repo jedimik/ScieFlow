@@ -57,9 +57,9 @@ def parse_set(text: str) -> tuple[str, object]:
     return key, raw
 
 
-def _show(block: dict) -> None:
+def _show(block: dict, default_pool: str = "research.draft-reviewers") -> None:
     for key, value in block.items():
-        shown = "(research.draft-reviewers)" if key == "pool" and value is None else value
+        shown = f"({default_pool})" if key == "pool" and value is None else value
         click.echo(f"  {key:<26} {shown}")
 
 
@@ -81,8 +81,14 @@ def configure(slug, sets, as_agent, yes):
     try:
         current = settings.load(project, slug)
         if not sets:
+            from scieflow.core.review import claims
+
             click.echo(f"Review settings of workspace/{slug}:")
-            _show(current)
+            try:
+                manuscript = claims.reviews_manuscript(project.run_dir(slug))
+            except ValueError:
+                manuscript = False
+            _show(current, "research.reviewer" if manuscript else "research.draft-reviewers")
             return
         changes = dict(parse_set(s) for s in sets)
         actor = "agent" if as_agent else "human"
@@ -392,7 +398,7 @@ def prompt_cmd(slug, round_, reviewer, author, pass_, write):
     stem = f"review-{pass_}-{reviewer}-on-{author}-round-{round_}"
     rel_prompt = f"workspace/{slug}/prompts/{stem}.md"
     how = (f"fresh dispatch (no resume, no session id): uv run scieflow agent run "
-           f"--role {passes.ROLE} {reviewer} {rel_prompt} workspace/{slug}/logs/{stem}.log")
+           f"--role {passes.role(ws)} {reviewer} {rel_prompt} workspace/{slug}/logs/{stem}.log")
     if not write:
         click.echo(text, nl=False)
         click.echo(f"# {how}", err=True)
@@ -566,7 +572,7 @@ def revise_cmd(slug, round_, author, write):
         raise click.ClickException(str(exc)) from exc
     stem = f"revise-{author}-round-{round_}"
     rel_prompt = f"workspace/{slug}/prompts/{stem}.md"
-    how = (f"dispatch: uv run scieflow agent run --role {revise.ROLE} {author} {rel_prompt} "
+    how = (f"dispatch: uv run scieflow agent run --role {revise.role(ws)} {author} {rel_prompt} "
            f"workspace/{slug}/logs/{stem}.log")
     summary = (f"accepted {', '.join(c['cluster'] for c in got['accepted'])}; "
                f"undecided {', '.join(got['undecided']) or 'none'}")

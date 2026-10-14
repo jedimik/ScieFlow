@@ -14,7 +14,7 @@ literature service yourself; ask for more through followup_requests instead.
 
 ${persona}
 ${context}
-THE DRAFT (workspace/${slug}/manuscript/drafts/${author}/, one block per file):
+THE DRAFT (workspace/${slug}/${draft_dir}, one block per file):
 ${draft}
 ${pass_a}
 ${bundle}

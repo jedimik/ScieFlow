@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from scieflow.core.review import claims as claims_mod
 from scieflow.core.review import decisions as decisions_mod
 from scieflow.core.review import matrix as matrix_mod
 from scieflow.core.review import passes
@@ -29,6 +30,11 @@ _CITE = re.compile(r"\\[A-Za-z]*cite[A-Za-z]*\*?\s*(?:\[[^\]]*\]\s*)*\{([^{}]*)\
 
 class RevisionError(ValueError):
     """The revision step is refused; nothing was written."""
+
+
+def role(ws: Path) -> str:
+    """The `--role` the revision of this run is dispatched with."""
+    return "research.submitter" if claims_mod.reviews_manuscript(ws) else ROLE
 
 
 def response_name(author: str) -> str:
@@ -177,6 +183,13 @@ def _render_cluster(c: dict) -> str:
     return "\n".join(lines)
 
 
+def _files(ws: Path, author: str) -> str:
+    """Run-relative paths of the files the author edits (main.tex and its inputs)."""
+    _root, files = passes.draft_files(ws, author)
+    base = Path(ws).resolve()
+    return ", ".join(p.resolve().relative_to(base).as_posix() for p in files)
+
+
 def revision_prompt(ws: Path, round_: int, author: str, *, slug: str | None = None) -> str:
     """The author's revision task with the accepted clusters only."""
     got = clusters_for(ws, round_, author)
@@ -186,6 +199,7 @@ def revision_prompt(ws: Path, round_: int, author: str, *, slug: str | None = No
     body = "\n\n".join(_render_cluster(c) for c in got["accepted"])
     return passes._template(
         TEMPLATE, round=got["round"], slug=slug or Path(ws).name, author=author,
+        draft_dir=passes.draft_dir(ws, author), files=_files(ws, author),
         ids=", ".join(c["cluster"] for c in got["accepted"]),
         clusters=passes._fenced(f"ACCEPTED REVIEW CLUSTERS for {author}, round {got['round']}",
                                 body))
