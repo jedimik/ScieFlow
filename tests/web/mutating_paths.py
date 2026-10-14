@@ -39,6 +39,7 @@ MUTATING_PATHS = {
     "/api/v1/runs": {"post"},
     "/runs/{slug}/review/settings": {"post"},
     "/runs/{slug}/review/preview": {"post"},
+    "/runs/{slug}/review/{round}/decisions": {"post"},
 }
 
 #: Placeholder ids for the templated paths above. Guard tests never resolve
@@ -76,6 +77,7 @@ SAMPLES: dict[str, dict] = {
     "/api/v1/runs": {"slug": "guard-api-runs", "goal": "a goal"},
     "/runs/{slug}/review/settings": {"scite_present": "1", "scite_use": "on"},
     "/runs/{slug}/review/preview": {"scite_present": "1", "scite_use": "on"},
+    "/runs/{slug}/review/{round}/decisions": {"cluster": "K2", "decision": "accept"},
 }
 
 

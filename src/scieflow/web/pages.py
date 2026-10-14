@@ -468,6 +468,7 @@ def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
         "conversation_raw": presentation.verified_raw_url(ws, slug, 'conversation.yml'),
         "agents": service.conversational_agents(project),
         "overview": presentation.sanitized(service.run_overview(project, slug)),
+        "review": review_views.run_review_context(project, slug, ws),
         "error": presentation.text(error),
         "csrf": auth.csrf_token(request),
     })

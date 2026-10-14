@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "review_parts.html" import findings %}
+{% block title %}Review round {{ round }} — {{ slug }} — ScieFlow{% endblock %}
+{% block nav %}<a href="/runs/{{ slug|urlencode }}/review">← review</a> <a href="/runs/{{ slug|urlencode }}/review/{{ round }}/matrix">matrix</a>{% endblock %}
+{% block content %}
+<h1>Review round {{ round }} — {{ slug }}</h1>
+{% if notice %}<p class="state-failed" role="alert">{{ notice }}</p>{% endif %}
+{% if summary_notice %}<p class="state-failed" role="alert">{{ summary_notice }}</p>{% endif %}
+
+{% if summary %}
+  <p class="dim">scite status: {{ summary.scite_status }} · {{ summary.references.total }} references · {{ summary.claims }} claims · {{ summary.passages }} passages</p>
+{% elif not summary_notice %}
+  <p class="dim">evidence bundle: not (yet) available</p>
+{% endif %}
+
+{% if authors %}
+<form method="get" action="/runs/{{ slug|urlencode }}/review/{{ round }}" class="actions">
+  <label>draft
+    <select name="author">
+      {% for a in authors %}<option value="{{ a }}"{% if a == selected %} selected{% endif %}>{{ a }}</option>{% endfor %}
+    </select>
+  </label>
+  <button>Show</button>
+</form>
+{% endif %}
+
+{% for p in panels %}
+<section class="pair">
+  <h2>{{ p.reviewer }} on {{ selected }}</h2>
+  <div class="passes">
+    <div class="pass">
+      <h3>blind</h3>
+      {% if p.blind_notice %}<p class="state-failed" role="alert">{{ p.blind_notice }}</p>
+      {% elif p.blind is none %}<p class="dim">blind pass not (yet) available</p>
+      {% else %}{{ findings(p.blind, doi_link) }}{% endif %}
+    </div>
+    <div class="pass">
+      <h3>evidence</h3>
+      {% if p.evidence_notice %}<p class="state-failed" role="alert">{{ p.evidence_notice }}</p>
+      {% elif p.evidence is none %}<p class="dim">evidence pass not (yet) available</p>
+      {% else %}{{ findings(p.evidence, doi_link) }}{% endif %}
+    </div>
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

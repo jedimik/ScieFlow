@@ -11,6 +11,7 @@ so it is imported lazily: without it every review panel shows NEEDS_EXTRA.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from urllib.parse import quote
 
 from scieflow.core import service
@@ -295,3 +296,21 @@ def doi_link(doi) -> str | None:
     if any(mark in doi for mark in "?#") or ".." in doi:
         return None
     return "https://doi.org/" + quote(doi, safe="/")
+
+
+def run_review_context(project, slug: str, ws) -> dict:
+    """What the run page shows of review: the blocker banner and the nav links.
+
+    Never raises (ledger F7): a core refusal or a missing research extra is one
+    notice line, and the run page renders around it.
+    """
+    rounds, _ = review_call("rounds", project, slug)
+    blockers, notice = review_call("blockers", project, slug)
+    blockers = blockers or []
+    return {
+        "has_review": bool(rounds) or (Path(ws) / "review").is_dir(),
+        "has_discovery": (Path(ws) / "discovery").is_dir(),
+        "blockers": blockers,
+        "blocker_notice": notice,
+        "newest_round": max((b["round"] for b in blockers), default=None),
+    }
