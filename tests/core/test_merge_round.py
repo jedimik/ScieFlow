@@ -674,3 +674,72 @@ def test_a_failing_skipped_event_does_not_fail_the_round(project, curated, respo
     monkeypatch.setattr(service.events, "emit", emit)
     result = service.merge_round(project, "r1")
     assert result["round"] == 2, "the round must still advance"
+
+
+# --- W8: merge guard (ledger §5 W8) -------------------------------------
+# These tests spy on `say` and never assert round advancement, so they do
+# not depend on the six baseline-broken success-path tests above.
+
+_BLOCKER = {"round": 1, "cluster": "c1", "reason": "retracted reference",
+            "references": [{"doi": "10.1000/xyz", "key": "smith2020"}],
+            "decision": None}
+
+
+def _spy_say(monkeypatch):
+    calls = []
+
+    def fake_say(project, slug, message, *args, **kwargs):
+        calls.append(message)
+        return {"job": {"state": "failed"}, "turn": {}}
+
+    monkeypatch.setattr(service, "say", fake_say)
+    return calls
+
+
+def test_open_blockers_refuse_the_merge_before_any_dispatch(project, curated, monkeypatch):
+    from scieflow.core.review import service as review_service
+
+    monkeypatch.setattr(review_service, "blockers", lambda project, slug: [_BLOCKER])
+    calls = _spy_say(monkeypatch)
+    with pytest.raises(service.ServiceError) as info:
+        service.merge_round(project, "r1")
+    assert calls == [], "a refused merge must not reach say"
+    assert "merge refused" in str(info.value)
+    assert "1 open blocker" in str(info.value)
+    assert "overrule" in str(info.value)
+
+
+def test_blockers_are_checked_before_the_empty_curation_refusal(project, monkeypatch):
+    """No curation at all: the guard must answer first, not 'nothing to merge'."""
+    from scieflow.core.review import service as review_service
+
+    monkeypatch.setattr(review_service, "blockers", lambda project, slug: [_BLOCKER])
+    calls = _spy_say(monkeypatch)
+    with pytest.raises(service.ServiceError) as info:
+        service.merge_round(project, "r1")
+    assert "merge refused" in str(info.value)
+    assert calls == []
+
+
+def test_no_open_blockers_lets_the_merge_reach_say(project, curated, monkeypatch):
+    from scieflow.core.review import service as review_service
+
+    monkeypatch.setattr(review_service, "blockers", lambda project, slug: [])
+    calls = _spy_say(monkeypatch)
+    result = service.merge_round(project, "r1")
+    assert len(calls) == 1, "an empty blocker list must not block the merge"
+    assert "turn" in result
+
+
+def test_a_blockers_failure_is_a_service_error_not_a_crash(project, curated, monkeypatch):
+    from scieflow.core.review import service as review_service
+
+    def broken(project, slug):
+        raise ValueError("matrix.json is corrupt")
+
+    monkeypatch.setattr(review_service, "blockers", broken)
+    calls = _spy_say(monkeypatch)
+    with pytest.raises(service.ServiceError) as info:
+        service.merge_round(project, "r1")
+    assert "matrix.json is corrupt" in str(info.value)
+    assert calls == []

@@ -933,8 +933,29 @@ def merge_round(project: Project, slug: str) -> dict:
     supplies the round, the emptiness check's `blocks`/`note`, and the
     prompt's text and token from one read — see its docstring for why a
     second read here would risk disagreeing with the first.
+
+    The merge is refused, before any render or dispatch, while the review
+    layer reports an open reference blocker (a retracted or unresolvable
+    citation) — the same refusal `scieflow review merge-check` gives. An
+    unreadable blocker state refuses too: the guard fails closed.
     """
     ws = _ws(project, slug)
+    # Lazy: the review layer needs the `research` extra (jsonschema).
+    try:
+        from scieflow.core.review import service as review_service
+    except ImportError as exc:
+        raise ServiceError(
+            f"merge refused: cannot check open blockers for workspace/{slug} "
+            f"(review needs the research extra): {exc}") from exc
+    try:
+        open_blockers = review_service.blockers(project, slug)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+    if open_blockers:
+        raise ServiceError(
+            f"merge refused: workspace/{slug} has {len(open_blockers)} open blocker(s); "
+            "fix the citation and build the evidence of a new round, or let the user "
+            "overrule it")
     try:
         rendered = curation.render(ws)
     except curation.CurationError as exc:
