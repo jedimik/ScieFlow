@@ -221,6 +221,9 @@ def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: 
         d = agent_run.prepare(project, agent, Path(prompt_file), cwd, role,
                               session=session, conversational=conversational)
     except (agent_run.DispatchError, sandbox.SandboxError) as e:
+        run_dir = agent_run.refusal_run_dir(Path(prompt_file))
+        if isinstance(e, sandbox.SandboxError) and run_dir is not None:
+            events.emit(run_dir, "job.refused", "system", reason="sandbox", detail=str(e))
         raise ServiceError(str(e)) from e
     if d.run_dir is not None:
         try:
@@ -233,7 +236,8 @@ def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: 
                         why=f"{sandbox.ALLOWLIST_FILE} unsandboxed_runs")
     else:
         try:
-            sandbox.verify(d.writable, d.cwd)
+            sandbox.verify(d.writable, d.cwd, mask=sandbox.masks_for(d.writable, run_dir=d.run_dir),
+                           layout=d.layout)
         except sandbox.SandboxError as exc:
             if d.run_dir is not None:
                 events.emit(d.run_dir, "job.refused", "system", reason="sandbox",
@@ -243,10 +247,16 @@ def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: 
     # lets `_turn_in_flight` (below) tell a chat turn apart from every other
     # agent-kind job the run starts (a campaign, a review), which must never
     # make the chat box look busy.
-    job, proc = jobs.start(project, d.argv, kind="turn" if conversational else "agent",
-                           cwd=d.cwd, run_dir=d.run_dir,
-                           label=agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text,
-                           sandbox_writable=d.writable, env=d.env)
+    try:
+        job, proc = jobs.start(project, d.argv, kind="turn" if conversational else "agent",
+                               cwd=d.cwd, run_dir=d.run_dir,
+                               label=agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text,
+                               sandbox_writable=d.writable, sandbox_layout=d.layout, env=d.env)
+    except sandbox.SandboxError as exc:
+        # A11: the launch itself was refused after verify passed.
+        if d.run_dir is not None:
+            events.emit(d.run_dir, "job.refused", "system", reason="sandbox", detail=str(exc))
+        raise ServiceError(str(exc)) from exc
 
     def finish() -> jobs.Job:
         done = jobs.wait(job, proc)
@@ -611,11 +621,17 @@ def _complete_marked_turn(prepared, job, *, artifacts) -> _TurnCompletion:
 
 def _launch_prepared_turn(project, prepared, *, artifacts, turn_audit) -> jobs.Job:
     """Launch the SAME snapshot; short linkage write, wait, actual spend once."""
-    job, proc = jobs.start(project, list(prepared.argv), kind='turn', cwd=prepared.cwd,
-                           run_dir=prepared.run_dir, label=prepared.agent, timeout_s=prepared.timeout_s,
-                           stdin_text=prepared.stdin_text, env=dict(prepared.env_items),
-                           sandbox_writable=list(prepared.protection.writable),
-                           sandbox_mask=list(prepared.protection.masks), turn_audit=turn_audit)
+    try:
+        job, proc = jobs.start(project, list(prepared.argv), kind='turn', cwd=prepared.cwd,
+                               run_dir=prepared.run_dir, label=prepared.agent, timeout_s=prepared.timeout_s,
+                               stdin_text=prepared.stdin_text, env=dict(prepared.env_items),
+                               sandbox_writable=list(prepared.protection.writable),
+                               sandbox_mask=list(prepared.protection.masks),
+                               sandbox_layout=prepared.layout, turn_audit=turn_audit)
+    except sandbox.SandboxError as exc:
+        # A11: a launch-time refusal on the turn path is a ServiceError plus job.refused.
+        events.emit(prepared.run_dir, 'job.refused', 'system', reason='sandbox', detail=str(exc))
+        raise ServiceError(str(exc)) from exc
     linkage_error = None
     try:
         _validate_turn_destination(prepared)
@@ -650,17 +666,19 @@ def _say_prepared(project, reservation, submission, actor):
     ws = reservation.run_dir
     try:
         doc = _send_state(project, ws, submission)
+        # The turn's own HOME is created inside the protection capture, under the held
+        # reservation, before any admission fact is recorded: a protected directory that
+        # appeared only at launch would read as a changed path and refuse the turn. Only
+        # a sandboxed turn gets one (F3). The agent name is checked on every path.
+        sandbox._check_agent_name(doc['agent'])
         accepted_revision = conversation.selection_revision(doc)
-        resolved = agent_run.resolve_turn(project, doc['agent'], run_dir=ws, session=doc['session'])
+        resolved = agent_run.resolve_turn(project, doc['agent'], run_dir=ws, session=doc['session'],
+                                          create_home=True)
         prepared = agent_run.prepare_turn(resolved, submission)
         reservation.validate_protection(prepared.protection)
         _validate_execution(prepared)
         actions.guard_budget(ws, ('wall_minutes',))
-        try:
-            sandbox.verify(list(prepared.protection.writable), prepared.cwd)
-        except sandbox.SandboxError as exc:
-            events.emit(ws, 'job.refused', 'system', reason='sandbox', detail=str(exc))
-            raise
+        sandbox.verify(list(prepared.protection.writable), prepared.cwd, layout=prepared.layout)
         _validate_execution(prepared)
         reservation.validate_protection(prepared.protection)
         conversation.check_revision(conversation.read(ws), accepted_revision, required=True)
@@ -668,6 +686,9 @@ def _say_prepared(project, reservation, submission, actor):
         raise ServiceError(f'{exc} — run checkpointed') from exc
     except (conversation.ConversationError, agent_run.DispatchError, sandbox.SandboxError,
             OSError, TypeError, ValueError) as exc:
+        if isinstance(exc, sandbox.SandboxError):
+            # F3/F13: every confinement refusal on the turn path is recorded, once.
+            events.emit(ws, 'job.refused', 'system', reason='sandbox', detail=str(exc))
         raise ServiceError(str(exc)) from exc
 
     tid = store.new_id()

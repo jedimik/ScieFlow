@@ -1,3 +1,4 @@
+import os
 import shutil
 import sys
 import threading
@@ -122,7 +123,8 @@ def test_a_sandboxed_job_writes_inside_its_run_and_nowhere_else(tmp_path):
             f"except OSError:\n"
             f"    pass\n")
     job = jobs.run_blocking(project, [PY_EXE, "-c", code], kind="agent", cwd=ws,
-                            run_dir=ws, sandbox_writable=[ws])
+                            run_dir=ws, sandbox_writable=[ws], env=dict(os.environ),
+                            sandbox_layout=sandbox.dispatch_layout(project, run_dir=ws, agent="probe"))
     assert job.sandboxed is True
     assert (ws / "inside.txt").exists()
     assert not (outside / "escaped.txt").exists()
@@ -132,7 +134,8 @@ def test_a_sandboxed_job_writes_inside_its_run_and_nowhere_else(tmp_path):
 def test_the_recorded_argv_is_the_command_not_the_wrapper(tmp_path):
     project, ws = project_and_run(tmp_path)
     job = jobs.run_blocking(project, [PY_EXE, "-c", "print(1)"], kind="agent",
-                            cwd=ws, run_dir=ws, sandbox_writable=[ws])
+                            cwd=ws, run_dir=ws, sandbox_writable=[ws], env=dict(os.environ),
+                            sandbox_layout=sandbox.dispatch_layout(project, run_dir=ws, agent="probe"))
     assert job.argv[0] == PY_EXE            # what was asked for
     assert "bwrap" not in " ".join(job.argv)  # not the plumbing
 
@@ -148,7 +151,7 @@ def test_sandbox_failure_is_recorded_as_failed_job(tmp_path):
     # jobs.start should raise SandboxError
     with pytest.raises(sandbox.SandboxError):
         jobs.start(project, [PY_EXE, "-c", "print(1)"], kind="agent",
-                   cwd=ws, run_dir=ws, sandbox_writable=[bad_writable])
+                   cwd=ws, run_dir=ws, sandbox_writable=[bad_writable], env=dict(os.environ))
 
     # But the job should have been recorded as failed
     all_jobs = jobs.list_jobs(project, ws)

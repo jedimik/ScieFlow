@@ -357,7 +357,11 @@ def start(project: Project, argv: list[str], *, kind: str, cwd: Path,
           run_dir: Path | None = None, label: str = "", timeout_s: float | None = None,
           stdin_text: str | None = None, env: dict | None = None,
           sandbox_writable: list[Path] | None = None, turn_audit=None,
-          sandbox_mask: list[Path] | None = None) -> tuple[Job, subprocess.Popen]:
+          sandbox_mask: list[Path] | None = None,
+          sandbox_layout: sandbox.Layout | None = None) -> tuple[Job, subprocess.Popen]:
+    # A4: a sandboxed launch never inherits the host environment by accident.
+    if sandbox_writable is not None and env is None:
+        raise sandbox.SandboxError("a sandboxed job needs an explicit environment (env=)")
     job_id = store.new_id()
     directory = jobs_dir(project, run_dir)
     directory.mkdir(parents=True, exist_ok=True)
@@ -375,7 +379,8 @@ def start(project: Project, argv: list[str], *, kind: str, cwd: Path,
             # The job records the command that was asked for; the wrapper is plumbing.
             launch = (sandbox.wrap(argv, writable=sandbox_writable, cwd=cwd,
                                    mask=(captured_mask if captured_mask is not None else
-                                         sandbox.masks_for(sandbox_writable, run_dir=run_dir)))
+                                         sandbox.masks_for(sandbox_writable, run_dir=run_dir)),
+                                   layout=sandbox_layout)
                       if sandbox_writable is not None else list(argv))
             proc = subprocess.Popen(
                 launch, cwd=cwd, stdout=out, stderr=err, text=True, env=env,

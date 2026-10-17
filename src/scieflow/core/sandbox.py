@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import os
 import hashlib
+import re
 import stat
+import sys
+import sysconfig
+from collections.abc import Callable
 from dataclasses import dataclass
 import shlex
 import shutil
@@ -29,6 +33,24 @@ from scieflow.core.project import Project
 BWRAP = "bwrap"
 VERIFY_TIMEOUT_S = 30
 INSTALL_HINT = "install it with: sudo apt-get install -y bubblewrap"
+
+# D1: the system set is read-only. Merged-usr links are recreated from the host's
+# own readlink target; /lib64 and friends appear only when the host has them.
+RESOLV_CONF = Path("/etc/resolv.conf")   # module constant so tests can point it elsewhere
+MERGED_USR = ("bin", "lib", "lib64", "sbin")
+MERGED_USR_ROOT = Path("/")   # where the host's merged-usr entries are read; a seam for tests
+SYSTEM_TREES = (Path("/usr"), Path("/etc"))
+SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
+
+# D2/C5: one persistent, per-run, per-agent HOME inside the run's own grant.
+AGENT_HOME_DIR = "agent-home"
+AGENT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+# D5/C9 (A1): hard deny table, checked lexically and after resolve().
+_SECRET_UNDER_HOME = (".ssh", ".gnupg", ".hermes", ".config/scieflow/credentials")
+_AGENT_STORES = (".claude", ".claude.json", ".codex", ".gemini")
+_RUNTIME_SOCKETS = (Path("/run"), Path("/var/run"), Path("/proc"), Path("/sys"), Path("/dev"))
+_MAX_LINK_HOPS = 8
 
 
 class SandboxError(RuntimeError):
@@ -73,40 +95,236 @@ def masks_for(writable: list[Path], *, run_dir: Path | None) -> list[Path]:
     run = Path(run_dir).resolve()
     if run not in [Path(entry).resolve() for entry in writable]:
         return []
-    return [run / REPO_DIR]
+    # C13: every agent's home is hidden from the others; wrap() then binds this
+    # dispatch's own home back on top of the mask.
+    return [run / REPO_DIR, run / "scratch" / AGENT_HOME_DIR]
+
+
+@dataclass(frozen=True, slots=True)
+class Layout:
+    """What a dispatch sees beyond the system set and its writable grants (C2).
+
+    readable: bound read-only at the same path. links: (link, target) pairs,
+    recreated with --symlink. home: the dispatch's own HOME, bound read-write
+    after the masks. launcher_dirs: directories of bound launchers, which form
+    the start of the sandbox PATH (C6).
+    """
+    readable: tuple[Path, ...] = ()
+    links: tuple[tuple[Path, str], ...] = ()
+    home: Path | None = None
+    launcher_dirs: tuple[Path, ...] = ()
+
+    def __post_init__(self):
+        if type(self.readable) is not tuple or any(not _is_abs(p) for p in self.readable):
+            raise TypeError("readable must be an immutable tuple of absolute Paths")
+        if type(self.links) is not tuple or any(
+                type(pair) is not tuple or len(pair) != 2 or not _is_abs(pair[0])
+                or type(pair[1]) is not str for pair in self.links):
+            raise TypeError("links must be an immutable tuple of (absolute Path, target text)")
+        if self.home is not None and not _is_abs(self.home):
+            raise TypeError("home must be an absolute Path or None")
+        if type(self.launcher_dirs) is not tuple or any(not _is_abs(p) for p in self.launcher_dirs):
+            raise TypeError("launcher_dirs must be an immutable tuple of absolute Paths")
+
+
+def _is_abs(value) -> bool:
+    return isinstance(value, Path) and value.is_absolute()
+
+
+def _check_agent_name(agent) -> None:
+    if type(agent) is not str or AGENT_NAME_RE.fullmatch(agent) is None:
+        raise SandboxError(f"agent name {agent!r} cannot name an agent home")
+
+
+def _homes() -> list[Path]:
+    """Both the HOME env and the passwd home: either may be the real one."""
+    out = {Path.home().resolve()}
+    try:
+        import pwd
+        out.add(Path(pwd.getpwuid(os.getuid()).pw_dir).resolve())
+    except (ImportError, KeyError, OSError):
+        pass
+    return sorted(out, key=str)
+
+
+def check_not_denied(path: Path, *, kind: str = "readable") -> None:
+    """Refuse a path that equals, lies inside, or contains a hard-deny path (A1).
+
+    kind "bind" may name a file inside an agent credential store (C10), so only
+    that kind allows a path inside a store. Runtime sockets are refused for
+    "readable" (F9) only: the resolver config ("resolv") lives under /run by design,
+    so it keeps the store rules but not the socket rule.
+    """
+    candidates = {Path(path).absolute(), Path(path).resolve()}
+    for c in candidates:
+        for home in _homes():
+            if c == home or c in home.parents:
+                raise SandboxError(f"{c} is the home directory or contains it; never granted")
+            for rel in _SECRET_UNDER_HOME:
+                d = home / rel
+                if c == d or d in c.parents or c in d.parents:
+                    raise SandboxError(f"{c} touches the protected path {d}; never granted")
+            for rel in _AGENT_STORES:
+                d = home / rel
+                if c == d or c in d.parents:
+                    raise SandboxError(f"{c} is an agent credential store or contains one; never granted")
+                if d in c.parents and kind != "bind":
+                    raise SandboxError(f"{c} lies inside the agent credential store {d}; never granted")
+        if kind == "readable":
+            for sock in _RUNTIME_SOCKETS:
+                if c == sock or sock in c.parents or c in sock.parents:
+                    raise SandboxError(f"{c} touches the runtime socket area {sock}; never readable")
+
+
+def _in_system_set(path: Path) -> bool:
+    return any(path == tree or tree in path.parents for tree in SYSTEM_TREES)
+
+
+def _outermost(paths) -> list[Path]:
+    """Unique paths, minus any that lie inside another one (A10/A17)."""
+    kept: list[Path] = []
+    for p in sorted(dict.fromkeys(Path(x) for x in paths), key=lambda q: len(q.parts)):
+        if any(q == p or q in p.parents for q in kept):
+            continue
+        kept.append(p)
+    return kept
+
+
+def _system_args(resolv: Path) -> list[str]:
+    """D1: the read-only system set, in C3 order, merged-usr links from the host."""
+    out = ["--ro-bind", "/usr", "/usr"]
+    for name in MERGED_USR:
+        src = MERGED_USR_ROOT / name          # the host's entry (a seam for tests)
+        dest = Path("/") / name               # where it appears inside
+        if src.is_symlink():
+            out += ["--symlink", os.readlink(src), str(dest)]
+        elif src.is_dir():
+            out += ["--ro-bind", str(src), str(dest)]
+    out += ["--ro-bind", "/etc", "/etc", "--dev", "/dev", "--proc", "/proc",
+            "--tmpfs", "/tmp", "--tmpfs", "/run"]
+    target = _resolv_target(resolv)
+    if target is not None and _resolv_allowed(target):
+        out += ["--ro-bind", str(target), str(target)]
+    return out
+
+
+def _resolv_allowed(target: Path) -> bool:
+    """F11: the resolved resolver config must pass the deny table; a refused one is skipped."""
+    try:
+        check_not_denied(target, kind="resolv")
+    except SandboxError:
+        return False
+    return True
+
+
+def _resolv_target(path: Path) -> Path | None:
+    """The resolved DNS config, when it lies outside the system set (A10)."""
+    try:
+        target = Path(os.path.realpath(path))
+    except OSError:
+        return None
+    if not target.exists() or _in_system_set(target):
+        return None
+    return target
+
+
+def _bind_home(home: Path, writable: list[Path]) -> Path:
+    """C5/C13: the agent home must sit inside a grant; create it host-side."""
+    home = Path(home)
+    if home.parent.name != AGENT_HOME_DIR or home.parent.parent.name != "scratch":
+        raise SandboxError(f"agent home must be <run>/scratch/{AGENT_HOME_DIR}/<agent>: {home}")
+    resolved = home.parent.parent.parent
+    grants = [Path(entry).resolve() for entry in writable]
+    if not any(g in [*home.parents] for g in grants):
+        raise SandboxError(f"agent home {home} lies outside every writable grant")
+    return agent_home(resolved, home.name)
+
+
+def _scratch_pins(home: Path | None, mask: list[Path], grants: list[Path]) -> list[Path]:
+    """F1: the run's scratch dirs, to be bound onto themselves so they are mount points.
+
+    A mount point cannot be renamed or removed from inside the sandbox, so an agent
+    cannot move `scratch` aside and plant files in a sibling home's new tree. Each
+    pinned scratch must be a real directory lying inside a writable grant (C5); a
+    missing one is created inside its grant.
+    """
+    wanted: list[Path] = []
+    if home is not None:
+        wanted.append(home.parent.parent)                       # <run>/scratch
+    for path in mask:
+        resolved = Path(path).resolve()
+        if resolved.name == AGENT_HOME_DIR and resolved.parent.name == "scratch":
+            wanted.append(resolved.parent)
+    pins: list[Path] = []
+    for scratch in dict.fromkeys(wanted):
+        if not any(scratch == g or g in scratch.parents for g in grants):
+            raise SandboxError(f"scratch {scratch} lies outside every writable grant")
+        try:
+            info = scratch.lstat()
+        except FileNotFoundError:
+            os.mkdir(scratch, 0o755)
+            info = scratch.lstat()
+        except OSError as exc:
+            raise SandboxError(f"cannot inspect scratch {scratch}: {exc}") from exc
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise SandboxError(f"scratch must be a real directory, refused: {scratch}")
+        pins.append(scratch.resolve())
+    return pins
 
 
 def wrap(argv: list[str], *, writable: list[Path], cwd: Path,
-         mask: list[Path] | None = None) -> list[str]:
-    """`argv` rewritten to run under bubblewrap, writable only where granted.
+         mask: list[Path] | None = None, layout: Layout | None = None) -> list[str]:
+    """`argv` rewritten to run under bubblewrap, seeing only the allow-list root.
 
-    As a side effect, creates any missing writable directories on the host:
-    bubblewrap refuses to bind a source that does not exist, and an allowlisted
-    path or a brand-new run may not have been created yet — which would
-    otherwise surface as a cryptic bwrap error. This is part of the contract and
-    every caller depends on it.
+    The root is the read-only system set (D1), then `layout.readable`, then
+    `layout.links`, then the writable grants, then the masks, then the agent
+    home (C3). There is no `--ro-bind / /`; `layout=None` means the system set
+    plus the writable grants only.
 
-    Each `mask` path is overlaid with an empty tmpfs, so writes there are
-    discarded. It is a tmpfs rather than a read-only bind because bwrap refuses
-    to bind a source that does not exist, and the repo usually does not yet on a
-    fresh run. The mountpoint then materialises as an empty directory on the
-    host, which `provenance.ensure_repo` discards and re-inits. The mask comes
-    after the writable binds because bwrap applies operations in order.
+    As a side effect, creates missing writable directories and the agent home
+    on the host (C5/A12): bubblewrap refuses to bind a source that does not
+    exist. Each `mask` is overlaid with an empty tmpfs. The mask comes after
+    the writable binds because bwrap applies operations in order.
     """
     _validate_writable(writable)
     if not available():
         raise SandboxUnavailable(f"bubblewrap is not installed; {INSTALL_HINT}")
-    out = [BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-           "--tmpfs", "/tmp"]
+    layout = layout if layout is not None else Layout()
+    bwrap = shutil.which(BWRAP)
+    if bwrap is None:
+        raise SandboxUnavailable(f"bubblewrap is not installed; {INSTALL_HINT}")
+    out = [os.path.abspath(bwrap), *_system_args(RESOLV_CONF)]    # F10 / A13: absolute
+    readable: list[Path] = []
+    for path in layout.readable:
+        resolved = Path(path).resolve()
+        if not resolved.exists():
+            raise SandboxError(f"readable path does not exist: {path}")
+        check_not_denied(resolved, kind="readable")
+        readable.append(resolved)
+        out += ["--ro-bind", str(resolved), str(resolved)]
+    for link, target in layout.links:
+        out += ["--symlink", target, str(link)]
+    grants: list[Path] = []
     for path in writable:
         resolved = Path(path).resolve()
         resolved.mkdir(parents=True, exist_ok=True)
+        grants.append(resolved)
         out += ["--bind", str(resolved), str(resolved)]
+    # The home is created host-side here, before its binds are emitted (A12).
+    home = _bind_home(layout.home, writable) if layout.home is not None else None
+    for scratch in _scratch_pins(home, list(mask or []), grants):
+        out += ["--bind", str(scratch), str(scratch)]            # F1: a mount point inside
     for path in mask or []:
         out += ["--tmpfs", str(Path(path).resolve())]
-    out += ["--chdir", str(Path(cwd).resolve()),
-            "--unshare-pid", "--die-with-parent", "--"]
+    if home is not None:
+        out += ["--bind", str(home), str(home)]
+    work = Path(cwd).resolve()
+    bound = [*readable, *grants, *([home] if home is not None else [])]
+    if not any(work == b or b in work.parents for b in bound):
+        raise SandboxError(f"cwd {work} is outside every path the sandbox grants")
+    out += ["--chdir", str(work), "--unshare-pid", "--die-with-parent", "--"]
     return out + list(argv)
+
 
 
 def probe_dir(writable: list[Path]) -> Path:
@@ -146,7 +364,8 @@ def probe_dir(writable: list[Path]) -> Path:
         "found to host the probe")
 
 
-def verify(writable: list[Path], cwd: Path) -> None:
+def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
+           layout: Layout | None = None) -> None:
     """Prove the sandbox confines before trusting it; raise if it does not.
 
     Runs a throwaway process inside the sandbox that tries to write into a
@@ -155,6 +374,9 @@ def verify(writable: list[Path], cwd: Path) -> None:
     confinement, not just permission denied); the sandboxed command ran (with a
     sentinel file in a granted path); and the forbidden write was blocked.
     Raises if any check fails.
+
+    `mask` and `layout` must be the SAME values the launch receives, so the
+    proof covers the layout that will actually run (A11).
 
     Both control files carry a per-call unique name: several verify() calls can
     run concurrently in one process, and a name keyed on the pid would let them
@@ -170,6 +392,11 @@ def verify(writable: list[Path], cwd: Path) -> None:
     tag = uuid4().hex
     probe = probe_dir(writable) / f".scieflow-sandbox-probe-{tag}"
     sentinel = Path(writable[0]).resolve() / f".scieflow-verify-sentinel-{tag}"
+    extra: dict = {}
+    if mask is not None:
+        extra["mask"] = mask
+    if layout is not None:
+        extra["layout"] = layout
 
     try:
         # Positive control 1: prove the probe location is writable on the host.
@@ -190,7 +417,7 @@ def verify(writable: list[Path], cwd: Path) -> None:
         script = (f"touch {shlex.quote(str(sentinel))} && "
                   f"touch {shlex.quote(str(probe))} 2>/dev/null; true")
         try:
-            subprocess.run(wrap(["/bin/sh", "-c", script], writable=writable, cwd=cwd),
+            subprocess.run(wrap(["/bin/sh", "-c", script], writable=writable, cwd=cwd, **extra),
                            capture_output=True, timeout=VERIFY_TIMEOUT_S, check=False)
         except (OSError, subprocess.SubprocessError) as exc:
             raise SandboxUnavailable(f"the sandbox probe could not run: {exc}") from exc
@@ -240,6 +467,156 @@ def environment(base: Path, env: dict | None = None) -> dict:
     """`env` (default: this process's) with uv pointed at the dispatch's cache."""
     out = dict(os.environ if env is None else env)
     out["UV_CACHE_DIR"] = str(cache_dir(base))
+    return out
+
+
+def agent_home_path(run_dir: Path, agent: str) -> Path:
+    """`<run>/scratch/agent-home/<agent>`, computed read-only (A12).
+
+    Every existing component must be a real directory: a symlink is refused and
+    never followed, so nothing outside the run can be chmod-ed or populated.
+    """
+    _check_agent_name(agent)
+    run = Path(run_dir).resolve()
+    scratch = run / "scratch"
+    home_root = scratch / AGENT_HOME_DIR
+    home = home_root / agent
+    for part in (scratch, home_root, home):
+        try:
+            info = part.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise SandboxError(f"cannot inspect agent home component {part}: {exc}") from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise SandboxError(f"agent home component is a symbolic link, refused: {part}")
+        if not stat.S_ISDIR(info.st_mode):
+            raise SandboxError(f"agent home component is not a directory: {part}")
+    return home
+
+
+def _restrict_home(home: Path) -> None:
+    """C5: mode 0700 on the directory opened here, never on a path a link could redirect."""
+    try:
+        fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
+        raise SandboxError(f"agent home is not a real directory, refused: {home}: {exc}") from exc
+    try:
+        os.fchmod(fd, 0o700)
+    finally:
+        os.close(fd)
+
+
+def agent_home(run_dir: Path, agent: str) -> Path:
+    """Create (if needed) and return the agent's private home, mode 0700 (C5).
+
+    Components are created one at a time and re-checked with lstat, so a link
+    planted between the check and the mkdir is still refused, not followed.
+    """
+    home = agent_home_path(run_dir, agent)
+    for part, mode in ((home.parent.parent, 0o755), (home.parent, 0o755), (home, 0o700)):
+        try:
+            os.mkdir(part, mode)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise SandboxError(f"cannot create agent home component {part}: {exc}") from exc
+        info = part.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise SandboxError(f"agent home component is not a real directory: {part}")
+    _restrict_home(home)
+    return home
+
+
+def _python_runtime() -> list[Path]:
+    """C4: the interpreter that dispatches, plus the editable-install roots it sees."""
+    out = [Path(sys.prefix).resolve(), Path(os.path.realpath(sys.base_prefix))]
+    purelib = sysconfig.get_paths().get("purelib")
+    site = Path(purelib) if purelib else None
+    if site is not None and site.is_dir():
+        for pth in sorted(site.glob("*.pth")):
+            try:
+                lines = pth.read_text().splitlines()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for line in lines:
+                entry = line.strip()
+                if not entry or entry.startswith(("#", "import ")):
+                    continue
+                candidate = Path(entry) if Path(entry).is_absolute() else site / entry
+                if candidate.is_dir():
+                    out.append(candidate.resolve())
+    return [p for p in out if p.is_dir()]
+
+
+def _scieflow_root() -> Path:
+    """The source checkout of the running scieflow package, else its install dir."""
+    import scieflow
+    pkg = Path(scieflow.__file__).resolve().parent
+    if pkg.parent.name == "src" and (pkg.parent.parent / "pyproject.toml").is_file():
+        return pkg.parent.parent
+    return pkg.parent
+
+
+def _launcher(name: str) -> tuple[Path | None, list[tuple[Path, str]], Path | None]:
+    """A host launcher's directory, its symlink hops, and its final file (C7)."""
+    which = shutil.which(name)
+    if which is None:
+        return None, [], None
+    path = Path(os.path.abspath(which))
+    hops: list[tuple[Path, str]] = []
+    for _ in range(_MAX_LINK_HOPS):
+        if not path.is_symlink():
+            break
+        target = os.readlink(path)
+        hops.append((path, target))
+        path = Path(os.path.normpath(target if Path(target).is_absolute() else path.parent / target))
+    return Path(os.path.abspath(which)).parent, hops, Path(os.path.realpath(which))
+
+
+def dispatch_layout(project: Project, *, run_dir: Path, agent: str) -> Layout:
+    """The S1 layout for one agent dispatch: project, Python, ScieFlow, uv, own home.
+
+    Reads only (stat/lstat/readlink), so a resolution can happen before any write.
+    The project root is bound read-only (D3); the writable run is bound over it.
+    The interpreter's symlinked ancestors are recreated as links unless a bound
+    path already shows them, so `sys.executable` resolves inside the sandbox (C4).
+    """
+    _check_agent_name(agent)
+    run = Path(run_dir).resolve()
+    home = agent_home_path(run, agent)
+    launcher_dir, hops, uv_final = _launcher("uv")
+    candidates = [project.root.resolve(), *_python_runtime(), _scieflow_root().resolve()]
+    if uv_final is not None:
+        candidates.append(uv_final)
+    readable = tuple(p for p in _outermost(candidates) if not _in_system_set(p))
+    for entry in readable:
+        check_not_denied(entry, kind="readable")
+    interpreter = Path(os.path.abspath(sys.executable))
+    links = [*hops, *((p, os.readlink(p)) for p in reversed(interpreter.parents) if p.is_symlink())]
+    kept_links: list[tuple[Path, str]] = []
+    for link, target in links:
+        covered = _in_system_set(link) or any(link == r or r in link.parents for r in readable)
+        if not covered and link not in [k for k, _ in kept_links]:
+            kept_links.append((link, target))
+    return Layout(readable=readable, links=tuple(kept_links), home=home,
+                  launcher_dirs=(launcher_dir,) if launcher_dir is not None else ())
+
+
+def _launcher_path_needed(directory: Path, layout: Layout) -> bool:
+    """A launcher dir joins PATH only when no bound system or readable path covers it (A17)."""
+    if str(directory) in SYSTEM_PATH or _in_system_set(directory):
+        return False
+    return not any(directory == r or r in directory.parents for r in layout.readable)
+
+
+def dispatch_environment(base: Path, *, layout: Layout, env: dict | None = None) -> dict:
+    """`environment(base)` with HOME = the agent home and PATH = the sandbox PATH (C6)."""
+    out = environment(base) if env is None else environment(base, env)
+    if layout.home is not None:
+        out["HOME"] = str(layout.home)
+    dirs = [str(d) for d in layout.launcher_dirs if _launcher_path_needed(d, layout)]
+    out["PATH"] = ":".join([*dict.fromkeys(dirs), *SYSTEM_PATH])
     return out
 
 
@@ -525,8 +902,15 @@ def _capture_path_facts(seeds: list[Path]) -> tuple[ProtectionPath, ...]:
     return tuple(facts[p] for p in sorted(facts, key=str))
 
 
-def resolve_turn_protection(project: Project, *, run_dir: Path) -> TurnProtection:
-    """Capture policy and both grant envelopes without run/agent/charter semantics."""
+def resolve_turn_protection(project: Project, *, run_dir: Path,
+                            prepare_home: Callable[[Path], None] | None = None) -> TurnProtection:
+    """Capture policy and both grant envelopes without run/agent/charter semantics.
+
+    `prepare_home`, when given, runs for a SANDBOXED run only, right after the one policy
+    read and before any path fact is captured. The turn path passes the agent's home
+    creation here (F3): the sandbox flag comes from this single read, and the directory
+    exists before the admission facts record it.
+    """
     try:
         root = project.root.resolve(strict=True)
         workspace = (root / 'workspace').resolve(strict=True)
@@ -538,6 +922,8 @@ def resolve_turn_protection(project: Project, *, run_dir: Path) -> TurnProtectio
         policy = root / ALLOWLIST_FILE
         data, digest, policy_fact = _capture_turn_policy(policy)
         enabled = run.name not in _unsandboxed_of(data, policy)
+        if enabled and prepare_home is not None:
+            prepare_home(run)
         allowlist = tuple(_allowlist_of(data, root, policy))
         narrowed = (run, *allowlist)
         broad = (workspace, *allowlist)

@@ -33,7 +33,7 @@ from pathlib import Path
 import yaml
 
 from scieflow import research
-from scieflow.core import drafts, jobs
+from scieflow.core import drafts, jobs, sandbox
 
 LATEXMK = "latexmk"
 PREVIEW_DIR = "manuscript/curation/preview"
@@ -243,6 +243,16 @@ def assemble(ws: Path, source: str, dest: Path) -> Path:
     return main
 
 
+def compile_layout() -> sandbox.Layout:
+    """The compile's allow-list view: the system set plus Debian's TeX formats.
+
+    No home and no project root: the compile reads its sources from the run
+    grant, and `compile_env` points HOME at the compile's own cache.
+    """
+    texmf = Path("/var/lib/texmf")
+    return sandbox.Layout(readable=(texmf,) if texmf.is_dir() else ())
+
+
 def compile_cache(ws: Path) -> Path:
     """The one shared kpathsea scratch tree this run's previews compile
     against, created if absent. See `run_compile` for why it is shared.
@@ -336,4 +346,5 @@ def run_compile(project, ws: Path, main: Path, writable: list[Path]) -> jobs.Job
                              cwd=main.parent, run_dir=ws,
                              label=f"preview {main.parent.name}",
                              sandbox_writable=writable,
+                             sandbox_layout=compile_layout(),
                              env=compile_env(compile_cache(ws)))

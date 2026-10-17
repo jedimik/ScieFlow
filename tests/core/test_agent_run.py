@@ -905,7 +905,11 @@ def test_k_single_resolution_and_pure_snapshot(k_conversational_project, monkeyp
     resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws,
                                      session='k-existing', cwd=Path('workspace/r1'))
     assert counts == dict.fromkeys(counts, 1)
-    assert resolved.cwd == ws and resolved.env_items == (('SYNTHETIC_ENV', 'original'),)
+    assert resolved.cwd == ws
+    # The turn env is the captured snapshot plus its own HOME and sandbox PATH (S1).
+    env = dict(resolved.env_items)
+    assert set(env) == {'SYNTHETIC_ENV', 'HOME', 'PATH'} and env['SYNTHETIC_ENV'] == 'original'
+    assert env['HOME'] == str(ws.resolve() / 'scratch' / 'agent-home' / 'k-protocol-fixture')
     assert 'SYNTHETIC_ENV' not in repr(resolved)
     registry['k-protocol-fixture']['session_cmd'] = 'mutated {prompt}'
     registry['k-protocol-fixture']['model'] = 'mutated'

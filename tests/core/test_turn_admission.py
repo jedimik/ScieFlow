@@ -345,7 +345,7 @@ def _live_inert_job(project, ws):
     try:
         command = f'printf ready > {shlex.quote(str(ready))}; read value < {shlex.quote(str(wait))}'
         job, proc = jobs.start(project, ['/bin/sh', '-c', command], kind='turn', cwd=ws,
-                               run_dir=ws, sandbox_writable=[ws], timeout_s=30)
+                               run_dir=ws, sandbox_writable=[ws], env=dict(os.environ), timeout_s=30)
         assert select.select([fd], [], [], 10)[0], 'inert child never acknowledged running'
         assert os.read(fd, 5) == b'ready' and proc.poll() is None
         return job, proc

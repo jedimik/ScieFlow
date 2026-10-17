@@ -28,9 +28,10 @@ def test_wrap_builds_a_read_only_root_with_granted_binds(monkeypatch, tmp_path):
     run = tmp_path / "run"
     run.mkdir()
     argv = sandbox.wrap(["agent", "--flag"], writable=[run], cwd=run)
-    assert argv[0] == sandbox.BWRAP
+    assert argv[0] == "/usr/bin/bwrap"            # A13: the absolute path, not "bwrap"
     joined = " ".join(argv)
-    assert "--ro-bind / /" in joined              # everything read-only first
+    assert "--ro-bind / /" not in joined          # D1: no whole-root bind
+    assert "--ro-bind /usr /usr" in joined        # the read-only system set
     assert f"--bind {run} {run}" in joined        # then the grant on top
     assert "--tmpfs /tmp" in joined
     assert "--die-with-parent" in joined          # must not outlive a cancelled job
@@ -43,7 +44,7 @@ def test_wrap_creates_missing_writable_directories(monkeypatch, tmp_path):
     has no uv cache, and the failure would otherwise be a cryptic bwrap error."""
     monkeypatch.setattr(sandbox.shutil, "which", lambda name: "/usr/bin/bwrap")
     absent = tmp_path / "not" / "created" / "yet"
-    sandbox.wrap(["echo"], writable=[absent], cwd=tmp_path)
+    sandbox.wrap(["echo"], writable=[absent], cwd=absent)
     assert absent.is_dir()
 
 
@@ -454,7 +455,7 @@ def _vandalise(project, run: Path, **launch) -> None:
     repo = run / "provenance.git"
     script = _VANDAL.format(repo=repo, run=run)
     jobs.run_blocking(project, ["/bin/sh", "-c", script], kind="agent", cwd=run,
-                      run_dir=run, sandbox_writable=writable, **launch)
+                      run_dir=run, sandbox_writable=writable, env=sandbox.environment(run), **launch)
     assert (run / "inside").exists()          # the sandbox ran; the grant still works
 
 
@@ -524,7 +525,8 @@ def test_an_agent_grant_masks_exactly_the_runs_provenance_repo(tmp_path):
     project = make_project(tmp_path)
     run = project.run_dir("r1")
     writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
-    assert sandbox.masks_for(writable, run_dir=run) == [run.resolve() / "provenance.git"]
+    assert sandbox.masks_for(writable, run_dir=run) == [
+        run.resolve() / "provenance.git", run.resolve() / "scratch" / "agent-home"]
     assert sandbox.masks_for(writable, run_dir=None) == []
 
 
@@ -544,9 +546,9 @@ def test_jobs_start_passes_the_mask_through_to_wrap(monkeypatch, tmp_path):
     monkeypatch.setattr(sandbox, "wrap", fake_wrap)
     writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
     _, proc = jobs.start(project, ["agent"], kind="agent", cwd=run, run_dir=run,
-                         sandbox_writable=writable)
+                         sandbox_writable=writable, env={})
     proc.wait()
-    assert seen["mask"] == [run.resolve() / "provenance.git"]
+    assert seen["mask"] == [run.resolve() / "provenance.git", run.resolve() / "scratch" / "agent-home"]
 
 
 # --- Independent K protection producer: no manager or run semantics ---
@@ -580,7 +582,7 @@ def test_k_protection_policy_loaded_once(k_conversational_project, monkeypatch):
     assert protection.writable == (ws, extra / 'missing')
     assert protection.allowlist == (extra / 'missing',)
     assert protection.coordinator_writable == (project.workspace_root, extra / 'missing')
-    assert protection.masks == (ws / 'provenance.git',)
+    assert protection.masks == (ws / 'provenance.git', ws / 'scratch' / 'agent-home')
     assert protection.policy_sha256 == hashlib.sha256(raw).hexdigest()
     facts = {fact.path: fact for fact in protection.path_facts}
     assert facts[alias].link_target == str(extra) and facts[alias].resolved == extra
@@ -772,6 +774,7 @@ def test_k_t3_real_child_cannot_replace_admission_with_host_positive(project):
     ws = project.run_dir('r1')
     provenance = ws / 'provenance.git'
     provenance.mkdir()
+    sandbox.agent_home(ws, 'probe-agent')   # the turn path creates this before capture
     original = provenance / 'sentinel'
     original.write_bytes(b'original provenance')
     digest = hashlib.sha256(original.read_bytes()).hexdigest()

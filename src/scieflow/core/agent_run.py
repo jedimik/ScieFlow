@@ -60,6 +60,7 @@ class Dispatch:
     run_dir: Path | None
     writable: list[Path] | None = None    # None means this dispatch is unsandboxed
     env: dict | None = None               # None means inherit this process's
+    layout: sandbox.Layout | None = None  # the allow-list view; verify and launch share it
 
 
 def _prompt_via_stdin_safe(template: str) -> bool:
@@ -179,6 +180,14 @@ def owning_run_workspace(prompt_file: Path) -> Path | None:
         joined = ", ".join(str(candidate) for candidate in candidates)
         raise ValueError(f"prompt is nested below multiple run workspaces: {joined}")
     return candidates[0] if candidates else None
+
+
+def refusal_run_dir(prompt_file: Path) -> Path | None:
+    """The run a refused prompt belongs to, so its job.refused can be recorded (F13)."""
+    try:
+        return owning_run_workspace(Path(prompt_file))
+    except (OSError, ValueError):
+        return None
 
 
 def load_prompt_override(prompt_file: Path, agent: str) -> dict:
@@ -328,13 +337,15 @@ def prepare(project: Project, agent: str, prompt_file: Path,
     use_sandbox = sandbox_enabled and not disabled
     writable = (sandbox.writable_for(project, run_dir=run_dir, coordinator=False)
                 if use_sandbox else None)
-    # A sandboxed dispatch gets its own uv cache, inside the run it may write;
-    # sharing the host's would let it hardlink into the host virtualenv.
-    env = sandbox.environment(writable[0]) if writable is not None else None
+    # The allow-list view and the dispatch's own HOME (D1, D2). Read-only here:
+    # the home directory itself is created by wrap(), next to the writable mkdir.
+    layout = (sandbox.dispatch_layout(project, run_dir=run_dir, agent=agent)
+              if writable is not None else None)
+    env = sandbox.dispatch_environment(writable[0], layout=layout) if layout is not None else None
     return Dispatch(agent=agent, argv=argv, cwd=cwd,
                     stdin_text=prompt if use_stdin else None,
                     timeout_s=float(agent_cfg.get("timeout_min", 10)) * 60,
-                    run_dir=run_dir, writable=writable, env=env)
+                    run_dir=run_dir, writable=writable, env=env, layout=layout)
 
 
 def _validate_turn_record(record) -> None:
@@ -354,6 +365,8 @@ def _validate_turn_record(record) -> None:
         elif f.name == 'env_items':
             valid = value is None or (type(value) is tuple and all(type(pair) is tuple and
                     len(pair) == 2 and all(type(item) is str for item in pair) for pair in value))
+        elif f.name == 'layout':
+            valid = value is None or type(value) is sandbox.Layout
         elif f.name == 'argv':
             valid = type(value) is tuple and bool(value) and all(type(item) is str for item in value)
         elif f.name in ('accepted_bytes', 'composed_bytes'):
@@ -394,6 +407,7 @@ class ResolvedTurn:
     charter_sha256: str
     execution_path: Path | None = None
     execution_facts: tuple[sandbox.ProtectionPath, ...] = ()
+    layout: sandbox.Layout | None = None
 
     def __post_init__(self):
         _validate_turn_record(self)
@@ -401,7 +415,10 @@ class ResolvedTurn:
 
 @dataclass(frozen=True, slots=True)
 class PreparedTurn:
-    """Pure accepted/composed bytes and immutable launch inputs, never a Dispatch alias."""
+    """Pure accepted/composed bytes and immutable launch inputs, never a Dispatch alias.
+
+    The `layout` is the one resolve_turn captured: verify and launch both use it.
+    """
     agent: str
     family: str
     run_dir: Path
@@ -423,6 +440,7 @@ class PreparedTurn:
     policy_revision: str
     execution_path: Path | None = None
     execution_facts: tuple[sandbox.ProtectionPath, ...] = ()
+    layout: sandbox.Layout | None = None
 
     def __post_init__(self):
         _validate_turn_record(self)
@@ -479,9 +497,12 @@ def _capture_execution(token: str, cwd: Path, env: dict):
 
 
 def resolve_turn(project: Project, agent: str, *, run_dir: Path,
-                 session: str | None, cwd: Path | None = None) -> ResolvedTurn:
+                 session: str | None, cwd: Path | None = None,
+                 create_home: bool = False) -> ResolvedTurn:
     """Full conversational resolution without a prompt file or any writes/launch.
 
+    `create_home` (the live turn path only) creates the agent's sandboxed HOME inside the
+    one protection capture, before its facts are recorded (F3). Without it nothing is written.
     Later consumers must reserve BEFORE calling and validate the SAME protection.
     """
     try:
@@ -527,8 +548,15 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
             raise ValueError('cwd must be a directory')
         if 'sandbox' in data:
             raise sandbox.SandboxError(f'{run / "config.yml"}: {HATCH_MOVED}')
-        protection = sandbox.resolve_turn_protection(project, run_dir=run)
-        env = sandbox.environment(protection.writable[0]) if protection.writable is not None else dict(os.environ)
+        protection = (sandbox.resolve_turn_protection(project, run_dir=run) if not create_home else
+                      sandbox.resolve_turn_protection(
+                          project, run_dir=run,
+                          prepare_home=lambda home_run: sandbox.agent_home(home_run, agent)))
+        # The allow-list view and the turn's own HOME, computed read-only (A12).
+        layout = (sandbox.dispatch_layout(project, run_dir=run, agent=agent)
+                  if protection.sandbox_enabled else None)
+        env = (sandbox.dispatch_environment(protection.writable[0], layout=layout)
+               if layout is not None else dict(os.environ))
         env_items = tuple(env.items())
         agreed = charter.snapshot(run)
         text, version = agreed['text'].strip(), agreed['current']
@@ -546,7 +574,7 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
         return ResolvedTurn(agent, family, root, run, work, session, templates[0], templates[1],
                             model, reasoning, python, PROMPT_ARGV_LIMIT, float(timeout) * 60,
                             protection, env_items, identity, text, version, charter_digest,
-                            execution_path, execution_facts)
+                            execution_path, execution_facts, layout)
     except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError, charter.CharterError) as exc:
         raise DispatchError(f'invalid conversational turn configuration: {exc}') from exc
 
@@ -584,7 +612,8 @@ def prepare_turn(resolved: ResolvedTurn, submission: HumanSubmission) -> Prepare
                         resolved.timeout_s, resolved.protection, resolved.env_items,
                         resolved.harness_identity, raw, composed.encode('utf-8'), submission.mode,
                         submission.selection_revision, 'command-first' if marked else 'charter-first', resolved.charter_version,
-                        resolved.charter_sha256, revision, resolved.execution_path, resolved.execution_facts)
+                        resolved.charter_sha256, revision, resolved.execution_path, resolved.execution_facts,
+                        resolved.layout)
 
 
 def _write(path: Path, text: str) -> None:
@@ -621,6 +650,9 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(str(e))
     except sandbox.SandboxError as e:
         _refuse(args.transcript_file, f"{args.agent}: sandbox refused, {e}\n")
+        run_dir = refusal_run_dir(args.prompt_file)
+        if run_dir is not None:
+            events.emit(run_dir, "job.refused", "system", reason="sandbox", detail=str(e))
         sys.exit(SANDBOX_EXIT)
 
     if d.writable is None:
@@ -630,7 +662,8 @@ def main(argv: list[str] | None = None) -> None:
                             else f"{sandbox.ALLOWLIST_FILE} unsandboxed_runs")
     else:
         try:
-            sandbox.verify(d.writable, d.cwd)
+            sandbox.verify(d.writable, d.cwd, mask=sandbox.masks_for(d.writable, run_dir=d.run_dir),
+                           layout=d.layout)
         except sandbox.SandboxError as e:
             _refuse(args.transcript_file, f"{d.agent}: sandbox refused, {e}\n")
             if d.run_dir is not None:
@@ -649,7 +682,13 @@ def main(argv: list[str] | None = None) -> None:
     try:
         job = jobs.run_blocking(project, d.argv, kind="agent", cwd=d.cwd, run_dir=d.run_dir,
                                 label=d.agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text,
-                                sandbox_writable=d.writable, env=d.env)
+                                sandbox_writable=d.writable, sandbox_layout=d.layout, env=d.env)
+    except sandbox.SandboxError as e:
+        # A11: the launch itself was refused after verify passed.
+        _refuse(args.transcript_file, f"{d.agent}: sandbox refused, {e}\n")
+        if d.run_dir is not None:
+            events.emit(d.run_dir, "job.refused", "system", reason="sandbox", detail=str(e))
+        sys.exit(SANDBOX_EXIT)
     except OSError as e:
         _write(args.transcript_file, f"{d.agent}: failed to launch subprocess: {e}\n")
         sys.exit(f"{d.agent}: failed to launch subprocess: {e}")

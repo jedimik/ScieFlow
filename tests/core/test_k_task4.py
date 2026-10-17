@@ -622,16 +622,18 @@ def test_t4_real_venv_and_parent_alias_preserve_invocation_semantics(k_conversat
     alias.symlink_to(env / 'bin', target_is_directory=True)
     invoke = alias / 'python' if parent_alias else env / 'bin/python'
     probe = ['-B', '-c', 'import json,sys;print(json.dumps({"prefix":sys.prefix,"exe":sys.executable}))']
-    native = subprocess.run(sandbox.wrap([str(invoke), *probe], writable=[ws], cwd=project.root),
+    native = subprocess.run(sandbox.wrap([str(invoke), *probe], writable=[ws], cwd=project.root,
+                                            layout=sandbox.dispatch_layout(project, run_dir=ws, agent='k-protocol-fixture')),
                             env=sandbox.environment(ws), capture_output=True, text=True, check=True)
     expected = json.loads(native.stdout)
     if not parent_alias:
         assert expected['prefix'] == str(env)
-        canonical = subprocess.run(sandbox.wrap([str(invoke.resolve()), *probe], writable=[ws], cwd=project.root),
+        canonical = subprocess.run(sandbox.wrap([str(invoke.resolve()), *probe], writable=[ws], cwd=project.root,
+                                   layout=sandbox.dispatch_layout(project, run_dir=ws, agent='k-protocol-fixture')),
                                    env=sandbox.environment(ws), capture_output=True, text=True, check=True)
         assert json.loads(canonical.stdout)['prefix'] != expected['prefix']
     runner = ws / 'scratch' / 'venv_runner.py'
-    runner.parent.mkdir()
+    runner.parent.mkdir(exist_ok=True)   # the agent home already created scratch/
     runner.write_text('import json, runpy, sys\nprint(json.dumps({"prefix":sys.prefix,"exe":sys.executable}))\n'
                       'sys.argv=sys.argv[1:]\nrunpy.run_path(sys.argv[0], run_name="__main__")\n')
     protocol = Path(__file__).resolve().parents[1] / 'fixtures/k_conversation_protocol.py'
@@ -792,7 +794,8 @@ def test_t4_real_lost_job_and_pending_attempt_never_authorize_replay(k_conversat
     diagnostic['selected_manager'] = 'k-protocol-fixture'
     conversation.add_turn(ws, role='human', text='/scieflow-menu', turn_id=tid, audit=diagnostic)
     job, proc = jobs.start(project, list(prepared.argv), kind='turn', cwd=prepared.cwd, run_dir=ws,
-        env=dict(prepared.env_items), sandbox_writable=list(prepared.protection.writable), turn_audit=diagnostic)
+        env=dict(prepared.env_items), sandbox_writable=list(prepared.protection.writable),
+        sandbox_layout=prepared.layout, turn_audit=diagnostic)
     assert proc.wait(timeout=15) == 0  # Simulate coordinator lost before jobs.wait/finalize.
     lost, = jobs.reconcile(project, ws)
     assert lost.id == job.id and lost.state == 'lost'
@@ -820,8 +823,8 @@ def test_t4_job_captured_masks_and_audit_are_defensively_copied(k_conversational
     def forbidden(*a, **kw): pytest.fail('explicit captured masks recomputed')
     monkeypatch.setattr(sandbox, 'wrap', wrap)
     monkeypatch.setattr(sandbox, 'masks_for', forbidden)
-    job, proc = jobs.start(project, ['/bin/true'], kind='turn', cwd=project.root, run_dir=ws,
-        sandbox_writable=[ws], sandbox_mask=masks, turn_audit=original_audit)
+    job, proc = jobs.start(project, ['/bin/true'], kind='turn', cwd=ws, run_dir=ws,
+        sandbox_writable=[ws], env=dict(__import__('os').environ), sandbox_mask=masks, turn_audit=original_audit)
     actual = jobs.wait(job, proc)
     assert actual.state == 'done' and actual.exit_code == 0 and actual.turn_audit['reason'] == ''
     assert actual.turn_audit['job_id'] == actual.id and original_audit['job_id'] == ''
