@@ -356,7 +356,8 @@ def prepare(project: Project, agent: str, prompt_file: Path,
         layout, credential_env = sandbox.attach_credential(
             layout, sandbox.credentials_of(project, policy=policy), agent=agent, argv=argv,
             located=located, writable=writable, root=project.root)
-        env = sandbox.dispatch_environment(writable[0], layout=layout, credential_env=credential_env)
+        env = sandbox.dispatch_environment(writable[0], layout=layout, credential_env=credential_env,
+                                           writable=writable)
         _check_launcher_capture(cli, cwd, env, located)
     return Dispatch(agent=agent, argv=argv, cwd=cwd,
                     stdin_text=prompt if use_stdin else None,
@@ -596,7 +597,8 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
                 layout, protection.credentials, agent=agent, argv=[first_token],
                 located=located, writable=list(protection.writable), root=root)
         env = (sandbox.dispatch_environment(protection.writable[0], layout=layout,
-                                            credential_env=credential_env)
+                                            credential_env=credential_env,
+                                            writable=list(protection.writable))
                if layout is not None else dict(os.environ))
         env_items = tuple(env.items())
         agreed = charter.snapshot(run)

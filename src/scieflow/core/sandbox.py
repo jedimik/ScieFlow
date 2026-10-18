@@ -541,17 +541,19 @@ def read_probe_results(text, expected) -> None:
             raise SandboxUnavailable(f"confinement proof: check {name} has no verdict")
 
 
-def marker_location(*, outer, binds, candidates) -> Path | None:
-    """A15: the directory for the host marker.
+def marker_location(*, outer, binds, candidates, everywhere=False):
+    """A15: the directory for the host marker, or with `everywhere` every qualifying directory.
 
     It must be writable, an ancestor of an outermost bind, and outside EVERY bind (readable
     binds included), so a marker visible inside the sandbox can only come from a leak. It must
     also lie outside the directories the sandbox overlays (S25fix1 finding 3a): a marker in
     /tmp, /run, /dev, /proc or /sys is replaced by the sandbox's own mount, so it could never
-    show a leak.
+    show a leak. Returns the first qualifying directory (or None); with `everywhere=True`,
+    every qualifying directory in candidate order (N2: HOME env and passwd home may differ).
     """
     outer = [Path(p) for p in outer]
     binds = [Path(p) for p in binds]
+    found: list[Path] = []
     for candidate in dict.fromkeys(Path(c) for c in candidates):
         if not candidate.is_absolute() or not candidate.is_dir():
             continue
@@ -563,8 +565,10 @@ def marker_location(*, outer, binds, candidates) -> Path | None:
             continue
         if not any(candidate in o.parents for o in outer):
             continue
-        return candidate
-    return None
+        if not everywhere:
+            return candidate
+        found.append(candidate)
+    return found if everywhere else None
 
 
 def create_marker(directory: Path, tag: str) -> Path:
@@ -586,15 +590,19 @@ def _probe_binds(grants: list[Path], layout: Layout | None) -> list[Path]:
     return binds
 
 
-def _probe_checks(marker: Path) -> list[tuple[str, Path]]:
-    """The absence checks, each with a stable id; the secret paths of every home (D8, A1)."""
+def _probe_checks(markers) -> list[tuple[str, Path]]:
+    """The absence checks, each with a stable id; the secret paths of every home (D8, A1).
+
+    One host marker per qualifying home (N2): the first is `marker`, the rest `marker:<index>`.
+    """
     checks: list[tuple[str, Path]] = []
     for index, home in enumerate(_homes()):
         checks.append((f"ssh:{index}", home / ".ssh"))
         checks.append((f"hermes:{index}", home / ".hermes"))
     checks.append(("run-user-bus", Path(f"/run/user/{os.getuid()}/bus")))
     checks.append(("system-bus", Path("/run/dbus/system_bus_socket")))
-    checks.append(("marker", marker))
+    for index, marker in enumerate(markers):
+        checks.append(("marker" if index == 0 else f"marker:{index}", marker))
     return checks
 
 
@@ -608,6 +616,18 @@ def _probe_script(sentinel: Path, probe: Path, checks: list[tuple[str, Path]]) -
     parts.append(f" }} > {shlex.quote(str(sentinel))}; ")
     parts.append(f"touch {shlex.quote(str(probe))} 2>/dev/null; true")
     return "".join(parts)
+
+
+def _marker_dirs(*, outer, binds, homes, parents) -> list[Path]:
+    """N2: a marker in every qualifying home (HOME env and passwd home may differ).
+
+    When no home qualifies, the first qualifying ancestor of the outermost binds, as before.
+    """
+    found = marker_location(outer=outer, binds=binds, candidates=homes, everywhere=True)
+    if isinstance(found, list) and found:
+        return list(found)
+    single = marker_location(outer=outer, binds=binds, candidates=parents)
+    return [single] if isinstance(single, Path) else []
 
 
 def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
@@ -640,9 +660,9 @@ def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
     sentinel = grants[0] / f".scieflow-verify-sentinel-{tag}"
     binds = _probe_binds(grants, layout)
     outer = _outermost(binds)
-    marker_dir = marker_location(outer=outer, binds=binds,
-                                 candidates=[*_homes(), *(p for o in outer for p in o.parents)])
-    if marker_dir is None:
+    marker_dirs = _marker_dirs(outer=outer, binds=binds, homes=_homes(),
+                               parents=[p for o in outer for p in o.parents])
+    if not marker_dirs:
         raise SandboxUnavailable(
             "confinement could not be verified: no directory above the sandbox binds, outside "
             "all of them, can hold the host marker")
@@ -652,15 +672,16 @@ def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
     if layout is not None:
         extra["layout"] = layout
 
-    marker: Path | None = None
+    markers: list[Path] = []
     try:
         try:
-            marker = create_marker(marker_dir, tag)
+            for directory in marker_dirs:                                  # N2: each home
+                markers.append(create_marker(directory, tag))
         except OSError as exc:
             raise SandboxUnavailable(
                 f"confinement could not be verified: the host marker cannot be created: {exc}"
             ) from exc
-        checks = _probe_checks(marker)
+        checks = _probe_checks(markers)
 
         # Positive control 1: prove the probe location is writable on the host.
         # If this fails, we cannot draw any conclusion from its later absence.
@@ -693,9 +714,7 @@ def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
             raise SandboxUnavailable("confinement proof: the probe result is unreadable") from exc
         read_probe_results(text, (PROBE_RAN, *(name for name, _path in checks)))
     finally:
-        for path in (probe, sentinel, marker):
-            if path is None:
-                continue
+        for path in (probe, sentinel, *markers):
             try:
                 path.unlink(missing_ok=True)
             except Exception:
@@ -1120,13 +1139,31 @@ def _launcher_path_needed(directory: Path, layout: Layout) -> bool:
     return not (str(directory) in SYSTEM_PATH or _in_system_set(directory))
 
 
+def _check_launcher_grants(directory: Path, grants) -> None:
+    """N1 (review re-review 1): a launcher dir that joins PATH must not lie inside a writable grant.
+
+    Checked lexically and by realpath. An agent that could write there could plant an executable
+    that a later dispatch in the same run resolves by name. Refused, never silently skipped.
+    """
+    resolved = [Path(grant).resolve() for grant in grants]
+    for where in dict.fromkeys([Path(directory).absolute(), Path(os.path.realpath(directory))]):
+        for grant in resolved:
+            if where == grant or grant in where.parents:
+                raise SandboxError(
+                    f"launcher directory {where} lies inside a writable grant {grant}; refused: "
+                    "an agent could plant an executable on the sandbox PATH")
+
+
 def dispatch_environment(base: Path, *, layout: Layout, env: dict | None = None,
-                         credential_env: dict | None = None) -> dict:
+                         credential_env: dict | None = None, writable=None) -> dict:
     """The C12 allow-list environment: HOME = the agent home, PATH = the sandbox PATH (C6).
 
     Every inherited variable not on the allow-list is dropped (D7, C12). What `environment()`
     itself adds is kept, so `environment(base)` stays the one place that builds the base.
     `credential_env` holds only this agent's own token variable (C10, attach_credential).
+    `writable` is every writable grant of the dispatch; a launcher dir that joins PATH must lie
+    outside all of them (N1). None checks against `base` alone, which is the run and the first
+    grant at both call sites.
     """
     inherited = os.environ if env is None else env
     out = environment(base) if env is None else environment(base, env)
@@ -1136,7 +1173,11 @@ def dispatch_environment(base: Path, *, layout: Layout, env: dict | None = None,
     out.update(credential_env or {})
     if layout.home is not None:
         out["HOME"] = str(layout.home)
-    dirs = [str(d) for d in layout.launcher_dirs if _launcher_path_needed(d, layout)]
+    grants = [base] if writable is None else writable
+    joining = [d for d in layout.launcher_dirs if _launcher_path_needed(d, layout)]
+    for directory in joining:
+        _check_launcher_grants(directory, grants)
+    dirs = [str(d) for d in joining]
     out["PATH"] = ":".join([*dict.fromkeys(dirs), *SYSTEM_PATH])
     return out
 

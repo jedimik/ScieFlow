@@ -658,7 +658,7 @@ def test_the_resolv_check_does_not_refuse_the_runtime_area_dns_needs(monkeypatch
     sandbox.check_not_denied(Path("/run/systemd/resolve/stub-resolv.conf"), kind="resolv")
 
 
-def test_a_launcher_inside_a_bound_root_adds_nothing_to_path(tmp_path):
+def test_a_launcher_dir_reaches_path_unless_it_is_a_system_dir(tmp_path):
     """F12 / A17, narrowed by S25fix1 (review finding 5): a launcher dir under a bound SYSTEM path adds
     nothing to PATH. A dir that is only covered by a readable bind (a project-local install) is
     added, because a covered-but-off-PATH launcher made the dispatch refuse (see the review's probe)."""
