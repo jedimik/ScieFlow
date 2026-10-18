@@ -774,7 +774,7 @@ def test_k_t3_real_child_cannot_replace_admission_with_host_positive(project):
     ws = project.run_dir('r1')
     provenance = ws / 'provenance.git'
     provenance.mkdir()
-    sandbox.agent_home(ws, 'probe-agent')   # the turn path creates this before capture
+    sandbox.agent_home(ws, 'probe-agent')   # the turn path creates its home in the protection capture (F3)
     original = provenance / 'sentinel'
     original.write_bytes(b'original provenance')
     digest = hashlib.sha256(original.read_bytes()).hexdigest()

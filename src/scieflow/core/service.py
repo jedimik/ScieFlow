@@ -670,7 +670,7 @@ def _say_prepared(project, reservation, submission, actor):
         # reservation, before any admission fact is recorded: a protected directory that
         # appeared only at launch would read as a changed path and refuse the turn. Only
         # a sandboxed turn gets one (F3). The agent name is checked on every path.
-        sandbox._check_agent_name(doc['agent'])
+        sandbox.check_agent_name(doc['agent'])
         accepted_revision = conversation.selection_revision(doc)
         resolved = agent_run.resolve_turn(project, doc['agent'], run_dir=ws, session=doc['session'],
                                           create_home=True)
@@ -1453,7 +1453,12 @@ def set_conversation_agent(project: Project, slug: str, agent: str,
         if _turn_in_flight(project, ws):
             raise ServiceError("a turn is still running; wait for it or cancel it")
         with _target_registry(project) as (registry, revalidate_registry):
-            protection = sandbox.resolve_turn_protection(project, run_dir=ws)
+            try:
+                protection = sandbox.resolve_turn_protection(project, run_dir=ws)
+            except sandbox.SandboxError as exc:
+                # S2: a refused readable:/policy capture is recorded on the run, as every turn refusal is.
+                events.emit(ws, 'job.refused', 'system', reason='sandbox', detail=str(exc))
+                raise ServiceError(str(exc)) from exc
             reservation.validate_protection(protection)
             _validate_conversation_target(agent, registry)
             reservation.validate_protection(protection)

@@ -781,3 +781,441 @@ def test_a_turn_launch_refusal_is_service_error_and_job_refused(k_conversational
     with pytest.raises(service.ServiceError):
         service.say(project, "r1", "hello")
     assert "job.refused" in [e["type"] for e in events.read(ws)]
+
+
+# --- S2: readable: grammar, hard deny list, refusals, C14 masks, other runs' homes ---
+# Plan r2 section 3 S2, design D5, C8, C9, C14, A1, A2 and the S1 re-review NITs N1-N4.
+
+def _policy(root: Path, text: str) -> Project:
+    (root / "config").mkdir(parents=True, exist_ok=True)
+    (root / "config" / "sandbox.yml").write_text(text)
+    return Project(root)
+
+
+def _readable_yaml(*entries) -> str:
+    """A config/sandbox.yml whose readable: list holds one (path, reason) entry per pair."""
+    return "readable:\n" + "".join(f"  - path: {p}\n    reason: {r}\n" for p, r in entries)
+
+
+def _two_homes(monkeypatch, tmp_path_factory):
+    """Both homes the deny table consults: a fake HOME-env home and a fake passwd home."""
+    env_home = tmp_path_factory.mktemp("home").resolve()
+    passwd_home = tmp_path_factory.mktemp("home").resolve()
+    monkeypatch.setenv("HOME", str(env_home))
+    monkeypatch.setattr(sandbox, "_homes", lambda: sorted({env_home, passwd_home}, key=str))
+    return env_home, passwd_home
+
+
+def _make_secret_tree(home: Path) -> None:
+    for d in (".ssh", ".gnupg", ".hermes", ".config/scieflow/credentials", ".claude", ".codex", ".gemini"):
+        (home / d).mkdir(parents=True, exist_ok=True)
+    for f in (".ssh/id_ed25519", ".hermes/.env", ".config/scieflow/credentials/a.token",
+              ".claude.json", ".codex/auth.json"):
+        (home / f).parent.mkdir(parents=True, exist_ok=True)
+        (home / f).write_text("FAKE")
+
+
+_DENIED_UNDER_HOME = [".", ".ssh", ".ssh/id_ed25519", ".gnupg", ".hermes", ".hermes/.env",
+                      ".config/scieflow/credentials", ".config/scieflow/credentials/a.token",
+                      ".claude", ".claude.json", ".codex", ".codex/auth.json", ".gemini"]
+_RUNTIME_SOCKETS = ["/run", "/run/user/1000/bus", "/var/run", "/proc", "/sys", "/dev"]
+
+
+def test_s2_readable_is_empty_when_the_key_is_absent(tmp_path):
+    assert sandbox.readable_paths(_policy(tmp_path / "a", "writable: []\n")) == ()
+    assert sandbox.readable_paths(_policy(tmp_path / "b", "")) == ()
+
+
+def test_s2_readable_accepts_absolute_home_and_project_relative_entries(tmp_path, tmp_path_factory, monkeypatch):
+    env_home, _ = _two_homes(monkeypatch, tmp_path_factory)
+    root = tmp_path / "repo"
+    (root / "data").mkdir(parents=True)
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    (env_home / "shared").mkdir()
+    project = _policy(root, _readable_yaml((str(extra), "absolute"), ("~/shared", "home"), ("data", "relative")))
+    assert sandbox.readable_paths(project) == (
+        extra.resolve(), (env_home / "shared").resolve(), (root / "data").resolve())
+
+
+@pytest.mark.parametrize("text", [
+    "readable: data\n",                                    # not a list
+    "readable:\n  - data\n",                               # entry not a mapping
+    "readable:\n  - reason: why\n",                        # no path
+    "readable:\n  - path: ''\n    reason: why\n",          # empty path
+    "readable:\n  - path: 5\n    reason: why\n",            # path not text
+    "readable:\n  - path: data\n",                         # no reason
+    "readable:\n  - path: data\n    reason: ''\n",         # empty reason
+    "readable:\n  - path: no-such-dir\n    reason: why\n",  # path does not exist
+])
+def test_s2_malformed_readable_entries_are_refused(tmp_path, text):
+    (tmp_path / "repo" / "data").mkdir(parents=True)
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.readable_paths(_policy(tmp_path / "repo", text))
+
+
+@pytest.mark.parametrize("which", ["env", "passwd"])
+@pytest.mark.parametrize("rel", _DENIED_UNDER_HOME)
+def test_s2_readable_refuses_every_hard_denied_path_under_either_home(
+        tmp_path, tmp_path_factory, monkeypatch, which, rel):
+    env_home, passwd_home = _two_homes(monkeypatch, tmp_path_factory)
+    for home in (env_home, passwd_home):
+        _make_secret_tree(home)
+    home = env_home if which == "env" else passwd_home
+    root = tmp_path / "repo"
+    root.mkdir()
+    target = home / rel
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.readable_paths(_policy(root, _readable_yaml((str(target), "test"))))
+
+
+@pytest.mark.parametrize("path", ["/", "/home", "PARENT", *_RUNTIME_SOCKETS])
+def test_s2_readable_refuses_home_ancestors_and_runtime_sockets(tmp_path, tmp_path_factory, monkeypatch, path):
+    env_home, _ = _two_homes(monkeypatch, tmp_path_factory)
+    root = tmp_path / "repo"
+    root.mkdir()
+    target = str(env_home.parent) if path == "PARENT" else path
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.readable_paths(_policy(root, _readable_yaml((target, "test"))))
+
+
+def test_s2_readable_refuses_a_symlink_that_resolves_into_a_denied_path(tmp_path, tmp_path_factory, monkeypatch):
+    env_home, _ = _two_homes(monkeypatch, tmp_path_factory)
+    _make_secret_tree(env_home)
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "alias").symlink_to(env_home / ".ssh", target_is_directory=True)
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.readable_paths(_policy(root, _readable_yaml(("alias", "link"))))
+
+
+def test_s2_a_denied_readable_entry_is_exit_77_and_recorded_on_the_cli(tmp_path, monkeypatch):
+    from scieflow.core import events
+    root = _repo(tmp_path)
+    run = root / "workspace" / "r1"
+    prompt = run / "logs" / "p.md"
+    prompt.write_text("echo hi")
+    (root / "config" / "sandbox.yml").write_text(_readable_yaml(("/run", "denied by test")))
+    monkeypatch.chdir(root)
+    with pytest.raises(SystemExit) as exc:
+        agent_run.main(["tracer", str(prompt), str(run / "logs" / "t.md")])
+    assert exc.value.code == 77
+    assert "job.refused" in [e["type"] for e in events.read(run)]
+
+
+def test_s2_a_denied_readable_entry_is_a_service_error_and_recorded(tmp_path):
+    from scieflow.core import events
+    root = _repo(tmp_path)
+    project = Project(root)
+    run = project.run_dir("r1")
+    prompt = run / "logs" / "p.md"
+    prompt.write_text("echo hi")
+    (root / "config" / "sandbox.yml").write_text(_readable_yaml(("/run", "denied by test")))
+    with pytest.raises(service.ServiceError, match="runtime socket"):
+        service.dispatch_agent(project, "tracer", prompt, run / "logs" / "t.md")
+    assert "job.refused" in [e["type"] for e in events.read(run)]
+
+
+def test_s2_a_denied_readable_entry_refuses_a_turn_before_launch(k_conversational_project):
+    from scieflow.core import events
+    project, ws, _ = k_conversational_project
+    service.set_conversation_agent(project, "r1", "k-protocol-fixture")
+    (project.root / "config" / "sandbox.yml").write_text(_readable_yaml(("/run", "denied by test")))
+    with pytest.raises(service.ServiceError):
+        service.say(project, "r1", "hello")
+    assert "job.refused" in [e["type"] for e in events.read(ws)]
+
+
+def test_s2_a_denied_readable_entry_refuses_setting_the_turn_agent(k_conversational_project):
+    from scieflow.core import events
+    project, ws, _ = k_conversational_project
+    (project.root / "config" / "sandbox.yml").write_text(_readable_yaml(("/run", "denied by test")))
+    with pytest.raises(service.ServiceError, match="runtime socket"):
+        service.set_conversation_agent(project, "r1", "k-protocol-fixture")
+    assert "job.refused" in [e["type"] for e in events.read(ws)]
+
+
+def test_s2_the_cli_reads_the_policy_once_and_carries_readable_into_the_layout(tmp_path, tmp_path_factory, monkeypatch):
+    root = _repo(tmp_path)
+    run = root / "workspace" / "r1"
+    prompt = run / "logs" / "p.md"
+    prompt.write_text("echo hi")
+    extra = tmp_path_factory.mktemp("extra")           # outside the repo: inside it, it is already readable
+    (root / "config" / "sandbox.yml").write_text(_readable_yaml((str(extra), "cli test")))
+    reads = []
+    real_load = sandbox._load_allowlist
+
+    def counting(project):
+        reads.append(project.root)
+        return real_load(project)
+    monkeypatch.setattr(sandbox, "_load_allowlist", counting)
+    d = agent_run.prepare(Project(root), "tracer", prompt)
+    assert len(reads) == 1                                        # A2: one captured policy read
+    assert d.writable is not None and extra.resolve() in d.layout.readable
+
+
+def test_s2_the_turn_captures_readable_from_the_one_policy_read(k_conversational_project, tmp_path_factory):
+    project, ws, _ = k_conversational_project
+    extra = tmp_path_factory.mktemp("extra").resolve()
+    (project.root / "config" / "sandbox.yml").write_text(_readable_yaml((str(extra), "turn test")))
+    protection = sandbox.resolve_turn_protection(project, run_dir=ws)
+    assert protection.readable == (extra,)
+    resolved = agent_run.resolve_turn(project, "k-protocol-fixture", run_dir=ws, session=None)
+    assert extra in resolved.layout.readable
+
+
+def test_s2_a_readable_policy_edit_after_resolve_fails_admission(k_conversational_project, tmp_path_factory):
+    from scieflow.core import turn_admission
+    project, ws, _ = k_conversational_project
+    extra = tmp_path_factory.mktemp("extra").resolve()
+    policy = project.root / "config" / "sandbox.yml"
+    policy.write_text(_readable_yaml((str(extra), "turn test")))
+    with turn_admission.reserve(project, ws) as held:
+        protection = sandbox.resolve_turn_protection(project, run_dir=ws)
+        held.validate_protection(protection)
+        policy.write_text(_readable_yaml((str(extra), "turn test"), ("/usr/share/doc", "edited")))
+        with pytest.raises(turn_admission.AdmissionUnsafe):
+            held.validate_protection(protection)
+
+
+def test_s2_validate_protection_refuses_a_tampered_readable(k_conversational_project, tmp_path_factory):
+    import dataclasses
+    from scieflow.core import turn_admission
+    project, ws, _ = k_conversational_project
+    extra = tmp_path_factory.mktemp("extra").resolve()
+    other = tmp_path_factory.mktemp("other").resolve()
+    (project.root / "config" / "sandbox.yml").write_text(_readable_yaml((str(extra), "turn test")))
+    with turn_admission.reserve(project, ws) as held:
+        protection = sandbox.resolve_turn_protection(project, run_dir=ws)
+        held.validate_protection(protection)
+        with pytest.raises(turn_admission.AdmissionUnsafe):
+            held.validate_protection(dataclasses.replace(protection, readable=(other,)))
+
+
+def test_s2_layout_hidden_must_be_a_tuple_of_absolute_paths():
+    assert sandbox.Layout(hidden=(Path("/x"),)).hidden == (Path("/x"),)
+    with pytest.raises(TypeError):
+        sandbox.Layout(hidden=("relative",))
+    with pytest.raises(TypeError):
+        sandbox.Layout(hidden=[Path("/x")])
+
+
+def test_s2_readable_binds_after_the_system_set_and_before_the_writable_run(fake_bwrap, tmp_path):
+    extra = (tmp_path / "extra").resolve()
+    extra.mkdir()
+    run = (tmp_path / "repo" / "workspace" / "r1").resolve()
+    run.mkdir(parents=True)
+    argv = sandbox.wrap(["/bin/true"], writable=[run], cwd=run,
+                        layout=sandbox.Layout(readable=(extra,)))
+    at = _at(argv, "--ro-bind", str(extra), str(extra))
+    assert _at(argv, "--tmpfs", "/run") < at < _at(argv, "--bind", str(run), str(run))
+
+
+def test_s2_a_readable_grant_inside_a_writable_grant_is_refused_not_shadowed(fake_bwrap, tmp_path):
+    """A readable entry under a writable grant would silently be writable: refused, not bound."""
+    root = (tmp_path / "repo").resolve()
+    run = root / "workspace" / "r1"
+    (run / "data").mkdir(parents=True)
+    with pytest.raises(sandbox.SandboxError, match="writable grant"):
+        sandbox.wrap(["/bin/true"], writable=[run], cwd=run,
+                     layout=sandbox.Layout(readable=((run / "data").resolve(),)))
+
+
+def test_s2_project_secret_files_are_discovered_and_only_those(tmp_path):
+    root = (tmp_path / "repo").resolve()
+    run = root / "workspace" / "r1"
+    run.mkdir(parents=True)
+    (root / ".env").write_text("A=1")
+    (root / ".env.local").write_text("B=2")
+    (root / ".env.example").write_text("C=3")
+    (root / ".env_template").write_text("D=4")
+    (root / ".env.d").mkdir()
+    (root / ".dvc").mkdir()
+    (root / ".dvc" / "config.local").write_text("E=5")
+    layout = sandbox.dispatch_layout(Project(root), run_dir=run, agent="tracer")
+    assert set(layout.hidden) == {root / ".env", root / ".env.local", root / ".env.example",
+                                  root / ".env.d", root / ".dvc" / "config.local"}
+
+
+def test_s2_hidden_secrets_overlay_after_readable_and_before_the_writable_run(fake_bwrap, tmp_path):
+    root = (tmp_path / "repo").resolve()
+    run = root / "workspace" / "r1"
+    run.mkdir(parents=True)
+    (root / ".env").write_text("A=1")
+    (root / ".env.d").mkdir()
+    layout = sandbox.dispatch_layout(Project(root), run_dir=run, agent="tracer")
+    argv = sandbox.wrap(["/bin/true"], writable=[run], cwd=run, layout=layout)
+    null_bind = _at(argv, "--ro-bind", "/dev/null", str(root / ".env"))
+    assert _at(argv, "--ro-bind", str(root), str(root)) < null_bind
+    assert _at(argv, "--tmpfs", str(root / ".env.d")) < _at(argv, "--bind", str(run), str(run))
+    assert null_bind < _at(argv, "--bind", str(run), str(run))
+
+
+def test_s2_a_symlinked_project_secret_is_refused(tmp_path):
+    root = (tmp_path / "repo").resolve()
+    run = root / "workspace" / "r1"
+    run.mkdir(parents=True)
+    (tmp_path / "elsewhere").write_text("x")
+    (root / ".env").symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.dispatch_layout(Project(root), run_dir=run, agent="tracer")
+
+
+def test_s2_a_secret_inside_a_writable_grant_is_refused_not_reexposed(fake_bwrap, tmp_path):
+    root = (tmp_path / "repo").resolve()
+    run = root / "workspace" / "r1"
+    run.mkdir(parents=True)
+    (root / ".env").write_text("A=1")
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.wrap(["/bin/true"], writable=[root], cwd=run,
+                     layout=sandbox.Layout(hidden=(root / ".env",)))
+
+
+def test_s2_other_runs_agent_homes_are_hidden_and_symlinks_are_never_followed(tmp_path, tmp_path_factory):
+    root = (tmp_path / "repo").resolve()
+    ws = root / "workspace"
+    r1, r2 = ws / "r1", ws / "r2"
+    (r1 / "scratch" / "agent-home" / "alpha").mkdir(parents=True)
+    (r1 / "scratch" / "agent-home" / "alpha" / "session.json").write_text("FAKE")
+    r2.mkdir(parents=True)
+    decoy = tmp_path_factory.mktemp("decoy").resolve()
+    (decoy / "agent-home" / "gamma").mkdir(parents=True)
+    r3 = ws / "r3"                                   # symlinked scratch: skipped, target untouched
+    r3.mkdir()
+    (r3 / "scratch").symlink_to(decoy, target_is_directory=True)
+    r4 = ws / "r4"                                   # symlinked agent-home: skipped
+    (r4 / "scratch").mkdir(parents=True)
+    (r4 / "scratch" / "agent-home").symlink_to(decoy / "agent-home", target_is_directory=True)
+    layout = sandbox.dispatch_layout(Project(root), run_dir=r2, agent="beta")
+    assert set(layout.hidden) == {r1 / "scratch" / "agent-home"}
+    assert (decoy / "agent-home" / "gamma").is_dir()
+
+
+@pytest.mark.parametrize("name", ["resolv-dir", "resolv-proc"])
+def test_n1_the_resolv_target_must_be_a_regular_file_outside_proc_sys_dev(tmp_path, name):
+    target = {"resolv-dir": tmp_path / "dir", "resolv-proc": Path("/proc/self/environ")}[name]
+    if name == "resolv-dir":
+        target.mkdir()
+    link = tmp_path / name
+    link.symlink_to(target)
+    assert sandbox._resolv_target(link) is None
+    good = tmp_path / "resolv.conf"
+    good.write_text("nameserver 192.0.2.1\n")
+    ok = tmp_path / "resolv-ok"
+    ok.symlink_to(good)
+    assert sandbox._resolv_target(ok) == good.resolve()
+
+
+def test_n2_a_mask_only_scratch_symlink_is_refused_like_the_home_case(fake_bwrap, tmp_path, tmp_path_factory):
+    root = (tmp_path / "repo").resolve()
+    run = root / "workspace" / "r1"
+    run.mkdir(parents=True)
+    decoy = tmp_path_factory.mktemp("decoy").resolve()
+    (decoy / "agent-home" / "beta").mkdir(parents=True)
+    (run / "scratch").symlink_to(decoy, target_is_directory=True)
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.wrap(["/bin/true"], writable=[run], cwd=run, mask=[run / "scratch" / "agent-home"])
+    assert (decoy / "agent-home" / "beta").is_dir()
+
+
+def test_n3_check_agent_name_is_public_and_the_service_uses_it():
+    import inspect
+    assert sandbox.check_agent_name("alpha") is None
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.check_agent_name("../x")
+    assert "_check_agent_name" not in inspect.getsource(service._say_prepared)
+
+
+def test_n4_a_scratch_pin_that_cannot_be_created_is_a_sandbox_error(fake_bwrap, tmp_path, monkeypatch):
+    root = (tmp_path / "repo").resolve()
+    run = root / "workspace" / "r1"
+    run.mkdir(parents=True)
+    real_mkdir = os.mkdir
+
+    def deny_scratch(path, *args, **kwargs):
+        if Path(path).name == "scratch":
+            raise PermissionError(13, "denied by test")
+        return real_mkdir(path, *args, **kwargs)
+    monkeypatch.setattr(sandbox.os, "mkdir", deny_scratch)
+    with pytest.raises(sandbox.SandboxError, match="scratch"):
+        sandbox.wrap(["/bin/true"], writable=[run], cwd=run, mask=[run / "scratch" / "agent-home"])
+
+
+@needs_bwrap
+def test_bwrap_a_readable_dir_is_readable_not_writable_and_a_sibling_is_absent(tmp_path):
+    extra = (tmp_path / "extra").resolve()
+    extra.mkdir()
+    (extra / "note.txt").write_text("NOTE-OK")
+    sibling = (tmp_path / "sibling").resolve()
+    sibling.mkdir()
+    run = (tmp_path / "repo" / "workspace" / "r1").resolve()
+    run.mkdir(parents=True)
+    script = (f"cat {extra}/note.txt; echo; "
+              f"if (echo x > {extra}/w.txt) 2>/dev/null; then echo WRITE-LEAK; else echo ro-denied; fi; "
+              f"if test -e {sibling}; then echo SIBLING-LEAK; else echo sibling-absent; fi")
+    argv = sandbox.wrap(["/bin/sh", "-c", script], writable=[run], cwd=run,
+                        layout=sandbox.Layout(readable=(extra,)))
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=60, check=False)
+    assert proc.returncode == 0, proc.stderr
+    assert "NOTE-OK" in proc.stdout and "ro-denied" in proc.stdout and "sibling-absent" in proc.stdout
+    assert "LEAK" not in proc.stdout and not (extra / "w.txt").exists()
+
+
+@needs_bwrap
+def test_bwrap_a_dispatch_cannot_see_another_runs_agent_home(tmp_path):
+    root = (tmp_path / "repo").resolve()
+    (root / "config").mkdir(parents=True)
+    r1, r2 = root / "workspace" / "r1", root / "workspace" / "r2"
+    r1.mkdir(parents=True)
+    r2.mkdir(parents=True)
+    alpha_home = sandbox.agent_home(r1, "alpha")
+    (alpha_home / "session.json").write_text("FAKE-SESSION")
+    layout = sandbox.dispatch_layout(Project(root), run_dir=r2, agent="beta")
+    script = (f"if test -e {alpha_home}/session.json; then echo SEEN-SESSION; fi; "
+              f"echo LISTING:$(ls -A {r1}/scratch/agent-home); "
+              f"mkdir -p {alpha_home}/beta 2>/dev/null; touch {alpha_home}/planted 2>/dev/null; echo done")
+    argv = sandbox.wrap(["/bin/sh", "-c", script], writable=[r2], cwd=r2,
+                        mask=sandbox.masks_for([r2], run_dir=r2), layout=layout)
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=60, check=False)
+    assert proc.returncode == 0, proc.stderr
+    assert "SEEN-SESSION" not in proc.stdout and "alpha" not in proc.stdout and "done" in proc.stdout
+    assert not (alpha_home / "planted").exists() and not (alpha_home / "beta").exists()
+    assert (alpha_home / "session.json").read_text() == "FAKE-SESSION"
+    own = sandbox.dispatch_layout(Project(root), run_dir=r1, agent="alpha")
+    argv_own = sandbox.wrap(["/bin/sh", "-c", f"cat {alpha_home}/session.json"], writable=[r1], cwd=r1,
+                            mask=sandbox.masks_for([r1], run_dir=r1), layout=own)
+    own_proc = subprocess.run(argv_own, capture_output=True, text=True, timeout=60, check=False)
+    assert own_proc.stdout == "FAKE-SESSION"
+
+
+@needs_bwrap
+def test_bwrap_project_secret_files_are_masked_and_the_template_stays_readable(tmp_path):
+    root = (tmp_path / "repo").resolve()
+    run = root / "workspace" / "r1"
+    run.mkdir(parents=True)
+    (root / ".dvc").mkdir()
+    secrets = {root / ".env": "FAKE_SECRET_A\n", root / ".env.local": "FAKE_SECRET_B\n",
+               root / ".dvc" / "config.local": "FAKE_SECRET_C\n"}
+    for path, text in secrets.items():
+        path.write_text(text)
+    (root / ".env_template").write_text("TEMPLATE_OK\n")
+    layout = sandbox.dispatch_layout(Project(root), run_dir=run, agent="tracer")
+    script = (f"cat {root}/.env; cat {root}/.env.local; cat {root}/.dvc/config.local; "
+              f"cat {root}/.env_template")
+    argv = sandbox.wrap(["/bin/sh", "-c", script], writable=[run], cwd=run,
+                        mask=sandbox.masks_for([run], run_dir=run), layout=layout)
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=60, check=False)
+    assert proc.returncode == 0, proc.stderr
+    assert "FAKE_SECRET" not in proc.stdout and "TEMPLATE_OK" in proc.stdout
+    assert {p: p.read_text() for p in secrets} == secrets
+
+
+def test_s2_the_shipped_policy_documents_readable():
+    text = (W / "config" / "sandbox.yml").read_text()
+    assert "# readable:" in text and "never overridable" in text
+
+
+def test_s2_docs_gain_a_readable_section():
+    import re
+    text = (W / "docs" / "sandbox.md").read_text()
+    assert re.search(r"^#+ .*readable", text, re.M)

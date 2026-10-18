@@ -246,13 +246,15 @@ HATCH_MOVED = (
     "with a reason, or pass --no-sandbox for a one-off dispatch")
 
 
-def sandbox_disabled_in_run(project: Project, run_dir: Path | None) -> bool:
+def sandbox_disabled_in_run(project: Project, run_dir: Path | None, *,
+                            policy: dict | None = None) -> bool:
     """True when config/sandbox.yml lets this run dispatch unsandboxed.
 
     A `sandbox:` key inside the run's own config.yml is never honoured — that
     file lives in the dispatch's writable bind, so honouring it would let an
     agent switch off its own confinement. A stale one would be silently
     misleading, so it refuses the dispatch instead of being ignored quietly.
+    `policy` is the captured mapping of config/sandbox.yml, when the caller holds one.
     """
     if run_dir is None:
         return False
@@ -264,7 +266,7 @@ def sandbox_disabled_in_run(project: Project, run_dir: Path | None) -> bool:
             data = {}          # malformed or unreadable: the loader reports it
         if isinstance(data, dict) and "sandbox" in data:
             raise sandbox.SandboxError(f"{path}: {HATCH_MOVED}")
-    return Path(run_dir).name in sandbox.unsandboxed_runs(project)
+    return Path(run_dir).name in sandbox.unsandboxed_runs(project, policy=policy)
 
 
 def prepare(project: Project, agent: str, prompt_file: Path,
@@ -333,13 +335,18 @@ def prepare(project: Project, agent: str, prompt_file: Path,
                           template=template, session=session or "")
     else:
         argv = build_argv(agent_cfg, prompt, root, template=template, session=session or "")
-    disabled = sandbox_disabled_in_run(project, run_dir)
+    policy = sandbox.read_policy(project) if run_dir is not None else None   # one read (A2)
+    disabled = sandbox_disabled_in_run(project, run_dir, policy=policy)
     use_sandbox = sandbox_enabled and not disabled
-    writable = (sandbox.writable_for(project, run_dir=run_dir, coordinator=False)
+    writable = (sandbox.writable_for(project, run_dir=run_dir, coordinator=False, policy=policy)
                 if use_sandbox else None)
-    # The allow-list view and the dispatch's own HOME (D1, D2). Read-only here:
-    # the home directory itself is created by wrap(), next to the writable mkdir.
-    layout = (sandbox.dispatch_layout(project, run_dir=run_dir, agent=agent)
+    # The allow-list view and the dispatch's own HOME, computed read-only (A12). The
+    # `readable:` grants come from the same captured policy read (A2). The CLI path
+    # creates the home in wrap(), next to the writable mkdir; the turn path creates it
+    # in the protection capture.
+    readable = (sandbox.readable_paths(project, policy=policy)
+                if writable is not None else ())
+    layout = (sandbox.dispatch_layout(project, run_dir=run_dir, agent=agent, readable=readable)
               if writable is not None else None)
     env = sandbox.dispatch_environment(writable[0], layout=layout) if layout is not None else None
     return Dispatch(agent=agent, argv=argv, cwd=cwd,
@@ -553,7 +560,7 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
                           project, run_dir=run,
                           prepare_home=lambda home_run: sandbox.agent_home(home_run, agent)))
         # The allow-list view and the turn's own HOME, computed read-only (A12).
-        layout = (sandbox.dispatch_layout(project, run_dir=run, agent=agent)
+        layout = (sandbox.dispatch_layout(project, run_dir=run, agent=agent, readable=protection.readable)
                   if protection.sandbox_enabled else None)
         env = (sandbox.dispatch_environment(protection.writable[0], layout=layout)
                if layout is not None else dict(os.environ))

@@ -375,7 +375,8 @@ class Reservation:
                 raise AdmissionUnsafe('incomplete or ambiguous protection path facts')
             policy = self.project_root / sandbox.ALLOWLIST_FILE
             seeds = {self.project_root, self.workspace_root, self.run_dir, policy,
-                     *protection.writable, *protection.coordinator_writable, *protection.masks}
+                     *protection.writable, *protection.coordinator_writable, *protection.masks,
+                     *protection.readable}
             # Require the bounded closure of every captured lexical/canonical
             # ancestor and alias, rather than trusting an omitted safety path.
             for fact in protection.path_facts:
@@ -386,6 +387,11 @@ class Reservation:
             needed = {p for seed in seeds for p in (seed, *seed.parents)}
             if not needed.issubset(facts):
                 raise AdmissionUnsafe('incomplete protection alias/ancestor facts')
+            # S2: each captured readable grant must be a live, resolved fact of its own.
+            for path in protection.readable:
+                fact = facts.get(path)
+                if fact is None or not fact.exists or fact.resolved != path:
+                    raise AdmissionUnsafe('incomplete readable protection facts')
             policy_fact = facts[policy]
             if policy_fact.exists:
                 if not stat.S_ISREG(policy_fact.mode) or protection.policy_sha256 is None:

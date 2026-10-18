@@ -216,3 +216,40 @@ in a sandboxed dispatch's writable set, coordinator or sub-agent alike, so
 extending the allowlist — or [opting a run out](#the-escape-hatch) — is
 always a human decision made outside any run. That is what makes the
 `sandbox.disabled` event's `actor: human` true.
+
+## readable: folders the agent may read
+
+`config/sandbox.yml` can also list folders **outside** the repository that an
+agent may read. A `readable:` grant is read-only: the folder appears at the
+same path inside the sandbox, and writes to it fail. Every entry is a mapping
+with a `path` and a `reason`, and it is commented out by default:
+
+```yaml
+readable:
+  - path: ~/datasets/shared-exports
+    reason: >-
+      de-identified exports the analysis agents need to read.
+```
+
+- `path` is absolute, `~/`-prefixed (expanded against the real home), or
+  relative to the repository root. It must exist.
+- `reason` is required and must be non-empty.
+- Only the folder you list is granted. Its siblings stay absent.
+
+The hard deny list is never overridable. An entry that equals, lies inside,
+or contains any of these is refused with exit 77 and a `job.refused` event,
+after symlinks are resolved:
+
+- the home directory, `/`, `/home`, and the home's parent;
+- `~/.ssh`, `~/.gnupg`, `~/.hermes`, `~/.config/scieflow/credentials`;
+- the agent credential stores `~/.claude`, `~/.claude.json`, `~/.codex`,
+  `~/.gemini`;
+- the runtime socket areas `/run`, `/var/run`, `/proc`, `/sys`, `/dev`.
+
+Two protections apply to every dispatch, whatever `readable:` says:
+
+- Secret files in the repository root are masked: `.env`, `.env.*` (but not
+  `.env_template`) and `.dvc/config.local`. Inside the sandbox they read as
+  empty. A symlink at one of these names is refused.
+- Every other run's agent home (`workspace/<other>/scratch/agent-home`) is
+  hidden. A dispatch cannot read or plant files in a sibling agent's home.

@@ -107,12 +107,15 @@ class Layout:
     readable: bound read-only at the same path. links: (link, target) pairs,
     recreated with --symlink. home: the dispatch's own HOME, bound read-write
     after the masks. launcher_dirs: directories of bound launchers, which form
-    the start of the sandbox PATH (C6).
+    the start of the sandbox PATH (C6). hidden: paths overlaid after the
+    readable binds and before the writable ones (C14): a file becomes
+    /dev/null, a directory an empty tmpfs.
     """
     readable: tuple[Path, ...] = ()
     links: tuple[tuple[Path, str], ...] = ()
     home: Path | None = None
     launcher_dirs: tuple[Path, ...] = ()
+    hidden: tuple[Path, ...] = ()
 
     def __post_init__(self):
         if type(self.readable) is not tuple or any(not _is_abs(p) for p in self.readable):
@@ -125,15 +128,21 @@ class Layout:
             raise TypeError("home must be an absolute Path or None")
         if type(self.launcher_dirs) is not tuple or any(not _is_abs(p) for p in self.launcher_dirs):
             raise TypeError("launcher_dirs must be an immutable tuple of absolute Paths")
+        if type(self.hidden) is not tuple or any(not _is_abs(p) for p in self.hidden):
+            raise TypeError("hidden must be an immutable tuple of absolute Paths")
 
 
 def _is_abs(value) -> bool:
     return isinstance(value, Path) and value.is_absolute()
 
 
-def _check_agent_name(agent) -> None:
+def check_agent_name(agent) -> None:
+    """Refuse an agent name that cannot name an agent home (C5). Public for the service."""
     if type(agent) is not str or AGENT_NAME_RE.fullmatch(agent) is None:
         raise SandboxError(f"agent name {agent!r} cannot name an agent home")
+
+
+_check_agent_name = check_agent_name      # the internal spelling used by this module
 
 
 def _homes() -> list[Path]:
@@ -218,12 +227,18 @@ def _resolv_allowed(target: Path) -> bool:
 
 
 def _resolv_target(path: Path) -> Path | None:
-    """The resolved DNS config, when it lies outside the system set (A10)."""
+    """The resolved DNS config, when it lies outside the system set (A10).
+
+    N1: only a regular file qualifies. A link into /proc, /sys or /dev, or to a
+    directory, is never bound, even though the resolver link is host-controlled.
+    """
     try:
         target = Path(os.path.realpath(path))
     except OSError:
         return None
-    if not target.exists() or _in_system_set(target):
+    if not target.is_file() or _in_system_set(target):
+        return None
+    if any(target == area or area in target.parents for area in (Path("/proc"), Path("/sys"), Path("/dev"))):
         return None
     return target
 
@@ -252,7 +267,18 @@ def _scratch_pins(home: Path | None, mask: list[Path], grants: list[Path]) -> li
     if home is not None:
         wanted.append(home.parent.parent)                       # <run>/scratch
     for path in mask:
-        resolved = Path(path).resolve()
+        unresolved = Path(path)
+        if unresolved.name == AGENT_HOME_DIR and unresolved.parent.name == "scratch":
+            # N2: a symlinked scratch is refused before resolve() can follow it, as in the home case.
+            try:
+                link = unresolved.parent.lstat()
+            except FileNotFoundError:
+                link = None
+            except OSError as exc:
+                raise SandboxError(f"cannot inspect scratch {unresolved.parent}: {exc}") from exc
+            if link is not None and stat.S_ISLNK(link.st_mode):
+                raise SandboxError(f"scratch must be a real directory, refused: {unresolved.parent}")
+        resolved = unresolved.resolve()
         if resolved.name == AGENT_HOME_DIR and resolved.parent.name == "scratch":
             wanted.append(resolved.parent)
     pins: list[Path] = []
@@ -262,14 +288,41 @@ def _scratch_pins(home: Path | None, mask: list[Path], grants: list[Path]) -> li
         try:
             info = scratch.lstat()
         except FileNotFoundError:
-            os.mkdir(scratch, 0o755)
-            info = scratch.lstat()
+            try:
+                os.mkdir(scratch, 0o755)
+                info = scratch.lstat()
+            except OSError as exc:                              # N4: a refusal, not a raw OSError
+                raise SandboxError(f"cannot create scratch {scratch}: {exc}") from exc
         except OSError as exc:
             raise SandboxError(f"cannot inspect scratch {scratch}: {exc}") from exc
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
             raise SandboxError(f"scratch must be a real directory, refused: {scratch}")
         pins.append(scratch.resolve())
     return pins
+
+
+def _hidden_args(hidden: tuple[Path, ...], grants: list[Path]) -> list[str]:
+    """C14/S2: overlay each hidden path: a directory becomes a tmpfs, anything else /dev/null.
+
+    Fails closed on a symlink, a missing path, or a hidden path that a writable grant
+    contains (the grant's bind would re-expose it, since writable binds come later).
+    """
+    out: list[str] = []
+    for path in hidden:
+        target = Path(path)
+        if any(g == target or g in target.parents for g in grants):
+            raise SandboxError(f"protected path {target} lies inside a writable grant; refused")
+        try:
+            info = target.lstat()
+        except OSError as exc:
+            raise SandboxError(f"hidden path cannot be checked, refused: {target}: {exc}") from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise SandboxError(f"hidden path is a symbolic link, refused: {target}")
+        if stat.S_ISDIR(info.st_mode):
+            out += ["--tmpfs", str(target)]
+        else:
+            out += ["--ro-bind", "/dev/null", str(target)]
+    return out
 
 
 def wrap(argv: list[str], *, writable: list[Path], cwd: Path,
@@ -294,21 +347,27 @@ def wrap(argv: list[str], *, writable: list[Path], cwd: Path,
     if bwrap is None:
         raise SandboxUnavailable(f"bubblewrap is not installed; {INSTALL_HINT}")
     out = [os.path.abspath(bwrap), *_system_args(RESOLV_CONF)]    # F10 / A13: absolute
+    grants: list[Path] = []
+    for path in writable:
+        resolved = Path(path).resolve()
+        resolved.mkdir(parents=True, exist_ok=True)
+        grants.append(resolved)
     readable: list[Path] = []
     for path in layout.readable:
         resolved = Path(path).resolve()
         if not resolved.exists():
             raise SandboxError(f"readable path does not exist: {path}")
         check_not_denied(resolved, kind="readable")
+        if any(g == resolved or g in resolved.parents for g in grants):
+            # A grant bind over this path would make it writable; a read-only grant must not be.
+            raise SandboxError(f"readable path {resolved} lies inside a writable grant; "
+                               "refused, it would not be read-only")
         readable.append(resolved)
         out += ["--ro-bind", str(resolved), str(resolved)]
     for link, target in layout.links:
         out += ["--symlink", target, str(link)]
-    grants: list[Path] = []
-    for path in writable:
-        resolved = Path(path).resolve()
-        resolved.mkdir(parents=True, exist_ok=True)
-        grants.append(resolved)
+    out += _hidden_args(layout.hidden, grants)               # C14: before the writable binds
+    for resolved in grants:
         out += ["--bind", str(resolved), str(resolved)]
     # The home is created host-side here, before its binds are emitted (A12).
     home = _bind_home(layout.home, writable) if layout.home is not None else None
@@ -574,33 +633,163 @@ def _launcher(name: str) -> tuple[Path | None, list[tuple[Path, str]], Path | No
     return Path(os.path.abspath(which)).parent, hops, Path(os.path.realpath(which))
 
 
-def dispatch_layout(project: Project, *, run_dir: Path, agent: str) -> Layout:
-    """The S1 layout for one agent dispatch: project, Python, ScieFlow, uv, own home.
+def _secret_masks(root: Path) -> list[Path]:
+    """C14: the project-root secret files that exist now, masked from every dispatch.
 
-    Reads only (stat/lstat/readlink), so a resolution can happen before any write.
+    `.env`, `.env.*` (but not `.env_template`) and `.dvc/config.local`. A symlink is
+    refused, never followed: the overlay would otherwise land on its target.
+    """
+    if (root / ".dvc").is_symlink():
+        raise SandboxError(f"project .dvc is a symbolic link; secret masks cannot be proven: {root / '.dvc'}")
+    try:
+        names = sorted(os.listdir(root))
+    except OSError as exc:
+        raise SandboxError(f"cannot list project root {root}: {exc}") from exc
+    found = [root / name for name in names
+             if name == ".env" or (name.startswith(".env.") and name != ".env_template")]
+    local = root / ".dvc" / "config.local"
+    if os.path.lexists(local):
+        found.append(local)
+    for path in found:
+        if os.path.islink(path):
+            raise SandboxError(f"project secret file is a symbolic link, refused: {path}")
+    return found
+
+
+def _other_run_homes(root: Path, run: Path) -> list[Path]:
+    """S2 (S1 review F6): every existing agent home of a run other than this dispatch's.
+
+    Listed with lstat only: a symlinked `scratch` or `agent-home` is skipped, and its
+    target is never read (the link itself stays visible, as the plan records).
+    """
+    ws = root / "workspace"
+    try:
+        info = ws.lstat()
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise SandboxError(f"cannot inspect workspace {ws}: {exc}") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise SandboxError(f"workspace is a symbolic link; other runs cannot be hidden: {ws}")
+    if not stat.S_ISDIR(info.st_mode):
+        return []
+    out: list[Path] = []
+    try:
+        entries = sorted(os.scandir(ws), key=lambda e: e.name)
+    except OSError as exc:
+        raise SandboxError(f"cannot list workspace {ws}: {exc}") from exc
+    for entry in entries:
+        if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+            continue
+        other = ws / entry.name
+        if other.resolve() == run:
+            continue
+        scratch = other / "scratch"
+        try:
+            scratch_info = scratch.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISDIR(scratch_info.st_mode):
+            continue
+        home_root = scratch / AGENT_HOME_DIR
+        try:
+            home_info = home_root.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISDIR(home_info.st_mode):
+            out.append(home_root)
+    return out
+
+
+def _readable_of(data: dict, root: Path, path: Path) -> tuple[Path, ...]:
+    """C8/D5: the `readable:` grants, each refused on any grammar or deny-table failure.
+
+    Entries: a mapping with a non-empty `path:` (absolute, `~/`, or relative to the
+    project root; it must exist) and a non-empty `reason:`. The deny table applies
+    here at parse time and again in wrap() on each bind source.
+    """
+    entries = data.get("readable")
+    if entries is None:
+        return ()
+    if not isinstance(entries, list):
+        raise SandboxError(
+            f"allowlist 'readable:' must be a list, not {type(entries).__name__}: {path}")
+    root = root.resolve()
+    out: list[Path] = []
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise SandboxError(
+                f"readable entry {i} must be a mapping with 'path:' and 'reason:', "
+                f"not {type(entry).__name__}: {path}")
+        raw = entry.get("path")
+        if not isinstance(raw, str) or not raw:
+            raise SandboxError(f"readable entry {i} has no 'path:' or an empty path: {path}")
+        reason = entry.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise SandboxError(
+                f"readable entry {raw!r} needs a 'reason:' saying why the agent may read it: {path}")
+        if raw.startswith("~/"):
+            candidate = Path.home() / raw[2:]
+        elif Path(raw).is_absolute():
+            candidate = Path(raw)
+        else:
+            candidate = root / raw
+        if not candidate.exists():
+            raise SandboxError(f"readable path does not exist: {raw!r} ({candidate})")
+        check_not_denied(candidate, kind="readable")
+        out.append(candidate.resolve())
+    return tuple(dict.fromkeys(out))
+
+
+def read_policy(project: Project) -> dict:
+    """The one captured mapping of config/sandbox.yml a dispatch decides from (A2)."""
+    return _load_allowlist(project)
+
+
+def readable_paths(project: Project, *, policy: dict | None = None) -> tuple[Path, ...]:
+    """The validated `readable:` grants of config/sandbox.yml (S2)."""
+    data = _load_allowlist(project) if policy is None else policy
+    return _readable_of(data, project.root, project.root / ALLOWLIST_FILE)
+
+
+def dispatch_layout(project: Project, *, run_dir: Path, agent: str,
+                    readable: tuple[Path, ...] = ()) -> Layout:
+    """The layout for one agent dispatch: project, Python, ScieFlow, uv, `readable:`, own home.
+
+    Reads only (stat/lstat/readlink/listdir), so a resolution can happen before any write.
     The project root is bound read-only (D3); the writable run is bound over it.
     The interpreter's symlinked ancestors are recreated as links unless a bound
     path already shows them, so `sys.executable` resolves inside the sandbox (C4).
+    `readable` is the validated `readable:` tuple captured from the one policy read
+    (A2); it is appended after the de-duplication (A10).
+    C14 and S2 add the hidden paths: the project's secret files and every other run's
+    agent home.
     """
-    _check_agent_name(agent)
+    check_agent_name(agent)
     run = Path(run_dir).resolve()
     home = agent_home_path(run, agent)
+    root = project.root.resolve()
     launcher_dir, hops, uv_final = _launcher("uv")
-    candidates = [project.root.resolve(), *_python_runtime(), _scieflow_root().resolve()]
+    candidates = [root, *_python_runtime(), _scieflow_root().resolve()]
     if uv_final is not None:
         candidates.append(uv_final)
-    readable = tuple(p for p in _outermost(candidates) if not _in_system_set(p))
-    for entry in readable:
+    base = tuple(p for p in _outermost(candidates) if not _in_system_set(p))
+    for entry in base:
         check_not_denied(entry, kind="readable")
+    extra = [p for p in dict.fromkeys(Path(r) for r in readable)
+             if not any(p == b or b in p.parents for b in base)]
+    granted = tuple([*base, *_outermost(extra)])
     interpreter = Path(os.path.abspath(sys.executable))
     links = [*hops, *((p, os.readlink(p)) for p in reversed(interpreter.parents) if p.is_symlink())]
     kept_links: list[tuple[Path, str]] = []
     for link, target in links:
-        covered = _in_system_set(link) or any(link == r or r in link.parents for r in readable)
+        covered = _in_system_set(link) or any(link == r or r in link.parents for r in granted)
         if not covered and link not in [k for k, _ in kept_links]:
             kept_links.append((link, target))
-    return Layout(readable=readable, links=tuple(kept_links), home=home,
-                  launcher_dirs=(launcher_dir,) if launcher_dir is not None else ())
+    hidden = [*_secret_masks(root), *_other_run_homes(root, run)]
+    return Layout(readable=granted, links=tuple(kept_links), home=home,
+                  launcher_dirs=(launcher_dir,) if launcher_dir is not None else (),
+                  hidden=tuple(dict.fromkeys(hidden)))
 
 
 def _launcher_path_needed(directory: Path, layout: Layout) -> bool:
@@ -648,7 +837,7 @@ def _policy_mapping(raw: bytes | str, path: Path) -> dict:
     return data
 
 
-def unsandboxed_runs(project: Project) -> set[str]:
+def unsandboxed_runs(project: Project, *, policy: dict | None = None) -> set[str]:
     """Run slugs config/sandbox.yml permits to dispatch unsandboxed.
 
     The per-run escape hatch lives here rather than in the run's own
@@ -656,10 +845,10 @@ def unsandboxed_runs(project: Project) -> set[str]:
     agent could append `sandbox: off` and, with `agent_overrides:` in the same
     file, choose what the next unconfined dispatch runs. Here it is a human
     decision made outside every run, which is what makes the `sandbox.disabled`
-    event's `actor: human` true.
+    event's `actor: human` true. `policy` is the mapping of one captured read.
     """
     path = project.root / ALLOWLIST_FILE
-    return _unsandboxed_of(_load_allowlist(project), path)
+    return _unsandboxed_of(_load_allowlist(project) if policy is None else policy, path)
 
 
 def _unsandboxed_of(data: dict, path: Path) -> set[str]:
@@ -694,10 +883,11 @@ def _unsandboxed_of(data: dict, path: Path) -> set[str]:
     return out
 
 
-def allowlist_paths(project: Project) -> list[Path]:
+def allowlist_paths(project: Project, *, policy: dict | None = None) -> list[Path]:
     """Extra writable paths from config/sandbox.yml, deny-by-default."""
     path = project.root / ALLOWLIST_FILE
-    return _allowlist_of(_load_allowlist(project), project.root, path)
+    data = _load_allowlist(project) if policy is None else policy
+    return _allowlist_of(data, project.root, path)
 
 
 def _allowlist_of(data: dict, root: Path, path: Path) -> list[Path]:
@@ -738,9 +928,10 @@ def _allowlist_of(data: dict, root: Path, path: Path) -> list[Path]:
 
 
 def writable_for(project: Project, *, run_dir: Path | None,
-                 coordinator: bool) -> list[Path]:
+                 coordinator: bool, policy: dict | None = None) -> list[Path]:
     """What this dispatch may write. The caller declares which kind it is —
-    the sandbox never guesses, because guessing wrong widens the boundary."""
+    the sandbox never guesses, because guessing wrong widens the boundary.
+    `policy`, when given, is the one captured read of config/sandbox.yml (A2)."""
     if coordinator:
         base = [project.workspace_root]
     elif run_dir is None:
@@ -749,7 +940,7 @@ def writable_for(project: Project, *, run_dir: Path | None,
             "use --no-sandbox for a one-off dispatch outside a run")
     else:
         base = [Path(run_dir)]
-    return [*base, *allowlist_paths(project)]
+    return [*base, *allowlist_paths(project, policy=policy)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -796,6 +987,7 @@ class TurnProtection:
     coordinator_writable: tuple[Path, ...]
     policy_sha256: str | None
     path_facts: tuple[ProtectionPath, ...]
+    readable: tuple[Path, ...] = ()        # S2: from the same captured mapping (A2)
 
     def __post_init__(self):
         for name in ('project_root', 'run_dir', 'workspace_root'):
@@ -804,12 +996,14 @@ class TurnProtection:
                 raise TypeError('protection roots must be absolute Paths')
         if type(self.sandbox_enabled) is not bool or self.sandbox_enabled != (self.writable is not None):
             raise TypeError('sandbox state and grants must agree')
-        for name in ('writable', 'masks', 'allowlist', 'coordinator_writable'):
+        for name in ('writable', 'masks', 'allowlist', 'coordinator_writable', 'readable'):
             value = getattr(self, name)
             if name == 'writable' and value is None:
                 continue
             if type(value) is not tuple or any(not isinstance(p, Path) or not p.is_absolute() for p in value):
                 raise TypeError('grants and masks must be immutable absolute Path tuples')
+        if not self.sandbox_enabled and self.readable:
+            raise TypeError('readable grants exist only for a sandboxed run')
         if type(self.path_facts) is not tuple or any(type(p) is not ProtectionPath for p in self.path_facts):
             raise TypeError('path facts must be an immutable ProtectionPath tuple')
         if self.policy_sha256 is not None and (type(self.policy_sha256) is not str or
@@ -922,6 +1116,7 @@ def resolve_turn_protection(project: Project, *, run_dir: Path,
         policy = root / ALLOWLIST_FILE
         data, digest, policy_fact = _capture_turn_policy(policy)
         enabled = run.name not in _unsandboxed_of(data, policy)
+        readable = tuple(_readable_of(data, root, policy)) if enabled else ()
         if enabled and prepare_home is not None:
             prepare_home(run)
         allowlist = tuple(_allowlist_of(data, root, policy))
@@ -932,12 +1127,12 @@ def resolve_turn_protection(project: Project, *, run_dir: Path,
         masks = tuple(masks_for(list(narrowed), run_dir=run))
         originals = [root / str(e['path']) for e in data.get('writable') or []]
         seeds = [project.root.absolute(), Path(run_dir).absolute(), root, run, workspace,
-                 policy, *narrowed, *broad, *masks, *originals]
+                 policy, *narrowed, *broad, *masks, *originals, *readable]
         facts = _capture_path_facts(seeds)
         if next(f for f in facts if f.path == policy) != policy_fact:
             raise SandboxError('sandbox policy changed during protection capture')
         return TurnProtection(root, run, workspace, enabled, narrowed if enabled else None,
-                              masks, allowlist, broad, digest, facts)
+                              masks, allowlist, broad, digest, facts, readable)
     except (OSError, ValueError, RuntimeError) as exc:
         if isinstance(exc, SandboxError):
             raise
