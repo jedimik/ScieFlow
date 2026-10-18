@@ -13,7 +13,7 @@ All examples assume you are at the repo root and use `uv run scieflow …`.
 |---|---|---|
 | `0` | success | everywhere |
 | `75` | dispatch refused — the run's `wall_minutes` budget is spent | `scieflow agent run` only (`agent_run.BUDGET_EXIT`); the run is checkpointed automatically |
-| `77` | sandbox could not be established or proven; the dispatch was refused | `scieflow agent run` only (`agent_run.SANDBOX_EXIT`); see [The agent sandbox](sandbox.md) |
+| `77` | sandbox could not be established or proven, or a credential, `readable:` entry or hidden path was refused; the dispatch was refused | `scieflow agent run` only (`agent_run.SANDBOX_EXIT`); see [The agent sandbox](sandbox.md) |
 | `124` | the agent process was killed for running past its timeout, with partial output kept | `scieflow agent run`, and any job `jobs.wait` times out on |
 | `2` | `gate wait --timeout` expired without an answer | `scieflow gate wait` |
 | `1` | any other refusal (bad slug, unmet precondition, validation problem) | Click's default for a raised `ClickException`, e.g. `run advance` past `iterations`, `run mark` with a bad phase/state |
@@ -155,7 +155,7 @@ without filesystem confinement — a deliberate opt-out, recorded as a
 `sandbox.disabled` event on the run's timeline rather than run silently
 (see [The agent sandbox](sandbox.md)). Exit codes: `0` ok,
 `75` refused on an exhausted `wall_minutes` budget (the run is checkpointed),
-`77` refused because the sandbox could not be established or proven,
+`77` refused because the sandbox could not be established or proven, or because a credential, `readable:` entry or hidden path was refused,
 `124` timed out (partial output kept in `TRANSCRIPT_FILE`), otherwise the
 agent's own exit code.
 

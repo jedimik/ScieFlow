@@ -1,13 +1,13 @@
 """Filesystem confinement for agent dispatches — the only bubblewrap-aware module.
 
-A sandboxed process may write inside the run it was given, plus a private /tmp
-and whatever the allowlist grants; its uv cache lives inside that same run. It
-may read the repository, because agents read their own protocols, skills and
-schemas.
+Allow-list model: the repository root is read-only to an agent dispatch, the run it serves
+(`workspace/<slug>/`) is writable, and the `writable:` and `readable:` entries of
+config/sandbox.yml add grants on top. Each run has its own agent home, and a dispatch sees only
+its own agent's credential. The network stays open, because agents need it to reach their model
+API. Other runs' agent homes and the project's secret files are hidden.
 
-What this deliberately does NOT do: restrict the network, or hide credentials.
-Agents need both to reach their model API, so a hostile agent can still send
-what it can read. See docs/sandbox.md; that limit is stated, not implied.
+What this deliberately does NOT do: restrict the network. See docs/sandbox.md; that limit is
+stated, not implied.
 """
 
 from __future__ import annotations
@@ -871,7 +871,9 @@ def _launcher(name: str) -> tuple[Path | None, list[tuple[Path, str]], Path | No
         target = os.readlink(path)
         hops.append((path, target))
         path = Path(os.path.normpath(target if Path(target).is_absolute() else path.parent / target))
-    return Path(os.path.abspath(which)).parent, hops, Path(os.path.realpath(which))
+    # finalfix1 (finding 2): the directory is NOT lexically collapsed, so a PATH entry such as
+    # link/../bin is checked as spelled and by realpath (_check_launcher_grants).
+    return Path(which).absolute().parent, hops, Path(os.path.realpath(which))
 
 
 def _secret_masks(root: Path) -> list[Path]:
@@ -975,7 +977,12 @@ def _readable_of(data: dict, root: Path, path: Path) -> tuple[Path, ...]:
             candidate = Path(raw)
         else:
             candidate = root / raw
-        if not candidate.exists():
+        try:
+            present = candidate.exists()
+        except (OSError, ValueError) as exc:
+            raise SandboxError(
+                f"readable entry {i} is not a usable path (too long or NUL byte): {path}") from exc
+        if not present:
             raise SandboxError(f"readable path does not exist: {raw!r} ({candidate})")
         check_not_denied(candidate, kind="readable")
         out.append(candidate.resolve())
@@ -1135,8 +1142,13 @@ def _launcher_path_needed(directory: Path, layout: Layout) -> bool:
     S25fix1 (finding 5): a dir that a readable bind merely covers still joins PATH. Treating
     "covered" as "reachable on PATH" made a project-local CLI refuse the dispatch (the capture
     found nothing on the sandbox PATH). A dir under a bound SYSTEM path still adds nothing.
+
+    finalfix2 (finding 3): system membership is decided on the normalised spelling, so
+    `/usr/bin/../../home/x/bin` is not mistaken for a system dir. The grant check in
+    dispatch_environment still uses the unnormalised path and its realpath.
     """
-    return not (str(directory) in SYSTEM_PATH or _in_system_set(directory))
+    norm = Path(os.path.normpath(directory))
+    return not (str(norm) in SYSTEM_PATH or _in_system_set(norm))
 
 
 def _check_launcher_grants(directory: Path, grants) -> None:
@@ -1155,15 +1167,14 @@ def _check_launcher_grants(directory: Path, grants) -> None:
 
 
 def dispatch_environment(base: Path, *, layout: Layout, env: dict | None = None,
-                         credential_env: dict | None = None, writable=None) -> dict:
+                         credential_env: dict | None = None, writable) -> dict:
     """The C12 allow-list environment: HOME = the agent home, PATH = the sandbox PATH (C6).
 
     Every inherited variable not on the allow-list is dropped (D7, C12). What `environment()`
     itself adds is kept, so `environment(base)` stays the one place that builds the base.
     `credential_env` holds only this agent's own token variable (C10, attach_credential).
-    `writable` is every writable grant of the dispatch; a launcher dir that joins PATH must lie
-    outside all of them (N1). None checks against `base` alone, which is the run and the first
-    grant at both call sites.
+    `writable` is every writable grant of the dispatch (required, finalfix1 finding 5); a
+    launcher dir that joins PATH must lie outside all of them (N1).
     """
     inherited = os.environ if env is None else env
     out = environment(base) if env is None else environment(base, env)
@@ -1173,7 +1184,7 @@ def dispatch_environment(base: Path, *, layout: Layout, env: dict | None = None,
     out.update(credential_env or {})
     if layout.home is not None:
         out["HOME"] = str(layout.home)
-    grants = [base] if writable is None else writable
+    grants = writable
     joining = [d for d in layout.launcher_dirs if _launcher_path_needed(d, layout)]
     for directory in joining:
         _check_launcher_grants(directory, grants)
@@ -1286,7 +1297,12 @@ def _allowlist_of(data: dict, root: Path, path: Path) -> list[Path]:
             raise SandboxError(
                 f"allowlist entry {i} has no 'path:' or an empty path: {path}")
 
-        candidate = (root / str(raw)).resolve()
+        try:
+            candidate = (root / str(raw)).resolve()
+        except (OSError, ValueError) as exc:
+            raise SandboxError(
+                f"allowlist 'writable:' entry {i} is not a usable path (NUL byte or too long): "
+                f"{path}") from exc
         if candidate in forbidden:
             raise SandboxError(
                 f"allowlist entry {raw!r} would grant the whole repository, all of "
@@ -1449,7 +1465,10 @@ def read_token(cred: Credential, *, forbidden=()) -> str:
     path = Path(cred.file)
     if os.path.islink(path):
         raise SandboxError(f"token file for {cred.agent} is a symbolic link, refused: {path}")
-    real = Path(os.path.realpath(path))
+    try:
+        real = Path(os.path.realpath(path))
+    except (OSError, ValueError) as exc:
+        raise SandboxError(f"token file for {cred.agent}: 'file:' is not a usable path") from exc
     for area in forbidden:
         area_path = Path(area).absolute()
         for grant in {area_path, area_path.resolve()}:
@@ -1463,6 +1482,8 @@ def read_token(cred: Credential, *, forbidden=()) -> str:
         raise SandboxError(f"token file for {cred.agent} is missing: {path}") from None
     except OSError as exc:
         raise SandboxError(f"token file for {cred.agent} cannot be opened safely: {path}") from exc
+    except ValueError as exc:
+        raise SandboxError(f"token file for {cred.agent}: 'file:' is not a usable path") from exc
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
@@ -1588,7 +1609,8 @@ def _status_of(cred: Credential) -> tuple[str, str]:
         info = os.lstat(path)
     except FileNotFoundError:
         return "missing", str(path)
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError: a NUL byte in the configured path (finalfix2 finding 1) is unreadable, not a crash.
         return "unreadable", str(path)
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
         return "bad-mode", f"not a regular file: {path}"

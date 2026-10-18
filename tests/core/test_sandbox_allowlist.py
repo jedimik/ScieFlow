@@ -382,7 +382,7 @@ def test_bwrap_home_persists_within_a_run_and_not_across_runs(tmp_path):
     assert other_layout.home == _home_of(other, "tracer")
 
     def run_once(writable_run, layout, script):
-        env = sandbox.dispatch_environment(writable_run, layout=layout, env=dict(os.environ))
+        env = sandbox.dispatch_environment(writable_run, layout=layout, env=dict(os.environ), writable=[writable_run])
         job = jobs.run_blocking(project, ["/bin/sh", "-c", script], kind="agent", cwd=writable_run,
                                 run_dir=writable_run, sandbox_writable=[writable_run], env=env,
                                 sandbox_layout=layout)
@@ -428,8 +428,8 @@ def test_bwrap_agent_cannot_relocate_scratch_or_plant_in_a_sibling_home(tmp_path
     (beta_home / ".claude" / "session.json").write_text("BETA-SESSION\n")
     alpha = sandbox.dispatch_layout(project, run_dir=run, agent="alpha")
     beta = sandbox.dispatch_layout(project, run_dir=run, agent="beta")
-    env_a = sandbox.dispatch_environment(run_r, layout=alpha, env=dict(os.environ))
-    env_b = sandbox.dispatch_environment(run_r, layout=beta, env=dict(os.environ))
+    env_a = sandbox.dispatch_environment(run_r, layout=alpha, env=dict(os.environ), writable=[run_r])
+    env_b = sandbox.dispatch_environment(run_r, layout=beta, env=dict(os.environ), writable=[run_r])
     attack = (
         f"if mv {run_r}/scratch {run_r}/scratch.old 2>/dev/null; then echo mv-scratch-LEAK; "
         f"else echo mv-scratch-blocked; fi > {run_r}/alpha-out.txt\n"
@@ -665,15 +665,15 @@ def test_a_launcher_dir_reaches_path_unless_it_is_a_system_dir(tmp_path):
     root = tmp_path / "project"
     (root / ".venv" / "bin").mkdir(parents=True)
     covered = sandbox.Layout(readable=(root,), launcher_dirs=(root / ".venv" / "bin",))
-    env = sandbox.dispatch_environment(tmp_path / "run", layout=covered, env={})
+    env = sandbox.dispatch_environment(tmp_path / "run", layout=covered, env={}, writable=[tmp_path / "run"])
     assert env["PATH"] == f"{root / '.venv' / 'bin'}:/usr/local/bin:/usr/bin:/bin"
     system = sandbox.Layout(readable=(root,), launcher_dirs=(Path("/usr/bin"),))
-    assert sandbox.dispatch_environment(tmp_path / "run", layout=system, env={})["PATH"] == \
+    assert sandbox.dispatch_environment(tmp_path / "run", layout=system, env={}, writable=[tmp_path / "run"])["PATH"] == \
         "/usr/local/bin:/usr/bin:/bin"
     outside = tmp_path / "bin2"
     outside.mkdir()
     free = sandbox.Layout(readable=(root,), launcher_dirs=(outside,))
-    assert sandbox.dispatch_environment(tmp_path / "run", layout=free, env={})["PATH"].startswith(str(outside))
+    assert sandbox.dispatch_environment(tmp_path / "run", layout=free, env={}, writable=[tmp_path / "run"])["PATH"].startswith(str(outside))
 
 
 @needs_bwrap
@@ -685,8 +685,8 @@ def test_bwrap_agent_cannot_see_or_write_a_sibling_agents_home(tmp_path):
     beta = sandbox.dispatch_layout(project, run_dir=run, agent="beta")
     alpha_home = _home_of(run, "alpha")
     beta_home = _home_of(run, "beta")
-    env_a = sandbox.dispatch_environment(run, layout=alpha, env=dict(os.environ))
-    env_b = sandbox.dispatch_environment(run, layout=beta, env=dict(os.environ))
+    env_a = sandbox.dispatch_environment(run, layout=alpha, env=dict(os.environ), writable=[run])
+    env_b = sandbox.dispatch_environment(run, layout=beta, env=dict(os.environ), writable=[run])
     jobs.run_blocking(project, ["/bin/sh", "-c", "echo alpha-secret > $HOME/token"], kind="agent",
                       cwd=run, run_dir=run, sandbox_writable=[run], env=env_a, sandbox_layout=alpha)
     jobs.run_blocking(project, ["/bin/sh", "-c",
@@ -719,7 +719,7 @@ def test_bwrap_uv_run_executes_python_inside(tmp_path):
     project = Project(root)
     run = project.run_dir("r1")
     layout = sandbox.dispatch_layout(project, run_dir=run, agent="tracer")
-    env = sandbox.dispatch_environment(run, layout=layout, env=dict(os.environ))
+    env = sandbox.dispatch_environment(run, layout=layout, env=dict(os.environ), writable=[run])
     script = f"uv run --offline --no-project python3 -c 'print(42)' > {run}/uv.txt 2>&1"
     job = jobs.run_blocking(project, ["/bin/sh", "-c", script], kind="agent", cwd=run,
                             run_dir=run, sandbox_writable=[run], env=env, sandbox_layout=layout)
@@ -1427,11 +1427,12 @@ def test_s3_the_launcher_dir_joins_path_only_when_no_bound_path_covers_it(tmp_pa
     monkeypatch.setattr(sandbox, "_launcher", lambda name: (None, [], None))
     project = Project(_repo(tmp_path))
     layout = _layout(project, home / ".local" / "bin" / "claude")
-    env = sandbox.dispatch_environment(project.run_dir("r1"), layout=layout, env={"PATH": "/x"})
+    env = sandbox.dispatch_environment(project.run_dir("r1"), layout=layout, env={"PATH": "/x"}, writable=[project.run_dir("r1")])
     assert env["PATH"] == f"{home / '.local' / 'bin'}:/usr/local/bin:/usr/bin:/bin"
     system = _layout(project, Path("/bin/sh"))
     assert sandbox.dispatch_environment(project.run_dir("r1"), layout=system,
-                                        env={"PATH": "/x"})["PATH"] == "/usr/local/bin:/usr/bin:/bin"
+                                        env={"PATH": "/x"},
+                                        writable=[project.run_dir("r1")])["PATH"] == "/usr/local/bin:/usr/bin:/bin"
 
 
 def test_s3_merged_usr_hops_are_never_recreated(tmp_path):
@@ -1563,7 +1564,7 @@ def test_s3_bwrap_a_fake_codex_finds_its_resources_and_never_sees_the_store_auth
     run = project.run_dir("r1")
     layout = sandbox.dispatch_layout(project, run_dir=run, agent="tracer",
                                      launcher=home / ".local" / "bin" / "codex")
-    env = sandbox.dispatch_environment(run, layout=layout, env=dict(os.environ))
+    env = sandbox.dispatch_environment(run, layout=layout, env=dict(os.environ), writable=[run])
     job = jobs.run_blocking(project, [str(home / ".local" / "bin" / "codex")], kind="agent", cwd=run,
                             run_dir=run, label="codex", timeout_s=60, sandbox_writable=[run],
                             sandbox_layout=layout, env=env)

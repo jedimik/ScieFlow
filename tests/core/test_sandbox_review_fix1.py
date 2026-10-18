@@ -154,7 +154,7 @@ def test_f5_a_launcher_under_the_bound_project_root_reaches_the_sandbox_path(tmp
     located = sandbox.host_launcher("claude", run)
     assert located == exe.absolute()
     layout = sandbox.dispatch_layout(Project(root), run_dir=run, agent="tracer", launcher=located)
-    env = sandbox.dispatch_environment(run, layout=layout, env={})
+    env = sandbox.dispatch_environment(run, layout=layout, env={}, writable=[run])
     assert str(exe.parent) in env["PATH"].split(":")
     captured = agent_run._capture_execution("claude", run, env)[0]
     assert captured == located, "the dispatch would refuse: the launcher is not on its PATH"

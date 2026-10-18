@@ -81,7 +81,7 @@ def test_n1_a_launcher_dir_inside_the_dispatch_run_is_refused(tmp_path):
     run = tmp_path / "run"
     layout = sandbox.Layout(launcher_dirs=(run / "bin",))
     with pytest.raises(sandbox.SandboxError, match="writable grant") as exc:
-        sandbox.dispatch_environment(run, layout=layout, env={})
+        sandbox.dispatch_environment(run, layout=layout, env={}, writable=[run])
     assert str(run / "bin") in str(exc.value)
     assert str(run) in str(exc.value)
 
@@ -103,7 +103,7 @@ def test_n1_a_launcher_dir_reached_through_a_symlink_into_a_grant_is_refused(tmp
     link.symlink_to(run / "bin")
     layout = sandbox.Layout(launcher_dirs=(link,))
     with pytest.raises(sandbox.SandboxError, match="writable grant"):
-        sandbox.dispatch_environment(run, layout=layout, env={})
+        sandbox.dispatch_environment(run, layout=layout, env={}, writable=[run])
 
 
 def test_n1_a_launcher_outside_every_grant_still_joins_path(tmp_path):

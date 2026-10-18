@@ -36,7 +36,7 @@ applies to it. Bringing it inside the boundary is future work.
 | The repository root | read-only (D3). Everything under it is readable, including other runs' `workspace/<slug>/` files and their provenance repositories, except the other runs' agent homes (below) |
 | This run, `workspace/<slug>/` | writable for a sub-agent dispatch. Its `provenance.git` is hidden (empty tmpfs) |
 | This dispatch's agent home, `<run>/scratch/agent-home/<agent>/` | writable, mode 0700. Its `$HOME` points here |
-| Other runs' agent homes, `workspace/<other>/scratch/agent-home/` | hidden (empty tmpfs) |
+| Other runs' agent homes, `workspace/<other>/scratch/agent-home/` | hidden (empty tmpfs) if the home exists when this dispatch's layout is built; a home created later, by a run that starts during this dispatch, is readable (read-only, never writable) until the next dispatch |
 | Project `.env`, `.env.*` (not `.env_template`), `.dvc/config.local` | read as empty (overlaid with `/dev/null`) |
 | `writable:` entries of `config/sandbox.yml` | writable |
 | `readable:` entries of `config/sandbox.yml` | read-only |
@@ -92,7 +92,7 @@ The sandbox is built in this order, and a later bind overlays an earlier one:
 4. The agent and tool install roots, read-only, with each symlink hop
    recreated as a link.
 5. Hidden paths: the project secret files (as `/dev/null`) and other runs'
-   agent homes (as tmpfs).
+   agent homes that exist when the layout is built (as tmpfs).
 6. The writable grants: this run, and the `writable:` entries.
 7. The run's `scratch` directory, bound onto itself so it is a mount point and
    cannot be renamed from inside. Then the masks: `provenance.git` and
@@ -122,6 +122,10 @@ Kept:
   `SCIEFLOW_MAILTO`.
 - The agent's own token variable, only when that agent has an `env` credential.
 
+The parent directories bwrap synthesises to hold read-only launchers may be
+writable inside the sandbox, but they are per-sandbox tmpfs: nothing persists to
+the host or to a later dispatch.
+
 Dropped, among others: `SCITE_TOKEN`, `DISCORD_*`, `HERMES_*`,
 `SSH_AUTH_SOCK`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, proxy variables
 (`HTTPS_PROXY` and similar), CA-bundle variables (`SSL_CERT_FILE`,
@@ -142,8 +146,10 @@ mode 0700 and kept across dispatches. Within one run, `claude --resume` and
 - Every component from `scratch` down must be a real directory. A symlink is
   refused (exit 77) and never followed. A symlinked `run/scratch` therefore
   refuses every dispatch in that run.
-- Another run's agent home is hidden from this dispatch. A dispatch cannot read or
-  plant files in a sibling agent's home, and a sibling run's home is hidden too.
+- Another run's agent home is hidden from this dispatch if it exists when the
+  dispatch's layout is built. A dispatch cannot plant files in a sibling agent's
+  home. A sibling home created later, by a run that starts during this dispatch,
+  is readable (read-only, never writable) until the next dispatch.
 - The archive never packs an agent home (`scratch/agent-home`), whatever the
   archive's skip setting is. That covers the run archive, workspace size and
   the chats bundle. `.dvcignore` lists the same path.
@@ -153,7 +159,8 @@ mode 0700 and kept across dispatches. Within one run, `claude --resume` and
 A sandboxed agent needs its login. Each agent has an entry under `credentials:`
 in `config/sandbox.yml`, keyed by agent name, with a `mode` and a `reason`.
 A dispatch with no entry for its agent is refused (exit 77) with the exact
-setup step.
+setup step. A dispatch whose entry names a token file that is missing is refused
+(exit 77) with a message that names that file.
 
 - `mode: env` — the token is read from a private file, one line, owned by you,
   mode 0600. The default is `~/.config/scieflow/credentials/<agent>.token`, or
@@ -181,7 +188,13 @@ chmod 600 ~/.config/scieflow/credentials/claude.token
 ```
 
 Then `scieflow agent run` for `claude` dispatches sandboxed. Until that file
-exists, a `claude` dispatch is refused with exit 77 and this same message.
+exists, a `claude` dispatch is refused with exit 77 and a message that names the
+missing token file. The setup steps above are printed only for an agent with no
+`credentials:` entry.
+
+The token is yours. Revoke it through the provider's own account controls at any
+time. Deleting the token file stops sandboxed dispatches for that agent (exit
+77). Revoking the token at the provider makes the agent's own login fail.
 
 Further rules, checked at dispatch time:
 
@@ -231,11 +244,15 @@ readable:
 - An entry already covered by a bound root (the project, the Python runtime,
   `uv`) is dropped as redundant.
 
-The hard deny list is never overridable. An entry that equals, lies inside, or
-contains any of these is refused with exit 77 and a `job.refused` event, after
-symlinks are resolved:
+The hard deny list is never overridable. After symlinks are resolved, an entry
+is refused with exit 77 and a `job.refused` event if it equals one of the paths
+below or is an ancestor of one:
 
 - the home directory, `/`, `/home`, and the home's parent;
+
+For the rest of the list, an entry is refused when it equals, lies inside, or is
+an ancestor of one of these:
+
 - `~/.ssh`, `~/.gnupg`, `~/.hermes`, `~/.config/scieflow/credentials`;
 - the agent credential stores `~/.claude`, `~/.claude.json`, `~/.codex`,
   `~/.gemini`;
@@ -257,8 +274,8 @@ Two protections apply to every dispatch, whatever `readable:` says:
   The host files are untouched. A symlink at one of these names refuses the
   dispatch (exit 77), because a `/dev/null` overlay would land on the link's
   target.
-- Every other run's agent home is hidden (see
-  [the agent home](#the-agent-home)).
+- Every other run's agent home that exists when the dispatch's layout is built
+  is hidden (see [the agent home](#the-agent-home)).
 
 A `writable:` entry that contains a hidden path is refused (exit 77), because
 the writable bind would re-expose it. A `workspace/` that is itself a symbolic
@@ -460,8 +477,9 @@ It does not confine the following:
   machine can reach, and it can send what it reads.
 - **What it can read.** The repository (including other runs' files and their
   provenance repositories), its own run, its own agent home, the `readable:`
-  folders, and the system and install roots. Only the agent homes of other runs
-  and the project secret files are hidden.
+  folders, and the system and install roots. Only the agent homes of other runs that exist when the
+  dispatch's layout is built, and the project secret files, are hidden (see the
+  timing residual below).
 - **The agent's own evidence.** The agent writes its own evidence into its run
   (K16 H7, return-to item B3). The sandbox does not check it.
 
@@ -484,7 +502,7 @@ fixed bug.
   `run/.claude/`), and through any run file a CLI reads on start. Through those,
   one agent can make another agent's CLI run code with that agent's credential in
   its environment. The planted-executable form and the env-prefix form are
-  refused, and sibling homes are hidden. A full fix conflicts with the K Task 8
+  refused, and sibling homes that exist when the layout is built are hidden. A full fix conflicts with the K Task 8
   binding and is a human decision (S7). Not fixed here.
 - **R3 — the network is open.** Loopback TCP services, abstract-namespace Unix
   sockets, and SysV IPC (`--unshare-ipc` is not used) are reachable or shared with
@@ -510,6 +528,10 @@ fixed bug.
 
 Further residuals, from the S1–S5 reviews and fix rounds:
 
+- **A sibling run's agent home created during a dispatch is readable.** A home that
+  exists when the layout is built is hidden. One created later, by a run that starts
+  during this dispatch, is readable read-only until the next dispatch. It is never
+  writable.
 - **A coordinator's workspace-root grant still sees every run's agent home.**
   Agent dispatches never get that grant, so this affects only a coordinator grant.
   The grant is not a dispatch layout.
@@ -523,9 +545,9 @@ Further residuals, from the S1–S5 reviews and fix rounds:
   per qualifying home, and it is removed on every exit path. A killed `verify()`
   can leave a stale `.scieflow-verify-marker-*` file behind. This is cosmetic: the
   file is not a credential and does not weaken the proof.
-- **Projects outside the home directory, or under `/tmp`, cannot be dispatched
-  sandboxed.** No directory outside every bind can hold the marker, so `verify()`
-  refuses. `doctor` still reports ok, because it proves confinement on its own
+- **A project with no writable directory above it outside the sandbox binds
+  (for example, a project under `/tmp`) cannot be dispatched sandboxed.** No
+  directory outside every bind can hold the marker, so `verify()` refuses. `doctor` still reports ok, because it proves confinement on its own
   throwaway grant under `~/.cache/scieflow`. Move the project under the home
   directory, or opt out deliberately.
 - **Python inside the sandbox imports the checkout's `src/` through the venv's
