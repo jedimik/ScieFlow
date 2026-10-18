@@ -1219,3 +1219,345 @@ def test_s2_docs_gain_a_readable_section():
     import re
     text = (W / "docs" / "sandbox.md").read_text()
     assert re.search(r"^#+ .*readable", text, re.M)
+
+
+# --- S3: agent and tool install roots, env prefix, K16 compatibility -----------
+# Fake installs live under a fake HOME from tmp_path_factory (A6). Labels s3-*.
+
+CODEX_BODY = ("#!/bin/sh\n"
+              'here=$(dirname "$(readlink -f "$0")")\n'
+              'if test -f "$here/../codex-resources/marker"; then echo resources-ok; '
+              'else echo resources-missing; fi\n')
+
+
+def _s3_home(tmp_path_factory, monkeypatch) -> Path:
+    home = tmp_path_factory.mktemp("home").resolve()
+    monkeypatch.setenv("HOME", str(home))
+    (home / ".local" / "bin").mkdir(parents=True)
+    return home
+
+
+def _exe(path: Path, body: str = "#!/bin/sh\necho ok\n") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+    path.chmod(0o755)
+    return path
+
+
+def _claude_install(home: Path, body: str = "#!/bin/sh\necho claude-ran\n", version: str = "1.0") -> Path:
+    """claude: ~/.local/bin/claude -> ~/.local/share/claude/versions/<v> (a file)."""
+    target = _exe(home / ".local" / "share" / "claude" / "versions" / version, body)
+    (home / ".local" / "bin" / "claude").symlink_to(target)
+    return target
+
+
+def _codex_install(home: Path, body: str = CODEX_BODY, version: str = "0.1.0") -> Path:
+    """codex: ~/.local/bin/codex -> .codex/.../standalone/current/bin/codex; current -> releases/<v>."""
+    release = home / ".codex" / "packages" / "standalone" / "releases" / version
+    _exe(release / "bin" / "codex", body)
+    (release / "codex-resources").mkdir()
+    (release / "codex-resources" / "marker").write_text("res\n")
+    current = home / ".codex" / "packages" / "standalone" / "current"
+    current.symlink_to(f"releases/{version}")
+    (home / ".local" / "bin" / "codex").symlink_to(current / "bin" / "codex")
+    return release
+
+
+def _layout(project, launcher, agent="tracer"):
+    return sandbox.dispatch_layout(project, run_dir=project.run_dir("r1"), agent=agent,
+                                   launcher=launcher)
+
+
+def _append_agent(project, name: str, cfg: dict) -> None:
+    path = project.root / "config" / "agents.yml"
+    block = ''.join('    ' + line + '\n' for line in yaml.safe_dump(cfg).splitlines())
+    path.write_text(path.read_text() + f'  {name}:\n{block}')
+
+
+def _turn_cfg(**over) -> dict:
+    cfg = {'cmd': 'claude first {prompt}', 'session_cmd': 'claude first {prompt}',
+           'resume_cmd': 'claude --resume {session} resume {prompt}', 'family': 'claude',
+           'enabled': True, 'timeout_min': 1, 'model': 'fixture', 'reasoning': 'high'}
+    cfg.update(over)
+    return cfg
+
+
+@pytest.mark.parametrize("argv, index", [
+    (["claude", "-p"], 0),
+    (["env", "MAX_THINKING_TOKENS=32000", "claude", "-p"], 2),
+    (["/usr/bin/env", "A=1", "B=2", "codex", "exec"], 3),
+])
+def test_s3_cli_index_is_argv0_or_the_command_after_env_operands(argv, index):
+    assert sandbox.agent_cli_index(argv) == index
+
+
+@pytest.mark.parametrize("argv", [
+    ["env", "-i", "claude"], ["env", "-S", "claude -p"], ["env", "-u", "X", "claude"],
+    ["env", "--", "claude"], ["env", "A=1", "-i", "claude"], ["env"], ["env", "A=1"], [],
+])
+def test_s3_an_env_prefix_with_options_or_no_command_is_refused(argv):
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.agent_cli_index(argv)
+
+
+def test_s3_claude_install_root_is_the_version_file_and_the_hop_is_a_link(tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    target = _claude_install(home)
+    layout = _layout(Project(_repo(tmp_path)), home / ".local" / "bin" / "claude")
+    assert layout.installs == (target,)
+    assert (home / ".local" / "bin" / "claude", str(target)) in layout.links
+    assert home / ".local" / "bin" in layout.launcher_dirs
+
+
+def test_s3_codex_install_root_is_the_releases_dir_with_both_hops_as_links(tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    release = _codex_install(home)
+    layout = _layout(Project(_repo(tmp_path)), home / ".local" / "bin" / "codex")
+    current = home / ".codex" / "packages" / "standalone" / "current"
+    assert layout.installs == (release,)
+    assert (home / ".local" / "bin" / "codex", str(current / "bin" / "codex")) in layout.links
+    assert (current, "releases/0.1.0") in layout.links
+
+
+def test_s3_a_plain_file_launcher_is_its_own_root(tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    tool = _exe(home / ".local" / "bin" / "agy", "#!/bin/sh\n")
+    layout = _layout(Project(_repo(tmp_path)), tool)
+    assert layout.installs == (tool,)
+    assert not [link for link, _ in layout.links if link.name == "agy"]
+
+
+def test_s3_a_venv_link_to_a_uv_python_roots_at_the_python_file(tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    uv_python = _exe(home / ".local" / "share" / "uv" / "python" / "cpython-3.12.9" / "bin" / "python3.12")
+    root = _repo(tmp_path)
+    venv_python = root / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(uv_python)
+    layout = _layout(Project(root), venv_python)
+    assert layout.installs == (uv_python,)
+    # the venv link lies inside the project root, which is already bound: it is not recreated
+    assert all(link != venv_python for link, _ in layout.links)
+
+
+def test_s3_the_climb_is_bounded_to_two_components_above_the_file(tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    deep = _exe(home / ".local" / "share" / "tool" / "versions" / "1.0" / "sub" / "deeper" / "tool")
+    (home / ".local" / "bin" / "tool").symlink_to(deep)
+    layout = _layout(Project(_repo(tmp_path)), home / ".local" / "bin" / "tool")
+    assert layout.installs == (deep,)      # versions/1.0 is three components up: not the root
+
+
+def test_s3_a_store_root_outside_packages_is_refused(tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    release = home / ".codex" / "releases" / "0.1.0"
+    _exe(release / "bin" / "codex", CODEX_BODY)
+    (home / ".local" / "bin" / "codex").symlink_to(release / "bin" / "codex")
+    with pytest.raises(sandbox.SandboxError, match="credential store"):
+        _layout(Project(_repo(tmp_path)), home / ".local" / "bin" / "codex")
+
+
+def test_s3_a_store_root_holding_a_credential_file_is_refused(tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    release = _codex_install(home)
+    (release / "auth.json").write_text("fake-token\n")
+    with pytest.raises(sandbox.SandboxError, match="credential"):
+        _layout(Project(_repo(tmp_path)), home / ".local" / "bin" / "codex")
+
+
+def test_s3_the_store_walk_is_bounded(tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    _codex_install(home)
+    monkeypatch.setattr(sandbox, "INSTALL_WALK_MAX", 3)
+    with pytest.raises(sandbox.SandboxError, match="entries"):
+        _layout(Project(_repo(tmp_path)), home / ".local" / "bin" / "codex")
+
+
+@pytest.mark.parametrize("target", [".codex", ".claude", ""])
+def test_s3_a_root_equal_to_or_containing_a_store_or_the_home_is_refused(tmp_path, tmp_path_factory,
+                                                                     monkeypatch, target):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    where = home / target if target else home
+    where.mkdir(exist_ok=True)
+    (home / ".local" / "bin" / "tool").symlink_to(where)
+    with pytest.raises(sandbox.SandboxError):
+        _layout(Project(_repo(tmp_path)), home / ".local" / "bin" / "tool")
+
+
+def test_s3_an_install_root_inside_a_bound_root_is_dropped(tmp_path):
+    root = _repo(tmp_path)
+    real = _exe(root / "tools" / "real", "#!/bin/sh\n")
+    launcher = root / "tools" / "alias"
+    launcher.symlink_to(real)
+    assert _layout(Project(root), launcher).installs == ()
+
+
+def test_s3_the_launcher_dir_joins_path_only_when_no_bound_path_covers_it(tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    _claude_install(home)
+    monkeypatch.setattr(sandbox, "_launcher", lambda name: (None, [], None))
+    project = Project(_repo(tmp_path))
+    layout = _layout(project, home / ".local" / "bin" / "claude")
+    env = sandbox.dispatch_environment(project.run_dir("r1"), layout=layout, env={"PATH": "/x"})
+    assert env["PATH"] == f"{home / '.local' / 'bin'}:/usr/local/bin:/usr/bin:/bin"
+    system = _layout(project, Path("/bin/sh"))
+    assert sandbox.dispatch_environment(project.run_dir("r1"), layout=system,
+                                        env={"PATH": "/x"})["PATH"] == "/usr/local/bin:/usr/bin:/bin"
+
+
+def test_s3_merged_usr_hops_are_never_recreated(tmp_path):
+    layout = _layout(Project(_repo(tmp_path)), Path("/bin/sh"))
+    assert not [link for link, _ in layout.links if link.parts[1:2] and link.parts[1] in
+                ("bin", "lib", "lib64", "sbin")]
+
+
+def test_s3_layout_installs_must_be_an_immutable_tuple_of_absolute_paths(tmp_path):
+    assert sandbox.Layout(installs=(tmp_path,)).installs == (tmp_path,)   # RED: the field must exist
+    with pytest.raises(TypeError):
+        sandbox.Layout(installs=[tmp_path])
+    with pytest.raises(TypeError):
+        sandbox.Layout(installs=(Path("relative"),))
+
+
+def test_s3_installs_are_read_only_and_an_install_inside_a_grant_is_refused(fake_bwrap, tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+    inst = tmp_path / "inst"
+    inst.mkdir()
+    argv = sandbox.wrap(["agent"], writable=[run], cwd=run, layout=sandbox.Layout(installs=(inst,)))
+    _at(argv, "--ro-bind", str(inst), str(inst))
+    (run / "tool").write_text("x")
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.wrap(["agent"], writable=[run], cwd=run,
+                     layout=sandbox.Layout(installs=(run / "tool",)))
+
+
+def test_s3_cli_prepare_resolves_claude_behind_an_env_prefix(tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    target = _claude_install(home)
+    monkeypatch.setenv("PATH", f"{home / '.local' / 'bin'}:{os.environ['PATH']}")
+    root = _repo(tmp_path, agent="envcli", cmd="env MAX_THINKING_TOKENS=32000 claude -p {prompt}")
+    prompt = root / "workspace" / "r1" / "logs" / "p.md"
+    prompt.write_text("hi")
+    d = agent_run.prepare(Project(root), "envcli", prompt)
+    assert d.argv[:4] == ["env", "MAX_THINKING_TOKENS=32000", "claude", "-p"]
+    assert d.layout.installs == (target,)
+    assert str(home / ".local" / "bin") in d.env["PATH"].split(":")
+
+
+def test_s3_cli_env_with_options_is_refused_exit_77_and_recorded(tmp_path, monkeypatch):
+    from scieflow.core import events
+    root = _repo(tmp_path, agent="envopt", cmd="env -i claude -p {prompt}")
+    run = root / "workspace" / "r1"
+    prompt = run / "logs" / "p.md"
+    prompt.write_text("hi")
+    monkeypatch.chdir(root)
+    with pytest.raises(SystemExit) as exc:
+        agent_run.main(["envopt", str(prompt), str(run / "logs" / "t.md")])
+    assert exc.value.code == 77
+    assert "job.refused" in [e["type"] for e in events.read(run)]
+
+
+def test_s3_host_and_capture_divergence_is_refused(tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    _claude_install(home)
+    monkeypatch.setenv("PATH", f"{home / '.local' / 'bin'}:{os.environ['PATH']}")
+    root = _repo(tmp_path, agent="envcli", cmd="claude -p {prompt}")
+    prompt = root / "workspace" / "r1" / "logs" / "p.md"
+    prompt.write_text("hi")
+    monkeypatch.setattr(agent_run, "_capture_execution",
+                        lambda token, cwd, env: (Path("/usr/bin/true"), (), "/usr/bin/true"))
+    with pytest.raises(sandbox.SandboxError, match="launcher"):
+        agent_run.prepare(Project(root), "envcli", prompt)
+
+
+@pytest.mark.parametrize("key", ["session_cmd", "resume_cmd"])
+@pytest.mark.parametrize("prefix", ["env", "/usr/bin/env"])
+def test_s3_a_turn_env_prefix_is_refused_on_both_templates(k_conversational_project, key, prefix):
+    project, ws, _ = k_conversational_project
+    _append_agent(project, "envturn", _turn_cfg(**{key: prefix + " MAX_THINKING_TOKENS=32000 " +
+                                                  _turn_cfg()[key]}))
+    with pytest.raises(sandbox.SandboxError, match="env"):
+        agent_run.resolve_turn(project, "envturn", run_dir=ws, session=None)
+
+
+def test_s3_a_turn_env_prefix_refusal_is_recorded_as_job_refused(k_conversational_project):
+    from scieflow.core import events
+    project, ws, _ = k_conversational_project
+    _append_agent(project, "envturn", _turn_cfg(session_cmd="env X=1 " + _turn_cfg()["session_cmd"]))
+    try:
+        service.set_conversation_agent(project, "r1", "envturn")
+    except service.ServiceError:
+        pass
+    else:
+        with pytest.raises(service.ServiceError):
+            service.say(project, "r1", "hello")
+    assert "job.refused" in [e["type"] for e in events.read(ws)]
+
+
+@needs_bwrap
+def test_s3_bwrap_a_fake_claude_runs_by_name_and_by_path_with_its_own_path_and_no_neighbours(
+        tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    body = ("#!/bin/sh\necho claude-ran\n"
+            f"if test -e {home}/.local/bin/other; then echo NEIGHBOUR-LEAK; else echo neighbour-absent; fi\n"
+            "echo path=$PATH\n")
+    _claude_install(home, body=body)
+    _exe(home / ".local" / "bin" / "other", "#!/bin/sh\n")
+    monkeypatch.setenv("PATH", f"{home / '.local' / 'bin'}:{os.environ['PATH']}")
+    root = _repo(tmp_path, agent="envcli", cmd="claude -p {prompt}")
+    project = Project(root)
+    run = project.run_dir("r1")
+    prompt = run / "logs" / "p.md"
+    prompt.write_text("hi")
+    d = agent_run.prepare(project, "envcli", prompt)
+    kw = dict(kind="agent", cwd=d.cwd, run_dir=d.run_dir, label=d.agent, timeout_s=60,
+              sandbox_writable=d.writable, sandbox_layout=d.layout, env=d.env)
+    job = jobs.run_blocking(project, d.argv, **kw)
+    out = Path(job.log).read_text()
+    assert job.exit_code == 0, out
+    assert "claude-ran" in out and "neighbour-absent" in out and "LEAK" not in out, out
+    assert f"path={d.env['PATH']}" in out, out
+    by_path = jobs.run_blocking(project, [str(home / ".local" / "bin" / "claude"), "-p", "hi"],
+                                **{**kw, "label": "by-path"})
+    assert by_path.exit_code == 0 and "claude-ran" in Path(by_path.log).read_text()
+
+
+@needs_bwrap
+def test_s3_bwrap_a_fake_codex_finds_its_resources_and_never_sees_the_store_auth(
+        tmp_path, tmp_path_factory, monkeypatch):
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    body = CODEX_BODY + f"if test -e {home}/.codex/auth.json; then echo AUTH-LEAK; else echo auth-absent; fi\n"
+    _codex_install(home, body)
+    (home / ".codex" / "auth.json").write_text("fake-auth\n")
+    project = Project(_repo(tmp_path))
+    run = project.run_dir("r1")
+    layout = sandbox.dispatch_layout(project, run_dir=run, agent="tracer",
+                                     launcher=home / ".local" / "bin" / "codex")
+    env = sandbox.dispatch_environment(run, layout=layout, env=dict(os.environ))
+    job = jobs.run_blocking(project, [str(home / ".local" / "bin" / "codex")], kind="agent", cwd=run,
+                            run_dir=run, label="codex", timeout_s=60, sandbox_writable=[run],
+                            sandbox_layout=layout, env=env)
+    out = Path(job.log).read_text()
+    assert job.exit_code == 0, out
+    assert "resources-ok" in out and "auth-absent" in out and "LEAK" not in out, out
+
+
+@needs_bwrap
+def test_s3_bwrap_k16_turn_through_a_fake_claude_resolves_its_launcher_and_records_its_session(
+        k_conversational_project, tmp_path_factory, monkeypatch):
+    import shlex
+    project, ws, _ = k_conversational_project
+    home = _s3_home(tmp_path_factory, monkeypatch)
+    protocol = W / "tests" / "fixtures" / "k_conversation_protocol.py"
+    fake = _exe(home / ".local" / "bin" / "claude",
+                f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -B {shlex.quote(str(protocol))} \"$@\"\n")
+    _append_agent(project, "claude-turn", _turn_cfg())
+    monkeypatch.setenv("PATH", f"{home / '.local' / 'bin'}:{os.environ['PATH']}")
+    resolved = agent_run.resolve_turn(project, "claude-turn", run_dir=ws, session=None)
+    assert resolved.execution_path == home / ".local" / "bin" / "claude"
+    assert resolved.layout.installs == (fake,)
+    service.set_conversation_agent(project, "r1", "claude-turn")
+    result = service.say(project, "r1", "hello")
+    assert result["job"]["state"] == "done" and result["job"]["exit_code"] == 0
+    assert result["turn"]["text"] == "K protocol reply"

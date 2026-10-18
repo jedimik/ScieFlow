@@ -1226,9 +1226,14 @@ def test_k_operands_executable_identity_matches_literal_launch(tmp_path, monkeyp
         captured.append(token)
         return Path(token), (), token
     monkeypatch.setattr(agent_run, '_capture_execution', capture)
+    expected = str(root) + '/' + python + '/' + cfg['model'] + '/' + cfg['reasoning']
+    # S3 (C7): the host must locate the same launcher the capture reports, so the identity is a real file.
+    from pathlib import Path as _Path
+    _Path(expected).parent.mkdir(parents=True)
+    _Path(expected).write_text('#!/bin/sh\necho ok\n')
+    _Path(expected).chmod(0o755)
     resolved = agent_run.resolve_turn(Project(root), 'fixture', run_dir=ws, session=None)
     prepared = agent_run.prepare_turn(resolved, accept_human_submission('ordinary text'))
-    expected = str(root) + '/' + python + '/' + cfg['model'] + '/' + cfg['reasoning']
     assert captured == [expected]
     assert resolved.harness_identity.executable == prepared.argv[0] == expected
 

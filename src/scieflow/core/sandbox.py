@@ -51,6 +51,8 @@ _SECRET_UNDER_HOME = (".ssh", ".gnupg", ".hermes", ".config/scieflow/credentials
 _AGENT_STORES = (".claude", ".claude.json", ".codex", ".gemini")
 _RUNTIME_SOCKETS = (Path("/run"), Path("/var/run"), Path("/proc"), Path("/sys"), Path("/dev"))
 _MAX_LINK_HOPS = 8
+INSTALL_WALK_MAX = 20_000   # A1: the most entries a store-resident install root may hold
+_ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")   # an `env` NAME=VALUE operand
 
 
 class SandboxError(RuntimeError):
@@ -104,8 +106,9 @@ def masks_for(writable: list[Path], *, run_dir: Path | None) -> list[Path]:
 class Layout:
     """What a dispatch sees beyond the system set and its writable grants (C2).
 
-    readable: bound read-only at the same path. links: (link, target) pairs,
-    recreated with --symlink. home: the dispatch's own HOME, bound read-write
+    readable: bound read-only at the same path. installs: read-only install roots of the
+    agent CLI and the uv-managed tools (S3; checked as installs, A1). links: (link, target)
+    pairs, recreated with --symlink. home: the dispatch's own HOME, bound read-write
     after the masks. launcher_dirs: directories of bound launchers, which form
     the start of the sandbox PATH (C6). hidden: paths overlaid after the
     readable binds and before the writable ones (C14): a file becomes
@@ -116,6 +119,7 @@ class Layout:
     home: Path | None = None
     launcher_dirs: tuple[Path, ...] = ()
     hidden: tuple[Path, ...] = ()
+    installs: tuple[Path, ...] = ()
 
     def __post_init__(self):
         if type(self.readable) is not tuple or any(not _is_abs(p) for p in self.readable):
@@ -130,6 +134,8 @@ class Layout:
             raise TypeError("launcher_dirs must be an immutable tuple of absolute Paths")
         if type(self.hidden) is not tuple or any(not _is_abs(p) for p in self.hidden):
             raise TypeError("hidden must be an immutable tuple of absolute Paths")
+        if type(self.installs) is not tuple or any(not _is_abs(p) for p in self.installs):
+            raise TypeError("installs must be an immutable tuple of absolute Paths")
 
 
 def _is_abs(value) -> bool:
@@ -156,13 +162,35 @@ def _homes() -> list[Path]:
     return sorted(out, key=str)
 
 
+def _install_root_in_store(root: Path, store: Path) -> None:
+    """A1 (S1 review F4): an install root may lie inside an agent store only as a clean
+    `packages/**/{versions,releases}/<v>` directory: a bounded walk must find no credential file."""
+    from scieflow.chats.stores.base import CREDENTIAL_FILES
+    rel = root.relative_to(store).parts
+    if rel[:1] != ("packages",) or root.parent.name not in ("versions", "releases"):
+        raise SandboxError(f"{root} lies inside the agent credential store {store}; never granted")
+    if root.is_symlink() or not root.is_dir():
+        raise SandboxError(f"install root inside {store} must be a real directory: {root}")
+    secrets = {Path(name).name for names in CREDENTIAL_FILES.values() for name in names}
+    seen = 0
+    for _dirpath, dirnames, filenames in os.walk(root):
+        names = [*dirnames, *filenames]
+        seen += len(names)
+        if seen > INSTALL_WALK_MAX:
+            raise SandboxError(f"install root {root} holds more than {INSTALL_WALK_MAX} entries; refused")
+        hit = sorted(secrets.intersection(names))
+        if hit:
+            raise SandboxError(f"install root {root} holds a credential file ({hit[0]}); never granted")
+
+
 def check_not_denied(path: Path, *, kind: str = "readable") -> None:
     """Refuse a path that equals, lies inside, or contains a hard-deny path (A1).
 
-    kind "bind" may name a file inside an agent credential store (C10), so only
-    that kind allows a path inside a store. Runtime sockets are refused for
-    "readable" (F9) only: the resolver config ("resolv") lives under /run by design,
-    so it keeps the store rules but not the socket rule.
+    kind "bind" may name a file inside an agent credential store (C10). kind "install"
+    (S3, A1) may name a clean `packages/**/{versions,releases}/<v>` root inside a store,
+    checked by `_install_root_in_store`; any other store path is refused. Runtime sockets
+    are refused for "readable" and "install" (F9) only: the resolver config ("resolv")
+    lives under /run by design, so it keeps the store rules but not the socket rule.
     """
     candidates = {Path(path).absolute(), Path(path).resolve()}
     for c in candidates:
@@ -177,16 +205,24 @@ def check_not_denied(path: Path, *, kind: str = "readable") -> None:
                 d = home / rel
                 if c == d or c in d.parents:
                     raise SandboxError(f"{c} is an agent credential store or contains one; never granted")
-                if d in c.parents and kind != "bind":
+                if d in c.parents:
+                    if kind == "bind":
+                        continue
+                    if kind == "install":
+                        _install_root_in_store(c, d)
+                        continue
                     raise SandboxError(f"{c} lies inside the agent credential store {d}; never granted")
-        if kind == "readable":
+        if kind in ("readable", "install"):
             for sock in _RUNTIME_SOCKETS:
                 if c == sock or sock in c.parents or c in sock.parents:
                     raise SandboxError(f"{c} touches the runtime socket area {sock}; never readable")
 
 
 def _in_system_set(path: Path) -> bool:
-    return any(path == tree or tree in path.parents for tree in SYSTEM_TREES)
+    if any(path == tree or tree in path.parents for tree in SYSTEM_TREES):
+        return True
+    # The merged-usr entries (/bin, /lib, ...) reach the sandbox through /usr: system too.
+    return len(path.parts) > 1 and path.parts[0] == "/" and path.parts[1] in MERGED_USR
 
 
 def _outermost(paths) -> list[Path]:
@@ -364,6 +400,17 @@ def wrap(argv: list[str], *, writable: list[Path], cwd: Path,
                                "refused, it would not be read-only")
         readable.append(resolved)
         out += ["--ro-bind", str(resolved), str(resolved)]
+    installs: list[Path] = []
+    for path in layout.installs:                              # S3: install roots, read-only (A1)
+        resolved = Path(path).resolve()
+        if not resolved.exists():
+            raise SandboxError(f"install root does not exist: {path}")
+        check_not_denied(resolved, kind="install")
+        if any(g == resolved or g in resolved.parents for g in grants):
+            raise SandboxError(f"install root {resolved} lies inside a writable grant; "
+                               "refused, it would not be read-only")
+        installs.append(resolved)
+        out += ["--ro-bind", str(resolved), str(resolved)]
     for link, target in layout.links:
         out += ["--symlink", target, str(link)]
     out += _hidden_args(layout.hidden, grants)               # C14: before the writable binds
@@ -378,7 +425,7 @@ def wrap(argv: list[str], *, writable: list[Path], cwd: Path,
     if home is not None:
         out += ["--bind", str(home), str(home)]
     work = Path(cwd).resolve()
-    bound = [*readable, *grants, *([home] if home is not None else [])]
+    bound = [*readable, *installs, *grants, *([home] if home is not None else [])]
     if not any(work == b or b in work.parents for b in bound):
         raise SandboxError(f"cwd {work} is outside every path the sandbox grants")
     out += ["--chdir", str(work), "--unshare-pid", "--die-with-parent", "--"]
@@ -752,8 +799,86 @@ def readable_paths(project: Project, *, policy: dict | None = None) -> tuple[Pat
     return _readable_of(data, project.root, project.root / ALLOWLIST_FILE)
 
 
+def agent_cli_index(argv) -> int:
+    """C7/A7: the index of the agent CLI in `argv`: 0, or the first command after an `env` prefix.
+
+    An `env` prefix may carry only NAME=VALUE operands. An option (-i, -S, -u, --, ...)
+    changes what runs, so it is refused, as is a prefix with no command.
+    """
+    if not argv or type(argv[0]) is not str:
+        raise SandboxError("agent command is empty")
+    if Path(argv[0]).name != "env":
+        return 0
+    index = 1
+    while index < len(argv) and _ENV_ASSIGNMENT.match(argv[index]):
+        index += 1
+    if index >= len(argv):
+        raise SandboxError("env prefix names no command to run")
+    if argv[index].startswith("-"):
+        raise SandboxError(f"env prefix option {argv[index]!r} is not allowed; "
+                           "use NAME=VALUE operands only")
+    return index
+
+
+def host_launcher(token: str, cwd: Path) -> Path | None:
+    """The agent CLI as the host resolves it, spelled absolutely and not resolved (C6/C7).
+
+    Mirrors `agent_run._capture_execution`: a bare name is searched on PATH, a path with a
+    slash is taken relative to `cwd`. None when no executable file is found.
+    """
+    if not token or "\0" in token:
+        return None
+    if "/" in token:
+        located = Path(token) if Path(token).is_absolute() else Path(cwd) / token
+        if located.is_file() and os.access(located, os.X_OK):
+            return located.absolute()
+        return None
+    found = shutil.which(token)
+    return Path(found).absolute() if found else None
+
+
+def _expand_links(path: Path) -> tuple[list[tuple[Path, str]], Path]:
+    """Every symlink on the way to an absolute `path`, directory components included (C7).
+
+    Returns the hops, (link path, target text), and the real location of the final file.
+    A directory symlink in the middle of the path (codex's `current`) is a hop too: the
+    sandbox must recreate it, or the launcher dangles. Bounded by _MAX_LINK_HOPS.
+    """
+    hops: list[tuple[Path, str]] = []
+    current = Path(path.anchor)
+    pending = list(reversed(path.parts[1:]))
+    while pending:
+        part = pending.pop()
+        if part == "..":
+            current = current.parent
+            continue
+        candidate = current / part
+        if not candidate.is_symlink():
+            current = candidate
+            continue
+        if len(hops) >= _MAX_LINK_HOPS:
+            raise SandboxError(f"too many symbolic links behind {path}")
+        target = os.readlink(candidate)
+        hops.append((candidate, target))
+        if Path(target).is_absolute():
+            current = Path(current.anchor)
+            pending.extend(reversed(Path(target).parts[1:]))
+        else:
+            pending.extend(reversed(Path(target).parts))
+    return hops, current
+
+
+def _install_root(final: Path) -> Path:
+    """C7/A17: the first of the two ancestors of the final file whose parent is `versions` or
+    `releases` is the install root (a directory); otherwise the final file itself."""
+    for ancestor in (final.parent, final.parent.parent):
+        if ancestor.parent.name in ("versions", "releases"):
+            return ancestor
+    return final
+
+
 def dispatch_layout(project: Project, *, run_dir: Path, agent: str,
-                    readable: tuple[Path, ...] = ()) -> Layout:
+                    readable: tuple[Path, ...] = (), launcher: Path | None = None) -> Layout:
     """The layout for one agent dispatch: project, Python, ScieFlow, uv, `readable:`, own home.
 
     Reads only (stat/lstat/readlink/listdir), so a resolution can happen before any write.
@@ -779,24 +904,42 @@ def dispatch_layout(project: Project, *, run_dir: Path, agent: str,
     extra = [p for p in dict.fromkeys(Path(r) for r in readable)
              if not any(p == b or b in p.parents for b in base)]
     granted = tuple([*base, *_outermost(extra)])
+    cli_hops: list[tuple[Path, str]] = []
+    cli_dir: Path | None = None
+    installs: list[Path] = []
+    if launcher is not None:
+        located = Path(launcher)
+        if not located.is_absolute():
+            raise SandboxError(f"agent launcher must be an absolute path: {located}")
+        cli_hops, final = _expand_links(located)
+        cli_root = _install_root(final)
+        check_not_denied(cli_root, kind="install")              # A1, before any use of the root
+        cli_dir = located.parent
+        if not _in_system_set(cli_root) and not any(
+                cli_root == g or g in cli_root.parents for g in granted):
+            installs.append(cli_root)
+    installs_t = tuple(installs)
     interpreter = Path(os.path.abspath(sys.executable))
-    links = [*hops, *((p, os.readlink(p)) for p in reversed(interpreter.parents) if p.is_symlink())]
+    links = [*hops, *cli_hops,
+             *((p, os.readlink(p)) for p in reversed(interpreter.parents) if p.is_symlink())]
+    inside = (*granted, *installs_t)
     kept_links: list[tuple[Path, str]] = []
     for link, target in links:
-        covered = _in_system_set(link) or any(link == r or r in link.parents for r in granted)
+        covered = _in_system_set(link) or any(link == r or r in link.parents for r in inside)
         if not covered and link not in [k for k, _ in kept_links]:
             kept_links.append((link, target))
     hidden = [*_secret_masks(root), *_other_run_homes(root, run)]
+    dirs = [d for d in (launcher_dir, cli_dir) if d is not None]
     return Layout(readable=granted, links=tuple(kept_links), home=home,
-                  launcher_dirs=(launcher_dir,) if launcher_dir is not None else (),
-                  hidden=tuple(dict.fromkeys(hidden)))
+                  launcher_dirs=tuple(dict.fromkeys(dirs)),
+                  hidden=tuple(dict.fromkeys(hidden)), installs=installs_t)
 
 
 def _launcher_path_needed(directory: Path, layout: Layout) -> bool:
     """A launcher dir joins PATH only when no bound system or readable path covers it (A17)."""
     if str(directory) in SYSTEM_PATH or _in_system_set(directory):
         return False
-    return not any(directory == r or r in directory.parents for r in layout.readable)
+    return not any(directory == r or r in directory.parents for r in (*layout.readable, *layout.installs))
 
 
 def dispatch_environment(base: Path, *, layout: Layout, env: dict | None = None) -> dict:

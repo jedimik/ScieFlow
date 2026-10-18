@@ -343,16 +343,31 @@ def prepare(project: Project, agent: str, prompt_file: Path,
     # The allow-list view and the dispatch's own HOME, computed read-only (A12). The
     # `readable:` grants come from the same captured policy read (A2). The CLI path
     # creates the home in wrap(), next to the writable mkdir; the turn path creates it
-    # in the protection capture.
-    readable = (sandbox.readable_paths(project, policy=policy)
-                if writable is not None else ())
-    layout = (sandbox.dispatch_layout(project, run_dir=run_dir, agent=agent, readable=readable)
-              if writable is not None else None)
-    env = sandbox.dispatch_environment(writable[0], layout=layout) if layout is not None else None
+    # in the protection capture. The CLI's launcher is resolved host-side and must be
+    # the one the dispatch's own PATH resolves to (C7, K16).
+    layout = None
+    env = None
+    if writable is not None:
+        readable = sandbox.readable_paths(project, policy=policy)
+        cli = argv[sandbox.agent_cli_index(argv)]        # A7: an env prefix with options is refused
+        located = sandbox.host_launcher(cli, cwd)
+        layout = sandbox.dispatch_layout(project, run_dir=run_dir, agent=agent,
+                                         readable=readable, launcher=located)
+        env = sandbox.dispatch_environment(writable[0], layout=layout)
+        _check_launcher_capture(cli, cwd, env, located)
     return Dispatch(agent=agent, argv=argv, cwd=cwd,
                     stdin_text=prompt if use_stdin else None,
                     timeout_s=float(agent_cfg.get("timeout_min", 10)) * 60,
                     run_dir=run_dir, writable=writable, env=env, layout=layout)
+
+
+def _check_launcher_capture(token: str, cwd: Path, env: dict, located: Path | None) -> None:
+    """C7/K16: the launcher the host resolved must be the one the dispatch's PATH resolves."""
+    captured = _capture_execution(token, cwd, env)[0]
+    if captured != located:
+        raise sandbox.SandboxError(
+            f"agent launcher {token!r} resolves to {located} on the host but to {captured} "
+            "in the dispatch; refused")
 
 
 def _validate_turn_record(record) -> None:
@@ -539,6 +554,9 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
             template = cfg.get(key)
             _validate_turn_template(template, agent, key)
             templates.append(template)
+            if Path(shlex.split(str(template))[0]).name == 'env':   # A7: refused on the turn path, unconditionally
+                raise sandbox.SandboxError(
+                    f'{agent}: an env prefix in {key} is refused on the conversation path')
         model, reasoning = cfg.get('model', ''), cfg.get('reasoning', '')
         if type(model) is not str or type(reasoning) is not str:
             raise ValueError('model and reasoning must be text')
@@ -559,8 +577,15 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
                       sandbox.resolve_turn_protection(
                           project, run_dir=run,
                           prepare_home=lambda home_run: sandbox.agent_home(home_run, agent)))
-        # The allow-list view and the turn's own HOME, computed read-only (A12).
-        layout = (sandbox.dispatch_layout(project, run_dir=run, agent=agent, readable=protection.readable)
+        # The allow-list view and the turn's own HOME, computed read-only (A12). The launcher
+        # is the CLI as the host resolves it (C7); the capture below must agree with it.
+        python = sys.executable
+        first_token = shlex.split(templates[1] if session else templates[0])[0]
+        first_token = _template_token(first_token, '', root, model=model, reasoning=reasoning,
+                                      python=python, session=session or '')
+        located = sandbox.host_launcher(first_token, work) if protection.sandbox_enabled else None
+        layout = (sandbox.dispatch_layout(project, run_dir=run, agent=agent,
+                                          readable=protection.readable, launcher=located)
                   if protection.sandbox_enabled else None)
         env = (sandbox.dispatch_environment(protection.writable[0], layout=layout)
                if layout is not None else dict(os.environ))
@@ -570,11 +595,11 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
         if type(version) is not int or version < 0:
             raise ValueError('charter version must be nonnegative integer')
         charter_digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
-        python = sys.executable
-        first_token = shlex.split(templates[1] if session else templates[0])[0]
-        first_token = _template_token(first_token, '', root, model=model, reasoning=reasoning,
-                                      python=python, session=session or '')
         execution_path, execution_facts, executable = _capture_execution(first_token, work, env)
+        if layout is not None and execution_path != located:          # K16/C7: one launcher, two lookups
+            raise sandbox.SandboxError(
+                f'agent launcher {first_token!r} resolves to {located} on the host but to '
+                f'{execution_path} in the dispatch; refused')
         identity = HarnessIdentity(agent, family, True, executable, None, None,
                                    templates[0], templates[1], model, reasoning, str(work),
                                    None, None, None, False)
