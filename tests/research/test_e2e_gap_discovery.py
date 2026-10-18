@@ -22,8 +22,8 @@ artifacts:
 """
 
 
-def sh(argv, cwd):
-    proc = subprocess.run(argv, capture_output=True, text=True, cwd=cwd)
+def sh(argv, cwd, env=None):
+    proc = subprocess.run(argv, capture_output=True, text=True, cwd=cwd, env=env)
     assert proc.returncode == 0, f"{argv}: {proc.stdout}{proc.stderr}"
     return proc
 
@@ -42,7 +42,7 @@ def make_root(tmp_path: Path):
     return tmp_path, ws
 
 
-def test_gap_discovery_pipeline(tmp_path):
+def test_gap_discovery_pipeline(tmp_path, child_env):
     root, ws = make_root(tmp_path)
     rel = ws.relative_to(root)
 
@@ -57,8 +57,8 @@ def test_gap_discovery_pipeline(tmp_path):
     for a in AGENTS:
         prompt = ws / "prompts" / f"search-{a}.md"
         prompt.write_text(f"search task\noutput: {rel}/findings/{a}.json\nkind: findings\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", a, str(prompt),
-            str(ws / "logs" / f"search-{a}.log")], cwd=root)
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(prompt),
+            str(ws / "logs" / f"search-{a}.log")], cwd=root, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",
             str(ws / "findings" / f"{a}.json")], cwd=root)
 
@@ -66,8 +66,8 @@ def test_gap_discovery_pipeline(tmp_path):
     for a in AGENTS:
         prompt = ws / "prompts" / f"gaps-{a}.md"
         prompt.write_text(f"gap task\noutput: {rel}/gaps/{a}.json\nkind: gaps\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", a, str(prompt),
-            str(ws / "logs" / f"gaps-{a}.log")], cwd=root)
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(prompt),
+            str(ws / "logs" / f"gaps-{a}.log")], cwd=root, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",
             str(ws / "gaps" / f"{a}.json"), "--schema", "gaps"], cwd=root)
 
@@ -75,12 +75,12 @@ def test_gap_discovery_pipeline(tmp_path):
     for a in AGENTS:
         p0 = ws / "prompts" / f"debate-propose-{a}.md"
         p0.write_text(f"propose\noutput: {rel}/debate/round-0/{a}.md\nkind: perspective\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", a, str(p0),
-            str(ws / "logs" / f"debate-0-{a}.log")], cwd=root)
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(p0),
+            str(ws / "logs" / f"debate-0-{a}.log")], cwd=root, env=child_env)
         p1 = ws / "prompts" / f"debate-round-1-{a}.md"
         p1.write_text(f"discuss\noutput: {rel}/debate/round-1/{a}.md\nkind: debate-response\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", a, str(p1),
-            str(ws / "logs" / f"debate-1-{a}.log")], cwd=root)
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(p1),
+            str(ws / "logs" / f"debate-1-{a}.log")], cwd=root, env=child_env)
     assert len(list((ws / "debate" / "round-0").glob("*.md"))) == 3
     assert len(list((ws / "debate" / "round-1").glob("*.md"))) == 3
     (ws / "debate" / "round-1" / "adjudication.md").write_text(

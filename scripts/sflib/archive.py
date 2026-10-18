@@ -58,9 +58,15 @@ def archived_slugs(workspace_root: Path) -> list[str]:
 
 
 def _agent_home(path: Path, src_dir: Path) -> bool:
-    """S4 (A16): a per-run agent HOME (`scratch/agent-home`) is never packed."""
+    """S4 (A16): a per-run agent HOME (`scratch/agent-home`) is never packed.
+
+    S25fix1 (finding NIT 8): also when `src_dir` is the run's scratch/ itself, which has no
+    `scratch/` prefix in its relative paths.
+    """
     rel = path.relative_to(src_dir).as_posix()
-    return rel == "scratch/agent-home" or rel.endswith("/scratch/agent-home")
+    if rel == "scratch/agent-home" or rel.endswith("/scratch/agent-home"):
+        return True
+    return path.name == "agent-home" and path.parent.name == "scratch"
 
 
 def _skip_dir(path: Path, src_dir: Path) -> bool:

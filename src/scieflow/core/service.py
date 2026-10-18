@@ -678,7 +678,9 @@ def _say_prepared(project, reservation, submission, actor):
         reservation.validate_protection(prepared.protection)
         _validate_execution(prepared)
         actions.guard_budget(ws, ('wall_minutes',))
-        sandbox.verify(list(prepared.protection.writable), prepared.cwd, layout=prepared.layout)
+        # F8 (S5): the probe gets the launch's masks, so it runs the argv the launch runs.
+        sandbox.verify(list(prepared.protection.writable), prepared.cwd,
+                       mask=list(prepared.protection.masks), layout=prepared.layout)
         _validate_execution(prepared)
         reservation.validate_protection(prepared.protection)
         conversation.check_revision(conversation.read(ws), accepted_revision, required=True)

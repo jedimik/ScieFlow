@@ -687,16 +687,23 @@ def test_s4_doctor_reports_each_credential_from_stat_only_and_never_content(tmp_
     assert "present" in by_agent["codex-paper:"]
 
 
+@needs_bwrap
 def test_s4_doctor_module_entry_runs_and_prints_no_token(tmp_path, tmp_path_factory, monkeypatch):
+    """S5 (residual c): the child's HOME is a fake one, so its credentials dir is the fake one.
+
+    The doctor now also runs the confinement proof, so this needs bwrap (skips without it).
+    """
     value = f"fake-entry-{uuid4().hex}"
-    _write_token(sandbox.credentials_dir() / "fixture.token", (value + "\n").encode())
+    home = _fake_home(tmp_path_factory, monkeypatch)
+    _write_token(home / ".config" / "scieflow" / "credentials" / "fixture.token",
+                 (value + "\n").encode())
     _project(tmp_path, {}, {"claude": {"mode": "env", "var": "CLAUDE_CODE_OAUTH_TOKEN",
-                                        "file": "fixture.token", "reason": "r"}})
-    env = {**os.environ, "PYTHONPATH": str(W / "src"),
+                                       "file": "fixture.token", "reason": "r"}})
+    env = {**os.environ, "PYTHONPATH": str(W / "src"), "HOME": str(home),
            "SCIEFLOW_STATE_DIR": str(tmp_path_factory.mktemp("state"))}
     proc = subprocess.run([sys.executable, "-m", "scieflow.core.sandbox", "doctor"],
-                          capture_output=True, text=True, cwd=tmp_path, env=env, timeout=120)
-    assert proc.returncode == 0, proc.stderr
+                          capture_output=True, text=True, cwd=tmp_path, env=env, timeout=300)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "claude" in proc.stdout and value not in proc.stdout + proc.stderr
 
 

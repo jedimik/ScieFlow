@@ -659,12 +659,17 @@ def test_the_resolv_check_does_not_refuse_the_runtime_area_dns_needs(monkeypatch
 
 
 def test_a_launcher_inside_a_bound_root_adds_nothing_to_path(tmp_path):
-    """F12 / A17: a launcher dir already covered by a bound path is not added to PATH."""
+    """F12 / A17, narrowed by S25fix1 (review finding 5): a launcher dir under a bound SYSTEM path adds
+    nothing to PATH. A dir that is only covered by a readable bind (a project-local install) is
+    added, because a covered-but-off-PATH launcher made the dispatch refuse (see the review's probe)."""
     root = tmp_path / "project"
     (root / ".venv" / "bin").mkdir(parents=True)
     covered = sandbox.Layout(readable=(root,), launcher_dirs=(root / ".venv" / "bin",))
     env = sandbox.dispatch_environment(tmp_path / "run", layout=covered, env={})
-    assert env["PATH"] == "/usr/local/bin:/usr/bin:/bin"
+    assert env["PATH"] == f"{root / '.venv' / 'bin'}:/usr/local/bin:/usr/bin:/bin"
+    system = sandbox.Layout(readable=(root,), launcher_dirs=(Path("/usr/bin"),))
+    assert sandbox.dispatch_environment(tmp_path / "run", layout=system, env={})["PATH"] == \
+        "/usr/local/bin:/usr/bin:/bin"
     outside = tmp_path / "bin2"
     outside.mkdir()
     free = sandbox.Layout(readable=(root,), launcher_dirs=(outside,))

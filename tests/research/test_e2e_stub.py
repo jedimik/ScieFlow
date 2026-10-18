@@ -45,7 +45,7 @@ def make_root(tmp_path: Path) -> tuple[Path, Path, dict]:
     return tmp_path, ws, env
 
 
-def test_lit_review_pipeline(tmp_path):
+def test_lit_review_pipeline(tmp_path, child_env):
     root, ws, env = make_root(tmp_path)
     rel = ws.relative_to(root)
 
@@ -53,8 +53,8 @@ def test_lit_review_pipeline(tmp_path):
     for a in AGENTS:
         prompt = ws / "prompts" / f"search-{a}.md"
         prompt.write_text(f"search task\noutput: {rel}/findings/{a}.json\nkind: findings\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", a, str(prompt),
-            str(ws / "logs" / f"search-{a}.log")], cwd=root)
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(prompt),
+            str(ws / "logs" / f"search-{a}.log")], cwd=root, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",
             str(ws / "findings" / f"{a}.json")], cwd=root)
 
@@ -62,8 +62,8 @@ def test_lit_review_pipeline(tmp_path):
     for r, a in itertools.permutations(AGENTS, 2):
         prompt = ws / "prompts" / f"review-{r}-on-{a}.md"
         prompt.write_text(f"review task\noutput: {rel}/reviews/{r}-on-{a}.json\nkind: review\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", r, str(prompt),
-            str(ws / "logs" / f"review-{r}-on-{a}.log")], cwd=root)
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", r, str(prompt),
+            str(ws / "logs" / f"review-{r}-on-{a}.log")], cwd=root, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",
             str(ws / "reviews" / f"{r}-on-{a}.json"), "--schema", "review"], cwd=root)
     assert len(list((ws / "reviews").glob("*.json"))) == 6

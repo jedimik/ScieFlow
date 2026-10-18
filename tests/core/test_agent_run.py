@@ -274,7 +274,7 @@ agents:
     assert "stdin-mode" in (root / "out.log").read_text()
 
 
-def test_run_overrides_apply_only_inside_the_owning_run(tmp_path):
+def test_run_overrides_apply_only_inside_the_owning_run(tmp_path, child_env):
     root = tmp_path
     (root / "config").mkdir()
     (root / "config" / "agents.yml").write_text(
@@ -287,8 +287,10 @@ def test_run_overrides_apply_only_inside_the_owning_run(tmp_path):
     (ws / "config.yml").write_text("agent_overrides:\n  echoer:\n    model: big\n    reasoning: high\n")
     prompt = ws / "prompts" / "task.md"
     prompt.write_text("hi")
-    proc = subprocess.run([*AGENT_RUN, "echoer", str(prompt), str(root / "out.log")],
-                          capture_output=True, text=True, cwd=root)
+    # S25fix1 (finding 1b): the sandbox is incidental to overrides, so this dispatch is
+    # unsandboxed and its child gets a fake HOME outside the project root.
+    proc = subprocess.run([*AGENT_RUN, "--no-sandbox", "echoer", str(prompt), str(root / "out.log")],
+                          capture_output=True, text=True, cwd=root, env=child_env)
     assert proc.returncode == 0, proc.stderr
     assert "m=big r=high" in (root / "out.log").read_text()
 
@@ -333,11 +335,11 @@ def make_loop_workspace(root: Path, wall_cap: int = 60) -> Path:
     return ws
 
 
-def dispatch_in_ws(root: Path, ws: Path, agent: str, prompt: str):
+def dispatch_in_ws(root: Path, ws: Path, agent: str, prompt: str, env: dict):
     (ws / "logs" / "p.md").write_text(prompt)
     return subprocess.run(
         [*AGENT_RUN, agent, str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
-        capture_output=True, text=True, cwd=root,
+        capture_output=True, text=True, cwd=root, env=env,
     )
 
 
@@ -352,13 +354,14 @@ def test_timeout_transcript_keeps_partial_output(tmp_path):
     assert "partial-output" in transcript and "timed out" in transcript
 
 
-def test_dispatch_inside_a_run_is_a_recorded_job_with_events(tmp_path):
+def test_dispatch_inside_a_run_is_a_recorded_job_with_events(tmp_path, child_env, grant_credentials):
     from scieflow.core import events
 
     root = make_repo(tmp_path)
+    grant_credentials(root, "stub")     # S25fix1 (finding 1b, option i): a valid sandboxed project
     ws = make_loop_workspace(root)
     out = ws / "iterations" / "h.md"
-    proc = dispatch_in_ws(root, ws, "stub", f"output: {out}\nkind: hypothesis\n")
+    proc = dispatch_in_ws(root, ws, "stub", f"output: {out}\nkind: hypothesis\n", child_env)
     assert proc.returncode == 0, proc.stderr
     assert list((ws / "jobs").glob("*.json"))
     types = [e["type"] for e in events.read(ws)]
@@ -366,13 +369,14 @@ def test_dispatch_inside_a_run_is_a_recorded_job_with_events(tmp_path):
     assert "budget.recorded" in types        # wall time accumulated by the runner
 
 
-def test_dispatch_refused_when_wall_time_is_spent(tmp_path):
+def test_dispatch_refused_when_wall_time_is_spent(tmp_path, child_env, grant_credentials):
     from scieflow.core.run import actions, status
 
     root = make_repo(tmp_path)
+    grant_credentials(root, "stub")     # S25fix1 (finding 1d): the project is valid, so 75 is reached
     ws = make_loop_workspace(root, wall_cap=1)
     actions.record_spend(ws, wall_minutes=2)
-    proc = dispatch_in_ws(root, ws, "stub", "output: x.md\nkind: hypothesis\n")
+    proc = dispatch_in_ws(root, ws, "stub", "output: x.md\nkind: hypothesis\n", child_env)
     assert proc.returncode == 75
     assert "budget exhausted" in (ws / "logs" / "t.md").read_text()
     assert status.read_status(ws)["stopped"]["reason"] == "low-budget"
@@ -391,17 +395,15 @@ def test_prepare_is_callable_without_exiting(tmp_path):
         prepare(Project(root), "nope", root / "p.md", sandbox_enabled=False)
 
 
-def bwrap_free_env(tmp_path):
-    """A PATH with no bwrap on it, and a throwaway HOME so a probe cannot
-    litter the real one."""
+def bwrap_free_env(tmp_path, child_env):
+    """A PATH with no bwrap on it. HOME is the child's fake home, outside the project root
+    (S25fix1 finding 1c): a probe cannot litter the real home, and S2 does not refuse it."""
     empty = tmp_path / "emptybin"
     empty.mkdir(exist_ok=True)
-    home = tmp_path / "home"
-    home.mkdir(exist_ok=True)
-    return {**os.environ, "PATH": str(empty), "HOME": str(home)}
+    return {**child_env, "PATH": str(empty)}
 
 
-def fake_bwrap_env(tmp_path):
+def fake_bwrap_env(tmp_path, child_env):
     """A `bwrap` that confines nothing: it drops its own options and runs the
     command. The sandbox looks available but does not work — the case a
     container without user namespaces produces."""
@@ -410,37 +412,37 @@ def fake_bwrap_env(tmp_path):
     shim = bindir / "bwrap"
     shim.write_text('#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n')
     shim.chmod(0o755)
-    home = tmp_path / "home"
-    home.mkdir(exist_ok=True)
-    return {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "HOME": str(home)}
+    return {**child_env, "PATH": f"{bindir}:{os.environ['PATH']}"}
 
 
-def test_dispatch_is_refused_when_bubblewrap_is_missing(tmp_path):
+def test_dispatch_is_refused_when_bubblewrap_is_missing(tmp_path, child_env, grant_credentials):
     root = make_repo(tmp_path)
+    grant_credentials(root, "stub")     # S25fix1: the sandbox is the subject
     ws = make_loop_workspace(root)
     (ws / "logs" / "p.md").write_text("output: x.md\nkind: hypothesis\n")
     proc = subprocess.run(
         [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
-        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path))
+        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path, child_env))
     assert proc.returncode == 77
     assert "bubblewrap" in (proc.stdout + proc.stderr)
     assert "apt-get install" in (proc.stdout + proc.stderr)
     assert "sandbox" in (ws / "logs" / "t.md").read_text()
 
 
-def test_dispatch_is_refused_when_the_sandbox_does_not_confine(tmp_path):
+def test_dispatch_is_refused_when_the_sandbox_does_not_confine(tmp_path, child_env, grant_credentials):
     """bwrap is on PATH but confines nothing. Only the probe catches this."""
     root = make_repo(tmp_path)
+    grant_credentials(root, "stub")     # S25fix1: the sandbox is the subject
     ws = make_loop_workspace(root)
     (ws / "logs" / "p.md").write_text("output: x.md\nkind: hypothesis\n")
     proc = subprocess.run(
         [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
-        capture_output=True, text=True, cwd=root, env=fake_bwrap_env(tmp_path))
+        capture_output=True, text=True, cwd=root, env=fake_bwrap_env(tmp_path, child_env))
     assert proc.returncode == 77
     assert "did not block" in (proc.stdout + proc.stderr + (ws / "logs" / "t.md").read_text())
 
 
-def test_no_sandbox_flag_runs_and_records_the_choice(tmp_path):
+def test_no_sandbox_flag_runs_and_records_the_choice(tmp_path, child_env):
     from scieflow.core import events
 
     root = make_repo(tmp_path)
@@ -450,13 +452,13 @@ def test_no_sandbox_flag_runs_and_records_the_choice(tmp_path):
     proc = subprocess.run(
         [*AGENT_RUN, "--no-sandbox", "stub",
          str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
-        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path))
+        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path, child_env))
     assert proc.returncode == 0, proc.stderr
     assert out.exists()
     assert "sandbox.disabled" in [e["type"] for e in events.read(ws)]
 
 
-def test_an_agent_cannot_disable_its_own_sandbox(tmp_path):
+def test_an_agent_cannot_disable_its_own_sandbox(tmp_path, child_env):
     """The run's own config.yml sits inside the dispatch's writable bind. If
     `sandbox: off` there still worked, a confined agent could append it and the
     next dispatch would run unconfined — choosing its own `cmd` through
@@ -469,7 +471,7 @@ def test_an_agent_cannot_disable_its_own_sandbox(tmp_path):
     (ws / "logs" / "p.md").write_text(f"output: {out}\nkind: hypothesis\n")
     proc = subprocess.run(
         [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
-        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path))
+        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path, child_env))
     assert proc.returncode == 77, proc.stdout + proc.stderr
     assert not out.exists()          # nothing ran unconfined
 
@@ -490,7 +492,7 @@ def test_a_stale_run_sandbox_key_says_where_the_hatch_moved(tmp_path):
     assert "unsandboxed_runs" in said
 
 
-def test_the_allowlist_can_let_a_run_dispatch_unsandboxed(tmp_path):
+def test_the_allowlist_can_let_a_run_dispatch_unsandboxed(tmp_path, child_env):
     """The escape hatch survives the move — in config/, which no agent can write."""
     from scieflow.core import events
 
@@ -502,13 +504,13 @@ def test_the_allowlist_can_let_a_run_dispatch_unsandboxed(tmp_path):
     (ws / "logs" / "p.md").write_text(f"output: {out}\nkind: hypothesis\n")
     proc = subprocess.run(
         [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
-        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path))
+        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path, child_env))
     assert proc.returncode == 0, proc.stderr
     assert out.exists()
     assert "sandbox.disabled" in [e["type"] for e in events.read(ws)]
 
 
-def test_the_allowlist_opt_out_does_not_leak_to_other_runs(tmp_path):
+def test_the_allowlist_opt_out_does_not_leak_to_other_runs(tmp_path, child_env):
     """Listing one slug must not unconfine the run next door."""
     root = make_repo(tmp_path)
     ws = make_loop_workspace(root)
@@ -517,7 +519,7 @@ def test_the_allowlist_opt_out_does_not_leak_to_other_runs(tmp_path):
     (ws / "logs" / "p.md").write_text("output: x.md\nkind: hypothesis\n")
     proc = subprocess.run(
         [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
-        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path))
+        capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path, child_env))
     assert proc.returncode == 77
 
 
@@ -533,20 +535,23 @@ def test_a_dispatch_outside_any_run_says_how_to_proceed(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap not installed")
-def test_a_sandboxed_agent_cannot_write_to_module_code(tmp_path):
+def test_a_sandboxed_agent_cannot_write_to_module_code(tmp_path, child_env, grant_credentials):
     """The headline guarantee of this milestone. If one assertion survives from
     this plan, it is this one."""
     root = make_repo(tmp_path)
+    grant_credentials(root, "writer")     # S25fix1 (finding 1e): a real sandboxed dispatch
     (root / "src").mkdir()
     (root / "src" / "untouched.py").write_text("original\n")
     ws = make_loop_workspace(root)
     target = root / "src" / "untouched.py"
     (root / "config" / "agents.yml").write_text(
         "agents:\n"
-        f'  writer: {{cmd: "sh -c \'echo hacked > {target}\'", enabled: true, timeout_min: 1}}\n')
+        f'  writer: {{cmd: "sh -c \'echo hacked > {target} || echo denied; echo ran > {ws}/ran.txt\'", enabled: true, timeout_min: 1}}\n')
     (ws / "logs" / "p.md").write_text("go\n")
-    subprocess.run([*AGENT_RUN, "writer", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
-                   capture_output=True, text=True, cwd=root)
+    proc = subprocess.run([*AGENT_RUN, "writer", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+                          capture_output=True, text=True, cwd=root, env=child_env)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (ws / "ran.txt").exists(), "the agent never ran: the denial would be vacuous"
     assert target.read_text() == "original\n"     # the write never landed
 
 
@@ -566,27 +571,29 @@ def test_a_sandboxed_dispatch_gets_its_own_uv_cache(tmp_path, grant_credentials)
 
 
 @pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap not installed")
-def test_a_sandboxed_agent_cannot_write_the_shared_uv_cache(tmp_path):
+def test_a_sandboxed_agent_cannot_write_the_shared_uv_cache(tmp_path, child_env, grant_credentials):
     """The shared cache is hardlinked into the host venv: a write there is a
     write to code the host will execute outside any sandbox."""
     root = make_repo(tmp_path)
+    grant_credentials(root, "writer")     # S25fix1: a real sandboxed dispatch, not a refusal
     ws = make_loop_workspace(root)
-    home = tmp_path / "home"
+    home = Path(child_env["HOME"])       # outside the project root (S2)
     cache = home / ".cache" / "uv"
     cache.mkdir(parents=True)
     victim = cache / "victim"
     victim.write_text("original\n")
     (root / "config" / "agents.yml").write_text(
         "agents:\n"
-        f'  writer: {{cmd: "sh -c \'echo hacked > {victim}\'", enabled: true, timeout_min: 1}}\n')
+        f'  writer: {{cmd: "sh -c \'echo hacked > {victim} || echo denied; echo ran > {ws}/ran.txt\'", enabled: true, timeout_min: 1}}\n')
     (ws / "logs" / "p.md").write_text("go\n")
-    subprocess.run([*AGENT_RUN, "writer", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
-                   capture_output=True, text=True, cwd=root,
-                   env={**os.environ, "HOME": str(home)})
+    proc = subprocess.run([*AGENT_RUN, "writer", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+                          capture_output=True, text=True, cwd=root, env=child_env)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (ws / "ran.txt").exists(), "the agent never ran: the denial would be vacuous"
     assert victim.read_text() == "original\n"
 
 
-def test_a_writable_grant_that_is_a_file_is_refused_not_a_traceback(tmp_path):
+def test_a_writable_grant_that_is_a_file_is_refused_not_a_traceback(tmp_path, child_env, grant_credentials):
     """A plain SandboxError (not SandboxUnavailable) must still exit 77 on the
     CLI path; it used to escape as a traceback with exit 1."""
     root = make_repo(tmp_path)
@@ -594,10 +601,11 @@ def test_a_writable_grant_that_is_a_file_is_refused_not_a_traceback(tmp_path):
     (root / "config" / "journals").write_text("not a directory\n")
     (root / "config" / "sandbox.yml").write_text(
         "writable:\n  - path: config/journals\n    reason: journal cache\n")
+    grant_credentials(root, "stub")     # S25fix1 (finding 1b): merged after the grant, so it is the subject
     (ws / "logs" / "p.md").write_text("output: x.md\nkind: hypothesis\n")
     proc = subprocess.run(
         [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
-        capture_output=True, text=True, cwd=root)
+        capture_output=True, text=True, cwd=root, env=child_env)
     assert proc.returncode == 77, proc.stdout + proc.stderr
     assert "Traceback" not in proc.stderr
     assert "must be a directory" in (proc.stdout + proc.stderr)

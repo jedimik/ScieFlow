@@ -1,6 +1,8 @@
 """Suite-wide isolation: jobs recorded outside any run go to a temp dir,
 never into the real repository's .scieflow/."""
 
+import os
+
 import pytest
 
 
@@ -17,6 +19,28 @@ def _isolated_credentials_dir(tmp_path_factory, monkeypatch):
     path = tmp_path_factory.mktemp("credentials")
     monkeypatch.setattr(sandbox, "CREDENTIALS_OVERRIDE", path, raising=False)
     return path
+
+
+@pytest.fixture
+def child_env(tmp_path):
+    """S25fix1 (review finding 1, NIT 9): the environment for a child process that may dispatch.
+
+    HOME is a fake home OUTSIDE tmp_path (the project root), so S2 accepts it and the child
+    resolves credentials only there. It holds a 0600 fake token at the name `grant_credentials`
+    writes (`fixture.token`), so a sandboxed child with a credential entry can read it.
+    Returns the env mapping; its HOME is asserted not to be the pytest process's home.
+    """
+    from pathlib import Path
+
+    home = tmp_path.parent / f"{tmp_path.name}-home"
+    creds = home / ".config" / "scieflow" / "credentials"
+    creds.mkdir(parents=True, exist_ok=True)
+    token = creds / "fixture.token"
+    token.write_text("fake-token-fixture\n")
+    token.chmod(0o600)
+    assert home.resolve() != Path.home().resolve(), "a child must never get the real home"
+    assert home.resolve() not in tmp_path.resolve().parents and home.resolve() != tmp_path.resolve()
+    return {**os.environ, "HOME": str(home)}
 
 
 @pytest.fixture

@@ -23,6 +23,7 @@ from dataclasses import dataclass, replace
 import shlex
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
@@ -41,6 +42,9 @@ MERGED_USR = ("bin", "lib", "lib64", "sbin")
 MERGED_USR_ROOT = Path("/")   # where the host's merged-usr entries are read; a seam for tests
 SYSTEM_TREES = (Path("/usr"), Path("/etc"))
 SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
+# S25fix1 (finding 3a): directories the sandbox replaces with its own mounts (`_system_args`,
+# `--dev`, `--proc`, `--tmpfs /tmp`, `--tmpfs /run`); the host marker must never be placed there.
+OVERLAID_DIRS = (Path("/tmp"), Path("/run"), Path("/dev"), Path("/proc"), Path("/sys"))
 
 # D2/C5: one persistent, per-run, per-agent HOME inside the run's own grant.
 AGENT_HOME_DIR = "agent-home"
@@ -187,7 +191,12 @@ def _install_root_in_store(root: Path, store: Path) -> None:
         raise SandboxError(f"install root inside {store} must be a real directory: {root}")
     secrets = {Path(name).name for names in CREDENTIAL_FILES.values() for name in names}
     seen = 0
-    for _dirpath, dirnames, filenames in os.walk(root):
+
+    def _unreadable(exc):
+        raise SandboxError(f"install root {root} holds an unreadable directory "
+                           f"({getattr(exc, 'filename', None)}); refused, it cannot be checked")
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=_unreadable):
         names = [*dirnames, *filenames]
         seen += len(names)
         if seen > INSTALL_WALK_MAX:
@@ -195,6 +204,16 @@ def _install_root_in_store(root: Path, store: Path) -> None:
         hit = sorted(secrets.intersection(names))
         if hit:
             raise SandboxError(f"install root {root} holds a credential file ({hit[0]}); never granted")
+        for name in filenames:
+            # S25fix1 (finding 4): a credential reachable under another name is the same inode
+            # (a hard link) or a copy: a regular file with more than one link is never granted.
+            try:
+                info = os.lstat(os.path.join(dirpath, name))
+            except OSError as exc:
+                raise SandboxError(f"install root {root} entry cannot be checked, refused: "
+                                   f"{name}: {exc}") from exc
+            if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
+                raise SandboxError(f"install root {root} holds a hard link ({name}); never granted")
 
 
 def check_not_denied(path: Path, *, kind: str = "readable") -> None:
@@ -202,9 +221,9 @@ def check_not_denied(path: Path, *, kind: str = "readable") -> None:
 
     kind "bind" may name a file inside an agent credential store (C10). kind "install"
     (S3, A1) may name a clean `packages/**/{versions,releases}/<v>` root inside a store,
-    checked by `_install_root_in_store`; any other store path is refused. Runtime sockets
-    are refused for "readable" and "install" (F9) only: the resolver config ("resolv")
-    lives under /run by design, so it keeps the store rules but not the socket rule.
+    checked by `_install_root_in_store`; any other store path is refused. Runtime sockets are
+    refused for "readable", "install" and "bind" (F9; S25fix1 finding 10) only: the resolver config
+    ("resolv") lives under /run by design, so it keeps the store rules but not the socket rule.
     """
     candidates = {Path(path).absolute(), Path(path).resolve()}
     for c in candidates:
@@ -226,7 +245,7 @@ def check_not_denied(path: Path, *, kind: str = "readable") -> None:
                         _install_root_in_store(c, d)
                         continue
                     raise SandboxError(f"{c} lies inside the agent credential store {d}; never granted")
-        if kind in ("readable", "install"):
+        if kind in ("readable", "install", "bind"):
             for sock in _RUNTIME_SOCKETS:
                 if c == sock or sock in c.parents or c in sock.parents:
                     raise SandboxError(f"{c} touches the runtime socket area {sock}; never readable")
@@ -486,25 +505,129 @@ def probe_dir(writable: list[Path]) -> Path:
         "found to host the probe")
 
 
+MARKER_PREFIX = ".scieflow-verify-marker-"
+PROBE_RAN = "ran"
+
+
+def read_probe_results(text, expected) -> None:
+    """S5 (D8): the probe's structured result, one `<id>\\t<state>` line per check.
+
+    Refuses unless the result is complete: `ran` is yes, every expected check is reported
+    exactly once and is absent, and no unknown id appears. A refusal never echoes content.
+    """
+    if type(text) is not str or not text.endswith("\n"):
+        raise SandboxUnavailable("confinement proof: the probe wrote no complete result")
+    seen: dict[str, str] = {}
+    for line in text[:-1].split("\n"):
+        fields = line.split("\t")
+        if len(fields) != 2 or not fields[0]:
+            raise SandboxUnavailable("confinement proof: the probe wrote an unparseable line")
+        name, state = fields
+        if name in seen:
+            raise SandboxUnavailable(f"confinement proof: the probe reported {name} twice")
+        seen[name] = state
+    if set(seen) - set(expected):
+        raise SandboxUnavailable("confinement proof: the probe reported an unknown check")
+    if seen.get(PROBE_RAN) != "yes":
+        raise SandboxUnavailable("the sandbox did not run the probe at all — refusing to dispatch")
+    for name in expected:
+        if name == PROBE_RAN:
+            continue
+        if name not in seen:
+            raise SandboxUnavailable(f"confinement proof: check {name} was not reported")
+        if seen[name] == "present":
+            raise SandboxUnavailable(f"confinement proof failed: {name} is visible inside the sandbox")
+        if seen[name] != "absent":
+            raise SandboxUnavailable(f"confinement proof: check {name} has no verdict")
+
+
+def marker_location(*, outer, binds, candidates) -> Path | None:
+    """A15: the directory for the host marker.
+
+    It must be writable, an ancestor of an outermost bind, and outside EVERY bind (readable
+    binds included), so a marker visible inside the sandbox can only come from a leak. It must
+    also lie outside the directories the sandbox overlays (S25fix1 finding 3a): a marker in
+    /tmp, /run, /dev, /proc or /sys is replaced by the sandbox's own mount, so it could never
+    show a leak.
+    """
+    outer = [Path(p) for p in outer]
+    binds = [Path(p) for p in binds]
+    for candidate in dict.fromkeys(Path(c) for c in candidates):
+        if not candidate.is_absolute() or not candidate.is_dir():
+            continue
+        if not os.access(candidate, os.W_OK):
+            continue
+        if any(candidate == d or d in candidate.parents for d in OVERLAID_DIRS):
+            continue
+        if any(candidate == b or b in candidate.parents for b in binds):
+            continue
+        if not any(candidate in o.parents for o in outer):
+            continue
+        return candidate
+    return None
+
+
+def create_marker(directory: Path, tag: str) -> Path:
+    """Create the host marker exclusively; the caller refuses the proof if this fails."""
+    path = Path(directory) / f"{MARKER_PREFIX}{tag}"
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    os.close(fd)
+    return path
+
+
+def _probe_binds(grants: list[Path], layout: Layout | None) -> list[Path]:
+    """Every path the probe layout binds: the system set, the grants and the layout's binds."""
+    binds: list[Path] = [*SYSTEM_TREES, *grants]
+    if layout is not None:
+        binds += [*layout.readable, *layout.installs]
+        binds += [dest for _source, dest, _writable in layout.binds]
+        if layout.home is not None:
+            binds.append(layout.home)
+    return binds
+
+
+def _probe_checks(marker: Path) -> list[tuple[str, Path]]:
+    """The absence checks, each with a stable id; the secret paths of every home (D8, A1)."""
+    checks: list[tuple[str, Path]] = []
+    for index, home in enumerate(_homes()):
+        checks.append((f"ssh:{index}", home / ".ssh"))
+        checks.append((f"hermes:{index}", home / ".hermes"))
+    checks.append(("run-user-bus", Path(f"/run/user/{os.getuid()}/bus")))
+    checks.append(("system-bus", Path("/run/dbus/system_bus_socket")))
+    checks.append(("marker", marker))
+    return checks
+
+
+def _probe_script(sentinel: Path, probe: Path, checks: list[tuple[str, Path]]) -> str:
+    """The sandboxed command: one structured line per check, then the forbidden write."""
+    parts = ["{ printf 'ran\\tyes\\n';"]
+    for name, path in checks:
+        quoted = shlex.quote(str(path))
+        parts.append(f" if [ -e {quoted} ] || [ -L {quoted} ]; then s=present; else s=absent; fi;"
+                     f" printf '%s\\t%s\\n' {shlex.quote(name)} \"$s\";")
+    parts.append(f" }} > {shlex.quote(str(sentinel))}; ")
+    parts.append(f"touch {shlex.quote(str(probe))} 2>/dev/null; true")
+    return "".join(parts)
+
+
 def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
            layout: Layout | None = None) -> None:
     """Prove the sandbox confines before trusting it; raise if it does not.
 
-    Runs a throwaway process inside the sandbox that tries to write into a
-    directory outside every grant (see `probe_dir`). Proves three things: the
-    probe location is actually writable on the host (so absence means
-    confinement, not just permission denied); the sandboxed command ran (with a
-    sentinel file in a granted path); and the forbidden write was blocked.
-    Raises if any check fails.
+    The probe runs in the dispatch's real layout (`wrap`, with the same `layout` and `mask`
+    the launch receives). It proves four things:
+    - the probe location is writable on the host, so absence can mean confinement;
+    - the sandboxed command ran and wrote its structured result into the granted sentinel;
+    - a forbidden write outside every grant was blocked;
+    - the secrets are absent inside: `.ssh` and `.hermes` of every home, the user and system
+      D-Bus sockets, and a host marker placed outside every bind (A15).
 
-    `mask` and `layout` must be the SAME values the launch receives, so the
-    proof covers the layout that will actually run (A11).
+    A mask whose path does not exist yet is left out of the probe (D-S5-1): a tmpfs mask only
+    hides content, so the probe then sees a superset of what the launch sees, and it cannot
+    hide a leak. Creating that mountpoint would also leave a host directory behind.
 
-    Both control files carry a per-call unique name: several verify() calls can
-    run concurrently in one process, and a name keyed on the pid would let them
-    clobber each other into false passes and false refusals alike.
-
-    Requires at least one writable path to host a control file.
+    Both control files carry a per-call unique tag, so concurrent verifies cannot clobber
+    each other. Every exit path removes the probe, the sentinel and the marker.
     """
     if not writable:
         raise SandboxError("verify() requires at least one writable path for the control")
@@ -512,15 +635,33 @@ def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
     _validate_writable(writable)
 
     tag = uuid4().hex
+    grants = [Path(entry).resolve() for entry in writable]
     probe = probe_dir(writable) / f".scieflow-sandbox-probe-{tag}"
-    sentinel = Path(writable[0]).resolve() / f".scieflow-verify-sentinel-{tag}"
+    sentinel = grants[0] / f".scieflow-verify-sentinel-{tag}"
+    binds = _probe_binds(grants, layout)
+    outer = _outermost(binds)
+    marker_dir = marker_location(outer=outer, binds=binds,
+                                 candidates=[*_homes(), *(p for o in outer for p in o.parents)])
+    if marker_dir is None:
+        raise SandboxUnavailable(
+            "confinement could not be verified: no directory above the sandbox binds, outside "
+            "all of them, can hold the host marker")
     extra: dict = {}
     if mask is not None:
-        extra["mask"] = mask
+        extra["mask"] = [Path(m) for m in mask if os.path.lexists(m)]     # D-S5-1
     if layout is not None:
         extra["layout"] = layout
 
+    marker: Path | None = None
     try:
+        try:
+            marker = create_marker(marker_dir, tag)
+        except OSError as exc:
+            raise SandboxUnavailable(
+                f"confinement could not be verified: the host marker cannot be created: {exc}"
+            ) from exc
+        checks = _probe_checks(marker)
+
         # Positive control 1: prove the probe location is writable on the host.
         # If this fails, we cannot draw any conclusion from its later absence.
         try:
@@ -532,38 +673,56 @@ def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
                 f"confinement could not be verified because the probe location "
                 f"is not writable: {exc}") from exc
 
-        # Positive control 2: run a command that writes a sentinel into the granted path,
-        # then tries to write to the forbidden path. If the sentinel doesn't appear,
-        # the sandboxed command never ran.
         sentinel.unlink(missing_ok=True)
-        script = (f"touch {shlex.quote(str(sentinel))} && "
-                  f"touch {shlex.quote(str(probe))} 2>/dev/null; true")
+        script = _probe_script(sentinel, probe, checks)
         try:
             subprocess.run(wrap(["/bin/sh", "-c", script], writable=writable, cwd=cwd, **extra),
                            capture_output=True, timeout=VERIFY_TIMEOUT_S, check=False)
         except (OSError, subprocess.SubprocessError) as exc:
             raise SandboxUnavailable(f"the sandbox probe could not run: {exc}") from exc
 
-        # Check positive control 2: did the sandboxed command actually run?
         if not sentinel.exists():
             raise SandboxUnavailable(
                 "the sandbox did not run the probe at all — refusing to dispatch")
-
-        # Positive control 3: was the forbidden write blocked?
         if probe.exists():
             raise SandboxUnavailable(
-                f"the sandbox did not block a write to {probe.parent} — "
-                "refusing to dispatch")
+                f"the sandbox did not block a write to {probe.parent} — refusing to dispatch")
+        try:
+            text = sentinel.read_text()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise SandboxUnavailable("confinement proof: the probe result is unreadable") from exc
+        read_probe_results(text, (PROBE_RAN, *(name for name, _path in checks)))
     finally:
-        # Clean up on every path through this function, defensively.
-        try:
-            probe.unlink(missing_ok=True)
-        except Exception:
-            pass
-        try:
-            sentinel.unlink(missing_ok=True)
-        except Exception:
-            pass
+        for path in (probe, sentinel, marker):
+            if path is None:
+                continue
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+def doctor_verify() -> tuple[bool, str]:
+    """S5: the confinement proof on a throwaway grant, through the real `wrap()` (D8).
+
+    The grant is a tmp dir created here and removed here; nothing of the project is granted.
+    """
+    # S25fix1 (finding 3a): not under the system temp dir, which the sandbox overlays with its own
+    # tmpfs. A marker next to a grant under $HOME/.cache is placed where a leak could show it.
+    base = Path.home() / ".cache" / "scieflow"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        throwaway = Path(tempfile.mkdtemp(prefix="scieflow-sandbox-doctor-", dir=base))
+    except OSError as exc:
+        return False, f"bad: confinement proof could not start, dispatches will be refused: {exc}"
+    try:
+        verify([throwaway], cwd=throwaway)
+    except SandboxError as exc:
+        return False, f"bad: confinement proof failed, dispatches will be refused: {exc}"
+    finally:
+        shutil.rmtree(throwaway, ignore_errors=True)
+    return True, ("ok: confinement proof passed on a throwaway grant "
+                  "(secret absence, host marker, write blocked)")
 
 
 ALLOWLIST_FILE = "config/sandbox.yml"
@@ -952,10 +1111,13 @@ def dispatch_layout(project: Project, *, run_dir: Path, agent: str,
 
 
 def _launcher_path_needed(directory: Path, layout: Layout) -> bool:
-    """A launcher dir joins PATH only when no bound system or readable path covers it (A17)."""
-    if str(directory) in SYSTEM_PATH or _in_system_set(directory):
-        return False
-    return not any(directory == r or r in directory.parents for r in (*layout.readable, *layout.installs))
+    """A launcher dir joins PATH unless it is already a system PATH directory (F12 / A17).
+
+    S25fix1 (finding 5): a dir that a readable bind merely covers still joins PATH. Treating
+    "covered" as "reachable on PATH" made a project-local CLI refuse the dispatch (the capture
+    found nothing on the sandbox PATH). A dir under a bound SYSTEM path still adds nothing.
+    """
+    return not (str(directory) in SYSTEM_PATH or _in_system_set(directory))
 
 
 def dispatch_environment(base: Path, *, layout: Layout, env: dict | None = None,
@@ -1264,6 +1426,9 @@ def read_token(cred: Credential, *, forbidden=()) -> str:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             raise SandboxError(f"token file for {cred.agent} is not a regular file: {path}")
+        if info.st_nlink > 1:
+            # S25fix1 (finding 11): a hard link of the token anywhere makes it readable from there.
+            raise SandboxError(f"token file for {cred.agent} has {info.st_nlink} hard links, refused: {path}")
         if info.st_uid != os.getuid():
             raise SandboxError(f"token file for {cred.agent} is not owned by this user: {path}")
         if info.st_mode & 0o077:
@@ -1333,7 +1498,14 @@ def attach_credential(layout: Layout, credentials: tuple, *, agent: str, argv, l
             raise SandboxError(f"agent {agent!r} has no home to bind its credential into")
         dest = layout.home / cred.target
         return replace(layout, binds=(*layout.binds, (cred.source, dest, cred.writable))), {}
-    forbidden = [Path(root), *writable, *layout.readable, *(bind[0] for bind in layout.binds)]
+    forbidden = [Path(root), *writable, *layout.readable, *(bind[0] for bind in layout.binds),
+                 *layout.installs, *SYSTEM_TREES, *(Path("/") / name for name in MERGED_USR)]
+    # S25fix1 (finding 2): the resolved resolver config and the agent home are never a token's place.
+    resolv = _resolv_target(RESOLV_CONF)
+    if resolv is not None:
+        forbidden.append(resolv)
+    if layout.home is not None:
+        forbidden.append(layout.home)
     return layout, {cred.var: read_token(cred, forbidden=forbidden)}
 
 
@@ -1401,18 +1573,19 @@ def doctor_lines(project: Project) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """`python -m scieflow.core.sandbox doctor`: the credential status of this project (A11)."""
+    """`python -m scieflow.core.sandbox doctor`: the confinement proof, then the credential status.
+
+    Exit 0 only when the proof passed (S5). The credential lines are status, never content.
+    """
     args = sys.argv[1:] if argv is None else list(argv)
     if args != ["doctor"]:
         print("usage: python -m scieflow.core.sandbox doctor", file=sys.stderr)
         return 2
-    for line in doctor_lines(Project.discover()):
-        print(line)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    proven, line = doctor_verify()
+    print(line)
+    for status_line in doctor_lines(Project.discover()):
+        print(status_line)
+    return 0 if proven else 1
 
 
 def writable_for(project: Project, *, run_dir: Path | None,
@@ -1629,3 +1802,7 @@ def resolve_turn_protection(project: Project, *, run_dir: Path,
         if isinstance(exc, SandboxError):
             raise
         raise SandboxError('cannot capture turn protection') from exc
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
