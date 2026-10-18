@@ -28,6 +28,9 @@
 # refused (exit 77). Secret files in the repository root (.env, .env.*, .dvc/config.local)
 # are masked from every dispatch, and other runs' agent homes are hidden.
 
+# Full rules: docs/sandbox.md. A writable entry that contains a hidden path (another run's
+# agent home, or a project secret such as .env) is refused, exit 77. A writable entry that is an
+# ancestor of a run lets an agent rename that run's scratch: a human decision, disclosed as a residual.
 writable:
   - path: config/journals
     reason: >-
@@ -37,6 +40,7 @@ writable:
 
 # credentials: the login each sandboxed agent may use (design D6, plan C10). Every sandboxed
 # dispatch needs an entry for its agent, or it is refused with exit 77 and the exact setup step.
+# Setup steps, permission rules and the codex/agy first-run steps: docs/sandbox.md (credentials).
 #   mode: env   the token is read from a private file (default <credentials dir>/<agent>.token,
 #               one line, mode 0600) and set only in that agent's environment as `var`.
 #               Claude: run `claude setup-token`, save the token to
