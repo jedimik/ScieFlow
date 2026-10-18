@@ -170,7 +170,7 @@ def test_job_log_stream_flushes_unterminated_final_line(live, project):
     assert frames == ["no trailing newline"]
 
 
-def test_the_server_keeps_answering_while_a_turn_is_in_flight(live, project):
+def test_the_server_keeps_answering_while_a_turn_is_in_flight(live, project, grant_credentials):
     """CRITICAL 1 (2026-09-25 review): `api.say` and `pages.say` used to be
     `async def` handlers calling `service.say`, which blocks on
     `proc.wait(timeout=...)` for as long as the dispatched agent's own
@@ -195,6 +195,7 @@ def test_the_server_keeps_answering_while_a_turn_is_in_flight(live, project):
         "    timeout_min: 1\n"
     ))
     conversation.set_agent(ws, "slow")
+    grant_credentials(project.root, "slow")     # S4 (A9)
 
     turn_done = threading.Event()
 

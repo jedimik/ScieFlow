@@ -108,7 +108,7 @@ def _responder_cmd(resume: bool = False) -> str:
 
 
 @pytest.fixture
-def responder(project):
+def responder(project, grant_credentials):
     """A fake conversable agent that always answers successfully, however
     the prompt is composed — unlike `stub`, which needs a literal `kind:
     conversation` line the production merge prompt never carries, and so
@@ -126,6 +126,7 @@ def responder(project):
         f'    resume_cmd: "{resume_yaml_cmd}"\n    family: claude\n    enabled: true\n'
         "    timeout_min: 1\n"
     ))
+    grant_credentials(project.root, "responder")     # S4 (A9)
     return "responder"
 
 

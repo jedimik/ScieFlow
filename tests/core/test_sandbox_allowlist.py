@@ -46,10 +46,20 @@ def _at(argv, *items):
 
 
 def _repo(tmp_path: Path, agent: str = "tracer", cmd: str = "/bin/sh -c {prompt}") -> Path:
-    """A ScieFlow repo with one agent and one run (workspace/r1), for CLI dispatch."""
+    """A ScieFlow repo with one agent and one run (workspace/r1), for CLI dispatch.
+
+    S4 (A9): the agent gets a real env credential backed by a fake 0600 token file.
+    """
     (tmp_path / "config").mkdir()
     (tmp_path / "config" / "agents.yml").write_text(yaml.safe_dump({"agents": {
         agent: {"cmd": cmd, "enabled": True, "timeout_min": 1}}}))
+    token = sandbox.credentials_dir() / "fixture.token"
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("fake-token-fixture\n")
+    token.chmod(0o600)
+    (tmp_path / "config" / "sandbox.yml").write_text(yaml.safe_dump({"credentials": {agent: {
+        "mode": "env", "var": "SCIEFLOW_FIXTURE_TOKEN", "file": "fixture.token",
+        "reason": "fake fixture token"}}}))
     (tmp_path / "schemas").mkdir()
     (tmp_path / "schemas" / "status.yml").write_text((W / "schemas" / "status.yml").read_text())
     ws = tmp_path / "workspace" / "r1"
@@ -333,6 +343,11 @@ def test_bwrap_cli_tracer_reads_repo_writes_run_and_hides_secrets(tmp_path, tmp_
     (root / "src").mkdir()
     (root / "src" / "untouched.py").write_text("original\n")
     fake_home = tmp_path_factory.mktemp("home")
+    # S4 (A9): the CLI child resolves its credentials dir from this HOME, so the fake token lives here.
+    creds_dir = fake_home / ".config" / "scieflow" / "credentials"
+    creds_dir.mkdir(parents=True)
+    (creds_dir / "fixture.token").write_text("fake-token-fixture\n")
+    (creds_dir / "fixture.token").chmod(0o600)
     (fake_home / ".ssh").mkdir(parents=True)
     (fake_home / ".ssh" / "id").write_text("secret")
     (fake_home / ".hermes").mkdir()
@@ -793,8 +808,17 @@ def _policy(root: Path, text: str) -> Project:
 
 
 def _readable_yaml(*entries) -> str:
-    """A config/sandbox.yml whose readable: list holds one (path, reason) entry per pair."""
-    return "readable:\n" + "".join(f"  - path: {p}\n    reason: {r}\n" for p, r in entries)
+    """A config/sandbox.yml whose readable: list holds one (path, reason) entry per pair.
+
+    S4 (A9): also one fake env credential per agent these tests dispatch, so a sandboxed
+    dispatch is not refused for want of a login. Their refusals stay the readable ones.
+    """
+    creds = "".join(
+        f"  {name}:\n    mode: env\n    var: SCIEFLOW_FIXTURE_TOKEN\n    file: fixture.token\n"
+        "    reason: fake fixture token\n"
+        for name in ("tracer", "k-protocol-fixture", "claude-turn", "envcli"))
+    return ("readable:\n" + "".join(f"  - path: {p}\n    reason: {r}\n" for p, r in entries)
+            + "credentials:\n" + creds)
 
 
 def _two_homes(monkeypatch, tmp_path_factory):
@@ -1553,6 +1577,7 @@ def test_s3_bwrap_k16_turn_through_a_fake_claude_resolves_its_launcher_and_recor
     fake = _exe(home / ".local" / "bin" / "claude",
                 f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -B {shlex.quote(str(protocol))} \"$@\"\n")
     _append_agent(project, "claude-turn", _turn_cfg())
+    (project.root / "config" / "sandbox.yml").write_text(_readable_yaml())   # S4 (A9): claude-turn's login
     monkeypatch.setenv("PATH", f"{home / '.local' / 'bin'}:{os.environ['PATH']}")
     resolved = agent_run.resolve_turn(project, "claude-turn", run_dir=ws, session=None)
     assert resolved.execution_path == home / ".local" / "bin" / "claude"

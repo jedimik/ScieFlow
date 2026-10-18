@@ -59,7 +59,7 @@ class Dispatch:
     timeout_s: float
     run_dir: Path | None
     writable: list[Path] | None = None    # None means this dispatch is unsandboxed
-    env: dict | None = None               # None means inherit this process's
+    env: dict | None = field(default=None, repr=False)   # None: inherit; carries a token (S4)
     layout: sandbox.Layout | None = None  # the allow-list view; verify and launch share it
 
 
@@ -353,7 +353,10 @@ def prepare(project: Project, agent: str, prompt_file: Path,
         located = sandbox.host_launcher(cli, cwd)
         layout = sandbox.dispatch_layout(project, run_dir=run_dir, agent=agent,
                                          readable=readable, launcher=located)
-        env = sandbox.dispatch_environment(writable[0], layout=layout)
+        layout, credential_env = sandbox.attach_credential(
+            layout, sandbox.credentials_of(project, policy=policy), agent=agent, argv=argv,
+            located=located, writable=writable, root=project.root)
+        env = sandbox.dispatch_environment(writable[0], layout=layout, credential_env=credential_env)
         _check_launcher_capture(cli, cwd, env, located)
     return Dispatch(agent=agent, argv=argv, cwd=cwd,
                     stdin_text=prompt if use_stdin else None,
@@ -587,7 +590,13 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
         layout = (sandbox.dispatch_layout(project, run_dir=run, agent=agent,
                                           readable=protection.readable, launcher=located)
                   if protection.sandbox_enabled else None)
-        env = (sandbox.dispatch_environment(protection.writable[0], layout=layout)
+        credential_env = None
+        if layout is not None:   # S4: the captured credential record; the token is read here only
+            layout, credential_env = sandbox.attach_credential(
+                layout, protection.credentials, agent=agent, argv=[first_token],
+                located=located, writable=list(protection.writable), root=root)
+        env = (sandbox.dispatch_environment(protection.writable[0], layout=layout,
+                                            credential_env=credential_env)
                if layout is not None else dict(os.environ))
         env_items = tuple(env.items())
         agreed = charter.snapshot(run)

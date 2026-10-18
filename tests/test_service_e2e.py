@@ -14,8 +14,21 @@ KIND = {"hypothesize": "hypothesis", "experiment": "results-summary",
         "literature": "literature", "synthesize": "synthesis"}
 
 
-def test_one_iteration_end_to_end(tmp_path):
+def test_one_iteration_end_to_end(tmp_path, monkeypatch):
     project = Project(ROOT)
+    # S4: the shipped config/sandbox.yml enters no login for `stub` (R8), and this dry run stays on the
+    # shipped registry. The test therefore adds one fake env credential, for stub only, on top of
+    # whatever the shipped policy holds.
+    from scieflow.core import sandbox
+    token = sandbox.credentials_dir() / "fixture.token"
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("fake-token-fixture\n")
+    token.chmod(0o600)
+    stub_login = sandbox.Credential("stub", "env", var="SCIEFLOW_FIXTURE_TOKEN", file=token,
+                                    reason="fake fixture token")
+    shipped = sandbox.credentials_of
+    monkeypatch.setattr(sandbox, "credentials_of",
+                        lambda project, **kw: (*shipped(project, **kw), stub_login))
     goal = tmp_path / "goal.md"
     goal.write_text("# Goal\nDry run through the service core.\n")
     ws = init.init_workspace("e2e", goal, tmp_path / "workspace",

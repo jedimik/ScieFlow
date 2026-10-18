@@ -1685,12 +1685,13 @@ def test_k_t3_busy_precedes_state_and_semantic_reads(project, monkeypatch, opera
 @pytest.mark.parametrize('operation', ['send', 'handover'])
 @pytest.mark.parametrize('policy', ['unsandboxed_runs:\n  - slug: r1\n    reason: deliberate\n',
                                   'writable:\n  - path: .scieflow\n'])
-def test_k_t3_supported_unsafe_never_legacy_fallback(project, monkeypatch, operation, policy):
+def test_k_t3_supported_unsafe_never_legacy_fallback(project, monkeypatch, operation, policy, grant_credentials):
     from scieflow.core.run import conversation
     ws = project.run_dir('r1')
     conversation.set_agent(ws, 'stub')
     before = (ws / 'conversation.yml').read_bytes()
     (project.root / 'config/sandbox.yml').write_text(policy)
+    grant_credentials(project.root, 'stub')     # S4 (A9): the refusal under test is the grant, not the login
     def forbidden(*args, **kwargs):
         raise AssertionError('unsafe entry reached old dispatch or selection write')
     monkeypatch.setattr(service, '_launch_prepared_turn', forbidden)

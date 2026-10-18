@@ -19,11 +19,11 @@ import stat
 import sys
 import sysconfig
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import shlex
 import shutil
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 import yaml
@@ -53,6 +53,15 @@ _RUNTIME_SOCKETS = (Path("/run"), Path("/var/run"), Path("/proc"), Path("/sys"),
 _MAX_LINK_HOPS = 8
 INSTALL_WALK_MAX = 20_000   # A1: the most entries a store-resident install root may hold
 _ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")   # an `env` NAME=VALUE operand
+
+# S4 (C10-C12, A8): the env allow-list names, the credential entry keys, the token size cap.
+CREDENTIALS_OVERRIDE: Path | None = None   # test seam: tests/conftest.py points it at a tmp dir (A9)
+C12_KEPT = frozenset({"PATH", "HOME", "LANG", "TZ", "TERM", "UV_CACHE_DIR", "SCIEFLOW_STATE_DIR",
+                      "SCIEFLOW_PROMPT_ARGV_LIMIT", "SCIEFLOW_LEGACY_QUIET", "SCIEFLOW_MAILTO"})
+CREDENTIAL_ENV_KEYS = frozenset({"mode", "var", "file", "reason"})
+CREDENTIAL_BIND_KEYS = frozenset({"mode", "source", "target", "writable", "reason"})
+ENV_VAR_RE = re.compile(r"[A-Z_][A-Z0-9_]*")
+CREDENTIAL_TOKEN_MAX = 4096
 
 
 class SandboxError(RuntimeError):
@@ -120,6 +129,7 @@ class Layout:
     launcher_dirs: tuple[Path, ...] = ()
     hidden: tuple[Path, ...] = ()
     installs: tuple[Path, ...] = ()
+    binds: tuple[tuple[Path, Path, bool], ...] = ()   # S4 (C10): credential binds, applied last
 
     def __post_init__(self):
         if type(self.readable) is not tuple or any(not _is_abs(p) for p in self.readable):
@@ -136,6 +146,10 @@ class Layout:
             raise TypeError("hidden must be an immutable tuple of absolute Paths")
         if type(self.installs) is not tuple or any(not _is_abs(p) for p in self.installs):
             raise TypeError("installs must be an immutable tuple of absolute Paths")
+        if type(self.binds) is not tuple or any(
+                type(b) is not tuple or len(b) != 3 or not _is_abs(b[0]) or not _is_abs(b[1])
+                or type(b[2]) is not bool for b in self.binds):
+            raise TypeError("binds must be an immutable tuple of (absolute source, absolute dest, bool) triples")
 
 
 def _is_abs(value) -> bool:
@@ -424,6 +438,8 @@ def wrap(argv: list[str], *, writable: list[Path], cwd: Path,
         out += ["--tmpfs", str(Path(path).resolve())]
     if home is not None:
         out += ["--bind", str(home), str(home)]
+    for source, dest, bind_writable in layout.binds:       # S4 (C10): credentials, last
+        out += _bind_args(source, dest, bind_writable, home)
     work = Path(cwd).resolve()
     bound = [*readable, *installs, *grants, *([home] if home is not None else [])]
     if not any(work == b or b in work.parents for b in bound):
@@ -942,9 +958,20 @@ def _launcher_path_needed(directory: Path, layout: Layout) -> bool:
     return not any(directory == r or r in directory.parents for r in (*layout.readable, *layout.installs))
 
 
-def dispatch_environment(base: Path, *, layout: Layout, env: dict | None = None) -> dict:
-    """`environment(base)` with HOME = the agent home and PATH = the sandbox PATH (C6)."""
+def dispatch_environment(base: Path, *, layout: Layout, env: dict | None = None,
+                         credential_env: dict | None = None) -> dict:
+    """The C12 allow-list environment: HOME = the agent home, PATH = the sandbox PATH (C6).
+
+    Every inherited variable not on the allow-list is dropped (D7, C12). What `environment()`
+    itself adds is kept, so `environment(base)` stays the one place that builds the base.
+    `credential_env` holds only this agent's own token variable (C10, attach_credential).
+    """
+    inherited = os.environ if env is None else env
     out = environment(base) if env is None else environment(base, env)
+    for name in inherited:
+        if not _c12_kept(name):
+            out.pop(name, None)
+    out.update(credential_env or {})
     if layout.home is not None:
         out["HOME"] = str(layout.home)
     dirs = [str(d) for d in layout.launcher_dirs if _launcher_path_needed(d, layout)]
@@ -1070,6 +1097,324 @@ def _allowlist_of(data: dict, root: Path, path: Path) -> list[Path]:
     return out
 
 
+# --- S4: per-agent credentials and the environment allow-list (C10-C12, A5, A8) -----
+
+def credentials_dir() -> Path:
+    """`~/.config/scieflow/credentials`. Under test the suite points it at a tmp dir (A9)."""
+    if CREDENTIALS_OVERRIDE is not None:
+        return Path(CREDENTIALS_OVERRIDE)
+    return Path.home() / ".config" / "scieflow" / "credentials"
+
+
+def _c12_kept(name: str) -> bool:
+    """C12: a name the dispatch environment keeps from the host (PATH and HOME are reset later)."""
+    return name in C12_KEPT or name.startswith("LC_")
+
+
+@dataclass(frozen=True, slots=True)
+class Credential:
+    """One parsed `credentials:` entry. Token-free: a token value is read only by read_token().
+
+    env: `var` is the variable set to the token, `file` the token file (not opened here).
+    bind: `source` is the host file or dir, `target` its path inside the agent home.
+    """
+    agent: str
+    mode: str
+    var: str | None = None
+    file: Path | None = None
+    source: Path | None = None
+    target: str | None = None
+    writable: bool = False
+    reason: str = ""
+
+    def __post_init__(self):
+        if self.mode not in ("env", "bind"):
+            raise TypeError("credential mode must be 'env' or 'bind'")
+
+
+def _only_keys(spec: dict, allowed: frozenset, where: str, path: Path) -> None:
+    unknown = sorted(str(key) for key in spec if key not in allowed)
+    if unknown:
+        raise SandboxError(f"{where} has unknown key(s) {', '.join(unknown)}: {path}")
+
+
+def _credentials_of(data: dict, path: Path, *, check_sources: bool = True) -> tuple[Credential, ...]:
+    """C10/A8: the `credentials:` grammar, parsed from the one captured mapping (A2).
+
+    check_sources=False (doctor only) skips the bind-source existence and deny checks, so a
+    missing source is reported rather than refused. Every dispatch uses the default.
+    """
+    entries = data.get("credentials")
+    if entries is None:
+        return ()
+    if not isinstance(entries, dict):
+        raise SandboxError(f"allowlist 'credentials:' must be a mapping keyed by agent, "
+                           f"not {type(entries).__name__}: {path}")
+    out: list[Credential] = []
+    for agent in sorted(entries, key=str):
+        if type(agent) is not str:
+            raise SandboxError(f"credentials key {agent!r} must be an agent name: {path}")
+        check_agent_name(agent)
+        spec = entries[agent]
+        where = f"credentials entry {agent!r}"
+        if not isinstance(spec, dict):
+            raise SandboxError(f"{where} must be a mapping with 'mode:' and 'reason:': {path}")
+        reason = spec.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise SandboxError(f"{where} needs a 'reason:' saying why the agent needs this login: {path}")
+        mode = spec.get("mode")
+        if mode == "env":
+            _only_keys(spec, CREDENTIAL_ENV_KEYS, where, path)
+            var = spec.get("var")
+            if not isinstance(var, str) or ENV_VAR_RE.fullmatch(var) is None:
+                raise SandboxError(f"{where} needs 'var:' matching [A-Z_][A-Z0-9_]*: {path}")
+            if _c12_kept(var) or var.startswith("LD_"):
+                raise SandboxError(f"{where}: {var} is reserved by the environment allow-list: {path}")
+            raw_file = spec.get("file")
+            if raw_file is None:
+                token_file = credentials_dir() / f"{agent}.token"
+            elif isinstance(raw_file, str) and raw_file:
+                token_file = _credential_path(raw_file, credentials_dir())
+            else:
+                raise SandboxError(f"{where}: 'file:' must be a non-empty path: {path}")
+            out.append(Credential(agent, "env", var=var, file=token_file, reason=reason))
+        elif mode == "bind":
+            _only_keys(spec, CREDENTIAL_BIND_KEYS, where, path)
+            raw_source = spec.get("source")
+            target = spec.get("target")
+            writable = spec.get("writable", False)
+            if not isinstance(raw_source, str) or not raw_source:
+                raise SandboxError(f"{where} needs 'source:' (a host file or dir): {path}")
+            if not (raw_source.startswith("~/") or Path(raw_source).is_absolute()):
+                raise SandboxError(f"{where}: 'source:' must be absolute or ~/-prefixed: {path}")
+            if not isinstance(target, str) or not target:
+                raise SandboxError(f"{where} needs 'target:' (a path inside the agent home): {path}")
+            target_path = PurePosixPath(target)
+            if target_path.is_absolute() or ".." in target_path.parts or target in (".", ""):
+                raise SandboxError(f"{where}: 'target:' must be relative inside the agent home: {path}")
+            if type(writable) is not bool:
+                raise SandboxError(f"{where}: 'writable:' must be true or false: {path}")
+            source = _credential_path(raw_source, Path("/"))
+            if check_sources:
+                if not os.path.exists(source):
+                    raise SandboxError(f"{where}: bind source does not exist: {source}")
+                check_not_denied(source, kind="bind")
+                source = source.resolve()
+            out.append(Credential(agent, "bind", source=source, target=target,
+                                  writable=writable, reason=reason))
+        else:
+            raise SandboxError(f"{where} needs mode 'env' or 'bind', not {mode!r}: {path}")
+    return tuple(out)
+
+
+def _credential_path(raw: str, base: Path) -> Path:
+    if raw.startswith("~/"):
+        return Path.home() / raw[2:]
+    if Path(raw).is_absolute():
+        return Path(raw)
+    return base / raw
+
+
+def credentials_of(project: Project, *, policy: dict | None = None,
+                   check_sources: bool = True) -> tuple[Credential, ...]:
+    """The token-free credential records of config/sandbox.yml (`policy`: one captured read)."""
+    data = _load_allowlist(project) if policy is None else policy
+    return _credentials_of(data, project.root / ALLOWLIST_FILE, check_sources=check_sources)
+
+
+def missing_credential_message(agent: str) -> str:
+    """C10: the exact setup step for an agent with no `credentials:` entry."""
+    base = (f"agent {agent!r} has no `credentials:` entry in {ALLOWLIST_FILE}, and a sandboxed "
+            "dispatch needs one; refused")
+    if agent == "claude":
+        token = credentials_dir() / "claude.token"
+        return (f"{base}. Run `claude setup-token`, save the token to {token}, `chmod 600` it, "
+                "and add to config/sandbox.yml under credentials: a claude entry with "
+                "mode: env, var: CLAUDE_CODE_OAUTH_TOKEN, file: claude.token, and a reason")
+    return (f"{base}. Add a `credentials:` entry for {agent} to {ALLOWLIST_FILE}: mode env with "
+            "a 0600 token file, or mode bind with the agent's own login file, and a reason")
+
+
+def read_token(cred: Credential, *, forbidden=()) -> str:
+    """The env token value, read once (C10). Refused unless a private, one-line regular file.
+
+    No refusal message carries the content. `forbidden` lists the dispatch's grants and binds:
+    a token inside any of them would be readable by the agent, so it is refused.
+    """
+    if cred.mode != "env" or cred.file is None:
+        raise SandboxError(f"credential for {cred.agent} is not an env token")
+    path = Path(cred.file)
+    if os.path.islink(path):
+        raise SandboxError(f"token file for {cred.agent} is a symbolic link, refused: {path}")
+    real = Path(os.path.realpath(path))
+    for area in forbidden:
+        area_path = Path(area).absolute()
+        for grant in {area_path, area_path.resolve()}:
+            for location in {path.absolute(), real}:
+                if location == grant or grant in location.parents:
+                    raise SandboxError(f"token file for {cred.agent} lies inside a grant or bind; "
+                                       f"refused: {path}")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        raise SandboxError(f"token file for {cred.agent} is missing: {path}") from None
+    except OSError as exc:
+        raise SandboxError(f"token file for {cred.agent} cannot be opened safely: {path}") from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise SandboxError(f"token file for {cred.agent} is not a regular file: {path}")
+        if info.st_uid != os.getuid():
+            raise SandboxError(f"token file for {cred.agent} is not owned by this user: {path}")
+        if info.st_mode & 0o077:
+            raise SandboxError(f"token file for {cred.agent} is readable by group or others "
+                               f"(mode {stat.S_IMODE(info.st_mode):o}); chmod 600 it: {path}")
+        if not 0 < info.st_size <= CREDENTIAL_TOKEN_MAX:
+            raise SandboxError(f"token file for {cred.agent} must hold 1 to "
+                               f"{CREDENTIAL_TOKEN_MAX} bytes: {path}")
+        chunks: list[bytes] = []
+        total = 0
+        while total <= CREDENTIAL_TOKEN_MAX:
+            chunk = os.read(fd, CREDENTIAL_TOKEN_MAX + 1 - total)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        raw = b"".join(chunks)
+    finally:
+        os.close(fd)
+    if len(raw) > CREDENTIAL_TOKEN_MAX:
+        raise SandboxError(f"token file for {cred.agent} grew past {CREDENTIAL_TOKEN_MAX} bytes: {path}")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise SandboxError(f"token file for {cred.agent} is not UTF-8 text: {path}") from None
+    if text.endswith("\n"):
+        text = text[:-1]
+    if not text or "\n" in text or "\r" in text or "\0" in text:
+        raise SandboxError(f"token file for {cred.agent} must hold exactly one line: {path}")
+    return text
+
+
+def _check_prefix(argv) -> None:
+    """A7: with a credential, an `env` prefix may set only MAX_THINKING_TOKENS."""
+    if not argv or Path(argv[0]).name != "env":
+        return
+    index = agent_cli_index(argv)
+    for operand in argv[1:index]:
+        name = operand.split("=", 1)[0]
+        if name != "MAX_THINKING_TOKENS":
+            raise SandboxError(f"an env prefix may set only MAX_THINKING_TOKENS when a credential "
+                               f"is handed over, not {name}; refused")
+
+
+def attach_credential(layout: Layout, credentials: tuple, *, agent: str, argv, located: Path | None,
+                      writable, root: Path) -> tuple[Layout, dict]:
+    """Hand a sandboxed agent its one credential, or refuse (C10, C11, A7).
+
+    Returns (layout, env additions). A missing entry is refused with the exact setup step. A CLI
+    that lies inside a writable grant is refused (C11). env mode reads the token here, once, and
+    returns it as the only addition; bind mode adds one bind to the layout instead.
+    """
+    check_agent_name(agent)
+    cred = next((c for c in credentials if c.agent == agent), None)
+    if cred is None:
+        raise SandboxError(missing_credential_message(agent))
+    _check_prefix(argv)
+    if located is None:
+        raise SandboxError(f"agent {agent!r} CLI {argv[0]!r} cannot be found on the host; refused")
+    grants = [Path(entry).resolve() for entry in writable]
+    for where in {located.absolute(), Path(os.path.realpath(located))}:
+        if any(where == grant or grant in where.parents for grant in grants):
+            raise SandboxError(f"agent {agent!r} CLI {where} lies inside a writable grant; "
+                               "a credential is refused for it (C11)")
+    if cred.mode == "bind":
+        if layout.home is None:
+            raise SandboxError(f"agent {agent!r} has no home to bind its credential into")
+        dest = layout.home / cred.target
+        return replace(layout, binds=(*layout.binds, (cred.source, dest, cred.writable))), {}
+    forbidden = [Path(root), *writable, *layout.readable, *(bind[0] for bind in layout.binds)]
+    return layout, {cred.var: read_token(cred, forbidden=forbidden)}
+
+
+def _bind_args(source: Path, dest: Path, writable_bind: bool, home: Path | None) -> list[str]:
+    """S4 bind (C10): the source read-only (or writable), at a target inside the agent home.
+
+    No symlink may appear in the target on the host; the source must pass the deny table
+    (kind "bind"). On the host the run keeps at most an empty mountpoint.
+    """
+    if home is None:
+        raise SandboxError("a credential bind needs the agent home")
+    dest = Path(dest)
+    try:
+        rel = dest.relative_to(home)
+    except ValueError:
+        raise SandboxError(f"bind target {dest} lies outside the agent home {home}") from None
+    current = home
+    for part in rel.parts:
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            break
+        if stat.S_ISLNK(info.st_mode):
+            raise SandboxError(f"bind target has a symbolic link on the host, refused: {current}")
+    if not os.path.exists(source):
+        raise SandboxError(f"bind source does not exist: {source}")
+    check_not_denied(Path(source), kind="bind")
+    return ["--bind" if writable_bind else "--ro-bind", str(Path(source).resolve()), str(dest)]
+
+
+def _status_of(cred: Credential) -> tuple[str, str]:
+    """A11: stat only. The file is never opened, read or hashed."""
+    if cred.mode == "bind":
+        present = cred.source is not None and os.path.exists(cred.source)
+        return ("present" if present else "missing"), str(cred.source)
+    path = cred.file
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return "missing", str(path)
+    except OSError:
+        return "unreadable", str(path)
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        return "bad-mode", f"not a regular file: {path}"
+    if (info.st_mode & 0o077 or info.st_uid != os.getuid()
+            or not 0 < info.st_size <= CREDENTIAL_TOKEN_MAX):
+        return "bad-mode", f"needs a private 0600 one-line file: {path}"
+    return "present", str(path)
+
+
+def doctor_lines(project: Project) -> list[str]:
+    """A11: one line per configured credential: its status from stat only, never content or a hash."""
+    try:
+        creds = credentials_of(project, check_sources=False)
+    except SandboxError as exc:
+        return [f"policy: invalid, {exc}"]
+    if not creds:
+        return [f"no credentials: entries in {ALLOWLIST_FILE}"]
+    lines = []
+    for cred in creds:
+        state, detail = _status_of(cred)
+        lines.append(f"{cred.agent}: {cred.mode} {state} ({detail})")
+    return lines
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`python -m scieflow.core.sandbox doctor`: the credential status of this project (A11)."""
+    args = sys.argv[1:] if argv is None else list(argv)
+    if args != ["doctor"]:
+        print("usage: python -m scieflow.core.sandbox doctor", file=sys.stderr)
+        return 2
+    for line in doctor_lines(Project.discover()):
+        print(line)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
 def writable_for(project: Project, *, run_dir: Path | None,
                  coordinator: bool, policy: dict | None = None) -> list[Path]:
     """What this dispatch may write. The caller declares which kind it is —
@@ -1131,6 +1476,7 @@ class TurnProtection:
     policy_sha256: str | None
     path_facts: tuple[ProtectionPath, ...]
     readable: tuple[Path, ...] = ()        # S2: from the same captured mapping (A2)
+    credentials: tuple[Credential, ...] = ()   # S4: token-free records, same mapping (A2)
 
     def __post_init__(self):
         for name in ('project_root', 'run_dir', 'workspace_root'):
@@ -1147,6 +1493,8 @@ class TurnProtection:
                 raise TypeError('grants and masks must be immutable absolute Path tuples')
         if not self.sandbox_enabled and self.readable:
             raise TypeError('readable grants exist only for a sandboxed run')
+        if type(self.credentials) is not tuple or any(type(c) is not Credential for c in self.credentials):
+            raise TypeError('credentials must be an immutable Credential tuple')
         if type(self.path_facts) is not tuple or any(type(p) is not ProtectionPath for p in self.path_facts):
             raise TypeError('path facts must be an immutable ProtectionPath tuple')
         if self.policy_sha256 is not None and (type(self.policy_sha256) is not str or
@@ -1271,11 +1619,12 @@ def resolve_turn_protection(project: Project, *, run_dir: Path,
         originals = [root / str(e['path']) for e in data.get('writable') or []]
         seeds = [project.root.absolute(), Path(run_dir).absolute(), root, run, workspace,
                  policy, *narrowed, *broad, *masks, *originals, *readable]
+        credentials = _credentials_of(data, policy) if enabled else ()
         facts = _capture_path_facts(seeds)
         if next(f for f in facts if f.path == policy) != policy_fact:
             raise SandboxError('sandbox policy changed during protection capture')
         return TurnProtection(root, run, workspace, enabled, narrowed if enabled else None,
-                              masks, allowlist, broad, digest, facts, readable)
+                              masks, allowlist, broad, digest, facts, readable, credentials)
     except (OSError, ValueError, RuntimeError) as exc:
         if isinstance(exc, SandboxError):
             raise

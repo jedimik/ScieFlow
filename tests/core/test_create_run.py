@@ -19,7 +19,7 @@ STUB = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
 
 
 @pytest.fixture
-def project(tmp_path):
+def project(tmp_path, grant_credentials):
     (tmp_path / "config").mkdir()
     (tmp_path / "config" / "agents.yml").write_text(
         f'agents:\n  stub: {{cmd: "{STUB}", enabled: true, timeout_min: 1}}\n')
@@ -31,6 +31,7 @@ def project(tmp_path):
         (tmp_path / "schemas" / f"{name}.yml").write_text(
             (ROOT / "schemas" / f"{name}.yml").read_text())
     (tmp_path / "workspace").mkdir()
+    grant_credentials(tmp_path, "stub")
     return Project(tmp_path)
 
 
@@ -191,7 +192,7 @@ def test_workflows_lists_the_registry(project):
 
 
 @pytest.fixture
-def project_with_agent(tmp_path):
+def project_with_agent(tmp_path, grant_credentials):
     """The same shape as `project`, with `stub` additionally configured to
     hold a conversation (`family`, `session_cmd`, `resume_cmd`) — copied from
     the conversation milestone's fixture in `tests/core/test_service.py`.
@@ -209,6 +210,7 @@ def project_with_agent(tmp_path):
         (tmp_path / "schemas" / f"{name}.yml").write_text(
             (ROOT / "schemas" / f"{name}.yml").read_text())
     (tmp_path / "workspace").mkdir()
+    grant_credentials(tmp_path, "stub")
     return Project(tmp_path)
 
 

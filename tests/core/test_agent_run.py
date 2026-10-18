@@ -550,13 +550,14 @@ def test_a_sandboxed_agent_cannot_write_to_module_code(tmp_path):
     assert target.read_text() == "original\n"     # the write never landed
 
 
-def test_a_sandboxed_dispatch_gets_its_own_uv_cache(tmp_path):
+def test_a_sandboxed_dispatch_gets_its_own_uv_cache(tmp_path, grant_credentials):
     """uv hardlinks cache files into .venv, so a writable shared cache is a
     writable host virtualenv. Each dispatch caches inside its own run instead."""
     from scieflow.core.agent_run import prepare
     from scieflow.core.project import Project
 
     root = make_repo(tmp_path)
+    grant_credentials(root, "stub")     # S4 (A9)
     ws = make_loop_workspace(root)
     (ws / "logs" / "p.md").write_text("go\n")
     d = prepare(Project(root), "stub", ws / "logs" / "p.md")
@@ -621,13 +622,14 @@ def test_an_unreadable_run_config_does_not_escape_as_a_traceback(tmp_path):
 
 
 @pytest.fixture
-def project_with_run(tmp_path):
+def project_with_run(tmp_path, grant_credentials):
     """A project with a run workspace, and a prompt file that
     ``agent_run.owning_run_workspace`` resolves to that workspace — so a
     charter written to it is the one ``prepare`` finds."""
     from scieflow.core.project import Project
 
     root = make_repo(tmp_path)
+    grant_credentials(root, "stub")     # S4 (A9): stub holds a fake login in this fixture
     ws = make_loop_workspace(root)
     prompt_file = ws / "logs" / "prompt.md"
     prompt_file.write_text("output: x.md\nkind: hypothesis\nbody")
@@ -705,7 +707,7 @@ def _add_agent(project_root: Path, name: str, block: str) -> None:
 
 
 def test_an_oversized_conversational_prompt_keeps_resume_and_session(
-        project_with_run, monkeypatch):
+        project_with_run, monkeypatch, grant_credentials):
     """Finding 2 (2026-09-25 review): `claude` and `agy` both declare a plain
     `stdin_cmd` alongside `session_cmd`/`resume_cmd`. Before this fix, any
     conversational turn whose composed prompt went over `PROMPT_ARGV_LIMIT`
@@ -713,6 +715,7 @@ def test_an_oversized_conversational_prompt_keeps_resume_and_session(
     the ordinary one-shot command instead — no `--resume`, no session id on
     the argv, and nothing for `sessions.parse` to recover on the far side."""
     project, ws, prompt_file = project_with_run
+    grant_credentials(project.root, "claude-like")     # S4 (A9)
     _add_agent(project.root, "claude-like",
               '    cmd: "echo {prompt}"\n'
               '    stdin_cmd: "echo stdin-mode"\n'
@@ -908,7 +911,7 @@ def test_k_single_resolution_and_pure_snapshot(k_conversational_project, monkeyp
     assert resolved.cwd == ws
     # The turn env is the captured snapshot plus its own HOME and sandbox PATH (S1).
     env = dict(resolved.env_items)
-    assert set(env) == {'SYNTHETIC_ENV', 'HOME', 'PATH'} and env['SYNTHETIC_ENV'] == 'original'
+    assert set(env) == {'SYNTHETIC_ENV', 'HOME', 'PATH', 'SCIEFLOW_FIXTURE_TOKEN'} and env['SYNTHETIC_ENV'] == 'original'   # S4: + its own token variable (C10)
     assert env['HOME'] == str(ws.resolve() / 'scratch' / 'agent-home' / 'k-protocol-fixture')
     assert 'SYNTHETIC_ENV' not in repr(resolved)
     registry['k-protocol-fixture']['session_cmd'] = 'mutated {prompt}'
@@ -1200,7 +1203,7 @@ def test_k_operands_all_inserted_fields_are_literal(field):
     assert omitted == [value for token, value in zip(shlex.split(template), argv) if '{prompt}' not in token]
 
 
-def test_k_operands_executable_identity_matches_literal_launch(tmp_path, monkeypatch):
+def test_k_operands_executable_identity_matches_literal_launch(tmp_path, monkeypatch, grant_credentials):
     import shlex
     from scieflow.core import sandbox
     from scieflow.core.project import Project
@@ -1219,6 +1222,7 @@ def test_k_operands_executable_identity_matches_literal_launch(tmp_path, monkeyp
            'reasoning': 'reasoning-' + literal, 'session_cmd': template,
            'resume_cmd': 'tool --resume {session} resume {prompt}'}
     (root / 'config/agents.yml').write_text(yaml.safe_dump({'agents': {'fixture': cfg}}))
+    grant_credentials(root, 'fixture')     # S4 (A9)
     monkeypatch.setattr(agent_run.sys, 'executable', python)
     monkeypatch.setattr(sandbox, 'environment', lambda base: {'SYNTHETIC_OPERANDS_TEST': 'only'})
     captured = []

@@ -57,6 +57,12 @@ def archived_slugs(workspace_root: Path) -> list[str]:
     return sorted(p.name[: -len(".zip.dvc")] for p in archive_dir.glob("*.zip.dvc"))
 
 
+def _agent_home(path: Path, src_dir: Path) -> bool:
+    """S4 (A16): a per-run agent HOME (`scratch/agent-home`) is never packed."""
+    rel = path.relative_to(src_dir).as_posix()
+    return rel == "scratch/agent-home" or rel.endswith("/scratch/agent-home")
+
+
 def _skip_dir(path: Path, src_dir: Path) -> bool:
     name = path.name
     if name in _SKIP_DIRS or any(fnmatch.fnmatch(name, p) for p in _SKIP_DIR_PATTERNS):
@@ -83,8 +89,8 @@ def _collect(
         kept = []
         for name in sorted(dirnames):
             path = base / name
-            if skip_rebuildable and _skip_dir(path, src_dir):
-                continue
+            if _agent_home(path, src_dir) or (skip_rebuildable and _skip_dir(path, src_dir)):
+                continue   # S4 (A16): unconditional, whatever skip_rebuildable says
             if path.is_symlink():
                 links.append(path)
             else:

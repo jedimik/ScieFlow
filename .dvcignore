@@ -51,3 +51,5 @@ uv.lock
 /workspace/_misc/neuroSnake/SoftwareX_SegSnake
 # Per-run scratch space: tests, envs, clones, caches (workspace/README.md)
 scratch/
+# Per-run, per-agent CLI homes: never packed into an archive (S4, A16)
+**/scratch/agent-home/

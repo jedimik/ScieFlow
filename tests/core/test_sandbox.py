@@ -604,6 +604,7 @@ def test_k_protection_policy_loaded_once(k_conversational_project, monkeypatch):
 
 def test_k_protection_absence_and_explicit_optout(k_conversational_project):
     project, ws, _ = k_conversational_project
+    (project.root / sandbox.ALLOWLIST_FILE).unlink()     # S4: this test pins the absent policy
     p = sandbox.resolve_turn_protection(project, run_dir=ws)
     assert p.policy_sha256 is None
     assert any(f.path == project.root / sandbox.ALLOWLIST_FILE and not f.exists for f in p.path_facts)
@@ -627,6 +628,7 @@ def test_k_protection_bad_policy_no_artifacts(k_conversational_project, body):
 def test_k_protection_unprovable_paths_refuse(k_conversational_project):
     project, ws, _ = k_conversational_project
     policy = project.root / sandbox.ALLOWLIST_FILE
+    policy.unlink()     # S4: the fixture's credentials policy is replaced by the symlink under test
     policy.symlink_to('missing')
     with pytest.raises(sandbox.SandboxError):
         sandbox.resolve_turn_protection(project, run_dir=ws)

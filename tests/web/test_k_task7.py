@@ -52,7 +52,7 @@ def api_post(client, path, **form):
 
 
 @pytest.fixture
-def web_k_project(project):
+def web_k_project(project, grant_credentials):
     """The run's conversation held by the web-local inert protocol agent.
 
     Registers the fixture protocol through the same agents.yml mechanism
@@ -72,6 +72,7 @@ def web_k_project(project):
     path = project.root / 'config' / 'agents.yml'
     path.write_text(path.read_text() + f'  web-k-fixture:\n{block}')
     conversation.set_agent(ws, 'web-k-fixture')
+    grant_credentials(project.root, 'web-k-fixture')     # S4 (A9)
     return project
 
 
@@ -83,6 +84,12 @@ def register_agent(project, name, prefix):
     block = ''.join('    ' + line + '\n' for line in yaml.safe_dump(cfg).splitlines())
     path = project.root / 'config' / 'agents.yml'
     path.write_text(path.read_text() + f'  {name}:\n{block}')
+    policy = project.root / 'config' / 'sandbox.yml'     # S4 (A9): the registered agent holds a fake login
+    data = (yaml.safe_load(policy.read_text()) if policy.exists() else None) or {}
+    creds = dict(data.get('credentials') or {})
+    creds[name] = {'mode': 'env', 'var': 'SCIEFLOW_FIXTURE_TOKEN', 'file': 'fixture.token',
+                   'reason': 'fake fixture token'}
+    policy.write_text(yaml.safe_dump({**data, 'credentials': creds}))
 
 
 def read_doc(project):

@@ -994,7 +994,7 @@ def test_t4_unsupported_ordinary_real_first_resume_compatibility(k_conversationa
 
 
 @pytest.mark.parametrize('fault', ['busy', 'unsafe'])
-def test_t4_supported_refusal_never_uses_compatibility(project, monkeypatch, fault):
+def test_t4_supported_refusal_never_uses_compatibility(project, monkeypatch, fault, grant_credentials):
     from contextlib import nullcontext
     from scieflow.core import turn_admission
     ws = project.run_dir('r1')
@@ -1003,6 +1003,7 @@ def test_t4_supported_refusal_never_uses_compatibility(project, monkeypatch, fau
     assert turn_admission.backend_supported()
     if fault == 'unsafe':
         (project.root / 'config/sandbox.yml').write_text('writable:\n  - path: .scieflow\n')
+        grant_credentials(project.root, 'stub')     # S4 (A9): the refusal under test is the grant, not the login
     def forbidden(*args, **kwargs):
         pytest.fail('supported admission refusal reached compatibility or launch')
     monkeypatch.setattr(service, '_say_legacy', forbidden)
