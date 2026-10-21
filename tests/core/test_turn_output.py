@@ -908,3 +908,138 @@ def test_display6b_public_chunks_positive_and_lazy_consumption():
     assert 'raw artifact retained' in panel.text
     with pytest.raises(ValueError):
         output.display_chunks(iter([b'x' * 65537]))
+
+
+# K16 PF-6 (human decision approvals/k-task8-attempt4-decision-human-20261021.md item 1).
+def pf6_init(session='s-pf6'):
+    return record({'type': 'system', 'subtype': 'init', 'session_id': session})
+
+
+def pf6_tool_use(session='s-pf6'):
+    return record({'type': 'assistant', 'session_id': session,
+                   'message': {'content': [{'type': 'tool_use', 'id': 'toolu_pf6', 'name': 'Read',
+                                            'input': {'file_path': '/synthetic/AGENTS.md'}}]}})
+
+
+def pf6_user(session='s-pf6', text='u'):
+    # Real top-level key order of the attempt-4 tool_result record (synthetic bytes only).
+    body = text * 14500
+    return record({'type': 'user',
+                   'message': {'role': 'user', 'content': [{'tool_use_id': 'toolu_pf6', 'type': 'tool_result',
+                                                            'content': body}]},
+                   'parent_tool_use_id': None, 'session_id': session, 'uuid': 'pf6-user',
+                   'timestamp': '2026-10-21T19:00:00Z',
+                   'tool_use_result': {'type': 'text', 'file': {'filePath': '/synthetic/AGENTS.md',
+                                                                'content': body, 'numLines': 1,
+                                                                'startLine': 1, 'totalLines': 1}},
+                   'tool_result_meta': [{'id': 'toolu_pf6', 'permission_decision':
+                                         {'decision': 'allow', 'source': 'config', 'reason_type': 'rule'}}]})
+
+
+def pf6_measure(monkeypatch):
+    retained, prefixes = [], []
+    append, real_feed = output._Records._append, output._Records.feed
+    def measured_append(self, piece):
+        append(self, piece)
+        retained.append(len(self._pending))
+    def measured_feed(self, chunk, *, final=False):
+        for value in real_feed(self, chunk, final=final):
+            if value is not None and type(value) is not bytes:
+                prefixes.append(len(value.prefix))
+            yield value
+    monkeypatch.setattr(output._Records, '_append', measured_append)
+    monkeypatch.setattr(output._Records, 'feed', measured_feed)
+    return retained, prefixes
+
+
+def pf6_check(tmp_path, monkeypatch, data):
+    retained, prefixes = pf6_measure(monkeypatch)
+    with source(tmp_path, data, monkeypatch) as (_, handle, _, _):
+        parsed = output.read_completed_turn(handle, 'claude')
+    assert max(retained, default=0) <= 16384
+    assert max(prefixes, default=0) <= 64
+    return parsed
+
+
+def test_pf6_real_shape_attempt4_stream_completes(tmp_path, monkeypatch):
+    final = record({'type': 'assistant', 'session_id': 's-pf6',
+                    'message': {'content': [{'type': 'text', 'text': 'pf6 final reply'}]}})
+    data = pf6_init() + pf6_tool_use() + pf6_user() + final + record(
+        {'type': 'result', 'session_id': 's-pf6', 'result': 'pf6 final reply'})
+    assert len(pf6_user()) >= 28336
+    assert pf6_check(tmp_path, monkeypatch, data) == output.BoundedSession('s-pf6', 'pf6 final reply', True, '')
+
+
+@pytest.mark.parametrize('case', ['system', 'assistant', 'result', 'result-real-order'])
+def test_pf6_oversize_parsed_types_still_fail(tmp_path, monkeypatch, case):
+    big = 'x' * 28000
+    line = {
+        'system': lambda: record({'type': 'system', 'subtype': 'init', 'session_id': 's-pf6', 'pad': big}),
+        'assistant': lambda: record({'type': 'assistant', 'session_id': 's-pf6',
+                                     'message': {'content': [{'type': 'text', 'text': big}]}}),
+        'result': lambda: record({'type': 'result', 'session_id': 's-pf6', 'result': big}),
+        'result-real-order': lambda: record({'duration_api_ms': 1234, 'type': 'result',
+                                             'session_id': 's-pf6', 'result': big}),
+    }[case]()
+    assert len(line) > output.RECORD_BYTES
+    parsed = pf6_check(tmp_path, monkeypatch, line + protocol('later', 'later'))
+    assert parsed.id is None and not parsed.complete and parsed.reason == 'record-limit'
+
+
+@pytest.mark.parametrize('case', ['type-not-first', 'leading-whitespace', 'space-after-colon',
+                                  'escaped-value', 'non-string-value', 'kind-33-chars', 'oversize-noise'])
+def test_pf6_prefix_strictness_still_fails(tmp_path, monkeypatch, case):
+    pad = b'x' * 28000
+    line = {
+        'type-not-first': record({'session_id': 's-pf6', 'type': 'user', 'pad': pad.decode()}),
+        'leading-whitespace': b' ' + record({'type': 'user', 'pad': pad.decode()}),
+        'space-after-colon': b'{"type": "user", "pad": "' + pad + b'"}\n',
+        'escaped-value': b'{"type":"us\\u0065r", "pad": "' + pad + b'"}\n',
+        'non-string-value': b'{"type":["user"], "pad": "' + pad + b'"}\n',
+        'kind-33-chars': b'{"type":"' + b'a' * 33 + b'", "pad": "' + pad + b'"}\n',
+        'oversize-noise': pad + b'\n',
+    }[case]
+    assert len(line) > output.RECORD_BYTES
+    parsed = pf6_check(tmp_path, monkeypatch, line + protocol('later', 's-pf6'))
+    assert parsed.id is None and not parsed.complete and parsed.reason == 'record-limit'
+
+
+def test_pf6_oversize_user_skipped_when_first_record(tmp_path, monkeypatch):
+    data = pf6_user() + protocol('after', 's-pf6')
+    assert pf6_check(tmp_path, monkeypatch, data) == output.BoundedSession('s-pf6', 'after', True, '')
+
+
+@pytest.mark.parametrize('before', [1, 10, 63])
+def test_pf6_oversize_user_straddles_chunk_boundary(tmp_path, monkeypatch, before):
+    data = noise(output.CHUNK_BYTES - before) + pf6_user() + protocol('after', 's-pf6')
+    assert data[output.CHUNK_BYTES - before:output.CHUNK_BYTES - before + 1] == b'{'
+    assert pf6_check(tmp_path, monkeypatch, data) == output.BoundedSession('s-pf6', 'after', True, '')
+
+
+def test_pf6_oversize_user_spans_three_chunks(tmp_path, monkeypatch):
+    long_user = record({'type': 'user', 'session_id': 's-pf6', 'pad': 'x' * 150000})
+    assert len(long_user) > 2 * output.CHUNK_BYTES
+    data = pf6_init() + long_user + protocol('after', 's-pf6')
+    assert pf6_check(tmp_path, monkeypatch, data) == output.BoundedSession('s-pf6', 'after', True, '')
+
+
+def test_pf6_oversize_user_final_flush_without_newline(tmp_path, monkeypatch):
+    data = protocol('done', 's-pf6') + pf6_user().rstrip(b'\n')
+    assert not data.endswith(b'\n')
+    assert pf6_check(tmp_path, monkeypatch, data) == output.BoundedSession('s-pf6', 'done', True, '')
+
+
+def test_pf6_two_oversize_users_in_a_row(tmp_path, monkeypatch):
+    data = pf6_init() + pf6_user(text='u') + pf6_user(text='v') + record(
+        {'type': 'result', 'session_id': 's-pf6', 'result': 'after'})
+    assert pf6_check(tmp_path, monkeypatch, data) == output.BoundedSession('s-pf6', 'after', True, '')
+
+
+def test_pf6_oversize_user_prefix_is_not_parsed_for_data(tmp_path, monkeypatch):
+    evil = record({'type': 'user', 'pad': 'p' * 200, 'session_id': 'evil-session',
+                   'result': 'injected', 'tail': 'x' * 28000})
+    assert evil[:64].find(b'session_id') == -1
+    data = pf6_init() + evil + record({'type': 'assistant', 'session_id': 's-pf6',
+                                       'message': {'content': [{'type': 'text', 'text': 'real'}]}}) + record(
+        {'type': 'result', 'session_id': 's-pf6', 'result': 'real'})
+    assert pf6_check(tmp_path, monkeypatch, data) == output.BoundedSession('s-pf6', 'real', True, '')

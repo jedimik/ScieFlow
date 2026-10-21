@@ -505,3 +505,50 @@ def test_t5_exact_consumer_producer_imports():
         actual = Path(module.__file__).resolve()
         assert actual == source / (module.__name__.rsplit('.', 1)[-1] + '.py')
         print(f'TASK5_IMPORT_ORIGIN module={module.__name__} file={actual}', flush=True)
+
+
+def test_pf6_real_oversize_user_record_turn_completes(k_conversational_project, offline_k_support, monkeypatch):
+    project, ws, _ = k_conversational_project
+    bind(project, ws, monkeypatch, offline_k_support)
+
+    def line(event):
+        return json.dumps(event, ensure_ascii=False, separators=(',', ':')).encode() + b'\n'
+    body = 'u' * 14500
+    user = {'type': 'user',
+            'message': {'role': 'user', 'content': [{'tool_use_id': 'toolu_pf6', 'type': 'tool_result',
+                                                     'content': body}]},
+            'parent_tool_use_id': None, 'session_id': 'k-session-1', 'uuid': 'pf6-user',
+            'timestamp': '2026-10-21T19:00:00Z',
+            'tool_use_result': {'type': 'text', 'file': {'filePath': '/synthetic/AGENTS.md', 'content': body,
+                                                         'numLines': 1, 'startLine': 1, 'totalLines': 1}},
+            'tool_result_meta': [{'id': 'toolu_pf6', 'permission_decision':
+                                  {'decision': 'allow', 'source': 'config', 'reason_type': 'rule'}}]}
+    assert len(line(user)) >= 28336
+    raw = (line({'type': 'system', 'subtype': 'init', 'session_id': 'k-session-1'}) +
+           line({'type': 'assistant', 'session_id': 'k-session-1',
+                 'message': {'content': [{'type': 'tool_use', 'id': 'toolu_pf6', 'name': 'Read',
+                                          'input': {'file_path': '/synthetic/AGENTS.md'}}]}}) +
+           line(user) +
+           line({'type': 'assistant', 'session_id': 'k-session-1',
+                 'message': {'content': [{'type': 'text', 'text': 'pf6 reply'}]}}) +
+           line({'type': 'result', 'session_id': 'k-session-1', 'result': 'pf6 reply'}))
+    real_wait = jobs.wait
+    reached = []
+
+    def wait(*a):
+        value = real_wait(*a)
+        assert value.state == 'done' and value.exit_code == 0
+        Path(value.log).write_bytes(raw)
+        reached.append(value.id)
+        return value
+    monkeypatch.setattr(jobs, 'wait', wait)
+    response = marked(project, ws)
+    assert reached == [response['job']['id']]
+    log, transcript = raw_result(ws, response)
+    assert log.read_bytes() == transcript.read_bytes() == raw
+    assert response['job']['state'] == 'done' and response['job']['exit_code'] == 0
+    assert response['turn']['text'] == 'pf6 reply'
+    audit = response['turn']['audit']
+    assert audit['parse_complete'] is True and audit['reason'] == ''
+    doc = conversation.read(ws)
+    assert not doc['recovery_required'] and doc['session'] == 'k-session-1' and doc['pending_turn_id'] is None

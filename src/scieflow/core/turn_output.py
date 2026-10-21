@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 
 from scieflow.core.turn_artifacts import ArtifactError, ExclusiveArtifact, RegularArtifact, _WriteFailure
 
 CHUNK_BYTES = 65536
 RECORD_BYTES = 16384
 PARSE_BYTES = 2097152
+TYPE_PREFIX_BYTES = 64
 _JSON_DEPTH = 128
 
 
@@ -32,14 +34,43 @@ class RawCopyResult:
     reason: str
 
 
+@dataclass(frozen=True)
+class _Overflow:
+    """An oversize record: only its first TYPE_PREFIX_BYTES bytes survive."""
+    prefix: bytes
+
+
+_OVERFLOW_TYPE = re.compile(rb'\{"type":"([A-Za-z0-9_]{1,32})"[,}]')
+
+
 class _Records:
     """Bytes first: bounded whole record, discard overflow through delimiter."""
     def __init__(self):
         self._pending = bytearray()
         self._discard = False
+        self._prefix = b''
 
     def _append(self, piece):
         self._pending.extend(piece)
+
+    def _start_discard(self, chunk, start):
+        # PF-6: the prefix is the record's first bytes, even when they straddle
+        # the previous chunk boundary (short _pending) or lie in this piece.
+        head = bytes(self._pending[:TYPE_PREFIX_BYTES])
+        piece = bytes(chunk[start:start + TYPE_PREFIX_BYTES])
+        self._prefix = head + piece[:TYPE_PREFIX_BYTES - len(head)]
+        self._pending.clear()
+        self._discard = True
+
+    def _take(self):
+        if self._discard:
+            value = _Overflow(self._prefix)
+        else:
+            value = bytes(self._pending)
+        self._pending.clear()
+        self._discard = False
+        self._prefix = b''
+        return value
 
     def feed(self, chunk, *, final=False):
         start = 0
@@ -48,21 +79,14 @@ class _Records:
             end = len(chunk) if newline < 0 else newline + 1
             if not self._discard:
                 if len(self._pending) + end - start > RECORD_BYTES:
-                    self._pending.clear()
-                    self._discard = True
+                    self._start_discard(chunk, start)
                 else:
                     self._append(chunk[start:end])
             if newline >= 0:
-                value = None if self._discard else bytes(self._pending)
-                self._pending.clear()
-                self._discard = False
-                yield value
+                yield self._take()
             start = end
         if final and (self._pending or self._discard):
-            value = None if self._discard else bytes(self._pending)
-            self._pending.clear()
-            self._discard = False
-            yield value
+            yield self._take()
 
 
 def _handle(handle):
@@ -116,7 +140,14 @@ class _Claude:
         self.reason = self.reason or reason
 
     def accept(self, raw):
-        if raw is None:
+        if type(raw) is _Overflow:
+            # PF-6, human decision approvals/k-task8-attempt4-decision-human-20261021.md item 1: an oversize
+            # record whose first key is a type other than system/assistant/result is skipped. The decoder
+            # rejects duplicate keys, so no such record can be an accepted system/assistant/result record.
+            # Only the compact type-first prefix is tested; the prefix is never decoded or used as data.
+            match = _OVERFLOW_TYPE.match(raw.prefix)
+            if match and match.group(1).decode('ascii') not in ('system', 'assistant', 'result'):
+                return
             self.fail('record-limit')
             return
         try:
