@@ -491,7 +491,7 @@ as more than that.
 ## Residuals
 
 These are known and disclosed. Each is a limit of the current design, not a
-fixed bug.
+fixed bug. The harness-command residuals (interception record, Host/Origin, raw log growth) are listed in [Harness commands](web.md#harness-commands).
 
 - **R1 — the agent reads its own credential.** Unavoidable, because the CLI needs
   it to log in.

@@ -221,8 +221,9 @@ def say(request: Request, slug: str, message: str = Form(...),
     if submission.mode == 'harness-command':
         from scieflow.web.pages import _as_chat
 
-        # Accepted but not enabled: CERTIFIED_POLICIES is empty, so run
-        # the message as ordinary chat — never a silent enablement.
+        # Accepted but not enabled: the web/API path never executes a marked
+        # turn as a command, so run the message as ordinary chat — never a
+        # silent enablement.
         return service.say(project, slug, submission.message, 'human',
                            human_submission=_as_chat(submission))
     return service.say(project, slug, submission.message, 'human',

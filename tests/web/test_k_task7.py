@@ -132,9 +132,10 @@ def test_send_explicit_chat_mode(web_k_project, client):
 
 def test_send_harness_command_mode_accepted_but_not_enabled(web_k_project, client):
     """mode=harness-command with a correct revision is ACCEPTED as a turn,
-    but with CERTIFIED_POLICIES empty it must not enable command execution:
-    a visible unsupported/incapable message and normal chat behavior (the
-    message is still delivered as an ordinary charter-first turn)."""
+    but the web/API path never executes a marked turn as a command, so it must
+    not enable command execution: a visible unsupported/incapable message and
+    normal chat behavior (the message is still delivered as an ordinary
+    charter-first turn)."""
     response = post(client, '/runs/r1/say', message='/scieflow-menu',
                     mode='harness-command',
                     selection_revision=revision(web_k_project))

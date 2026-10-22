@@ -39,9 +39,9 @@ def _project(request: Request):
 
 
 #: The send form's allowed `mode` values. 'harness-command' is an explicit
-#: intent marker only: with CERTIFIED_POLICIES empty the turn runs as
-#: ordinary chat and the page says the capability is not certified — never a
-#: claim of command execution.
+#: intent marker only: the web UI never executes a marked turn as a command,
+#: so the turn runs as ordinary chat and the page says the capability is not
+#: certified — never a claim of command execution.
 SEND_MODES = ('chat', 'harness-command')
 
 _DECIMAL = re.compile(r'(?:0|[1-9][0-9]*)')
@@ -650,9 +650,9 @@ def say(request: Request, slug: str, action: str = Form("say"),
         else:
             submission = _submission_from_form(form)
             if submission.mode == 'harness-command':
-                # Explicit intent, but the shipped policy tuple is empty:
-                # run it as ordinary chat and say the capability is not
-                # certified. Never a silent enablement.
+                # Explicit intent, but the web UI never executes a marked turn
+                # as a command: run it as ordinary chat and say the capability
+                # is not certified. Never a silent enablement.
                 service.say(project, slug, submission.message, "human",
                            human_submission=_as_chat(submission))
                 return _back(slug, 'harness-command capability is not certified '

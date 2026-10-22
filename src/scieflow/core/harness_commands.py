@@ -129,7 +129,8 @@ def support_for(identity: HarnessIdentity) -> SupportStatus:
     """Fail closed on missing effects or any exact certificate mismatch.
 
     Synthetic records may be monkeypatched only within offline tests. A file,
-    report or audit record cannot populate the shipped empty code-owned tuple.
+    report or audit record cannot add to or alter the code-owned
+    CERTIFIED_POLICIES tuple.
     """
     if not _complete(identity):
         return SupportStatus(False, 'Incomplete, disabled, unsupported or unpinned harness identity', '')
