@@ -25,10 +25,76 @@ def synthetic_policy(identity, monkeypatch):
     return policy
 
 
-def test_production_policy_empty_and_support_disabled(identity):
-    assert hc.CERTIFIED_POLICIES == ()
+def test_synthetic_identity_stays_disabled_under_production_policy(identity):
     status = hc.support_for(identity)
     assert status.enabled is False and status.reason and status.policy_revision == ''
+
+
+# G5 single policy entry (reviews/k-g5-review.md section 5; identity from reviews/k-g5-identity-argument.md section 1).
+PRODUCTION_IDENTITY = hc.HarnessIdentity(
+    agent='claude', family='claude', enabled=True,
+    executable='/home/ubuntu/.local/share/claude/versions/2.1.293',
+    executable_sha256='8968405e26db478af44eabc4635ab5ca557057b702a54460a59c13e1b253e978',
+    version='2.1.293',
+    session_template='claude -p --output-format=stream-json --verbose --dangerously-skip-permissions --tools=Read,Glob,Grep,Skill --model {model} {prompt}',
+    resume_template='claude -p --output-format=stream-json --verbose --dangerously-skip-permissions --tools=Read,Glob,Grep,Skill --model {model} --resume {session} {prompt}',
+    model='claude-opus-5-5',
+    reasoning='env:MAX_THINKING_TOKENS=32000',
+    cwd='/home/ubuntu/ScieFlow-probe/k-task8-k-r11',
+    discovery_sha256='f027fccae046faf5cfeb471be16a73e17295c0d65e4e88335477b15ffedea02a',
+    extensions_sha256='352742d657d7658e3f2fe4706057456b2d4099c923b92ba903b845e093e6bb57',
+    settings_sha256='255c46d5669e86c54b0587feb75c771d369d9f1cd5255df58494fc5a5d04a98e',
+    effects_pinned=True)
+
+FINAL_REPORT_SHA = '5c4a7f84add07f6cdbee1b302c584abc44460b2890f8aa101fde3f2f0860bf28'
+
+
+def test_production_policy_is_exactly_the_g5_entry():
+    assert len(hc.CERTIFIED_POLICIES) == 1
+    policy = hc.CERTIFIED_POLICIES[0]
+    assert type(policy) is hc._CertifiedPolicy
+    assert policy.command == '/scieflow-menu'
+    assert policy.identity == PRODUCTION_IDENTITY
+    assert policy.policy_revision == 'k-g5-r14-1'
+    assert policy.verified_on == '2026-10-22'
+    assert 'reviews/k-g5-review.md' in policy.evidence_ref
+    assert FINAL_REPORT_SHA in policy.evidence_ref
+
+
+def test_production_entry_enables_exact_identity_only():
+    assert hc.support_for(PRODUCTION_IDENTITY) == hc.SupportStatus(True, '', 'k-g5-r14-1')
+
+
+@pytest.mark.parametrize('field,value', [
+    ('agent', 'codex'), ('family', 'agy'), ('enabled', False), ('effects_pinned', False),
+    ('executable', '/home/ubuntu/.local/share/claude/versions/2.1.306'),
+    ('executable_sha256', 'e' * 64), ('version', '2.1.306'),
+    ('session_template', PRODUCTION_IDENTITY.session_template + ' --x'),
+    ('resume_template', PRODUCTION_IDENTITY.resume_template + ' --x'),
+    ('model', 'claude-fable-5'), ('reasoning', 'env:MAX_THINKING_TOKENS=1'),
+    ('cwd', '/home/ubuntu/ScieFlow-claude-f2976f52'),
+    ('discovery_sha256', 'e' * 64), ('extensions_sha256', 'e' * 64), ('settings_sha256', 'e' * 64),
+])
+def test_production_entry_single_field_mutation_disabled(field, value):
+    assert not hc.support_for(replace(PRODUCTION_IDENTITY, **{field: value})).enabled
+
+
+def test_production_shaped_identity_stays_disabled():
+    # G5P-1: production capture leaves the digests, version and effects unset.
+    production_shaped = replace(PRODUCTION_IDENTITY, version=None, executable_sha256=None,
+        discovery_sha256=None, extensions_sha256=None, settings_sha256=None, reasoning='',
+        effects_pinned=False)
+    assert not hc.support_for(production_shaped).enabled
+
+
+def test_root_cwd_identity_stays_disabled():
+    assert not hc.support_for(replace(PRODUCTION_IDENTITY, cwd='/home/ubuntu/ScieFlow-claude-f2976f52')).enabled
+
+
+def test_production_tuple_refuses_any_other_command():
+    assert all(policy.command == '/scieflow-menu' for policy in hc.CERTIFIED_POLICIES)
+    with pytest.raises(ValueError):
+        hc.validate_candidate_raw('/help')
 
 
 @pytest.mark.parametrize('message', ['', '/scieflow-men', '/help', '/scieflow-menu /other', '/scieflow-menu\n', '/scieflow-menu ', '／scieflow-menu', '/scieflow-menu\0', '/scieflow-k-probe', ' /scieflow-menu', '\t/scieflow-menu', b'/scieflow-menu'])

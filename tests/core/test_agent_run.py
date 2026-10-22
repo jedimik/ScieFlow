@@ -1009,7 +1009,7 @@ def test_k_unsupported_identity_and_unconfined_marked_refuse(k_conversational_pr
     project, ws, prompt = k_conversational_project
     resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=None)
     assert not resolved.harness_identity.effects_pinned and resolved.harness_identity.version is None
-    assert harness_commands.CERTIFIED_POLICIES == ()
+    assert all(p.identity != resolved.harness_identity for p in harness_commands.CERTIFIED_POLICIES)
     marked = accept_human_submission('/scieflow-menu', 'harness-command', '0')
     with pytest.raises(agent_run.DispatchError):
         agent_run.prepare_turn(resolved, marked)
@@ -1090,7 +1090,7 @@ def test_k_exact_fixture_identity_mutations_all_deny(k_conversational_project, o
         value = getattr(identity, f.name)
         changed = not value if type(value) is bool else 'changed'
         assert not harness_commands.support_for(replace(identity, **{f.name: changed})).enabled
-    assert harness_commands.CERTIFIED_POLICIES == ()
+    assert all(p.identity != identity for p in harness_commands.CERTIFIED_POLICIES)
     assert not original(identity).enabled
 
 

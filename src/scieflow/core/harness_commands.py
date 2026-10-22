@@ -66,7 +66,28 @@ class _CertifiedPolicy:
                 raise TypeError('policy metadata must be text scalars')
 
 
-CERTIFIED_POLICIES: tuple[_CertifiedPolicy, ...] = ()
+CERTIFIED_POLICIES: tuple[_CertifiedPolicy, ...] = (
+    _CertifiedPolicy(
+        identity=HarnessIdentity(
+            agent='claude', family='claude', enabled=True,
+            executable='/home/ubuntu/.local/share/claude/versions/2.1.293',
+            executable_sha256='8968405e26db478af44eabc4635ab5ca557057b702a54460a59c13e1b253e978',
+            version='2.1.293',
+            session_template='claude -p --output-format=stream-json --verbose --dangerously-skip-permissions --tools=Read,Glob,Grep,Skill --model {model} {prompt}',
+            resume_template='claude -p --output-format=stream-json --verbose --dangerously-skip-permissions --tools=Read,Glob,Grep,Skill --model {model} --resume {session} {prompt}',
+            model='claude-opus-5-5',
+            reasoning='env:MAX_THINKING_TOKENS=32000',
+            cwd='/home/ubuntu/ScieFlow-probe/k-task8-k-r11',
+            discovery_sha256='f027fccae046faf5cfeb471be16a73e17295c0d65e4e88335477b15ffedea02a',
+            extensions_sha256='352742d657d7658e3f2fe4706057456b2d4099c923b92ba903b845e093e6bb57',
+            settings_sha256='255c46d5669e86c54b0587feb75c771d369d9f1cd5255df58494fc5a5d04a98e',
+            effects_pinned=True),
+        command='/scieflow-menu',
+        policy_revision='k-g5-r14-1',
+        verified_on='2026-10-22',
+        evidence_ref='reviews/k-g5-review.md sha256-of-final-report=5c4a7f84add07f6cdbee1b302c584abc44460b2890f8aa101fde3f2f0860bf28',
+    ),
+)
 
 
 def validate_candidate_raw(message: str) -> None:
