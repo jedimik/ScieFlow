@@ -1,0 +1,14 @@
+{% macro scite_control(scite) -%}
+<fieldset class="scite">
+  <legend>scite literature check</legend>
+  {% if scite.enabled %}
+    <input type="hidden" name="scite_present" value="1">
+    <label><input type="checkbox" name="scite_use" value="on"{% if scite.use %} checked{% endif %}> Use scite</label>
+    <label><input type="checkbox" name="scite_no_ask" value="on"{% if scite.no_ask %} checked{% endif %}> don't ask again for this run</label>
+  {% else %}
+    <label><input type="checkbox" disabled> Use scite</label>
+    <p class="dim">scite is unavailable: {{ scite.reason }}</p>
+  {% endif %}
+  {% if scite.quota is number %}<p class="dim">scite calls left today: {{ scite.quota }}</p>{% endif %}
+</fieldset>
+{%- endmacro %}

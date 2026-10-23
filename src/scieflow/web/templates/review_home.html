@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "review_parts.html" import doi %}
+{% block title %}Review — {{ slug }} — ScieFlow{% endblock %}
+{% block nav %}<a href="/">← all runs</a> <a href="/runs/{{ slug|urlencode }}">run {{ slug }}</a> <a href="/agents?slug={{ slug|urlencode }}">agents</a>{% endblock %}
+{% block content %}
+<h1>Review — {{ slug }}</h1>
+{% if notice %}<p class="state-failed" role="alert">{{ notice }}</p>{% endif %}
+{% if blocker_notice and blocker_notice != notice %}<p class="state-failed" role="alert">{{ blocker_notice }}</p>{% endif %}
+
+<p class="dim">scite:
+  {% if scite.enabled %}configured{% if scite.quota is number %} ({{ scite.quota }} calls left today){% endif %}
+  {% else %}unavailable — {{ scite.reason }}{% endif %}
+</p>
+
+{% if blockers %}
+<section class="banner state-failed" role="alert">
+  <p><strong>{{ blockers|length }} open blocker{{ "" if blockers|length == 1 else "s" }}</strong>: a retracted or unresolvable reference blocks merge until you fix it or overrule it.</p>
+  <ul>
+  {% for b in blockers %}
+    <li>{{ b.title or b.reason }} <span class="dim">(round {{ b.round }}, {{ b.reason }})</span>
+      {% for ref in b.references %}
+        <br>{% if ref.doi %}{{ doi(ref.doi, doi_link(ref.doi)) }}{% endif %}{% if ref.key %} ({{ ref.key }}){% endif %}{% if ref.detail %} — {{ ref.detail }}{% endif %}
+      {% endfor %}
+    </li>
+  {% endfor %}
+  </ul>
+  <p><a href="/runs/{{ slug|urlencode }}/review/{{ blockers[0].round }}/matrix">review the matrix →</a></p>
+</section>
+{% endif %}
+
+{% if rounds %}
+<table>
+  <tr><th>round</th><th>draft pairs</th><th>evidence</th><th>matrix</th><th>decisions</th></tr>
+  {% for r in rounds %}
+  <tr>
+    <td><a href="/runs/{{ slug|urlencode }}/review/{{ r.round }}">round {{ r.round }}</a></td>
+    <td>{{ r.pairs|length }}</td>
+    <td>{% if r.evidence %}scite {{ r.scite_status or "unknown" }}{% else %}<span class="dim">not (yet) available</span>{% endif %}</td>
+    <td>{% if r.matrix %}<a href="/runs/{{ slug|urlencode }}/review/{{ r.round }}/matrix">matrix</a>{% else %}<span class="dim">not (yet) available</span>{% endif %}</td>
+    <td>{{ "recorded" if r.decisions else "none" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% elif not notice %}
+  <p class="dim">No review round yet. Rounds appear here once a draft has been reviewed.</p>
+{% endif %}
+
+<p><a href="/agents?slug={{ slug|urlencode }}">reviewer pool and scite settings →</a>
+  {% if has_discovery %} · <a href="/runs/{{ slug|urlencode }}/discovery">discovery →</a>{% endif %}
+</p>
+{% endblock %}

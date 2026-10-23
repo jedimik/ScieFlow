@@ -44,6 +44,9 @@
      <a href="/agents">agents page</a> — a run resolves its staffing when it
      dispatches, so you can set it now or straight after creating the run.</p>
 
+  {% from "review_controls.html" import scite_control %}
+  {{ scite_control(scite) }}
+
   <p><label>Coordinator
     {% if not agents %}
       <span class="dim">no agent in this project can hold a conversation —

@@ -4,8 +4,22 @@
 {% block content %}
 <h1>{{ slug }}</h1>
 {% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
+{% if review.blockers %}
+<section class="banner state-failed" role="alert">
+  <p><strong>{{ review.blockers|length }} open blocker{{ "" if review.blockers|length == 1 else "s" }}</strong> in review round {{ review.newest_round }}: a retracted or unresolvable reference blocks merge until you fix it or overrule it.</p>
+  <ul>
+    {% for b in review.blockers %}
+    <li>{{ b.title or b.reason }} <span class="dim">({{ b.reason }})</span>{% for ref in b.references %}{% if ref.doi %} · {{ ref.doi }}{% elif ref.key %} · {{ ref.key }}{% endif %}{% endfor %}</li>
+    {% endfor %}
+  </ul>
+  <p><a href="/runs/{{ slug|urlencode }}/review/{{ review.newest_round }}/matrix">review the matrix →</a></p>
+</section>
+{% endif %}
+{% if review.blocker_notice %}<p class="dim">review: {{ review.blocker_notice }}</p>{% endif %}
 <p><a href="/runs/{{ slug }}/files">browse this run's files →</a> ·
-   <a href="/runs/{{ slug }}/drafts">the draft workbench →</a></p>
+   <a href="/runs/{{ slug }}/drafts">the draft workbench →</a>{% if review.has_review %} ·
+   <a href="/runs/{{ slug|urlencode }}/review">review →</a>{% endif %}{% if review.has_discovery %} ·
+   <a href="/runs/{{ slug|urlencode }}/discovery">discovery →</a>{% endif %}</p>
 <p class="dim">
   id {{ (detail.status or {}).get("id", "—") }} ·
   iteration {{ (detail.status or {}).get("iteration", "—") }} ·
@@ -294,7 +308,7 @@
   <p class="dim">No gate is waiting.</p>
 {% else %}
   {% for gate in detail.gates %}
-  <div class="gate {% if gate.requires_human %}human{% endif %}">
+  <div class="gate {% if gate.requires_human %}human{% endif %}" id="gate-{{ gate.id }}">
     <span class="dim">{{ gate.kind }}{% if gate.requires_human %} · needs you{% endif %}</span>
     <div>{{ gate.question }}</div>
     {% if gate.options %}<div class="dim">options: {{ gate.options|join(", ") }}</div>{% endif %}

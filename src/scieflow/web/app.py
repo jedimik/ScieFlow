@@ -76,11 +76,12 @@ def create_app(project: Project, token: str) -> FastAPI:
         return get_swagger_ui_html(openapi_url="/api/v1/openapi.json",
                                    title=f"{app.title} — Swagger UI")
 
-    from scieflow.web import api, pages, sse
+    from scieflow.web import api, pages, review_pages, sse
 
     app.include_router(api.router)
     app.include_router(sse.router)
     app.include_router(pages.router)
+    app.include_router(review_pages.router)
 
     return app
 
