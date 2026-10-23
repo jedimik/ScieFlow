@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from scieflow.core import events, gates, jobs
@@ -12,6 +13,20 @@ from scieflow.web.app import create_app
 ROOT = Path(__file__).resolve().parents[2]
 TOKEN = "test-token"
 STUB = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
+
+
+def _fixture_credentials(root: Path, agents) -> None:
+    """S4 (A9): each fixture agent gets a real env credential backed by a fake 0600 token file."""
+    from scieflow.core import sandbox
+
+    token = sandbox.credentials_dir() / "fixture.token"
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("fake-token-fixture\n")
+    token.chmod(0o600)
+    entry = {"mode": "env", "var": "SCIEFLOW_FIXTURE_TOKEN", "file": "fixture.token",
+             "reason": "fake fixture token"}
+    (root / "config" / "sandbox.yml").write_text(
+        yaml.safe_dump({"credentials": {agent: dict(entry) for agent in agents}}))
 
 
 @pytest.fixture
@@ -46,6 +61,7 @@ def project(tmp_path):
         "  research.draft-authors: [stub]\n"
         "  research.consistency: stub\n")
     (tmp_path / "schemas").mkdir()
+    _fixture_credentials(tmp_path, ["stub", "stub2", "sleepy", "stub_disabled"])
     for name in ("status", "gates", "status-research"):
         (tmp_path / "schemas" / f"{name}.yml").write_text(
             (ROOT / "schemas" / f"{name}.yml").read_text())

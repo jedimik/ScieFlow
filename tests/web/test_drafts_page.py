@@ -44,11 +44,11 @@ def _responder_cmd() -> str:
     like this one can prove the round actually advances end to end."""
     code = ('import json;print(json.dumps({"session_id": "resp-1"}));'
            'print(json.dumps({"type": "result", "result": "merged okay"}))')
-    return f"{sys.executable} -c '{code}' {{prompt}}"
+    return f"{sys.executable} -c '{code}' {{session}} {{prompt}}"
 
 
 @pytest.fixture
-def responder(project):
+def responder(project, grant_credentials):
     """A fake conversable agent that always answers successfully, installed
     the way `tests/core/test_merge_round.py` and `tests/web/test_sse.py`'s
     `slow` agent both do: appended to the project's own `agents.yml`.
@@ -61,6 +61,7 @@ def responder(project):
         f'    resume_cmd: "{yaml_cmd}"\n    family: claude\n    enabled: true\n'
         "    timeout_min: 1\n"
     ))
+    grant_credentials(project.root, "responder")     # S4 (A9)
     return "responder"
 
 

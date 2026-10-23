@@ -33,13 +33,13 @@ BIB = """\
 """
 
 
-def sh(argv, cwd):
-    proc = subprocess.run(argv, capture_output=True, text=True, cwd=cwd)
+def sh(argv, cwd, env=None):
+    proc = subprocess.run(argv, capture_output=True, text=True, cwd=cwd, env=env)
     assert proc.returncode == 0, f"{argv}: {proc.stdout}{proc.stderr}"
     return proc
 
 
-def test_paper_draft_pipeline(tmp_path):
+def test_paper_draft_pipeline(tmp_path, child_env):
     stub = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
     agents_yml = "agents:\n" + "".join(
         f'  {a}: {{cmd: "{stub}", enabled: true, timeout_min: 1, tier: primary}}\n'
@@ -73,9 +73,9 @@ def test_paper_draft_pipeline(tmp_path):
                 f"draft\noutput: {rel}/manuscript/drafts/{agent}/{section}.tex\n"
                 "kind: tex-section\n"
             )
-            sh([sys.executable, "-m", "scieflow.core.agent_run", agent,
+            sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", agent,
                 str(prompt), str(ws / "logs" / f"draft-{agent}-{section}.log")],
-               cwd=tmp_path)
+               cwd=tmp_path, env=child_env)
         for section in SECTIONS:
             assert (ws / "manuscript" / "drafts" / agent / f"{section}.tex"
                     ).stat().st_size > 0
@@ -86,9 +86,9 @@ def test_paper_draft_pipeline(tmp_path):
         prompt = ws / "prompts" / f"xreview-{reviewer}-round-1.md"
         out = f"{rel}/review/draft-round-1/{reviewer}-on-{author}.json"
         prompt.write_text(f"review\noutput: {out}\nkind: manuscript-review\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", reviewer,
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", reviewer,
             str(prompt), str(ws / "logs" / f"xreview-{reviewer}.log")],
-           cwd=tmp_path)
+           cwd=tmp_path, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",
             str(ws / "review" / "draft-round-1" / f"{reviewer}-on-{author}.json"),
             "--schema", "manuscript-review"], cwd=tmp_path)

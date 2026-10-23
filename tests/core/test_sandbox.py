@@ -28,9 +28,10 @@ def test_wrap_builds_a_read_only_root_with_granted_binds(monkeypatch, tmp_path):
     run = tmp_path / "run"
     run.mkdir()
     argv = sandbox.wrap(["agent", "--flag"], writable=[run], cwd=run)
-    assert argv[0] == sandbox.BWRAP
+    assert argv[0] == "/usr/bin/bwrap"            # A13: the absolute path, not "bwrap"
     joined = " ".join(argv)
-    assert "--ro-bind / /" in joined              # everything read-only first
+    assert "--ro-bind / /" not in joined          # D1: no whole-root bind
+    assert "--ro-bind /usr /usr" in joined        # the read-only system set
     assert f"--bind {run} {run}" in joined        # then the grant on top
     assert "--tmpfs /tmp" in joined
     assert "--die-with-parent" in joined          # must not outlive a cancelled job
@@ -43,7 +44,7 @@ def test_wrap_creates_missing_writable_directories(monkeypatch, tmp_path):
     has no uv cache, and the failure would otherwise be a cryptic bwrap error."""
     monkeypatch.setattr(sandbox.shutil, "which", lambda name: "/usr/bin/bwrap")
     absent = tmp_path / "not" / "created" / "yet"
-    sandbox.wrap(["echo"], writable=[absent], cwd=tmp_path)
+    sandbox.wrap(["echo"], writable=[absent], cwd=absent)
     assert absent.is_dir()
 
 
@@ -454,7 +455,7 @@ def _vandalise(project, run: Path, **launch) -> None:
     repo = run / "provenance.git"
     script = _VANDAL.format(repo=repo, run=run)
     jobs.run_blocking(project, ["/bin/sh", "-c", script], kind="agent", cwd=run,
-                      run_dir=run, sandbox_writable=writable, **launch)
+                      run_dir=run, sandbox_writable=writable, env=sandbox.environment(run), **launch)
     assert (run / "inside").exists()          # the sandbox ran; the grant still works
 
 
@@ -524,7 +525,8 @@ def test_an_agent_grant_masks_exactly_the_runs_provenance_repo(tmp_path):
     project = make_project(tmp_path)
     run = project.run_dir("r1")
     writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
-    assert sandbox.masks_for(writable, run_dir=run) == [run.resolve() / "provenance.git"]
+    assert sandbox.masks_for(writable, run_dir=run) == [
+        run.resolve() / "provenance.git", run.resolve() / "scratch" / "agent-home"]
     assert sandbox.masks_for(writable, run_dir=None) == []
 
 
@@ -544,6 +546,269 @@ def test_jobs_start_passes_the_mask_through_to_wrap(monkeypatch, tmp_path):
     monkeypatch.setattr(sandbox, "wrap", fake_wrap)
     writable = sandbox.writable_for(project, run_dir=run, coordinator=False)
     _, proc = jobs.start(project, ["agent"], kind="agent", cwd=run, run_dir=run,
-                         sandbox_writable=writable)
+                         sandbox_writable=writable, env={})
     proc.wait()
-    assert seen["mask"] == [run.resolve() / "provenance.git"]
+    assert seen["mask"] == [run.resolve() / "provenance.git", run.resolve() / "scratch" / "agent-home"]
+
+
+# --- Independent K protection producer: no manager or run semantics ---
+def test_k_protection_policy_loaded_once(k_conversational_project, monkeypatch):
+    import hashlib
+    from dataclasses import FrozenInstanceError, replace
+
+    project, ws, _ = k_conversational_project
+    extra = project.root / 'extra'
+    extra.mkdir()
+    alias = project.root / 'alias'
+    alias.symlink_to(extra, target_is_directory=True)
+    policy = project.root / sandbox.ALLOWLIST_FILE
+    raw = b'writable:\n  - path: alias/missing\n'
+    policy.write_bytes(raw)
+    # Invalid current/registry/charter/run config must not be dependencies.
+    (ws / 'config.yml').write_text('sandbox: off\nagent_overrides: [bad]\n')
+    (ws / 'charter.yml').write_text('- malformed\n')
+    (project.root / 'config/agents.yml').unlink()
+    calls = []
+    real = sandbox._capture_turn_policy
+
+    def capture(path):
+        calls.append(path)
+        return real(path)
+
+    monkeypatch.setattr(sandbox, '_capture_turn_policy', capture)
+    protection = sandbox.resolve_turn_protection(project, run_dir=ws)
+    assert len(calls) == 1
+    assert protection.sandbox_enabled is True
+    assert protection.writable == (ws, extra / 'missing')
+    assert protection.allowlist == (extra / 'missing',)
+    assert protection.coordinator_writable == (project.workspace_root, extra / 'missing')
+    assert protection.masks == (ws / 'provenance.git', ws / 'scratch' / 'agent-home')
+    assert protection.policy_sha256 == hashlib.sha256(raw).hexdigest()
+    facts = {fact.path: fact for fact in protection.path_facts}
+    assert facts[alias].link_target == str(extra) and facts[alias].resolved == extra
+    assert facts[alias].inode == alias.lstat().st_ino
+    assert facts[extra].inode == extra.lstat().st_ino
+    assert facts[alias / 'missing'].exists is False
+    assert facts[extra / 'missing'].exists is False
+    assert facts[policy].size == len(raw)
+    assert all(p in facts for p in (project.root, ws, project.workspace_root, policy.parent, extra.parent))
+    with pytest.raises(FrozenInstanceError):
+        protection.writable = ()
+    with pytest.raises(TypeError):
+        replace(protection, allowlist=list(protection.allowlist))
+    with pytest.raises(TypeError):
+        replace(protection.path_facts[0], exists=[])
+    policy.write_text('writable: []\n')
+    assert protection.allowlist == (extra / 'missing',)
+
+
+def test_k_protection_absence_and_explicit_optout(k_conversational_project):
+    project, ws, _ = k_conversational_project
+    (project.root / sandbox.ALLOWLIST_FILE).unlink()     # S4: this test pins the absent policy
+    p = sandbox.resolve_turn_protection(project, run_dir=ws)
+    assert p.policy_sha256 is None
+    assert any(f.path == project.root / sandbox.ALLOWLIST_FILE and not f.exists for f in p.path_facts)
+    (project.root / sandbox.ALLOWLIST_FILE).write_text('unsandboxed_runs:\n  - slug: r1\n    reason: human\n')
+    disabled = sandbox.resolve_turn_protection(project, run_dir=ws)
+    assert not disabled.sandbox_enabled and disabled.writable is None
+    assert disabled.coordinator_writable == (project.workspace_root,)
+
+
+@pytest.mark.parametrize('body', ['- bad\n', 'writable: [src]\n',
+                                'writable:\n  - path: ../outside\n',
+                                'unsandboxed_runs:\n  - slug: r1\n'])
+def test_k_protection_bad_policy_no_artifacts(k_conversational_project, body):
+    project, ws, prompt = k_conversational_project
+    (project.root / sandbox.ALLOWLIST_FILE).write_text(body)
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.resolve_turn_protection(project, run_dir=ws)
+    assert not prompt.exists() and list((ws / 'logs').iterdir()) == []
+
+
+def test_k_protection_unprovable_paths_refuse(k_conversational_project):
+    project, ws, _ = k_conversational_project
+    policy = project.root / sandbox.ALLOWLIST_FILE
+    policy.unlink()     # S4: the fixture's credentials policy is replaced by the symlink under test
+    policy.symlink_to('missing')
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.resolve_turn_protection(project, run_dir=ws)
+    policy.unlink()
+    leaf = project.root / 'file-grant'
+    leaf.write_text('not a directory')
+    policy.write_text('writable:\n  - path: file-grant\n')
+    with pytest.raises(sandbox.SandboxError):
+        sandbox.resolve_turn_protection(project, run_dir=ws)
+
+
+def test_k_protection_captures_intermediate_alias_chain(k_conversational_project):
+    project, ws, _ = k_conversational_project
+    extra = project.root / 'actual'
+    extra.mkdir()
+    middle = project.root / 'middle'
+    middle.symlink_to(extra, target_is_directory=True)
+    alias = project.root / 'alias'
+    alias.symlink_to(middle, target_is_directory=True)
+    (project.root / sandbox.ALLOWLIST_FILE).write_text('writable:\n  - path: alias/absent\n')
+    protection = sandbox.resolve_turn_protection(project, run_dir=ws)
+    facts = {f.path: f for f in protection.path_facts}
+    assert middle in facts and facts[middle].link_target == str(extra)
+    assert middle / 'absent' in facts
+
+
+def test_k_protection_policy_identity_cannot_silently_drift(k_conversational_project, monkeypatch):
+    project, ws, _ = k_conversational_project
+    policy = project.root / sandbox.ALLOWLIST_FILE
+    policy.write_text('writable: []\n')
+    real = sandbox._capture_turn_policy
+    def capture(path):
+        captured = real(path)
+        replacement = path.with_name('replacement.yml')
+        replacement.write_text('writable:\n  - path: workspace\n')
+        replacement.replace(path)
+        return captured
+    monkeypatch.setattr(sandbox, '_capture_turn_policy', capture)
+    with pytest.raises(sandbox.SandboxError, match='changed'):
+        sandbox.resolve_turn_protection(project, run_dir=ws)
+
+
+# --- Read-induced access time is not a policy mutation ---
+@pytest.mark.parametrize('access_state', ['already-read', 'old-access'])
+def test_k_unchanged_policy_read_does_not_invalidate_protection(tmp_path, monkeypatch, access_state):
+    import hashlib
+    import json
+    import os
+    from scieflow.core.project import Project
+
+    root = tmp_path / 'project'
+    (root / 'config').mkdir(parents=True)
+    ws = root / 'workspace/r1'
+    ws.mkdir(parents=True)
+    project = Project(root)
+    policy = root / sandbox.ALLOWLIST_FILE
+    raw = b'writable: []\n'
+    policy.write_bytes(raw)
+    if access_state == 'already-read':
+        assert policy.read_bytes() == raw
+    else:
+        info = policy.stat()
+        os.utime(policy, ns=(1_000_000_000, info.st_mtime_ns))
+    before = policy.stat()
+    captured_stats = []
+    real_fstat = os.fstat
+
+    def observe(fd):
+        info = real_fstat(fd)
+        if (info.st_dev, info.st_ino) == (before.st_dev, before.st_ino):
+            captured_stats.append(info)
+        return info
+
+    def stable_identity(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
+                info.st_uid, info.st_gid, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    monkeypatch.setattr(sandbox.os, 'fstat', observe)
+    outcome = None
+    refusal = None
+    try:
+        outcome = sandbox.resolve_turn_protection(project, run_dir=ws)
+    except sandbox.SandboxError as exc:
+        refusal = str(exc)
+    after = policy.stat()
+    observation = {
+        'access_state': access_state,
+        'stable_identity_unchanged': stable_identity(before) == stable_identity(after),
+        'atime_before_ns': before.st_atime_ns,
+        'atime_after_ns': after.st_atime_ns,
+        'fstat_calls_for_policy': len(captured_stats),
+        'fstat_atimes_ns': [info.st_atime_ns for info in captured_stats],
+        'refusal': refusal,
+        'producer_module': str(Path(sandbox.__file__).resolve()),
+    }
+    print('POLICY_ATIME_OBSERVATION ' + json.dumps(observation, sort_keys=True))
+    assert len(captured_stats) == 2
+    assert all(stable_identity(info) == stable_identity(before) for info in captured_stats)
+    assert stable_identity(before) == stable_identity(after)
+    assert policy.read_bytes() == raw
+    assert list(ws.iterdir()) == []
+    if access_state == 'old-access':
+        assert after.st_atime_ns > before.st_atime_ns, 'read-induced atime advance was not exercised'
+    assert refusal is None, 'unchanged valid policy falsely refused after its own read: ' + str(refusal)
+    assert outcome is not None and outcome.policy_sha256 == hashlib.sha256(raw).hexdigest()
+    assert outcome.writable == (ws,)
+
+
+@pytest.mark.parametrize('field', [
+    'st_dev', 'st_ino', 'st_mode', 'st_nlink', 'st_uid', 'st_gid',
+    'st_size', 'st_mtime_ns', 'st_ctime_ns', 'st_atime', 'st_atime_ns',
+])
+def test_k_policy_stat_identity_field_sensitivity(field):
+    import os
+    from types import SimpleNamespace
+    from typing import cast
+
+    # Synthetic unit controls, not real ownership or link-count mutations.
+    fields = ('st_dev', 'st_ino', 'st_mode', 'st_nlink', 'st_uid', 'st_gid',
+              'st_size', 'st_mtime_ns', 'st_ctime_ns')
+    values: dict[str, int | float] = {name: i + 1 for i, name in enumerate(fields)}
+    values.update(st_atime=1.0, st_atime_ns=1_000_000_000,
+                  st_mtime=1.0, st_ctime=1.0)
+    before = cast(os.stat_result, SimpleNamespace(**values))
+    changed = dict(values)
+    changed[field] += 1
+    after = cast(os.stat_result, SimpleNamespace(**changed))
+    identity = sandbox._policy_stat_identity(before)
+    assert identity == tuple(values[name] for name in fields)
+    if field in ('st_atime', 'st_atime_ns'):
+        assert sandbox._policy_stat_identity(after) == identity
+    else:
+        # mtime/ctime controls change only one nanosecond, not their float fields.
+        assert sandbox._policy_stat_identity(after) != identity
+
+
+def test_k_t3_real_child_cannot_replace_admission_with_host_positive(project):
+    import hashlib
+    import json
+    import shlex
+    from scieflow.core import turn_admission
+
+    # This required control is not skipped/deselected as a live model test.
+    assert sandbox.available(), 'actual sandbox required for Task3 protection proof'
+    ws = project.run_dir('r1')
+    provenance = ws / 'provenance.git'
+    provenance.mkdir()
+    sandbox.agent_home(ws, 'probe-agent')   # the turn path creates its home in the protection capture (F3)
+    original = provenance / 'sentinel'
+    original.write_bytes(b'original provenance')
+    digest = hashlib.sha256(original.read_bytes()).hexdigest()
+    with turn_admission.reserve(project, ws) as held:
+        protection = sandbox.resolve_turn_protection(project, run_dir=ws)
+        held.validate_protection(protection)
+        directory = project.root / '.scieflow/turn-admission'
+        [lock] = list(directory.glob('*.lock'))
+        host = directory / 'host-positive'
+        host.write_bytes(b'host can write admission parent')
+        identities = {p: (p.stat().st_dev, p.stat().st_ino) for p in (lock, directory, directory.parent)}
+        inside = ws / 'child-positive'
+        replacement = ws / 'replacement'
+        replacement.write_bytes(b'hostile replacement')
+        q = lambda path: shlex.quote(str(path))
+        script = f'printf child > {q(inside)} || exit 10; '
+        attacks = [f'rm {q(lock)}', f'mv {q(replacement)} {q(lock)}',
+                   f'mv {q(directory)} {q(ws / "stolen-admission")}',
+                   f'mv {q(directory.parent)} {q(ws / "stolen-state")}']
+        for i, attack in enumerate(attacks):
+            script += f'if {attack} 2>/dev/null; then printf "ALLOWED-{i}\\n"; else printf "DENIED-{i}\\n"; fi; '
+        script += f'printf sandbox-only > {q(original)}; printf complete'
+        proc = subprocess.run(sandbox.wrap(['/bin/sh', '-c', script],
+                              writable=list(protection.writable), cwd=ws, mask=list(protection.masks)),
+                              capture_output=True, text=True, timeout=20, check=False)
+        assert proc.returncode == 0 and inside.read_bytes() == b'child'
+        assert proc.stdout == 'DENIED-0\nDENIED-1\nDENIED-2\nDENIED-3\ncomplete'
+        assert replacement.read_bytes() == b'hostile replacement'
+        assert lock.read_bytes() == b'' and host.read_bytes() == b'host can write admission parent'
+        assert identities == {p: (p.stat().st_dev, p.stat().st_ino) for p in identities}
+        assert hashlib.sha256(original.read_bytes()).hexdigest() == digest
+        held.validate_protection(protection)  # ordinary run/parent churn stays safe
+        print('T3_SANDBOX_OBSERVATION ' + json.dumps({'host_positive': True,
+              'child_positive': True, 'actual_denials': 4, 'lock_inode_unchanged': True,
+              'provenance_unchanged': True, 'exit_code': proc.returncode}, sort_keys=True))

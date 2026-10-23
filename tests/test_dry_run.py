@@ -28,18 +28,20 @@ FILE_FOR_PHASE = {
 }
 
 
-def dispatch_stub(ws: Path, kind: str, out_path: Path) -> None:
+def dispatch_stub(ws: Path, kind: str, out_path: Path, env: dict) -> None:
     prompt = ws / "logs" / f"{kind}.prompt.md"
     prompt.write_text(f"output: {out_path}\nkind: {kind}\n")
     transcript = ws / "logs" / f"{kind}.transcript.md"
+    # S25fix1 (finding 1b): the sandbox is incidental to the dry run (no credential in ROOT's
+    # policy, and the dry run must not write one there), so the dispatch is unsandboxed.
     subprocess.run(
-        [sys.executable, "-m", "scieflow.core.agent_run",
+        [sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox",
          "stub", str(prompt), str(transcript)],
-        check=True,
+        check=True, env=env,
     )
 
 
-def test_full_iteration_then_low_budget_checkpoint(tmp_path):
+def test_full_iteration_then_low_budget_checkpoint(tmp_path, child_env):
     goal = tmp_path / "goal.md"
     goal.write_text("# Goal\nDenoising parameter study (dry run).\n")
     ws = sfx_init.init_workspace(
@@ -55,7 +57,7 @@ def test_full_iteration_then_low_budget_checkpoint(tmp_path):
     st = status_mod.read_status(ws)
     while (phase := status_mod.next_pending(st)) is not None:
         status_mod.write_status(ws, status_mod.mark(st, phase, "running"))
-        dispatch_stub(ws, KIND_FOR_PHASE[phase], it_dir / FILE_FOR_PHASE[phase])
+        dispatch_stub(ws, KIND_FOR_PHASE[phase], it_dir / FILE_FOR_PHASE[phase], child_env)
         assert (it_dir / FILE_FOR_PHASE[phase]).exists()
         st = status_mod.mark(st, phase, "done")
         status_mod.write_status(ws, st)
@@ -66,7 +68,7 @@ def test_full_iteration_then_low_budget_checkpoint(tmp_path):
 
     # Notebook entry: produced, validated, appended
     entry_path = it_dir / "notebook-entry.md"
-    dispatch_stub(ws, "notebook-entry", entry_path)
+    dispatch_stub(ws, "notebook-entry", entry_path, child_env)
     entry = entry_path.read_text()
     assert validate_mod.validate_notebook_entry(entry) == []
     with (ws / "notebook.md").open("a") as fh:

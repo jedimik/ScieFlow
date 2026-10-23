@@ -14,10 +14,82 @@
 #   - slug: 2026-09-23-some-run
 #     reason: >-
 #       why this run must dispatch without filesystem confinement.
+#
+# readable:
+#   - path: ~/datasets/shared-exports      # absolute, ~/-prefixed, or relative to the repo
+#     reason: >-
+#       what the agent needs from this folder, in one sentence.
+#
+# Read-only grants outside the repository. Each entry needs a non-empty path and reason,
+# and the path must exist. The hard deny list is never overridable: your home directory
+# and anything above it, ~/.ssh, ~/.gnupg, ~/.hermes, ~/.config/scieflow/credentials, the
+# agent credential stores (~/.claude, ~/.claude.json, ~/.codex, ~/.gemini), and the
+# runtime socket areas (/run, /var/run, /proc, /sys, /dev). An entry that touches one is
+# refused (exit 77). Secret files in the repository root (.env, .env.*, .dvc/config.local)
+# are masked from every dispatch, and other runs' agent homes that exist when the layout is built are hidden.
 
+# Full rules: docs/sandbox.md. A writable entry that contains a hidden path (another run's
+# agent home, or a project secret such as .env) is refused, exit 77. A writable entry that is an
+# ancestor of a run lets an agent rename that run's scratch: a human decision, disclosed as a residual.
 writable:
   - path: config/journals
     reason: >-
       paper-review and paper-draft cache journal profiles here, the one
       documented exception to AGENTS.md rule 1
       (src/scieflow/research/AGENTS.md).
+
+# credentials: the login each sandboxed agent may use (design D6, plan C10). Every sandboxed
+# dispatch needs an entry for its agent. With no entry it is refused with exit 77 and the exact
+# setup step; with an entry whose token file is missing it is refused with exit 77, naming that file.
+# Setup steps, permission rules and the codex/agy first-run steps: docs/sandbox.md (credentials).
+#   mode: env   the token is read from a private file (default <credentials dir>/<agent>.token,
+#               one line, mode 0600) and set only in that agent's environment as `var`.
+#               Claude: run `claude setup-token`, save the token to
+#               ~/.config/scieflow/credentials/claude.token, then `chmod 600` the file.
+#   mode: bind  the agent's own login FILE is bound read-only into its private HOME at `target`
+#               (`writable: true` binds it read-write). The source may not be the home, .ssh,
+#               .gnupg, .hermes, the credentials dir or a whole agent store directory.
+# Every entry needs a `reason:`. Active now: claude and claude-paper (env). The bind examples
+# below are commented out: enabling one is a human decision. Until an entry exists, its agent
+# refuses with exit 77 (codex, codex-paper, codex-review, agy and stub are not yet entered).
+credentials:
+  claude:
+    mode: env
+    var: CLAUDE_CODE_OAUTH_TOKEN
+    file: claude.token
+    reason: >-
+      the Claude CLI's own login, made once with `claude setup-token`; revocable by the user.
+  claude-paper:
+    mode: env
+    var: CLAUDE_CODE_OAUTH_TOKEN
+    file: claude.token
+    reason: >-
+      the Claude CLI's own login for the paper agent, made with `claude setup-token`.
+#
+# Commented bind examples (not active; uncomment and set the reason to enable):
+#
+# credentials:
+#   codex:
+#     mode: bind
+#     source: ~/.codex/auth.json
+#     target: .codex/auth.json
+#     reason: >-
+#       the Codex login file, bound read-only; the store directory itself is refused.
+#   codex-paper:
+#     mode: bind
+#     source: ~/.codex/auth.json
+#     target: .codex/auth.json
+#     reason: >-
+#       the Codex login file for the paper agent.
+#   codex-review:
+#     mode: bind
+#     source: ~/.codex/auth.json
+#     target: .codex/auth.json
+#     reason: >-
+#       the Codex login file for the review agent.
+#   agy:
+#     mode: bind
+#     source: ~/.gemini/antigravity-cli/oauth_creds.json
+#     target: .gemini/antigravity-cli/oauth_creds.json
+#     reason: >-
+#       the Antigravity login file.

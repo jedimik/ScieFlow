@@ -956,3 +956,969 @@ def test_a_non_utf8_change_does_not_crash_the_diff(ws):
     assert result["truncated"] is False
     assert "results.tex" in result["text"]
     assert "�" in result["text"], "a malformed byte should be replaced, not raise"
+
+
+def _four_agent_history(ws, rounds):
+    """Equivalent histories; all fixture Git work precedes measurement."""
+    _write(ws / "outline" / "outline.md", "# Outline\n")
+    for n in range(1, rounds + 1):
+        _write(ws / "manuscript" / "curation" / "rounds" / str(n) / "results.tex",
+               f"merged {n}\n")
+        _write(ws / "review" / f"round-{n}" / "review.md", f"review {n}\n")
+        for agent in ("agy", "claude", "codex", "gemini"):
+            _write(ws / "manuscript" / "drafts" / agent / "results.tex", f"{agent}\n")
+            _write(ws / "review" / f"draft-round-{n}" / f"response-{agent}.md",
+                   f"response {n}\n")
+    commits = provenance.sync(ws)["commits"]
+    repo = provenance.repo_path(ws)
+    return {ref: (sha, provenance._git(repo, "log", "-1", "--format=%cI", sha))
+            for ref, sha in commits.items()}
+
+
+def _history_points(tips, rounds):
+    """Hand-derived public vocabulary, including absence of top-level parent."""
+    expected = []
+    sha, at = tips["refs/heads/main"]
+    for n in range(rounds, 0, -1):
+        expected.extend([
+            {"ref": f"main:merge_{n}", "label": f"Merge round {n}",
+             "kind": "merge", "commit": sha, "at": at},
+            {"ref": f"main:merge_{n}/sections", "label": f"Merge round {n} sections",
+             "kind": "merge", "parent": f"main:merge_{n}", "commit": sha, "at": at},
+        ])
+    for n in range(rounds, 0, -1):
+        expected.append({"ref": f"main:review_{n}", "label": f"Review round {n}",
+                         "kind": "review", "commit": sha, "at": at})
+    expected.append({"ref": "main:outline.md", "label": "Outline", "kind": "outline",
+                     "commit": sha, "at": at})
+    for agent in ("agy", "claude", "codex", "gemini"):
+        sha, at = tips[f"refs/heads/draft/{agent}"]
+        expected.append({"ref": f"draft/{agent}:sections", "label": f"{agent}'s draft",
+                         "kind": "draft", "commit": sha, "at": at})
+        for n in range(rounds, 0, -1):
+            expected.append({"ref": f"draft/{agent}:review_{n}",
+                             "label": f"Review round {n} ({agent})", "kind": "review",
+                             "commit": sha, "at": at})
+    return expected
+
+
+@pytest.mark.parametrize("rounds", [2, 20])
+def test_cold_points_git_cost_is_bounded_by_branches(ws, monkeypatch, rounds):
+    """A per-round traversal breaks both the tree and total-command budgets."""
+    tips = _four_agent_history(ws, rounds)
+    calls = []
+    real_run = provenance.subprocess.run
+
+    def measured(argv, **kwargs):
+        if argv[:3] == [provenance.GIT, "--git-dir", str(provenance.repo_path(ws))]:
+            calls.append(argv[3:])
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(provenance.subprocess, "run", measured)
+    actual = provenance.points(ws)
+    tree_count = sum(args[0] == "ls-tree" for args in calls)
+    print(f"COLD_POINTS rounds={rounds} branches=5 ls-tree={tree_count} "
+          f"total-git={len(calls)} points={len(actual)}")
+    assert actual == _history_points(tips, rounds)
+    assert tree_count == 5, "one recursive listing per relevant branch, independent of rounds"
+    assert len(calls) == 6, "one ref observation plus five listings, no per-point metadata work"
+
+
+def _point_commit(repo, ref, entries):
+    tree = provenance._tree(repo, entries)
+    commit = provenance._commit(repo, tree, [], "point fixture", when="@946684800 +0000")
+    provenance._update_ref(repo, ref, commit)
+    return commit
+
+
+def test_points_round_components_are_exact_ascii_canonical(ws):
+    """Noncanonical spellings must not create aliases of real or missing rounds."""
+    repo = provenance.ensure_repo(ws)
+    empty = provenance._tree(repo, [])
+    sections = provenance._tree(repo, [("040000", "tree", empty, "sections")])
+    suffixes = ["0", "2", "00", "01", "١", "１", "+1", "-1", "1\n", "1\r",
+                "1\t", "1x", " 1", "1 "]
+    main_entries = [("040000", "tree", sections if n == "2" else empty, f"merge_{n}")
+                    for n in suffixes]
+    main_entries += [("040000", "tree", empty, f"review_{n}") for n in suffixes]
+    _point_commit(repo, "refs/heads/main", main_entries)
+    _point_commit(repo, "refs/heads/draft/claude",
+                  [("040000", "tree", empty, "sections")]
+                  + [("040000", "tree", empty, f"review_{n}") for n in suffixes])
+    assert [p["ref"] for p in provenance.points(ws)] == [
+        "main:merge_2", "main:merge_2/sections", "main:merge_0",
+        "main:review_2", "main:review_0", "draft/claude:sections",
+        "draft/claude:review_2", "draft/claude:review_0",
+    ]
+
+
+@pytest.mark.parametrize("mode,kind", [("100644", "blob"), ("120000", "blob"),
+                                      ("160000", "commit")])
+def test_points_directory_names_require_actual_trees(ws, mode, kind):
+    """Blobs, symlinks and gitlinks cannot masquerade as point directories."""
+    repo = provenance.ensure_repo(ws)
+    oid = (provenance._ref_sha(repo, provenance.EMPTY_ROOT_REF) if kind == "commit"
+           else provenance._blob(repo, "not a directory"))
+    assert oid is not None
+    merge = provenance._tree(repo, [(mode, kind, oid, "sections")])
+    _point_commit(repo, "refs/heads/main", [
+        ("040000", "tree", merge, "merge_1"),
+        (mode, kind, oid, "merge_8"), (mode, kind, oid, "review_8"),
+    ])
+    _point_commit(repo, "refs/heads/draft/claude", [
+        (mode, kind, oid, "sections"), (mode, kind, oid, "review_8"),
+    ])
+    assert [p["ref"] for p in provenance.points(ws)] == ["main:merge_1"]
+
+
+@pytest.mark.parametrize("kind", ["tree", "commit"])
+def test_points_outline_requires_a_blob(ws, kind):
+    repo = provenance.ensure_repo(ws)
+    oid = (provenance._tree(repo, []) if kind == "tree"
+           else provenance._ref_sha(repo, provenance.EMPTY_ROOT_REF))
+    assert oid is not None
+    _point_commit(repo, "refs/heads/main", [
+        ("040000" if kind == "tree" else "160000", kind, oid, "outline.md"),
+    ])
+    assert provenance.points(ws) == []
+
+
+@pytest.mark.parametrize("agent", ["café", 'quote"agent', "line\u2028agent", "line\u0085agent"])
+def test_points_ref_metadata_preserves_unicode_without_line_splitting(ws, agent):
+    """Only Git's record newline separates refs, not Unicode line separators."""
+    repo = provenance.ensure_repo(ws)
+    empty = provenance._tree(repo, [])
+    commit = _point_commit(repo, f"refs/heads/draft/{agent}",
+                           [("040000", "tree", empty, "sections")])
+    assert provenance.points(ws) == [{
+        "ref": f"draft/{agent}:sections", "label": f"{agent}'s draft", "kind": "draft",
+        "commit": commit, "at": "2000-01-01T00:00:00+00:00",
+    }]
+
+
+def test_points_unrepresentable_ref_metadata_is_a_typed_failure(ws):
+    repo = provenance.ensure_repo(ws)
+    empty = provenance._tree(repo, [])
+    tree = provenance._tree(repo, [("040000", "tree", empty, "sections")])
+    commit = provenance._commit(repo, tree, [], "raw ref", when="@946684800 +0000")
+    subprocess.run(["git", "--git-dir", str(repo), "update-ref", b"refs/heads/draft/\xff",
+                    commit], capture_output=True, check=True, env=provenance._env())
+    with pytest.raises(provenance.ProvenanceError):
+        provenance.points(ws)
+
+
+def _raw_tree(repo, entries):
+    records = [f"{mode} {kind} {oid}\t".encode("ascii") + name + b"\x00"
+               for mode, kind, oid, name in entries]
+    result = subprocess.run(["git", "--git-dir", str(repo), "mktree", "-z"],
+                            input=b"".join(records), capture_output=True, check=True,
+                            env=provenance._env())
+    return result.stdout.decode("ascii").strip()
+
+
+def test_recursive_points_are_lossless_for_irrelevant_path_bytes(ws, monkeypatch):
+    """Descendant bytes and misleading nested names cannot forge point vocabulary."""
+    repo = provenance.ensure_repo(ws)
+    blob = provenance._blob(repo, "x\n")
+    names = [b"tab\tname.tex", b"line\nname.tex", b"cr\rname.tex", b'quote"name.tex',
+             "café.tex".encode("utf-8"), b"raw-\xff.tex", b"trailing\r\n",
+             f"leaf\n040000 tree {'0' * 40}\treview_99".encode("ascii")]
+    leaves = _raw_tree(repo, [("100644", "blob", blob, name) for name in names])
+    sections = provenance._tree(repo, [("040000", "tree", leaves, "sections")])
+    nested = provenance._tree(repo, [("040000", "tree", sections, "merge_99"),
+                                    ("040000", "tree", leaves, "review_99")])
+    no_direct_sections = provenance._tree(repo, [("040000", "tree", sections, "nested"),
+                                                ("040000", "tree", leaves, "sections_extra")])
+    main = _point_commit(repo, "refs/heads/main", [
+        ("040000", "tree", sections, "merge_0"),
+        ("040000", "tree", no_direct_sections, "merge_3"),
+        ("040000", "tree", leaves, "review_0"),
+        ("040000", "tree", nested, "nested"),
+        ("040000", "tree", leaves, "x\nmerge_99"),
+        ("100644", "blob", blob, "outline.md"),
+    ])
+    draft = _point_commit(repo, "refs/heads/draft/claude", [
+        ("040000", "tree", leaves, "sections"),
+        ("040000", "tree", leaves, "review_0"),
+        ("040000", "tree", nested, "nested"),
+    ])
+    real_run = provenance.subprocess.run
+    commands = []
+
+    def read_only(argv, **kwargs):
+        if argv[:3] == ["git", "--git-dir", str(repo)]:
+            commands.append(argv[3:])
+            assert argv[3] in {"for-each-ref", "ls-tree"}
+            assert kwargs.get("env") == {**provenance._env(), "GIT_NO_REPLACE_OBJECTS": "1"}
+            assert kwargs.get("timeout") == provenance._TIMEOUT_S
+            assert not kwargs.get("text", False) and "encoding" not in kwargs
+        return real_run(argv, **kwargs)
+
+    def no_write(*args, **kwargs):
+        raise AssertionError("point reads must not repair or synchronize")
+
+    monkeypatch.setattr(provenance.subprocess, "run", read_only)
+    monkeypatch.setattr(provenance, "ensure_repo", no_write)
+    monkeypatch.setattr(provenance, "sync", no_write)
+    points = provenance.points(ws)
+    assert [p["ref"] for p in points] == [
+        "main:merge_3", "main:merge_0", "main:merge_0/sections", "main:review_0",
+        "main:outline.md", "draft/claude:sections", "draft/claude:review_0",
+    ]
+    assert [p["commit"] for p in points] == [main] * 5 + [draft] * 2
+    assert all(p["at"] == "2000-01-01T00:00:00+00:00" for p in points)
+    assert commands[1:] == [["ls-tree", "-r", "-t", "-z", main],
+                             ["ls-tree", "-r", "-t", "-z", draft]]
+
+
+def test_point_snapshot_preserves_the_observed_generation_when_refs_move(ws, monkeypatch):
+    repo = provenance.ensure_repo(ws)
+    empty = provenance._tree(repo, [])
+    old = _point_commit(repo, "refs/heads/main", [("040000", "tree", empty, "merge_0")])
+    new_tree = provenance._tree(repo, [("040000", "tree", empty, "merge_99")])
+    new = provenance._commit(repo, new_tree, [], "later", when="@978307200 +0000")
+    real_run = provenance.subprocess.run
+    reads = []
+
+    def move_after_observation(argv, **kwargs):
+        result = real_run(argv, **kwargs)
+        if argv[:3] == ["git", "--git-dir", str(repo)]:
+            reads.append(argv[3:])
+            if argv[3] == "for-each-ref":
+                real_run(["git", "--git-dir", str(repo), "update-ref", "refs/heads/main", new],
+                         capture_output=True, check=True, env=provenance._env())
+        return result
+
+    monkeypatch.setattr(provenance.subprocess, "run", move_after_observation)
+    snapshot = provenance._read_point_snapshot(ws)
+    assert snapshot is not None
+    assert [(t.ref, t.commit, t.at) for t in snapshot.branches] == [
+        ("refs/heads/main", old, "2000-01-01T00:00:00+00:00"),
+    ]
+    assert snapshot.points == ({"ref": "main:merge_0", "label": "Merge round 0",
+                                "kind": "merge", "commit": old,
+                                "at": "2000-01-01T00:00:00+00:00"},)
+    assert len(reads) == 2 and reads[1] == ["ls-tree", "-r", "-t", "-z", old]
+    assert provenance._ref_sha(repo, "refs/heads/main") == new
+
+
+def test_point_snapshot_distinguishes_empty_refs_from_failed_ref_observation(ws):
+    repo = provenance.ensure_repo(ws)
+    snapshot = provenance._read_point_snapshot(ws)
+    assert snapshot is not None and snapshot.branches == () and snapshot.points == ()
+    (repo / "HEAD").write_text("broken HEAD\n")
+    assert provenance._read_point_snapshot(ws) is None
+    assert provenance.points(ws) == []
+    assert (repo / "HEAD").read_text() == "broken HEAD\n", "reader must not repair"
+
+
+def test_point_snapshot_recursive_failure_discards_all_partial_points(ws):
+    """Real missing subtree after readable refs must not look like empty history."""
+    repo = provenance.ensure_repo(ws)
+    empty = provenance._tree(repo, [])
+    _point_commit(repo, "refs/heads/main", [("040000", "tree", empty, "merge_0")])
+    blob = provenance._blob(repo, "unique content for removed subtree\n")
+    subtree = provenance._tree(repo, [("100644", "blob", blob, "results.tex")])
+    _point_commit(repo, "refs/heads/draft/claude", [("040000", "tree", subtree, "sections")])
+    (repo / "objects" / subtree[:2] / subtree[2:]).unlink()
+    assert provenance._git(repo, "for-each-ref", "--format=%(refname)")
+    with pytest.raises(provenance.ProvenanceError, match="ls-tree failed"):
+        provenance.points(ws)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "missing", "oserror"])
+def test_binary_git_transport_uses_typed_failures(ws, monkeypatch, failure):
+    repo = provenance.ensure_repo(ws)
+
+    def fail(argv, **kwargs):
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, provenance._TIMEOUT_S)
+        if failure == "missing":
+            raise FileNotFoundError("git missing")
+        raise OSError("cannot spawn Git")
+
+    monkeypatch.setattr(provenance.subprocess, "run", fail)
+    with pytest.raises(provenance.ProvenanceError):
+        provenance._git_bytes(repo, "ls-tree", "SENSITIVE-ARGUMENT")
+    assert provenance.points(ws) == [], "initial ref-read failures retain empty-history behavior"
+
+
+@pytest.mark.parametrize("hostile", ["main:merge_999", "HEAD:merge_1", "main~0:merge_1",
+                                     "main^:merge_1", "main:merge_1/", "main:merge_1/../merge_2",
+                                     "draft/claude:sections^{tree}", "refs/heads/draft/claude:sections"])
+def test_point_whitelist_refuses_revision_expressions_unknown_refs_and_aliases(drafted, hostile):
+    provenance.sync(drafted)
+    with pytest.raises(provenance.ProvenanceError, match="not a point"):
+        provenance.diff(drafted, hostile, "main:merge_2")
+    with pytest.raises(provenance.ProvenanceError, match="not a point"):
+        provenance.diff(drafted, "main:merge_2", hostile)
+
+
+def test_point_whitelist_and_comparisons_ignore_branch_tag_ambiguity(drafted):
+    provenance.sync(drafted)
+    repo = provenance.repo_path(drafted)
+    root = provenance._ref_sha(repo, provenance.EMPTY_ROOT_REF)
+    assert root is not None
+    before = provenance.points(drafted)
+    provenance._update_ref(repo, "refs/tags/main", root)
+    provenance._update_ref(repo, "refs/tags/draft/claude", root)
+    assert provenance.points(drafted) == before
+    result = provenance.diff(drafted, "draft/claude:sections", "main:merge_1/sections")
+    assert "-claude's results" in result["text"] and "+merged v1" in result["text"]
+    assert result["text"].count("diff --git") == 1
+
+
+def test_points_canonical_round_numbers_do_not_depend_on_python_int_limits(ws):
+    """Valid canonical path components stay sortable without bounded int parsing."""
+    repo = provenance.ensure_repo(ws)
+    empty = provenance._tree(repo, [])
+    largest = "9" * 5000
+    smaller = "9" * 4999
+    _point_commit(repo, "refs/heads/main", [
+        ("040000", "tree", empty, f"merge_{n}")
+        for n in ("0", "2", "10", smaller, largest)
+    ])
+    assert [p["ref"] for p in provenance.points(ws)] == [
+        f"main:merge_{largest}", f"main:merge_{smaller}",
+        "main:merge_10", "main:merge_2", "main:merge_0",
+    ]
+
+
+def test_point_snapshot_noncommit_head_is_a_typed_failure_not_a_point(ws):
+    """A corrupt branch pointing to a tree must not gain commit/date authority."""
+    repo = provenance.ensure_repo(ws)
+    empty = provenance._tree(repo, [])
+    tree = provenance._tree(repo, [("040000", "tree", empty, "merge_0")])
+    # update-ref refuses a non-commit head; model actual on-disk corruption.
+    (repo / "refs" / "heads" / "main").write_text(tree + "\n")
+    with pytest.raises(provenance.ProvenanceError):
+        provenance.points(ws)
+
+
+def test_task2_snapshot_records_do_not_retain_mutable_authority(drafted):
+    provenance.sync(drafted)
+    snapshot = provenance._read_point_snapshot(drafted)
+    assert snapshot is not None
+    with pytest.raises(TypeError):
+        snapshot.points[0]["ref"] = "--output=forged"
+
+
+def test_task2_diff_pins_validated_object_ids_when_ref_moves(drafted, monkeypatch):
+    provenance.sync(drafted)
+    repo = provenance.repo_path(drafted)
+    old = provenance._ref_sha(repo, "refs/heads/main")
+    root = provenance._ref_sha(repo, provenance.EMPTY_ROOT_REF)
+    assert old is not None and root is not None
+    real_run = provenance.subprocess.run
+    calls = []
+
+    def move_before_diff(argv, **kwargs):
+        if argv[:4] == ["git", "--git-dir", str(repo), "diff"]:
+            calls.append(argv[4:])
+            real_run(["git", "--git-dir", str(repo), "update-ref", "refs/heads/main", root],
+                     check=True, capture_output=True, env=provenance._env())
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(provenance.subprocess, "run", move_before_diff)
+    result = provenance.diff(drafted, "main:merge_1", "main:merge_2")
+    assert "-merged v1" in result["text"] and "+merged v2" in result["text"]
+    assert calls == [["--no-color", f"{old}:merge_1", f"{old}:merge_2"]]
+    assert result["a"] == "main:merge_1" and result["b"] == "main:merge_2"
+
+
+def _task2_reads(monkeypatch, *repos):
+    from pathlib import Path
+
+    real_run = provenance.subprocess.run
+    calls = []
+    normalized = {repo.resolve() for repo in repos}
+
+    def measured(argv, **kwargs):
+        if argv[:2] == ["git", "--git-dir"] and Path(argv[2]).resolve() in normalized:
+            calls.append((argv[2], argv[3:]))
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(provenance.subprocess, "run", measured)
+    return calls
+
+
+def _task2_trees(calls):
+    return sum(args[0] == "ls-tree" for _repo, args in calls)
+
+
+@pytest.mark.parametrize("hostile", ["--output=forged", "-x", "main:merge_999", "HEAD:merge_1",
+                                     "main~0:merge_1", "main^:merge_1", "main:merge_1/",
+                                     "main:merge_1/../merge_2", "draft/claude:sections^{tree}",
+                                     "refs/heads/draft/claude:sections", "main:merge_1/sections/results.tex"])
+def test_task2_mutated_public_lists_cannot_authorize_either_diff_operand(drafted, monkeypatch, hostile):
+    provenance.sync(drafted)
+    calls = _task2_reads(monkeypatch, provenance.repo_path(drafted))
+    with provenance.read_scope():
+        before = provenance.points(drafted)
+        forged = provenance.points(drafted)
+        assert forged == before and forged is not before and forged[0] is not before[0]
+        forged[0]["ref"] = hostile
+        forged.clear()
+        forged.append({"ref": hostile, "commit": before[0]["commit"]})
+        for a, b in [(hostile, "main:merge_2"), ("main:merge_2", hostile)]:
+            with pytest.raises(provenance.ProvenanceError, match="not a point"):
+                provenance.diff(drafted, a, b)
+        assert not any(args[0] == "diff" for _repo, args in calls)
+        assert provenance.points(drafted) == before
+        valid = provenance.diff(drafted, "main:merge_1", "main:merge_2")
+        assert "+merged v2" in valid["text"] and valid["truncated"] is False
+        assert _task2_trees(calls) == 3
+
+
+def test_task2_external_whitelist_is_not_an_api(drafted, monkeypatch):
+    import inspect
+
+    provenance.sync(drafted)
+    calls = _task2_reads(monkeypatch, provenance.repo_path(drafted))
+    assert list(inspect.signature(provenance.diff).parameters) == ["ws", "a", "b"]
+    with pytest.raises(TypeError):
+        provenance.diff(drafted, "--output=forged", "main:merge_2", **{"allowed": {"--output=forged"}})
+    assert calls == []
+
+
+def test_task2_scopes_are_lazy_sequential_and_unscoped_reads_retain_nothing(drafted, monkeypatch):
+    provenance.sync(drafted)
+    calls = _task2_reads(monkeypatch, provenance.repo_path(drafted))
+    assert provenance._read_memo.get() is None
+    with provenance.read_scope():
+        assert calls == []
+    for _ in range(2):
+        with provenance.read_scope():
+            first = provenance.points(drafted)
+            assert provenance.points(drafted) == first
+    assert _task2_trees(calls) == 2 * 3
+    assert len(calls) == 2 * (3 + 2)
+    assert provenance._read_memo.get() is None
+    provenance.points(drafted)
+    provenance.points(drafted)
+    assert _task2_trees(calls) == 4 * 3 and len(calls) == 2 * (3 + 2) + 2 * (3 + 1)
+
+
+def test_task2_scoped_refs_add_delete_and_a_b_a_are_revalidated(ws, monkeypatch):
+    repo = provenance.ensure_repo(ws)
+    empty = provenance._tree(repo, [])
+    old = _point_commit(repo, "refs/heads/main", [("040000", "tree", empty, "merge_1")])
+    new_tree = provenance._tree(repo, [("040000", "tree", empty, "merge_2")])
+    new = provenance._commit(repo, new_tree, [], "B", when="@978307200 +0000")
+    calls = _task2_reads(monkeypatch, repo)
+    with provenance.read_scope():
+        first = provenance.points(ws)
+        assert first[0]["commit"] == old
+        provenance._update_ref(repo, "refs/heads/main", new)
+        assert [p["ref"] for p in provenance.points(ws)] == ["main:merge_2"]
+        with pytest.raises(provenance.ProvenanceError):
+            provenance.diff(ws, "main:merge_1", "main:merge_2")
+        provenance._update_ref(repo, "refs/heads/main", old)
+        assert provenance.points(ws) == first
+        assert _task2_trees(calls) == 3, "A to B to A must not revive stale enumeration"
+        provenance._update_ref(repo, "refs/heads/draft/new", new)
+        assert [p["ref"] for p in provenance.points(ws)] == ["main:merge_1"]
+        assert _task2_trees(calls) == 5, "even a branch with no points changes the fingerprint"
+        provenance._git(repo, "update-ref", "-d", "refs/heads/main")
+        assert provenance.points(ws) == []
+        with pytest.raises(provenance.ProvenanceError):
+            provenance.diff(ws, "main:merge_1", "main:merge_1")
+        assert _task2_trees(calls) == 6
+        assert not any(args[0] == "diff" for _repo, args in calls)
+
+
+def test_task2_move_during_fill_uses_old_oids_then_rechecks_once(ws, monkeypatch):
+    repo = provenance.ensure_repo(ws)
+    empty = provenance._tree(repo, [])
+    old = _point_commit(repo, "refs/heads/main", [("040000", "tree", empty, "merge_1")])
+    tree = provenance._tree(repo, [("040000", "tree", empty, "merge_2")])
+    new = provenance._commit(repo, tree, [], "B", when="@978307200 +0000")
+    real_run = provenance.subprocess.run
+    reads = []
+    observed = 0
+
+    def churn(argv, **kwargs):
+        nonlocal observed
+        result = real_run(argv, **kwargs)
+        if argv[:3] == ["git", "--git-dir", str(repo)]:
+            reads.append(argv[3:])
+            if argv[3] == "for-each-ref":
+                observed += 1
+                move = new if observed % 2 else old
+                real_run(["git", "--git-dir", str(repo), "update-ref", "refs/heads/main", move],
+                         check=True, capture_output=True, env=provenance._env())
+        return result
+
+    monkeypatch.setattr(provenance.subprocess, "run", churn)
+    with provenance.read_scope():
+        first = provenance.points(ws)
+        assert first[0]["ref"] == "main:merge_1" and first[0]["commit"] == old
+        second = provenance.points(ws)
+        assert second[0]["ref"] == "main:merge_2" and second[0]["commit"] == new
+    assert observed == 2 and len(reads) == 4, "no retry until stable"
+    assert [args[-1] for args in reads if args[0] == "ls-tree"] == [old, new]
+
+
+@pytest.mark.parametrize("failure", ["refs", "metadata", "listing"])
+def test_task2_failed_revalidation_or_listing_invalidates_prior_authority(drafted, monkeypatch, failure):
+    provenance.sync(drafted)
+    repo = provenance.repo_path(drafted)
+    main = provenance._ref_sha(repo, "refs/heads/main")
+    assert main is not None
+    calls = _task2_reads(monkeypatch, repo)
+    real_bytes = provenance._git_bytes
+    fail = False
+
+    def transport(repo, *args):
+        if fail and args[0] == ("ls-tree" if failure == "listing" else "for-each-ref"):
+            if failure == "metadata":
+                return b"refs/heads/main\x00bad\x00commit\x00\xff\n"
+            raise provenance.ProvenanceError("injected transport failure")
+        return real_bytes(repo, *args)
+
+    monkeypatch.setattr(provenance, "_git_bytes", transport)
+    with provenance.read_scope():
+        before = provenance.points(drafted)
+        fail = True
+        if failure == "listing":
+            provenance._update_ref(repo, "refs/heads/draft/new", main)
+        if failure == "refs":
+            assert provenance.points(drafted) == []
+        else:
+            with pytest.raises(provenance.ProvenanceError):
+                provenance.points(drafted)
+        assert provenance._read_memo.get() == (), "failed reads cannot retain old authority"
+        with pytest.raises(provenance.ProvenanceError):
+            provenance.diff(drafted, "main:merge_1", "main:merge_2")
+        fail = False
+        after = provenance.points(drafted)
+        assert after[:len(before)] == before
+        assert _task2_trees(calls) == (2 * 3 + 1 if failure == "listing" else 2 * 3)
+        assert not any(args[0] == "diff" for _repo, args in calls)
+
+
+def test_task2_empty_refs_are_cached_but_broken_initial_refs_are_not(ws, monkeypatch):
+    repo = provenance.ensure_repo(ws)
+    calls = _task2_reads(monkeypatch, repo)
+    with provenance.read_scope():
+        assert provenance.points(ws) == []
+        assert len(provenance._read_memo.get() or ()) == 1
+        assert provenance.points(ws) == [] and len(calls) == 2
+        head = (repo / "HEAD").read_bytes()
+        (repo / "HEAD").write_text("broken HEAD\n")
+        assert provenance.points(ws) == [] and provenance._read_memo.get() == ()
+        assert (repo / "HEAD").read_text() == "broken HEAD\n"
+        (repo / "HEAD").write_bytes(head)
+        assert provenance.points(ws) == [] and len(provenance._read_memo.get() or ()) == 1
+
+
+def test_task2_repo_replacement_disappearance_and_identical_tips_do_not_share_cache(drafted, monkeypatch, tmp_path):
+    provenance.sync(drafted)
+    repo = provenance.repo_path(drafted)
+    other_ws = tmp_path / "other"
+    other_ws.mkdir()
+    other = provenance.repo_path(other_ws)
+    shutil.copytree(repo, other)
+    calls = _task2_reads(monkeypatch, repo, other)
+    with provenance.read_scope():
+        first = provenance.points(drafted)
+        assert provenance.points(other_ws) == first
+        assert _task2_trees(calls) == 2 * 3, "identical tips in a different repo need their own enumeration"
+        saved = drafted / "saved.git"
+        repo.rename(saved)
+        shutil.copytree(saved, repo)
+        assert provenance.points(drafted) == first
+        assert _task2_trees(calls) == 3 * 3, "replacement without a missing read changes inode"
+        repo.rename(drafted / "replacement.git")
+        assert provenance.points(drafted) == []
+        assert provenance._read_memo.get() == ()
+        shutil.copytree(saved, repo)
+        assert provenance.points(drafted) == first
+        assert _task2_trees(calls) == 4 * 3, "disappearance also discards cached authority"
+
+
+def test_task2_nested_scope_exception_unwinds_and_outer_revalidates(drafted, monkeypatch):
+    provenance.sync(drafted)
+    repo = provenance.repo_path(drafted)
+    root = provenance._ref_sha(repo, provenance.EMPTY_ROOT_REF)
+    assert root is not None
+    calls = _task2_reads(monkeypatch, repo)
+    with provenance.read_scope():
+        before = provenance.points(drafted)
+        outer = provenance._read_memo.get()
+        with pytest.raises(RuntimeError, match="unwind"):
+            with provenance.read_scope():
+                assert provenance._read_memo.get() == ()
+                assert provenance.points(drafted) == before
+                provenance._update_ref(repo, "refs/heads/main", root)
+                raise RuntimeError("unwind")
+        assert provenance._read_memo.get() is outer
+        current = provenance.points(drafted)
+        assert all(not p["ref"].startswith("main:") for p in current)
+        assert _task2_trees(calls) == 3 * 3
+    assert provenance._read_memo.get() is None
+
+
+def test_task2_simultaneous_async_scopes_and_copied_contexts_are_isolated(drafted, monkeypatch):
+    import asyncio
+
+    provenance.sync(drafted)
+    calls = _task2_reads(monkeypatch, provenance.repo_path(drafted))
+
+    async def request():
+        with provenance.read_scope():
+            first = provenance.points(drafted)
+            await asyncio.sleep(0)
+            assert provenance.points(drafted) == first
+            return provenance._read_memo.get()
+
+    async def parallel():
+        return await asyncio.gather(request(), request())
+
+    states = asyncio.run(parallel())
+    assert states[0] is not None and states[1] is not None
+    assert states[0] is not states[1] and states[0][0] is not states[1][0]
+    assert _task2_trees(calls) == 2 * 3 and len(calls) == 2 * (3 + 2)
+    assert provenance._read_memo.get() is None
+
+    async def copied():
+        # Child contexts inherit immutable state but must replace, not mutate it.
+        with provenance.read_scope():
+            provenance.points(drafted)
+            outer = provenance._read_memo.get()
+
+            async def child():
+                assert provenance._read_memo.get() is outer
+                provenance.points(drafted)
+                assert provenance._read_memo.get() is not outer
+
+            await asyncio.gather(child(), child())
+            assert provenance._read_memo.get() is outer
+
+    asyncio.run(copied())
+    assert _task2_trees(calls) == 3 * 3 and len(calls) == 2 * (3 + 2) + 3 + 1 + 2
+    assert provenance._read_memo.get() is None
+
+
+def test_task2_real_threads_do_not_share_request_authority(drafted, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    provenance.sync(drafted)
+    calls = _task2_reads(monkeypatch, provenance.repo_path(drafted))
+    barrier = Barrier(2)
+
+    def request():
+        assert provenance._read_memo.get() is None
+        with provenance.read_scope():
+            barrier.wait(timeout=10)
+            before = provenance.points(drafted)
+            state = provenance._read_memo.get()
+            barrier.wait(timeout=10)
+            assert provenance.points(drafted) == before
+        assert provenance._read_memo.get() is None
+        return state
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        states = list(pool.map(lambda _n: request(), range(2)))
+    assert states[0] is not None and states[1] is not None
+    assert states[0] is not states[1] and states[0][0] is not states[1][0]
+    assert _task2_trees(calls) == 2 * 3 and len(calls) == 2 * (3 + 2)
+
+
+def test_task2_tag_collisions_are_distinct_content_and_not_cached_authority(drafted, monkeypatch):
+    provenance.sync(drafted)
+    repo = provenance.repo_path(drafted)
+    root = provenance._ref_sha(repo, provenance.EMPTY_ROOT_REF)
+    main = provenance._ref_sha(repo, "refs/heads/main")
+    draft = provenance._ref_sha(repo, "refs/heads/draft/claude")
+    assert root is not None and root != main and root != draft
+    calls = _task2_reads(monkeypatch, repo)
+    with provenance.read_scope():
+        before = provenance.points(drafted)
+        provenance._update_ref(repo, "refs/tags/main", root)
+        provenance._update_ref(repo, "refs/tags/draft/claude", root)
+        assert provenance.points(drafted) == before
+        result = provenance.diff(drafted, "draft/claude:sections", "main:merge_1/sections")
+        assert "-claude's results" in result["text"] and "+merged v1" in result["text"]
+        assert _task2_trees(calls) == 3
+        assert [args for _repo, args in calls if args[0] == "diff"] == [
+            ["diff", "--no-color", f"{draft}:sections", f"{main}:merge_1/sections"]]
+
+
+def test_task2_identity_is_normalized_absolute_and_restat_before_hit(drafted, monkeypatch):
+    provenance.sync(drafted)
+    repo = provenance.repo_path(drafted)
+    identity = provenance._repo_identity(repo)
+    assert identity is not None
+    assert identity.location == str(repo.resolve())
+    assert (identity.device, identity.inode) == (repo.stat().st_dev, repo.stat().st_ino)
+    calls = _task2_reads(monkeypatch, repo)
+    real_identity = provenance._repo_identity
+    checks = []
+
+    def observed(path):
+        checks.append(path)
+        return real_identity(path)
+
+    monkeypatch.setattr(provenance, "_repo_identity", observed)
+    with provenance.read_scope():
+        before = provenance.points(drafted)
+        assert provenance.points(drafted / ".." / drafted.name) == before
+        assert len(checks) == 4, "stat before refs and before reuse for both reads"
+        assert _task2_trees(calls) == 3
+        assert len(calls) == 3 + 2
+
+
+def test_task2_replacement_during_fingerprint_is_typed_and_discards_memo(drafted, monkeypatch):
+    provenance.sync(drafted)
+    repo = provenance.repo_path(drafted)
+    replacement = drafted / "ready.git"
+    shutil.copytree(repo, replacement)
+    real_tips = provenance._read_branch_tips
+    move = False
+
+    def observe(path):
+        nonlocal move
+        result = real_tips(path)
+        if move:
+            move = False
+            repo.rename(drafted / "saved-before-recheck.git")
+            replacement.rename(repo)
+        return result
+
+    monkeypatch.setattr(provenance, "_read_branch_tips", observe)
+    with provenance.read_scope():
+        first = provenance.points(drafted)
+        move = True
+        with pytest.raises(provenance.ProvenanceError, match="repository changed"):
+            provenance.diff(drafted, "main:merge_1", "main:merge_2")
+        assert provenance._read_memo.get() == ()
+        assert provenance.points(drafted) == first
+
+
+def test_task2_scoped_diff_uses_the_rechecked_generation_even_if_refs_move_before_git(drafted, monkeypatch):
+    provenance.sync(drafted)
+    repo = provenance.repo_path(drafted)
+    main = provenance._ref_sha(repo, "refs/heads/main")
+    root = provenance._ref_sha(repo, provenance.EMPTY_ROOT_REF)
+    assert main is not None and root is not None
+    real_run = provenance.subprocess.run
+    calls = []
+
+    def change(argv, **kwargs):
+        if argv[:3] == ["git", "--git-dir", str(repo)]:
+            calls.append(argv[3:])
+            if argv[3] == "diff":
+                real_run(["git", "--git-dir", str(repo), "update-ref", "refs/heads/main", root],
+                         check=True, capture_output=True, env=provenance._env())
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(provenance.subprocess, "run", change)
+    with provenance.read_scope():
+        before = provenance.points(drafted)
+        assert before[0]["commit"] == main
+        result = provenance.diff(drafted, "main:merge_1", "main:merge_2")
+        assert "+merged v2" in result["text"] and "-merged v1" in result["text"]
+        assert calls[-2][0] == "for-each-ref"
+        assert calls[-1] == ["diff", "--no-color", f"{main}:merge_1", f"{main}:merge_2"]
+        assert sum(c[0] == "ls-tree" for c in calls) == 3 and len(calls) == 3 + 3
+        with pytest.raises(provenance.ProvenanceError, match="not a point"):
+            provenance.diff(drafted, "main:merge_1", "main:merge_2")
+
+
+def _i1_history(repo, prefix, rounds=(1, 2), when="@946684800 +0000"
+                ) -> tuple[str, str, dict[int, str], dict[int, str]]:
+    blobs, trees, entries = {}, {}, []
+    for n in rounds:
+        blobs[n] = provenance._blob(repo, f"{prefix} round {n}\n")
+        trees[n] = provenance._tree(repo, [("100644", "blob", blobs[n], "results.tex")])
+        entries.append(("040000", "tree", trees[n], f"merge_{n}"))
+    root = provenance._tree(repo, entries)
+    commit = provenance._commit(repo, root, [], "I1 fixture", when=when)
+    return commit, root, trees, blobs
+
+
+def _i1_fixture(ws):
+    repo = provenance.ensure_repo(ws)
+    original = _i1_history(repo, "original")
+    first = _i1_history(repo, "replacement", when="@978307200 +0000")
+    second = _i1_history(repo, "changed", when="@1009843200 +0000")
+    vocabulary = [_i1_history(repo, "foreign", (n,), when="@978307200 +0000")
+                  for n in (9, 10)]
+    provenance._update_ref(repo, "refs/heads/main", original[0])
+    return repo, original, first, second, vocabulary
+
+
+def _i1_repo_bytes(repo):
+    return {str(p.relative_to(repo)): p.read_bytes() for p in repo.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("kind", ["commit", "tree", "blob"])
+def test_i1_replacement_add_change_remove_preserves_original_authority_and_content(ws, kind):
+    repo, original, first, second, vocabulary = _i1_fixture(ws)
+    target = {"commit": original[0], "tree": original[1], "blob": original[3][1]}[kind]
+    replacements = ([v[0] if kind == "commit" else v[1] for v in vocabulary]
+                    if kind != "blob" else [first[3][1], second[3][1]])
+    identity = provenance._repo_identity(repo)
+    tips = provenance._read_branch_tips(repo)
+    expected = provenance.points(ws)
+    assert expected == [
+        {"ref": f"main:merge_{n}", "label": f"Merge round {n}", "kind": "merge",
+         "commit": original[0], "at": "2000-01-01T00:00:00+00:00"} for n in (2, 1)
+    ]
+    baseline = provenance.diff(ws, "main:merge_1", "main:merge_2")
+    assert "-original round 1" in baseline["text"] and "+original round 2" in baseline["text"]
+    with provenance.read_scope():
+        assert provenance.points(ws) == expected
+        for replacement in replacements:
+            provenance._git(repo, "replace", "-f", target, replacement)
+            # Positive controls prove these real replacements affect ordinary Git.
+            if kind == "blob":
+                redirected = provenance._git(repo, "diff", "--no-color",
+                                             f"{original[0]}:merge_1", f"{original[0]}:merge_2")
+                assert "-original round 1" not in redirected
+                assert "-replacement round 1" in redirected or "-changed round 1" in redirected
+            else:
+                redirected = provenance._git(repo, "ls-tree", "-r", "-t", original[0])
+                assert "merge_9" in redirected or "merge_10" in redirected
+                assert "merge_1/" not in redirected
+            before_read = _i1_repo_bytes(repo)
+            assert provenance._repo_identity(repo) == identity
+            assert provenance._read_branch_tips(repo) == tips
+            cached = provenance.points(ws)
+            with provenance.read_scope():
+                cold = provenance.points(ws)
+                cold_diff = provenance.diff(ws, "main:merge_1", "main:merge_2")
+            assert cached == cold == expected, "replacement refs must not reinterpret checked OIDs"
+            assert cold_diff == provenance.diff(ws, "main:merge_1", "main:merge_2") == baseline
+            assert _i1_repo_bytes(repo) == before_read, "reads must not repair refs, objects or config"
+            assert provenance._ref_sha(repo, f"refs/replace/{target}") == replacement
+        provenance._git(repo, "replace", "-d", target)
+        assert provenance.points(ws) == expected
+        with provenance.read_scope():
+            assert provenance.points(ws) == expected
+        assert provenance.diff(ws, "main:merge_1", "main:merge_2") == baseline
+    assert provenance.points(ws) == expected
+    assert provenance.diff(ws, "main:merge_1", "main:merge_2") == baseline
+
+
+@pytest.mark.parametrize("kind", ["commit", "tree", "blob"])
+@pytest.mark.parametrize("change_existing", [False, True])
+def test_i1_replacement_after_validation_cannot_redirect_real_oid_diff(ws, monkeypatch, kind,
+                                                                    change_existing):
+    repo, original, first, second, _vocabulary = _i1_fixture(ws)
+    target = {"commit": original[0], "tree": original[2][1], "blob": original[3][1]}[kind]
+    select = lambda history: {"commit": history[0], "tree": history[2][1],
+                              "blob": history[3][1]}[kind]
+    expected = provenance.diff(ws, "main:merge_1", "main:merge_2")
+    assert "-original round 1" in expected["text"] and "+original round 2" in expected["text"]
+    real_run = provenance.subprocess.run
+    diff_argv, executed = [], []
+
+    def replace_before_diff(argv, **kwargs):
+        if argv[:4] == ["git", "--git-dir", str(repo), "diff"]:
+            diff_argv.append(argv[4:])
+            real_run(["git", "--git-dir", str(repo), "replace", "-f", target, select(second)],
+                     check=True, capture_output=True, env=provenance._env())
+            before_read = _i1_repo_bytes(repo)
+            control = real_run(argv, capture_output=True, text=True, check=True,
+                               env=provenance._env()).stdout.strip()
+            assert "-changed round 1" in control and control != expected["text"]
+            result = real_run(argv, **kwargs)
+            assert _i1_repo_bytes(repo) == before_read
+            executed.append(result.returncode)
+            return result
+        return real_run(argv, **kwargs)
+
+    with provenance.read_scope():
+        points = provenance.points(ws)
+        assert all(p["commit"] == original[0] and p["at"] == "2000-01-01T00:00:00+00:00"
+                   for p in points)
+        if change_existing:
+            provenance._git(repo, "replace", target, select(first))
+        monkeypatch.setattr(provenance.subprocess, "run", replace_before_diff)
+        actual = provenance.diff(ws, "main:merge_1", "main:merge_2")
+    assert diff_argv == [["--no-color", f"{original[0]}:merge_1", f"{original[0]}:merge_2"]]
+    assert executed == [0], "a real final subprocess must execute successfully"
+    assert actual == expected, "public fields and original text must survive post-validation replacement"
+    assert actual["a"] == "main:merge_1" and actual["b"] == "main:merge_2"
+    assert actual["truncated"] is False
+    assert provenance._ref_sha(repo, f"refs/replace/{target}") == select(second)
+
+
+def test_i1_reads_use_exact_sealed_suppression_but_writers_keep_base_environment(ws, monkeypatch):
+    repo, original, _first, _second, _vocabulary = _i1_fixture(ws)
+    monkeypatch.setenv("GIT_NO_REPLACE_OBJECTS", "hostile-not-the-fixed-value")
+    monkeypatch.setenv("GIT_REPLACE_REF_BASE", "refs/hostile/")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "99")
+    monkeypatch.setenv("MODEL_API_KEY", "synthetic-secret-never-inherited")
+    base = provenance._env()
+    assert not {"GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_CONFIG_COUNT",
+                "MODEL_API_KEY"} & base.keys()
+    real_run = provenance.subprocess.run
+    reads, writes = [], []
+
+    def observe(argv, **kwargs):
+        if argv[:3] == ["git", "--git-dir", str(repo)]:
+            command = argv[3]
+            if command in {"for-each-ref", "ls-tree", "diff"}:
+                reads.append(argv[3:])
+                assert kwargs["env"] == {**base, "GIT_NO_REPLACE_OBJECTS": "1"}
+                assert kwargs["timeout"] == provenance._TIMEOUT_S
+                if command == "diff":
+                    assert kwargs["text"] and kwargs["encoding"] == "utf-8"
+                    assert kwargs["errors"] == "replace"
+                else:
+                    assert not kwargs.get("text", False) and "encoding" not in kwargs
+            else:
+                writes.append(command)
+                expected = dict(base)
+                if command == "commit-tree":
+                    expected.update(GIT_AUTHOR_DATE="@946684800 +0000",
+                                    GIT_COMMITTER_DATE="@946684800 +0000")
+                assert kwargs["env"] == expected
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(provenance.subprocess, "run", observe)
+    before_read = _i1_repo_bytes(repo)
+    with provenance.read_scope():
+        assert [p["commit"] for p in provenance.points(ws)] == [original[0]] * 2
+        result = provenance.diff(ws, "main:merge_1", "main:merge_2")
+    assert "-original round 1" in result["text"] and "+original round 2" in result["text"]
+    assert _i1_repo_bytes(repo) == before_read and writes == []
+    assert [args[0] for args in reads] == ["for-each-ref", "ls-tree", "for-each-ref", "diff"]
+    blob = provenance._blob(repo, "writer control\n")
+    tree = provenance._tree(repo, [("100644", "blob", blob, "control")])
+    commit = provenance._commit(repo, tree, [], "writer", when="@946684800 +0000")
+    provenance._update_ref(repo, "refs/heads/control", commit)
+    assert writes == ["hash-object", "mktree", "commit-tree", "update-ref"]
+    assert provenance._env() == base
+
+
+@pytest.mark.parametrize("kind", ["commit", "tree", "blob"])
+def test_i1_unscoped_reads_with_live_replacement_transitions_keep_original_bytes(ws, kind):
+    """Post-fix coverage: unscoped calls also ignore added/changed/removed refs."""
+    repo, original, first, second, _vocabulary = _i1_fixture(ws)
+    target = {"commit": original[0], "tree": original[2][1], "blob": original[3][1]}[kind]
+    expected_points = provenance.points(ws)
+    expected_diff = provenance.diff(ws, "main:merge_1", "main:merge_2")
+    assert provenance._read_memo.get() is None
+    identity, tips = provenance._repo_identity(repo), provenance._read_branch_tips(repo)
+    for history in (first, second, None):
+        if history is None:
+            provenance._git(repo, "replace", "-d", target)
+        else:
+            replacement = {"commit": history[0], "tree": history[2][1],
+                           "blob": history[3][1]}[kind]
+            provenance._git(repo, "replace", "-f", target, replacement)
+            raw_diff = provenance._git(repo, "diff", "--no-color",
+                                       f"{original[0]}:merge_1", f"{original[0]}:merge_2")
+            assert raw_diff != expected_diff["text"]
+        before_read = _i1_repo_bytes(repo)
+        assert provenance._repo_identity(repo) == identity
+        assert provenance._read_branch_tips(repo) == tips
+        assert provenance.points(ws) == expected_points
+        assert provenance.diff(ws, "main:merge_1", "main:merge_2") == expected_diff
+        assert provenance._read_memo.get() is None
+        assert _i1_repo_bytes(repo) == before_read
