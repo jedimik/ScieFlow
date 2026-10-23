@@ -1,7 +1,8 @@
 # Copy to config/integrations.yml (gitignored) to let gap discovery query the free
 # discovery providers. Deny-by-default: without config/integrations.yml every
-# provider is off; a provider that is not listed with `enabled: true` is off.
-# Unknown keys are refused. Agents never edit this file. Docs:
+# discovery provider is off; a provider that is not listed with `enabled: true` is off.
+# The literature search sources (search-*) are on unless listed with `enabled: false`
+# (M-A-D1). Unknown keys are refused. Agents never edit this file. Docs:
 # docs/research/discovery-providers.md.
 #
 # `hosts` may only narrow the built-in host list of a provider (a host outside it
@@ -25,6 +26,22 @@ providers:
   europepmc:                      # Europe PMC search (hypothesis novelty pre-check)
     enabled: true
     hosts: [www.ebi.ac.uk]
+    rate_per_s: 5
+  search-openalex:                # `scieflow research search openalex` (literature search)
+    enabled: true
+    hosts: [api.openalex.org]
+    rate_per_s: 5
+  search-arxiv:                   # `scieflow research search arxiv`; arXiv asks one request per 3 s
+    enabled: true
+    hosts: [export.arxiv.org]
+    rate_per_s: 0.33
+  search-europepmc:               # `scieflow research search europepmc`
+    enabled: true
+    hosts: [www.ebi.ac.uk]
+    rate_per_s: 5
+  search-crossref:                # `scieflow research search crossref`
+    enabled: true
+    hosts: [api.crossref.org]
     rate_per_s: 5
 
 cache_ttl_days:

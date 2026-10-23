@@ -16,14 +16,34 @@ public services. Core makes every request; sub-agents only read the results.
 cp config/integrations.example.yml config/integrations.yml   # gitignored
 ```
 
-Without `config/integrations.yml` every provider is **off**. A provider must be
-listed with `enabled: true`. Each provider has a built-in host list
+Without `config/integrations.yml` the discovery providers are **off**; a provider
+must be listed with `enabled: true`. The four literature search sources
+(`search-openalex`, `search-arxiv`, `search-europepmc`, `search-crossref`, see
+"Literature search" below) are **on** unless listed with `enabled: false`. Each provider has a built-in host list
 (`www.ncbi.nlm.nih.gov`, `clinicaltrials.gov`, `api.openalex.org`,
-`www.ebi.ac.uk`); `hosts:` in
+`www.ebi.ac.uk`, `export.arxiv.org`, `api.crossref.org`); `hosts:` in
 the file may only narrow it. A host outside the list is refused when the file
 loads, and a request to any host not listed for that provider (or not https)
 is refused before it is built. Unknown keys are refused. A refusal is a
 boundary (exit code 3, like scite), never retried around.
+
+## Literature search (`scieflow research search`)
+
+`scieflow research search openalex|arxiv|europepmc|crossref "query"` goes through
+the same gateway: policy, leak check, cache (7 days), rate limit, no redirects,
+ledger. The output records are unchanged.
+
+- The query is checked before anything is built (M-A-D2). A word-final `*` and a
+  standalone single digit are allowed (`parkinson*`, `type 2 diabetes`); the
+  query is sent as typed. Still refused: data-like tokens (`patient 4711 age 63`,
+  `cohort: RBD043`, paths, e-mail addresses) and `5-HT2A receptor`. Rephrase the
+  query; the refusal names the kind of leak, never the query.
+- arXiv and Europe PMC syntax (`all:`, the publication-year clause) is added by
+  code after the check; `--from-year` is an integer year.
+- `--workspace SLUG` records the request in `workspace/SLUG/scite/ledger.jsonl`
+  and `events.jsonl`. Without it the request is recorded in the per-day ledger only.
+- Exit codes: 0 success; 3 refused (leak check, policy, source switched off); 1
+  failure (`HTTP_<status>`, `RATE`, `TRANSIENT`, `MALFORMED`).
 
 ## What leaves the machine
 

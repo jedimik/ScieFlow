@@ -149,13 +149,6 @@ def test_failure_message_carries_no_url_query():
     assert "secret-term" not in str(exc.value)
 
 
-def test_get_unchanged_signature():
-    # the existing helper keeps working for the search modules
-    import inspect
-    assert list(inspect.signature(http.get).parameters) == [
-        "url", "params", "headers", "retries", "backoff"]
-
-
 # --- rate limiter -------------------------------------------------------------------
 
 

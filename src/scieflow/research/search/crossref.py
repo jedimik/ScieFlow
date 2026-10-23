@@ -1,11 +1,13 @@
-"""Search Crossref. usage: scieflow research search crossref "query" [--limit N] [--from-year YYYY]"""
+"""Search Crossref. usage: scieflow research search crossref "query" [--limit N] [--from-year YYYY] [--workspace SLUG]"""
 
 import argparse
 import re
 
 from scieflow.research.lib import http, papers
+from scieflow.research.search import registry
 
 API = "https://api.crossref.org/works"
+PROVIDER = "search-crossref"
 
 
 def _strip_jats(text: str | None) -> str | None:
@@ -34,18 +36,36 @@ def norm(item: dict) -> dict:
     )
 
 
+def _count(body) -> int:
+    message = body.get("message") if isinstance(body, dict) else None
+    items = message.get("items") if isinstance(message, dict) else None
+    return len(items or [])
+
+
+def _validate(body) -> None:
+    message = body.get("message") if isinstance(body, dict) else None
+    if not isinstance(message, dict) or not isinstance(message.get("items", []), list):
+        raise http.HTTPFailure("Crossref response has an unexpected shape", "MALFORMED")
+
+
+def _search(gw, args) -> list:
+    query = registry.check_query(args.query)            # refused here, before any request
+    fixed: dict = {"rows": args.limit}
+    if args.from_year:
+        fixed["filter"] = f"from-pub-date:{args.from_year}-01-01"
+    data = gw.get_json(PROVIDER, "search", API, checked={"query": query}, fixed=fixed,
+                       count=_count, validate=_validate)
+    return [norm(i) for i in data["message"].get("items", [])]
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="scieflow research search crossref")
     ap.add_argument("query")
     ap.add_argument("--limit", type=int, default=25)
     ap.add_argument("--from-year", type=int)
+    registry.add_workspace_option(ap)
     args = ap.parse_args(argv)
-
-    params = {"query": args.query, "rows": args.limit}
-    if args.from_year:
-        params["filter"] = f"from-pub-date:{args.from_year}-01-01"
-    data = http.get(API, params=params).json()
-    papers.emit([norm(i) for i in data["message"].get("items", [])])
+    registry.run(args.workspace, lambda gw: _search(gw, args))
 
 
 if __name__ == "__main__":

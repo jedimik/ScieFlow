@@ -12,6 +12,13 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _search_cache_home(tmp_path_factory, monkeypatch):
+    """Search and provider requests cache and ledger under XDG_CACHE_HOME (M-A T1): keep
+    them out of the real home for every research test."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path_factory.mktemp("xdg-cache")))
+
+
 @pytest.fixture
 def stub_child_home(tmp_path, monkeypatch):
     home = tmp_path.parent / f"{tmp_path.name}-home"
