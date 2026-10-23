@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import sys
+import unicodedata
 from collections.abc import Callable
 from typing import NoReturn
 
@@ -23,20 +24,29 @@ from scieflow.integrations.scite.policy import PolicyError, exit_code
 from scieflow.research.lib import http, papers, providers
 
 # The search check (M-A-D2) is the review check plus two search conventions: a
-# word-final `*` (a wildcard, `parkinson*`) and a standalone single digit (`type 2
-# diabetes`) are ignored by the check only. The query is sent as typed.
+# word-final `*` (a wildcard, `parkinson*`) and a standalone single digit between two
+# words (`type 2 diabetes`) are ignored by the check only. The query is sent as typed.
+# A digit run written with spaces (`patient 4 7 1 1`, `RBD 0 4 3`) is not a convention:
+# its digits stay in the text the check reads, so it is refused as a number.
 _WILDCARD = re.compile(r"(?<=[^\W_])\*(?=\s|$)")
-_STANDALONE_DIGIT = re.compile(r"(?<!\S)\d(?!\S)")
+_WORD_DIGIT = re.compile(r"(?<=[^\W\d_]) \d(?= [^\W\d_])")
 
 EXIT_REFUSED = 3
 EXIT_FAILED = 1
+
+
+def _folded(query: str) -> str:
+    """The text the leak check reads: NFKC (no-break spaces, full-width digits), with
+    format characters such as zero-width spaces as spaces (claims._normalise)."""
+    text = unicodedata.normalize("NFKC", query)
+    return "".join(" " if unicodedata.category(ch) == "Cf" else ch for ch in text)
 
 
 def check_query(query: str) -> providers.Checked:
     """The query as a `Checked` value if it may leave the machine; `LeakError` otherwise."""
     if not isinstance(query, str):
         raise LeakError("refused: nothing left that can be sent")
-    check_text(_STANDALONE_DIGIT.sub(" ", _WILDCARD.sub("", query)))
+    check_text(_WORD_DIGIT.sub(" ", _WILDCARD.sub("", _folded(query))))
     return providers._mint(providers.Checked, query)
 
 
@@ -96,7 +106,7 @@ def run(workspace: str | None, search: Callable[[providers.Gateway], list]) -> N
         gw = gateway(workspace)
         records = search(gw)
     except LeakError as exc:
-        _fail(EXIT_REFUSED, f"refused: {exc}")
+        _fail(EXIT_REFUSED, str(exc))  # the message already starts with "refused:"
     except PolicyError as exc:
         _fail(exit_code(exc), f"refused: {exc}")
     except http.HTTPFailure as exc:

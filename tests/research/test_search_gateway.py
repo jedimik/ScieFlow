@@ -160,6 +160,29 @@ def test_check_query_removes_only_word_final_wildcards_and_single_digits():
             registry.check_query(bad)
 
 
+@pytest.mark.parametrize("query", [
+    "patient 4 7 1 1 age 6 3",
+    "RBD 0 4 3",
+    "RBD 0 4 3 and 7",
+    "2 0 2 3 cohort",
+    "patient 4\u00a07\u00a01\u00a01",          # no-break spaces
+    "patient \uff14 \uff17 \uff11 \uff11",      # full-width digits
+    "patient 4\u200b7\u200b1\u200b1",           # zero-width spaces
+])
+def test_spaced_digit_runs_are_refused_as_numbers(query):
+    with pytest.raises(LeakError, match="number"):
+        registry.check_query(query)
+
+
+@responses.activate
+def test_spaced_digit_run_is_refused_before_any_request(project, capsys):
+    assert _exit_code(openalex, ["patient 4 7 1 1 age 6 3"]) == 3
+    assert len(responses.calls) == 0
+    err = capsys.readouterr().err
+    assert "still looks like data (number)" in err
+    assert "4 7 1 1" not in err  # the refusal names the kind, never the value
+
+
 # --- 4. policy: search on without a config file, discovery still off ----------------------
 
 

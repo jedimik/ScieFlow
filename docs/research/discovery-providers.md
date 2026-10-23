@@ -34,10 +34,12 @@ the same gateway: policy, leak check, cache (7 days), rate limit, no redirects,
 ledger. The output records are unchanged.
 
 - The query is checked before anything is built (M-A-D2). A word-final `*` and a
-  standalone single digit are allowed (`parkinson*`, `type 2 diabetes`); the
-  query is sent as typed. Still refused: data-like tokens (`patient 4711 age 63`,
-  `cohort: RBD043`, paths, e-mail addresses) and `5-HT2A receptor`. Rephrase the
-  query; the refusal names the kind of leak, never the query.
+  standalone single digit between two words are allowed (`parkinson*`,
+  `type 2 diabetes`); the query is sent as typed. Still refused: data-like tokens
+  (`patient 4711 age 63`, `cohort: RBD043`, paths, e-mail addresses), a digit run
+  written with spaces (`patient 4 7 1 1`, `RBD 0 4 3`, refused as a number
+  whatever the spacing), and `5-HT2A receptor`. Rephrase the query; the refusal
+  names the kind of leak, never the query.
 - arXiv and Europe PMC syntax (`all:`, the publication-year clause) is added by
   code after the check; `--from-year` is an integer year.
 - `--workspace SLUG` records the request in `workspace/SLUG/scite/ledger.jsonl`
