@@ -1,0 +1,38 @@
+{# Shared review macros. Every value is agent-written data: autoescape stays on, nothing here uses |safe. #}
+
+{# A DOI as a link when `link` (from review_views.doi_link) is set, else as plain text. #}
+{% macro doi(value, link) -%}
+{%- if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer">{{ value }}</a>{% else %}{{ value }}{% endif -%}
+{%- endmacro %}
+
+{# The findings of one review pass: major items, then minor items. #}
+{% macro findings(doc, doi_link) -%}
+{% for item in doc.major or [] %}
+  <div class="finding major">
+    <strong>{{ item.id }}</strong> major{% if item.location %} · {{ item.location }}{% endif %}
+    {% if item.changed_from_blind %}<span class="badge">{{ item.changed_from_blind }}</span>{% endif %}
+    <p>{{ item.problem }}</p>
+    {% if item.why_it_matters %}<p class="dim">{{ item.why_it_matters }}</p>{% endif %}
+    {% if item.resolution %}<p>Resolution: {{ item.resolution }}</p>{% endif %}
+    {% for ev in item.evidence or [] %}
+      <blockquote>&ldquo;{{ ev.quote }}&rdquo;
+        <span class="dim">{{ ev.stance }}{% if ev.source %} via {{ ev.source }}{% endif %}</span>
+        {% if ev.doi %}· {{ doi(ev.doi, doi_link(ev.doi)) }}{% endif %}
+      </blockquote>
+    {% endfor %}
+  </div>
+{% endfor %}
+{% for item in doc.minor or [] %}
+  <div class="finding minor">
+    <strong>{{ item.id }}</strong> minor{% if item.location %} · {{ item.location }}{% endif %}
+    {% if item.changed_from_blind %}<span class="badge">{{ item.changed_from_blind }}</span>{% endif %}
+    <p>{{ item.comment }}</p>
+    {% for ev in item.evidence or [] %}
+      <blockquote>&ldquo;{{ ev.quote }}&rdquo;
+        <span class="dim">{{ ev.stance }}{% if ev.source %} via {{ ev.source }}{% endif %}</span>
+        {% if ev.doi %}· {{ doi(ev.doi, doi_link(ev.doi)) }}{% endif %}
+      </blockquote>
+    {% endfor %}
+  </div>
+{% endfor %}
+{%- endmacro %}

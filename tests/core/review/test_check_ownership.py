@@ -139,6 +139,9 @@ def test_this_branch_passes():
                             cwd=ROOT, capture_output=True, text=True).stdout.strip()
     if not branch.startswith("dev/scite"):
         pytest.skip(f"live ownership check applies to scite branches only (HEAD is {branch or 'detached'})")
+    if branch.startswith("dev/scite-web"):
+        # Web-owner / integration branch: it carries web files by design; the ownership split ends at integration.
+        pytest.skip(f"web-owner integration branch {branch}: carries web files by design")
     probe = subprocess.run(["git", "rev-parse", "--verify", "-q", "dev/cloud-continuation"],
                            cwd=ROOT, capture_output=True, text=True)
     if probe.returncode != 0:

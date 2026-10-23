@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% from "review_parts.html" import doi %}
+{% block title %}Matrix round {{ round }} — {{ slug }} — ScieFlow{% endblock %}
+{% block nav %}<a href="/runs/{{ slug|urlencode }}/review">← review</a> <a href="/runs/{{ slug|urlencode }}/review/{{ round }}">round {{ round }}</a>{% endblock %}
+{% block content %}
+<h1>Matrix — round {{ round }}</h1>
+{% if ok %}<p class="note" role="status">{{ ok }}</p>{% endif %}
+{% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
+{% for msg in [notice, matrix_notice, decisions_notice, blocker_notice, gate_notice] %}
+  {% if msg %}<p class="state-failed" role="alert">{{ msg }}</p>{% endif %}
+{% endfor %}
+{% if matrix %}<p class="dim">matrix generated {{ matrix.generated }}</p>{% endif %}
+
+{% for b in unplaced %}
+  <p class="state-failed" role="alert">{{ b.reason }} blocker on {{ b.flags|join(", ") }}: fix the citation and build a new round. No decision form is offered for it.</p>
+{% endfor %}
+
+{% for g in gates %}
+  <p class="dim">Open {{ g.kind }} gate for {{ g.cluster }}: {{ g.question }}
+    — <a href="/runs/{{ slug|urlencode }}#gate-{{ g.id }}">answer on the run page</a></p>
+{% endfor %}
+
+{% for c in clusters %}
+<section class="cluster{% if c.blocker %} blocker{% endif %}" id="cluster-{{ c.cluster }}">
+  <h2>{{ c.cluster }} · {{ c.title }}</h2>
+  <p class="dim">{{ c.severity }} · {{ c.agreement }} · recommendation {{ c.recommendation }} · {{ c.members|length }} comment{{ "" if c.members|length == 1 else "s" }}</p>
+  {% if c.flags %}<p class="dim">flags: {{ c.flags|join(", ") }}</p>{% endif %}
+  {% if c.members %}<ul class="dim">{% for m in c.members %}<li>{{ m }}</li>{% endfor %}</ul>{% endif %}
+  {% if c.rationale %}<p>{{ c.rationale }}</p>{% endif %}
+
+  {% if c.open %}
+    <div class="state-failed" role="alert">
+      <p>Open blocker ({{ c.open.reason }}).</p>
+      {% for ref in c.open.references %}
+        <p>{% if ref.doi %}{{ doi(ref.doi, doi_link(ref.doi)) }}{% endif %}{% if ref.key %} ({{ ref.key }}){% endif %}{% if ref.detail %} — {{ ref.detail }}{% endif %}</p>
+      {% endfor %}
+      <form method="post" action="/runs/{{ slug|urlencode }}/review/{{ round }}/decisions">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <input type="hidden" name="cluster" value="{{ c.cluster }}">
+        <input type="hidden" name="decision" value="reject">
+        <label>overrule reason (required)<br><textarea name="overrule_reason" required></textarea></label>
+        <label>note <input name="note"></label>
+        <button>Overrule this blocker</button>
+      </form>
+    </div>
+  {% elif c.blocker and blocker_notice %}
+    <p class="state-failed" role="alert">blocker state unknown: {{ blocker_notice }}</p>
+  {% elif c.blocker %}
+    <p class="dim">overruled{% if c.verdict %} by {{ c.verdict.actor }}{% if c.verdict.overrule_reason %}: {{ c.verdict.overrule_reason }}{% endif %}{% endif %}</p>
+  {% endif %}
+
+  {% if c.verdict and not c.blocker %}
+    <p>Recorded: {{ c.verdict.decision }} by {{ c.verdict.actor }}{% if c.verdict.note %} — {{ c.verdict.note }}{% endif %}{% if c.verdict.rationale %} — {{ c.verdict.rationale }}{% endif %}</p>
+  {% endif %}
+
+  {% if c.form == "decide" %}
+    <form method="post" action="/runs/{{ slug|urlencode }}/review/{{ round }}/decisions" class="actions">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="cluster" value="{{ c.cluster }}">
+      <select name="decision">
+        {% for d in ("accept", "reject", "defer") %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+      </select>
+      <input name="note" placeholder="note (optional)">
+      <button>Record</button>
+    </form>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

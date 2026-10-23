@@ -34,6 +34,46 @@
 <h1>{{ slug }} — draft workbench</h1>
 {% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
 
+{% if review_outcome %}
+<section class="review-outcome">
+{% if review_outcome.round %}
+<h2>Review outcome — round {{ review_outcome.round }}</h2>
+{% else %}
+<h2>Review outcome</h2>
+{% endif %}
+{% if review_outcome.notice %}<p class="state-failed" role="alert">{{ review_outcome.notice }}</p>{% endif %}
+{% for a in review_outcome.authors %}
+<h3>{{ a.author }}</h3>
+{% if a.notice %}
+<p class="state-failed" role="alert">{{ a.notice }}</p>
+{% elif not a.accepted %}
+<p class="dim">No accepted cluster concerns this draft.</p>
+{% else %}
+<ul>
+  {% for c in a.accepted %}
+  <li><strong>{{ c.id }}</strong> {{ c.title }}{% if c.severity %} ({{ c.severity }}){% endif %}
+    — {{ c.decision }} by {{ c.actor }}{% if c.note %}: {{ c.note }}{% endif %}
+    {% if c.comments %}
+    <ul>
+      {% for m in c.comments %}
+      <li>reviewer {{ m.reviewer }}, {{ m.id }} ({{ m.severity }}, {{ m["pass"] }} pass): {{ m.text }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% if a.rejected or a.deferred or a.undecided %}
+<p class="dim">rejected: {{ a.rejected|join(", ") or "none" }} · deferred: {{ a.deferred|join(", ") or "none" }} · undecided: {{ a.undecided|join(", ") or "none" }}</p>
+{% endif %}
+{% endfor %}
+{% if review_outcome.round %}
+<p><a href="/runs/{{ slug|urlencode }}/review">review home</a> · <a href="/runs/{{ slug|urlencode }}/review/{{ review_outcome.round }}/matrix">matrix</a></p>
+{% endif %}
+</section>
+{% endif %}
+
 <h2>Drafts</h2>
 {% if preview_busy %}
 <p class="dim">A preview compile is already running for this run — Compile
