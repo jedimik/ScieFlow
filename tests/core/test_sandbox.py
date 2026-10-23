@@ -814,14 +814,17 @@ def test_k_t3_real_child_cannot_replace_admission_with_host_positive(project):
               'provenance_unchanged': True, 'exit_code': proc.returncode}, sort_keys=True))
 
 
-def test_a_dispatch_environment_carries_the_dispatch_marker(monkeypatch, tmp_path):
-    """W9: sandboxed dispatches are marked so the scite MCP refuses inside them
-    (integrations/scite/mcp.py checks SCIEFLOW_DISPATCH). Original keys survive."""
+def test_a_dispatch_environment_is_detected_by_its_cache_dir_not_a_marker(monkeypatch, tmp_path):
+    """Dispatch refusal uses the UV_CACHE_DIR detection (mcp.in_dispatch), not a marker:
+    the sealed K Task8 env contract forbids SCIEFLOW_DISPATCH in the dispatch environment.
+    Original keys survive."""
+    from scieflow.integrations.scite import mcp
     monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "shared"))
     monkeypatch.setenv("SCIEFLOW_TEST_KEEP", "kept")
     run = tmp_path / "workspace" / "r1"
     env = sandbox.environment(run, {"PATH": "/usr/bin", "SCIEFLOW_TEST_KEEP": "kept"})
-    assert env["SCIEFLOW_DISPATCH"] == "1"
+    assert "SCIEFLOW_DISPATCH" not in env
+    assert mcp.in_dispatch(env) is True
     assert env["PATH"] == "/usr/bin"
     assert env["SCIEFLOW_TEST_KEEP"] == "kept"
     assert env["UV_CACHE_DIR"] == str(run.resolve() / ".uv-cache")
