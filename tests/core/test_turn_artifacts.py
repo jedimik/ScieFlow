@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import stat
+from types import SimpleNamespace
 
 import pytest
 
@@ -524,3 +525,106 @@ def test_live6b_append_between_fd_and_named_observations(tmp_path, monkeypatch, 
             assert source.extent() == 13
             assert source.read_available(0, 65536) == b'prefix-append'
     assert appended == [True]
+
+
+_LIVE_FIELDS = ('st_dev', 'st_ino', 'st_mode', 'st_nlink', 'st_uid', 'st_gid',
+                'st_size', 'st_mtime_ns', 'st_ctime_ns')
+
+
+def _stat_like(base, **changes):
+    values = {name: getattr(base, name) for name in _LIVE_FIELDS}
+    values.update(changes)
+    return SimpleNamespace(**values)
+
+
+def _attempt(*stats):
+    """One scripted sample chain in observation order; the last stat is the latest."""
+    return stats[-1], tuple(artifacts._file_facts(stat_) for stat_ in stats)
+
+
+def _script(source, attempts):
+    remaining = iter(attempts)
+    source._live_sample = lambda: next(remaining)
+
+
+def test_live_append_in_flight_is_resampled_then_accepted(tmp_path, monkeypatch):
+    path = tmp_path / 'live'
+    path.write_bytes(b'prefix')
+    pauses = []
+    monkeypatch.setattr(artifacts, '_resample_pause', lambda: pauses.append(True), raising=False)
+    with artifacts.pin_artifact_root(tmp_path) as root:
+        with artifacts.open_live_artifact(root, 'live') as source:
+            base = os.fstat(source._fd)
+            # The writer stamps mtime/ctime before i_size moves: same size, newer times.
+            stamped = _stat_like(base, st_mtime_ns=base.st_mtime_ns + 1, st_ctime_ns=base.st_ctime_ns + 1)
+            grown = _stat_like(base, st_size=13, st_mtime_ns=base.st_mtime_ns + 2, st_ctime_ns=base.st_ctime_ns + 2)
+            _script(source, [_attempt(stamped, stamped, stamped), _attempt(grown, grown, grown)])
+            assert source.extent() == 13
+            assert len(pauses) == 1 and not source._invalid
+            assert source._observed == artifacts._file_facts(grown)
+
+
+def test_same_size_rewrite_stays_invalid_after_bounded_resampling(tmp_path, monkeypatch):
+    path = tmp_path / 'live'
+    path.write_bytes(b'prefix')
+    pauses = []
+    monkeypatch.setattr(artifacts, '_resample_pause', lambda: pauses.append(True), raising=False)
+    with artifacts.pin_artifact_root(tmp_path) as root:
+        with artifacts.open_live_artifact(root, 'live') as source:
+            base = os.fstat(source._fd)
+            attempts = [_attempt(*(_stat_like(base, st_mtime_ns=base.st_mtime_ns + n),) * 3)
+                        for n in range(1, artifacts._LIVE_ATTEMPTS + 1)]
+            _script(source, attempts)
+            with pytest.raises(artifacts.ArtifactError, match='live-artifact-invalidated'):
+                source.extent()
+            assert len(pauses) == artifacts._LIVE_ATTEMPTS - 1 and source._invalid
+            with pytest.raises(artifacts.ArtifactError, match='live-artifact-invalidated'):
+                source.extent()  # sticky: no further sampling after invalidation
+            assert len(pauses) == artifacts._LIVE_ATTEMPTS - 1
+
+
+@pytest.mark.parametrize('what', ['truncation', 'inode'])
+def test_truncation_and_identity_change_are_refused_without_resampling(tmp_path, monkeypatch, what):
+    path = tmp_path / 'live'
+    path.write_bytes(b'prefix')
+    pauses = []
+    monkeypatch.setattr(artifacts, '_resample_pause', lambda: pauses.append(True), raising=False)
+    with artifacts.pin_artifact_root(tmp_path) as root:
+        with artifacts.open_live_artifact(root, 'live') as source:
+            base = os.fstat(source._fd)
+            if what == 'truncation':
+                bad = _stat_like(base, st_size=0, st_mtime_ns=base.st_mtime_ns + 1)
+            else:
+                bad = _stat_like(base, st_ino=base.st_ino + 1, st_size=base.st_size + 7)
+            _script(source, [_attempt(bad, bad, bad)])
+            with pytest.raises(artifacts.ArtifactError, match='live-artifact-invalidated'):
+                source.extent()
+            assert pauses == [] and source._invalid
+
+
+def test_live_acquisition_resamples_stamp_then_append(tmp_path, monkeypatch):
+    path = tmp_path / 'live'
+    path.write_bytes(b'prefix')
+    base_ns = path.stat().st_mtime_ns
+    pauses = []
+    monkeypatch.setattr(artifacts, '_resample_pause', lambda: pauses.append(True), raising=False)
+    original = os.stat
+    named_calls = []
+
+    def writer(name, *args, **kwargs):
+        if name == 'live':
+            named_calls.append(True)
+            if len(named_calls) == 1:  # writer stamps times before i_size moves
+                os.utime(path, ns=(base_ns + 1000, base_ns + 1000))
+            elif len(named_calls) == 2:  # the append lands during the resample
+                with path.open('ab') as f:
+                    f.write(b'-append')
+        return original(name, *args, **kwargs)
+
+    with artifacts.pin_artifact_root(tmp_path) as root:
+        monkeypatch.setattr(os, 'stat', writer)
+        with artifacts.open_live_artifact(root, 'live') as source:
+            monkeypatch.setattr(os, 'stat', original)
+            assert source.extent() == 13
+            assert source.read_available(0, 65536) == b'prefix-append'
+    assert len(pauses) == 1

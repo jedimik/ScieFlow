@@ -12,8 +12,11 @@ import os
 from pathlib import Path
 import stat
 import sys
+import time
 
 _MAX_READ = 65536
+_LIVE_ATTEMPTS = 5  # one sample chain, then up to four resamples
+_LIVE_RESAMPLE_SECONDS = 0.001
 _TOKEN = object()
 
 
@@ -404,18 +407,14 @@ def _acquire(root, relative_path, *, create=False, allow_contained_aliases=False
         root._verify()
         directories.verify()
         _verify_aliases(aliases)
-        named = _file_facts(os.stat(name, dir_fd=parent, follow_symlinks=False))
         if live:
             # fd/name stat calls are not atomic with a genuine append writer.
             # Accept ONLY ordered growth of the original structural identity.
-            latest = os.fstat(fd)
-            if not (_live_progress(_file_facts(info), named) and
-                    _live_progress(named, _file_facts(latest))):
-                raise ArtifactError('artifact-identity-changed')
-            info = latest
+            info = _settle_live(_file_facts(info), lambda: _open_sample(fd, parent, name),
+                                'artifact-identity-changed')
             root._verify()
             directories.verify()
-        elif named != _file_facts(info):
+        elif _file_facts(os.stat(name, dir_fd=parent, follow_symlinks=False)) != _file_facts(info):
             raise ArtifactError('artifact-identity-changed')
         if create:
             handle = ExclusiveArtifact(_TOKEN, root, directories, parent, name, fd, info)
@@ -457,6 +456,42 @@ def _live_progress(previous, current):
             (current[7] > previous[7] or current == previous))
 
 
+def _resample_pause():
+    time.sleep(_LIVE_RESAMPLE_SECONDS)
+
+
+def _live_transient(baseline, chain):
+    """Only an unchanged-identity, non-shrinking chain can be a writer mid-append."""
+    seen = (baseline, *chain)
+    return all(a[:7] == b[:7] and b[7] >= a[7] for a, b in zip(seen, seen[1:]))
+
+
+def _settle_live(baseline, sample, refusal):
+    """Return the latest stat of a live sample chain that is valid growth from `baseline`.
+
+    An append stamps mtime/ctime before i_size moves, so one chain can show an equal
+    size with newer times. That is transient: resample a bounded number of times.
+    Every attempt is compared with the same baseline, so a same-size rewrite that never
+    grows, a shrink or an identity change is still refused.
+    """
+    for attempt in range(_LIVE_ATTEMPTS):
+        if attempt:
+            _resample_pause()
+        latest, chain = sample()
+        seen = (baseline, *chain)
+        if all(_live_progress(a, b) for a, b in zip(seen, seen[1:])):
+            return latest
+        if not _live_transient(baseline, chain):
+            break
+    raise ArtifactError(refusal)
+
+
+def _open_sample(fd, parent, name):
+    named = _file_facts(os.stat(name, dir_fd=parent, follow_symlinks=False))
+    latest = os.fstat(fd)
+    return latest, (named, _file_facts(latest))
+
+
 class LiveArtifact(RegularArtifact):
     """Append-observing view, distinct from an immutable finite snapshot.
 
@@ -468,6 +503,12 @@ class LiveArtifact(RegularArtifact):
         self._observed = self._facts
         self._invalid = False
 
+    def _live_sample(self):
+        info = os.fstat(self._fd)
+        named = _file_facts(os.stat(self._name, dir_fd=self._parent, follow_symlinks=False))
+        latest = os.fstat(self._fd)
+        return latest, (_file_facts(info), named, _file_facts(latest))
+
     def _observe(self):
         if not self._active or self._invalid:
             raise ArtifactError('live-artifact-invalidated')
@@ -475,18 +516,11 @@ class LiveArtifact(RegularArtifact):
             self._root._verify()
             self._directories.verify()
             _verify_aliases(self._aliases)
-            info = os.fstat(self._fd)
-            facts = _file_facts(info)
-            named = _file_facts(os.stat(self._name, dir_fd=self._parent, follow_symlinks=False))
-            latest = os.fstat(self._fd)
-            final = _file_facts(latest)
-            if not (_live_progress(self._observed, facts) and
-                    _live_progress(facts, named) and _live_progress(named, final)):
-                raise ArtifactError('live-artifact-invalidated')
+            latest = _settle_live(self._observed, self._live_sample, 'live-artifact-invalidated')
             self._root._verify()
             self._directories.verify()
             _verify_aliases(self._aliases)
-            self._observed = final
+            self._observed = _file_facts(latest)
             return latest.st_size
         except (ArtifactError, OSError) as exc:
             self._invalid = True
