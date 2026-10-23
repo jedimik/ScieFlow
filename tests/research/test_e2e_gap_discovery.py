@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+STUB_FILE = REPO / "src" / "scieflow" / "core" / "stub_agent.py"
 AGENTS = ["stub_a", "stub_b", "stub_c"]
 
 MANIFEST = """\
@@ -29,7 +30,7 @@ def sh(argv, cwd, env=None):
 
 
 def make_root(tmp_path: Path):
-    stub = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
+    stub = f"{sys.executable} {STUB_FILE} {{prompt}}"  # by path: see agents_yml in test_e2e_review_pool.py
     agents_yml = "agents:\n" + "".join(
         f'  {a}: {{cmd: "{stub}", enabled: true, timeout_min: 1}}\n' for a in AGENTS
     )
@@ -145,7 +146,7 @@ class CountingMCP:
 
 
 @pytest.fixture
-def robin(tmp_path, monkeypatch):
+def robin(tmp_path, monkeypatch, grant_credentials, stub_child_home):
     def boom(*a, **k):
         raise AssertionError("network attempted")
     monkeypatch.setattr(smcp, "sdk_rpc", boom)
@@ -161,7 +162,7 @@ def robin(tmp_path, monkeypatch):
                                   "unclassified": 0, "total": 6}} for d in dois}
         return tallies
     monkeypatch.setattr(pipeline, "_default_rest_factory", rest_factory)
-    stub = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
+    stub = f"{sys.executable} {STUB_FILE} {{prompt}}"  # by path: see agents_yml in test_e2e_review_pool.py
     (tmp_path / "config").mkdir()
     shutil.copy(REPO / "config" / "defaults.yml", tmp_path / "config" / "defaults.yml")
     (tmp_path / "config" / "agents.yml").write_text("agents:\n" + "".join(
@@ -170,6 +171,9 @@ def robin(tmp_path, monkeypatch):
     (tmp_path / "config" / "scite.yml").write_text(yaml.safe_dump(
         {"max_mcp_calls_per_round": 5, "max_mcp_calls_per_run": 20}))
     shutil.copytree(REPO / "schemas", tmp_path / "schemas")
+    # K sandbox S4: stub agents are dispatched sandboxed and need a credentials entry.
+    # Fixture-only (see tests/conftest.py grant_credentials); repo config/sandbox.yml unchanged.
+    grant_credentials(tmp_path, *FAMILIES)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
     monkeypatch.delenv("SCIEFLOW_DISPATCH", raising=False)
