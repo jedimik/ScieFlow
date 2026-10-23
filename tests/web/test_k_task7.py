@@ -665,9 +665,11 @@ def test_dom_composer_repeat_suppression_and_reset_controls(web_k_project, clien
     page = client.get('/runs/r1').text
     source = tmp_path / 'rendered-run.html'
     source.write_text(page)
+    # The jsdom harness takes ~6 s alone; on a shared 4-CPU host it exceeded the old 15 s cap (G6D-7 flake). 60 s
+    # bounds a real hang without failing on load.
     harness = Path(__file__).with_name('k_task7_dom.cjs')
     result = subprocess.run(['node', str(harness), str(source), str(JS)],
-                            capture_output=True, text=True, timeout=15)
+                            capture_output=True, text=True, timeout=60)
     print('TASK7_REAL_DOM', result.stdout, result.stderr)
     assert result.returncode == 0
     assert 'TASK7_REAL_DOM_PASS' in result.stdout

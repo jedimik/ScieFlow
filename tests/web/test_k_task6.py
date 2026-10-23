@@ -284,8 +284,10 @@ def test_task6_dom_actual_template(client, project, tmp_path):
     job = selected_job(project); job.state = 'running'; jobs.save(job)
     html = client.get(f'/runs/r1/jobs/{job.id}').text
     source = tmp_path / 'rendered.html'; source.write_text(html)
+    # The jsdom harness takes ~6 s alone; on a shared 4-CPU host it exceeded the old 15 s cap (G6D-7 flake). 60 s
+    # bounds a real hang without failing on load.
     harness = Path(__file__).with_name('k_task6_dom.cjs')
-    result = subprocess.run(['node', str(harness), str(source), str(JS)], capture_output=True, text=True, timeout=15)
+    result = subprocess.run(['node', str(harness), str(source), str(JS)], capture_output=True, text=True, timeout=60)
     print('TASK6B_REAL_DOM', result.stdout, result.stderr)
     assert result.returncode == 0
     assert 'REAL_DOM_PASS' in result.stdout
