@@ -84,10 +84,14 @@ def curated(project):
     return ws
 
 
-def _responder_cmd() -> str:
+def _responder_cmd(resume: bool = False) -> str:
     """A one-line `python -c` command that always answers successfully,
     printing the two JSON lines `sessions._claude` expects (a `session_id`
     event, then a `result`), regardless of what it was asked.
+
+    `resume=True` adds the one standalone `{session}` operand that
+    `agent_run._validate_turn_template` requires of `resume_cmd`; the
+    responder ignores it (it is an ordinary argv entry after `-c`).
 
     Inline, like `tests/web/test_sse.py`'s `slow` agent, rather than a
     separate script file: a sandboxed dispatch only sees `run_dir` (and
@@ -99,11 +103,12 @@ def _responder_cmd() -> str:
     """
     code = ('import json;print(json.dumps({"session_id": "resp-1"}));'
            'print(json.dumps({"type": "result", "result": "merged okay"}))')
-    return f"{sys.executable} -c '{code}' {{prompt}}"
+    session = " {session}" if resume else ""
+    return f"{sys.executable} -c '{code}'{session} {{prompt}}"
 
 
 @pytest.fixture
-def responder(project):
+def responder(project, grant_credentials):
     """A fake conversable agent that always answers successfully, however
     the prompt is composed — unlike `stub`, which needs a literal `kind:
     conversation` line the production merge prompt never carries, and so
@@ -114,12 +119,14 @@ def responder(project):
     yaml_cmd = cmd.replace('"', '\\"')     # this cmd's own JSON needs literal
                                             # double quotes; escape for the
                                             # YAML double-quoted scalar below
+    resume_yaml_cmd = _responder_cmd(resume=True).replace('"', '\\"')
     agents_yml = Path(project.root) / "config" / "agents.yml"
     agents_yml.write_text(agents_yml.read_text() + (
         f'  responder:\n    cmd: "{yaml_cmd}"\n    session_cmd: "{yaml_cmd}"\n'
-        f'    resume_cmd: "{yaml_cmd}"\n    family: claude\n    enabled: true\n'
+        f'    resume_cmd: "{resume_yaml_cmd}"\n    family: claude\n    enabled: true\n'
         "    timeout_min: 1\n"
     ))
+    grant_credentials(project.root, "responder")     # S4 (A9)
     return "responder"
 
 

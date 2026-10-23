@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+STUB_FILE = REPO / "src" / "scieflow" / "core" / "stub_agent.py"
 AGENTS = ["stub_a", "stub_b", "stub_c"]
 
 MANIFEST = """\
@@ -22,14 +23,14 @@ artifacts:
 """
 
 
-def sh(argv, cwd):
-    proc = subprocess.run(argv, capture_output=True, text=True, cwd=cwd)
+def sh(argv, cwd, env=None):
+    proc = subprocess.run(argv, capture_output=True, text=True, cwd=cwd, env=env)
     assert proc.returncode == 0, f"{argv}: {proc.stdout}{proc.stderr}"
     return proc
 
 
 def make_root(tmp_path: Path):
-    stub = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
+    stub = f"{sys.executable} {STUB_FILE} {{prompt}}"  # by path: see agents_yml in test_e2e_review_pool.py
     agents_yml = "agents:\n" + "".join(
         f'  {a}: {{cmd: "{stub}", enabled: true, timeout_min: 1}}\n' for a in AGENTS
     )
@@ -42,7 +43,7 @@ def make_root(tmp_path: Path):
     return tmp_path, ws
 
 
-def test_gap_discovery_pipeline(tmp_path):
+def test_gap_discovery_pipeline(tmp_path, child_env):
     root, ws = make_root(tmp_path)
     rel = ws.relative_to(root)
 
@@ -57,8 +58,8 @@ def test_gap_discovery_pipeline(tmp_path):
     for a in AGENTS:
         prompt = ws / "prompts" / f"search-{a}.md"
         prompt.write_text(f"search task\noutput: {rel}/findings/{a}.json\nkind: findings\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", a, str(prompt),
-            str(ws / "logs" / f"search-{a}.log")], cwd=root)
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(prompt),
+            str(ws / "logs" / f"search-{a}.log")], cwd=root, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",
             str(ws / "findings" / f"{a}.json")], cwd=root)
 
@@ -66,8 +67,8 @@ def test_gap_discovery_pipeline(tmp_path):
     for a in AGENTS:
         prompt = ws / "prompts" / f"gaps-{a}.md"
         prompt.write_text(f"gap task\noutput: {rel}/gaps/{a}.json\nkind: gaps\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", a, str(prompt),
-            str(ws / "logs" / f"gaps-{a}.log")], cwd=root)
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(prompt),
+            str(ws / "logs" / f"gaps-{a}.log")], cwd=root, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",
             str(ws / "gaps" / f"{a}.json"), "--schema", "gaps"], cwd=root)
 
@@ -75,12 +76,12 @@ def test_gap_discovery_pipeline(tmp_path):
     for a in AGENTS:
         p0 = ws / "prompts" / f"debate-propose-{a}.md"
         p0.write_text(f"propose\noutput: {rel}/debate/round-0/{a}.md\nkind: perspective\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", a, str(p0),
-            str(ws / "logs" / f"debate-0-{a}.log")], cwd=root)
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(p0),
+            str(ws / "logs" / f"debate-0-{a}.log")], cwd=root, env=child_env)
         p1 = ws / "prompts" / f"debate-round-1-{a}.md"
         p1.write_text(f"discuss\noutput: {rel}/debate/round-1/{a}.md\nkind: debate-response\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", a, str(p1),
-            str(ws / "logs" / f"debate-1-{a}.log")], cwd=root)
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(p1),
+            str(ws / "logs" / f"debate-1-{a}.log")], cwd=root, env=child_env)
     assert len(list((ws / "debate" / "round-0").glob("*.md"))) == 3
     assert len(list((ws / "debate" / "round-1").glob("*.md"))) == 3
     (ws / "debate" / "round-1" / "adjudication.md").write_text(
@@ -145,7 +146,7 @@ class CountingMCP:
 
 
 @pytest.fixture
-def robin(tmp_path, monkeypatch):
+def robin(tmp_path, monkeypatch, grant_credentials, stub_child_home):
     def boom(*a, **k):
         raise AssertionError("network attempted")
     monkeypatch.setattr(smcp, "sdk_rpc", boom)
@@ -161,7 +162,7 @@ def robin(tmp_path, monkeypatch):
                                   "unclassified": 0, "total": 6}} for d in dois}
         return tallies
     monkeypatch.setattr(pipeline, "_default_rest_factory", rest_factory)
-    stub = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
+    stub = f"{sys.executable} {STUB_FILE} {{prompt}}"  # by path: see agents_yml in test_e2e_review_pool.py
     (tmp_path / "config").mkdir()
     shutil.copy(REPO / "config" / "defaults.yml", tmp_path / "config" / "defaults.yml")
     (tmp_path / "config" / "agents.yml").write_text("agents:\n" + "".join(
@@ -170,6 +171,9 @@ def robin(tmp_path, monkeypatch):
     (tmp_path / "config" / "scite.yml").write_text(yaml.safe_dump(
         {"max_mcp_calls_per_round": 5, "max_mcp_calls_per_run": 20}))
     shutil.copytree(REPO / "schemas", tmp_path / "schemas")
+    # K sandbox S4: stub agents are dispatched sandboxed and need a credentials entry.
+    # Fixture-only (see tests/conftest.py grant_credentials); repo config/sandbox.yml unchanged.
+    grant_credentials(tmp_path, *FAMILIES)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
     monkeypatch.delenv("SCIEFLOW_DISPATCH", raising=False)

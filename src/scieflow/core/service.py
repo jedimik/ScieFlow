@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import shutil
+import stat
 import tempfile
 import threading
-from dataclasses import asdict
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,11 +36,14 @@ from scieflow.core import (
     sandbox,
     sessions,
     store,
+    turn_admission,
     workspace,
 )
 from scieflow.core.gates import ADOPTED, CHARTER_ADOPTION
 from scieflow.core.project import Project, ProjectError
 from scieflow.core.run import actions, budget, charter, conversation, curation, status
+from scieflow.core.turn_input import HumanSubmission, accept_human_submission
+from scieflow.core import turn_artifacts, turn_output
 
 RECENT_JOBS = 20
 RECENT_EVENTS = 50
@@ -215,6 +221,9 @@ def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: 
         d = agent_run.prepare(project, agent, Path(prompt_file), cwd, role,
                               session=session, conversational=conversational)
     except (agent_run.DispatchError, sandbox.SandboxError) as e:
+        run_dir = agent_run.refusal_run_dir(Path(prompt_file))
+        if isinstance(e, sandbox.SandboxError) and run_dir is not None:
+            events.emit(run_dir, "job.refused", "system", reason="sandbox", detail=str(e))
         raise ServiceError(str(e)) from e
     if d.run_dir is not None:
         try:
@@ -227,7 +236,8 @@ def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: 
                         why=f"{sandbox.ALLOWLIST_FILE} unsandboxed_runs")
     else:
         try:
-            sandbox.verify(d.writable, d.cwd)
+            sandbox.verify(d.writable, d.cwd, mask=sandbox.masks_for(d.writable, run_dir=d.run_dir),
+                           layout=d.layout)
         except sandbox.SandboxError as exc:
             if d.run_dir is not None:
                 events.emit(d.run_dir, "job.refused", "system", reason="sandbox",
@@ -237,10 +247,16 @@ def dispatch_agent(project: Project, agent: str, prompt_file: Path, transcript: 
     # lets `_turn_in_flight` (below) tell a chat turn apart from every other
     # agent-kind job the run starts (a campaign, a review), which must never
     # make the chat box look busy.
-    job, proc = jobs.start(project, d.argv, kind="turn" if conversational else "agent",
-                           cwd=d.cwd, run_dir=d.run_dir,
-                           label=agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text,
-                           sandbox_writable=d.writable, env=d.env)
+    try:
+        job, proc = jobs.start(project, d.argv, kind="turn" if conversational else "agent",
+                               cwd=d.cwd, run_dir=d.run_dir,
+                               label=agent, timeout_s=d.timeout_s, stdin_text=d.stdin_text,
+                               sandbox_writable=d.writable, sandbox_layout=d.layout, env=d.env)
+    except sandbox.SandboxError as exc:
+        # A11: the launch itself was refused after verify passed.
+        if d.run_dir is not None:
+            events.emit(d.run_dir, "job.refused", "system", reason="sandbox", detail=str(exc))
+        raise ServiceError(str(exc)) from exc
 
     def finish() -> jobs.Job:
         done = jobs.wait(job, proc)
@@ -279,13 +295,12 @@ def _turn_in_flight(project: Project, ws: Path) -> bool:
     for nearly all of an autonomous run's life — every dispatch the
     coordinator itself makes is `kind="agent"` too.
 
-    This is still a plain read of the job records, not a lock: two `say()`
-    calls that both read "not busy" before either one's job is recorded can
-    still both proceed. It narrows that window to the time between reading
-    the conversation record and starting the job, but does not close it — a
-    real fix would need a lock held across that whole span (e.g. the
-    run-scoped file lock `store.locked` already uses elsewhere), which this
-    task does not add.
+    This remains a plain read, not a lock. Supported ordinary send/selection
+    entries now hold neutral admission across it and final recording. The
+    scan is STILL necessary: kernel ownership may be released when a lock
+    owner dies while a separately running turn survives. Writable YAML locks
+    do not span launch/wait, and unsupported ordinary compatibility has no
+    new admission guarantee.
     """
     return any(job.state == "running" and job.kind == "turn"
               for job in jobs.list_jobs(project, ws))
@@ -318,7 +333,48 @@ def conversation_state(project: Project, slug: str) -> dict:
             "session_lost": session_lost}
 
 
-def say(project: Project, slug: str, message: str, actor: str = "human") -> dict:
+@contextmanager
+def _conversation_reservation(project: Project, ws: Path):
+    """Neutral admission BEFORE semantics, never a supported-error fallback."""
+    if not turn_admission.backend_supported():
+        yield None
+        return
+    try:
+        with turn_admission.reserve(project, ws) as reservation:
+            yield reservation
+    except (turn_admission.AdmissionError, sandbox.SandboxError) as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def say(project: Project, slug: str, message: str, actor: str = "human", *,
+        human_submission: HumanSubmission | None = None) -> dict:
+    """An immutable admitted send; absent explicit intent is ordinary chat only."""
+    if type(message) is not str or not message or not message.strip():
+        raise ServiceError("say something")
+    try:
+        submission = accept_human_submission(message) if human_submission is None else human_submission
+        if type(submission) is not HumanSubmission or submission.message != message:
+            raise ValueError('submission must be the exact accepted human message')
+        if actor not in events.ACTORS or (submission.mode == 'harness-command' and actor != 'human'):
+            raise ValueError('marked submission requires a human actor')
+        message.encode('utf-8')
+    except (TypeError, ValueError) as exc:
+        raise ServiceError(str(exc)) from exc
+    ws = _ws(project, slug)
+    with _conversation_reservation(project, ws) as reservation:
+        if reservation is None:
+            if submission.mode == 'harness-command':
+                raise ServiceError('marked turns require supported protected admission')
+            try:
+                _send_state(project, ws, submission)
+            except conversation.ConversationError as exc:
+                raise ServiceError(str(exc)) from exc
+            return _say_legacy(project, ws, message, actor, None, None)
+        return _say_prepared(project, reservation, submission, actor)
+
+
+def _say_legacy(project: Project, ws: Path, message: str, actor: str,
+                  reservation, protection) -> dict:
     """One conversation turn: a sandboxed job that resumes the agent's session.
 
     This is an ordinary dispatch — `dispatch_agent` guards the budget, proves
@@ -338,9 +394,6 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
     human turn is already on record by then, and a turn that genuinely
     started and died should still show what was asked.
     """
-    if not message or not message.strip():
-        raise ServiceError("say something")
-    ws = _ws(project, slug)
     try:
         doc = conversation.read(ws)
     except conversation.ConversationError as exc:
@@ -363,6 +416,8 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
     except actions.BudgetExhausted as exc:
         raise ServiceError(f"{exc} — run checkpointed") from exc
 
+    if reservation is not None:
+        reservation.validate_protection(protection)
     prompt_file = Path(ws) / TURN_PROMPT_DIR / f"turn-{store.new_id()}.md"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text(message)
@@ -373,8 +428,12 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
         raise ServiceError(str(exc)) from exc
 
     transcript = prompt_file.with_suffix(".out.md")
+    if reservation is not None:
+        reservation.prepare_launch_masks(protection)
     job = dispatch_agent(project, doc["agent"], prompt_file, transcript,
                          session=doc["session"], conversational=True)
+    if reservation is not None:
+        reservation.validate_protection(protection)
 
     parsed = sessions.parse(agent_cfg, Path(transcript).read_text())
     try:
@@ -392,6 +451,335 @@ def say(project: Project, slug: str, message: str, actor: str = "human") -> dict
     if parsed.text.strip():
         Path(transcript).write_text(parsed.text)  # the job page shows prose, not JSON
     return {"job": job, "turn": turn}
+
+
+@dataclass(frozen=True)
+class _TurnArtifacts:
+    turn_id: str
+    raw: Path
+    composed: Path
+    transcript: Path
+    log_directory_identity: tuple[int, int, int] | None = None
+
+
+@dataclass(frozen=True)
+class _TurnCompletion:
+    session_id: str | None
+    text: str
+    complete: bool
+    reason: str
+
+
+class _TurnLaunchError(Exception):
+    """Retain actual known job state on a later error, never trigger a relaunch."""
+    def __init__(self, job):
+        super().__init__('turn launch/completion failed')
+        self.job = job
+
+
+def _send_state(project, ws, submission):
+    doc = conversation.read(ws)
+    conversation.check_revision(doc, submission.selection_revision,
+                                required=submission.mode == 'harness-command')
+    if doc['pending_turn_id'] or doc['recovery_required']:
+        raise ServiceError('conversation requires deliberate revision-checked recovery')
+    if not doc['agent']:
+        raise ServiceError("choose an agent for this run's conversation first")
+    if _turn_in_flight(project, ws):
+        raise ServiceError('a turn is still running; wait for it or cancel it')
+    return doc
+
+
+def _validate_execution(prepared):
+    if (prepared.execution_path is None or not prepared.execution_facts or
+            prepared.argv[0] != str(prepared.execution_path)):
+        raise ServiceError('selected conversation executable is unavailable or unpinned')
+    facts = {f.path: f for f in prepared.execution_facts}
+    if not facts or len(facts) != len(prepared.execution_facts) or len(facts) > 8192:
+        raise ServiceError('incomplete captured executable facts')
+    required = {prepared.execution_path, *prepared.execution_path.parents}
+    for fact in prepared.execution_facts:
+        required.update((fact.resolved, *fact.resolved.parents, *fact.path.parents))
+        if fact.link_target is not None:
+            target = Path(fact.link_target)
+            target = target if target.is_absolute() else fact.path.parent / target
+            required.update((target, *target.parents))
+    if not required <= facts.keys() or facts[prepared.execution_path].resolved != Path(prepared.harness_identity.executable):
+        raise ServiceError('incomplete captured executable identity/alias closure')
+    turn_admission._validate_facts(prepared.execution_facts)
+
+
+def _validate_turn_destination(prepared):
+    """Private nonsemantic original-run check before correlation writes."""
+    paths = {prepared.run_dir, *prepared.run_dir.parents}
+    facts = tuple(f for f in prepared.protection.path_facts if f.path in paths)
+    if {f.path for f in facts} != paths:
+        raise ServiceError('incomplete admitted run identity')
+    turn_admission._validate_facts(facts)
+
+
+def _create_turn_artifacts(artifacts, prepared):
+    fd = os.open(artifacts.raw.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    transcript_identity = None
+    try:
+        writes = ((artifacts.raw, prepared.accepted_bytes), (artifacts.composed, prepared.composed_bytes))
+        if prepared.input_kind != 'harness-command':
+            writes += ((artifacts.transcript, b''),)
+        for path, raw in writes:
+            leaf = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                           0o600, dir_fd=fd)
+            with os.fdopen(leaf, 'wb') as stream:
+                if path == artifacts.transcript:
+                    transcript_identity = os.fstat(stream.fileno())
+                stream.write(raw)
+        return os.fstat(fd), transcript_identity
+    finally:
+        os.close(fd)
+
+
+def _write_ordinary_transcript(path, text, identities):
+    """Legacy uncapped presentation, only into our original exclusive file.
+
+    This is not Task5's marked-log reader/parser/copy or a public safe-handle API.
+    """
+    parent = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    leaf = None
+    try:
+        original_parent, original_leaf = identities
+        def identity(info):
+            return info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode)
+        if identity(os.fstat(parent)) != identity(original_parent):
+            raise ServiceError('ordinary transcript parent identity changed')
+        leaf = os.open(path.name, os.O_WRONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+        current = os.fstat(leaf)
+        if not stat.S_ISREG(current.st_mode) or identity(current) != identity(original_leaf):
+            raise ServiceError('ordinary transcript identity changed')
+        os.ftruncate(leaf, 0)
+        with os.fdopen(leaf, 'w') as stream:
+            leaf = None
+            stream.write(text)
+    finally:
+        if leaf is not None:
+            os.close(leaf)
+        os.close(parent)
+
+
+def _marked_run_identity(prepared):
+    """Original immutable admission fact, never a fresh stat-as-expectation."""
+    facts = [f for f in prepared.protection.path_facts if f.path == prepared.run_dir]
+    if len(facts) != 1:
+        raise jobs.JobArtifactError('invalid-admitted-run')
+    fact = facts[0]
+    if (not fact.exists or fact.resolved != prepared.run_dir or fact.link_target is not None or
+            fact.mode is None or not stat.S_ISDIR(fact.mode)):
+        raise jobs.JobArtifactError('invalid-admitted-run')
+    return fact.device, fact.inode, stat.S_IFMT(fact.mode)
+
+
+@contextmanager
+def _marked_job_location(prepared, job):
+    project = Project(prepared.protection.project_root)
+    with jobs.locate_artifacts(project, job.id, run_dir=prepared.run_dir,
+            expected_run_identity=_marked_run_identity(prepared)) as location:
+        record = location.read_job()
+        # Job fields are checked as correspondence/audit, NEVER path authority.
+        for name in ('id', 'run_dir', 'log', 'err', 'state', 'exit_code'):
+            if getattr(job, name) != getattr(record, name):
+                raise jobs.JobArtifactError('invalid-marked-job-location')
+        yield location
+
+
+def _validate_marked_job_destination(prepared, job):
+    """Narrow marked caller check; legacy jobs.save is not redesigned."""
+    with _marked_job_location(prepared, job):
+        pass
+
+
+def _complete_marked_turn(prepared, job, *, artifacts) -> _TurnCompletion:
+    """One pinned source/snapshot, bounded K parse and uncapped exact raw copy."""
+    text = ''
+    try:
+        jobs._artifact_job_id(artifacts.turn_id)
+        logs = prepared.run_dir / TURN_PROMPT_DIR
+        basename = f'turn-{artifacts.turn_id}.out.md'
+        if artifacts.transcript != logs / basename or artifacts.log_directory_identity is None:
+            raise jobs.JobArtifactError('invalid-marked-transcript')
+        with _marked_job_location(prepared, job) as location:
+            with turn_artifacts.pin_artifact_root(logs,
+                    expected_identity=artifacts.log_directory_identity) as target_root:
+                with location.open_log() as source:
+                    parsed = turn_output.read_completed_turn(source, prepared.family)
+                    text = parsed.text
+                    with turn_artifacts.create_run_artifact(target_root, basename) as target:
+                        copied = turn_output.copy_raw_log(source, target)
+                    complete = parsed.complete and copied.complete
+                    return _TurnCompletion(parsed.id if complete else None, text, complete,
+                        copied.reason if not copied.complete else parsed.reason)
+    except (jobs.JobArtifactError, turn_artifacts.ArtifactError, OSError, ValueError, TypeError):
+        return _TurnCompletion(None, text, False, 'artifact-acquisition-incomplete')
+
+
+def _launch_prepared_turn(project, prepared, *, artifacts, turn_audit) -> jobs.Job:
+    """Launch the SAME snapshot; short linkage write, wait, actual spend once."""
+    try:
+        job, proc = jobs.start(project, list(prepared.argv), kind='turn', cwd=prepared.cwd,
+                               run_dir=prepared.run_dir, label=prepared.agent, timeout_s=prepared.timeout_s,
+                               stdin_text=prepared.stdin_text, env=dict(prepared.env_items),
+                               sandbox_writable=list(prepared.protection.writable),
+                               sandbox_mask=list(prepared.protection.masks),
+                               sandbox_layout=prepared.layout, turn_audit=turn_audit)
+    except sandbox.SandboxError as exc:
+        # A11: a launch-time refusal on the turn path is a ServiceError plus job.refused.
+        events.emit(prepared.run_dir, 'job.refused', 'system', reason='sandbox', detail=str(exc))
+        raise ServiceError(str(exc)) from exc
+    linkage_error = None
+    try:
+        _validate_turn_destination(prepared)
+        conversation.annotate_turn(prepared.run_dir, artifacts.turn_id, job_id=job.id,
+                                   audit={**turn_audit, 'job_id': job.id})
+    except Exception as exc:
+        linkage_error = exc
+    spend_attempted = False
+    try:
+        job = jobs.wait(job, proc)
+        if job.duration_s is not None:
+            _validate_turn_destination(prepared)
+            spend_attempted = True
+            actions.record_spend(prepared.run_dir, wall_minutes=round(job.duration_s / 60, 3))
+        if linkage_error is not None:
+            raise linkage_error
+        return job
+    except Exception as exc:
+        # A wait failure may occur after _finish persisted the real process exit.
+        # Unknown/running state is not proof of duration; never retry a spend.
+        if not spend_attempted and job.state in jobs.FINAL and job.duration_s is not None:
+            try:
+                _validate_turn_destination(prepared)
+                spend_attempted = True
+                actions.record_spend(prepared.run_dir, wall_minutes=round(job.duration_s / 60, 3))
+            except Exception:
+                pass
+        raise _TurnLaunchError(job) from exc
+
+
+def _say_prepared(project, reservation, submission, actor):
+    ws = reservation.run_dir
+    try:
+        doc = _send_state(project, ws, submission)
+        # The turn's own HOME is created inside the protection capture, under the held
+        # reservation, before any admission fact is recorded: a protected directory that
+        # appeared only at launch would read as a changed path and refuse the turn. Only
+        # a sandboxed turn gets one (F3). The agent name is checked on every path.
+        sandbox.check_agent_name(doc['agent'])
+        accepted_revision = conversation.selection_revision(doc)
+        resolved = agent_run.resolve_turn(project, doc['agent'], run_dir=ws, session=doc['session'],
+                                          create_home=True)
+        prepared = agent_run.prepare_turn(resolved, submission)
+        reservation.validate_protection(prepared.protection)
+        _validate_execution(prepared)
+        actions.guard_budget(ws, ('wall_minutes',))
+        # F8 (S5): the probe gets the launch's masks, so it runs the argv the launch runs.
+        sandbox.verify(list(prepared.protection.writable), prepared.cwd,
+                       mask=list(prepared.protection.masks), layout=prepared.layout)
+        _validate_execution(prepared)
+        reservation.validate_protection(prepared.protection)
+        conversation.check_revision(conversation.read(ws), accepted_revision, required=True)
+    except actions.BudgetExhausted as exc:
+        raise ServiceError(f'{exc} — run checkpointed') from exc
+    except (conversation.ConversationError, agent_run.DispatchError, sandbox.SandboxError,
+            OSError, TypeError, ValueError) as exc:
+        if isinstance(exc, sandbox.SandboxError):
+            # F3/F13: every confinement refusal on the turn path is recorded, once.
+            events.emit(ws, 'job.refused', 'system', reason='sandbox', detail=str(exc))
+        raise ServiceError(str(exc)) from exc
+
+    tid = store.new_id()
+    stem = ws / TURN_PROMPT_DIR / f'turn-{tid}'
+    artifacts = _TurnArtifacts(tid, stem.with_suffix('.md'), stem.with_suffix('.composed.md'),
+                               stem.with_suffix('.out.md'))
+    audit = dict(schema_version=1, turn_id=tid, input_kind=prepared.input_kind,
+                 composition_order=prepared.composition_order, selected_manager=prepared.agent,
+                 family=prepared.family, policy_revision=prepared.policy_revision,
+                 message_sha256=hashlib.sha256(prepared.accepted_bytes).hexdigest(),
+                 charter_version=prepared.charter_version, charter_sha256=prepared.charter_sha256,
+                 composed_artifact=str(artifacts.composed.relative_to(ws)), job_id='',
+                 parse_complete=None, reason='', accepted_revision=accepted_revision, final_revision=None)
+    marked = submission.mode == 'harness-command'
+    job = None
+    try:
+        conversation.add_turn(ws, role='human', text=submission.message, actor=actor, turn_id=tid, audit=audit)
+        artifact_identities = _create_turn_artifacts(artifacts, prepared)
+        if marked:
+            parent = artifact_identities[0]
+            artifacts = replace(artifacts, log_directory_identity=(parent.st_dev, parent.st_ino,
+                                                                  stat.S_IFMT(parent.st_mode)))
+        reservation.prepare_launch_masks(prepared.protection)
+        _validate_execution(prepared)
+        job = _launch_prepared_turn(project, prepared, artifacts=artifacts, turn_audit=audit)
+        reservation.validate_protection(prepared.protection)
+        audit['job_id'] = job.id
+        if marked:
+            _validate_marked_job_destination(prepared, job)
+            completion = _complete_marked_turn(prepared, job, artifacts=artifacts)
+            if type(completion) is not _TurnCompletion:
+                raise ServiceError('invalid completion result')
+            usable = (job.state == 'done' and job.exit_code == 0 and completion.complete is True and
+                      type(completion.session_id) is str and bool(completion.session_id) and
+                      (prepared.session is None or prepared.session == completion.session_id))
+            reason = '' if usable else (completion.reason or
+                ('process-not-successful' if job.state != 'done' or job.exit_code != 0 else
+                 'incomplete-output' if completion.complete is not True else
+                 'missing-session' if not completion.session_id else 'inconsistent-session'))
+            audit.update(parse_complete=completion.complete, reason=reason)
+            turn = conversation.finalize_turn(ws, tid, job_id=job.id,
+                    session_id=completion.session_id if usable else None, reply=completion.text,
+                    state=job.state, audit=audit, recovery_required=not usable)
+            audit = turn['audit']
+        else:
+            out = Path(job.log).read_text()
+            note = f'\n{prepared.agent}: timed out after {prepared.timeout_s:.0f}s\n' if job.state == 'timeout' else ''
+            _write_ordinary_transcript(artifacts.transcript, out + note, artifact_identities)
+            parsed = sessions.parse({'family': prepared.family}, out + note)
+            after_session = conversation.record_session(ws, parsed.id)
+            turn = conversation.add_turn(ws, role='agent', text=parsed.text, job_id=job.id,
+                                         actor='agent', state=job.state)
+            audit.update(parse_complete=True, final_revision=conversation.selection_revision(conversation.read(ws)))
+            conversation.annotate_turn(ws, tid, job_id=job.id, audit=audit)
+            if not after_session['session']:
+                events.emit(ws, 'turn.session_lost', 'system', agent=prepared.agent, job=job.id)
+            if parsed.text.strip():
+                _write_ordinary_transcript(artifacts.transcript, parsed.text, artifact_identities)
+        job.turn_audit = conversation.validate_audit(audit)
+        if marked:
+            _validate_marked_job_destination(prepared, job)
+        jobs.save(job)
+        return {'job': asdict(job), 'turn': turn}
+    except Exception as exc:
+        if isinstance(exc, _TurnLaunchError):
+            job = exc.job
+        if marked:
+            # No state write to a newly adopted run or a duplicate completed turn.
+            try:
+                reservation._validate_held()
+                reservation._validate_protection_facts(prepared.protection)
+                if job is not None:
+                    _validate_marked_job_destination(prepared, job)
+                current = conversation.read(ws)
+                if current['pending_turn_id'] == tid:
+                    job_id = job.id if job else ''
+                    audit.update(job_id=job_id, parse_complete=False, reason='turn-error')
+                    final = conversation.finalize_turn(ws, tid, job_id=job_id, session_id=None, reply='',
+                        state=job.state if job and job.state in jobs.FINAL else 'lost',
+                        audit=audit, recovery_required=True)
+                    if job is not None:
+                        job.turn_audit = conversation.validate_audit(final['audit'])
+                        _validate_marked_job_destination(prepared, job)
+                        jobs.save(job)
+            except Exception:
+                pass  # Pending evidence remains uncertain; never replay or recapture.
+        if not marked:
+            raise ServiceError(str(exc)) from exc
+        raise ServiceError('turn attempt uncertain; deliberate revision-checked recovery is required') from exc
 
 
 ROUND_TARGET = "manuscript/curation/rounds"
@@ -970,6 +1358,30 @@ def record_spend(project: Project, slug: str, actor: str = "human", **spent) -> 
     return result
 
 
+def _validate_conversation_target(agent: str, registry_snapshot) -> None:
+    """Pure target-only eligibility from a caller's one registry snapshot."""
+    if not isinstance(registry_snapshot, dict) or any(type(name) is not str for name in registry_snapshot):
+        raise ServiceError('agent registry must be a mapping with text names')
+    agents = registry_snapshot
+    if type(agent) is not str or agent not in agents:
+        raise ServiceError(f"unknown agent: {agent} (known: {', '.join(agents)})")
+    agent_cfg = agents[agent]
+    if not isinstance(agent_cfg, dict):
+        raise ServiceError(f'{agent} configuration must be a mapping')
+    if type(agent_cfg.get('enabled', True)) is not bool or not agent_cfg.get("enabled", True):
+        raise ServiceError(f"{agent} is disabled (config/agents.yml); enable it first")
+    if type(agent_cfg.get('session_cmd')) is not str or not agent_cfg.get("session_cmd"):
+        raise ServiceError(
+            f"{agent} cannot host a conversation: no session_cmd in its configuration")
+    if type(agent_cfg.get('resume_cmd')) is not str or not agent_cfg.get("resume_cmd"):
+        raise ServiceError(
+            f"{agent} cannot host a conversation: no resume_cmd in its configuration")
+    if type(agent_cfg.get('family')) is not str or not sessions.can_converse(agent_cfg):
+        raise ServiceError(
+            f"{agent} cannot host a conversation: no family in its configuration "
+            "or the family is not registered")
+
+
 def _check_can_converse(project: Project, agent: str) -> None:
     """The per-reason check for whether `agent` could hold a conversation at
     all: known, enabled, and configured with both session commands and a
@@ -981,27 +1393,41 @@ def _check_can_converse(project: Project, agent: str) -> None:
     here never leaves a half-started run behind).
     """
     agents = config.load_agents(project.root)
-    if agent not in agents:
-        raise ServiceError(f"unknown agent: {agent} (known: {', '.join(agents)})")
-    agent_cfg = agents[agent]
-    if not agent_cfg.get("enabled", True):
-        raise ServiceError(f"{agent} is disabled (config/agents.yml); enable it first")
-    if not agent_cfg.get("session_cmd"):
-        raise ServiceError(
-            f"{agent} cannot host a conversation: no session_cmd in its configuration")
-    if not agent_cfg.get("resume_cmd"):
-        raise ServiceError(
-            f"{agent} cannot host a conversation: no resume_cmd in its configuration")
-    if not sessions.can_converse(agent_cfg):
-        # The only remaining reason can_converse can fail (given both commands exist)
-        # is an invalid family
-        raise ServiceError(
-            f"{agent} cannot host a conversation: no family in its configuration "
-            "or the family is not registered")
+    _validate_conversation_target(agent, agents)
+
+
+@contextmanager
+def _target_registry(project: Project):
+    """ONE semantic target snapshot with pinned identity before mutation."""
+    path = project.root / 'config/agents.yml'
+    fd = None
+    try:
+        facts = sandbox._capture_path_facts([path.absolute()])
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        os.set_inheritable(fd, False)
+        initial = os.fstat(fd)
+        if not stat.S_ISREG(initial.st_mode):
+            raise ServiceError('agent registry must be a regular file')
+
+        def revalidate():
+            if sandbox._policy_stat_identity(os.fstat(fd)) != sandbox._policy_stat_identity(initial):
+                raise ServiceError('agent registry identity changed during selection')
+            turn_admission._validate_facts(facts)
+
+        revalidate()
+        registry = config.load_agents(project.root)
+        revalidate()
+        yield registry, revalidate
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError, sandbox.SandboxError) as exc:
+        raise ServiceError(f'cannot capture safe agent registry: {exc}') from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def set_conversation_agent(project: Project, slug: str, agent: str,
-                           actor: str = "human") -> dict:
+                           actor: str = "human", *, expected_revision=None,
+                           reset_session=False) -> dict:
     """Choose who holds this run's conversation.
 
     Switching discards the session id, because one CLI's session means
@@ -1009,11 +1435,47 @@ def set_conversation_agent(project: Project, slug: str, agent: str,
     said are history and are kept.
     """
     ws = _ws(project, slug)
-    _check_can_converse(project, agent)
-    if _turn_in_flight(project, ws):
-        raise ServiceError("a turn is still running; wait for it or cancel it")
+    with _conversation_reservation(project, ws) as reservation:
+        if reservation is not None:
+            ws = reservation.run_dir
+        try:
+            doc = conversation.read(ws)
+            uncertain = bool(doc['recovery_required'] or doc['pending_turn_id'])
+            conversation.check_revision(doc, expected_revision, required=reset_session or uncertain)
+            if type(reset_session) is not bool or ((reset_session or uncertain) and actor != 'human'):
+                raise conversation.ConversationError('deliberate human recovery is required')
+        except conversation.ConversationError as exc:
+            raise ServiceError(str(exc)) from exc
+        if reservation is None:
+            _check_can_converse(project, agent)
+            if _turn_in_flight(project, ws):
+                raise ServiceError("a turn is still running; wait for it or cancel it")
+            return _set_conversation_agent_record(ws, agent, actor, expected_revision=expected_revision,
+                                                  reset_session=reset_session)
+        if _turn_in_flight(project, ws):
+            raise ServiceError("a turn is still running; wait for it or cancel it")
+        with _target_registry(project) as (registry, revalidate_registry):
+            try:
+                protection = sandbox.resolve_turn_protection(project, run_dir=ws)
+            except sandbox.SandboxError as exc:
+                # S2: a refused readable:/policy capture is recorded on the run, as every turn refusal is.
+                events.emit(ws, 'job.refused', 'system', reason='sandbox', detail=str(exc))
+                raise ServiceError(str(exc)) from exc
+            reservation.validate_protection(protection)
+            _validate_conversation_target(agent, registry)
+            reservation.validate_protection(protection)
+            revalidate_registry()
+            return _set_conversation_agent_record(ws, agent, actor, expected_revision=expected_revision,
+                                                  reset_session=reset_session)
+
+
+def _set_conversation_agent_record(ws: Path, agent: str, actor: str, *,
+                                   expected_revision=None, reset_session=False) -> dict:
     try:
-        return conversation.set_agent(ws, agent, actor)
+        if expected_revision is None and reset_session is False:
+            return conversation.set_agent(ws, agent, actor)
+        return conversation.set_agent(ws, agent, actor, expected_revision=expected_revision,
+                                      reset_session=reset_session)
     except conversation.ConversationError as exc:
         raise ServiceError(str(exc)) from exc
 
@@ -1579,14 +2041,27 @@ def _manuscript(ws: Path) -> dict:
     if not provenance.repo_path(ws).is_dir():
         return out("no_repo", "manuscript history has not been recorded yet — it appears "
                               "after the first merge round or workbench visit")
+    with provenance.read_scope():
+        return _manuscript_points(ws, out)
+
+
+def _manuscript_points(ws: Path, out) -> dict:
+    """The panel's normal points/comparison path, inside its lazy read scope."""
     points = provenance.points(ws)
     if not points:
         return out("no_points", "the history repository exists but holds no points yet — "
                                 "history appears after the first merge round or workbench visit")
-    merges = sorted(((int(m.group(1)), p["ref"]) for p in points
-                     if p.get("kind") == "merge" and "parent" not in p
-                     and (m := re.fullmatch(r"main:merge_(\d+)", p.get("ref", "")))),
-                    reverse=True)
+    try:
+        merges = sorted(((int(m.group(1)), p["ref"]) for p in points
+                         if p.get("kind") == "merge" and "parent" not in p
+                         and (m := re.fullmatch(r"main:merge_(\d+)", p.get("ref", "")))),
+                        reverse=True)
+    except ValueError:
+        # The reader accepts arbitrarily long canonical decimals. This panel
+        # still has an integer round contract; never substitute an older round
+        # or alter Python's global integer limits to disguise that boundary.
+        return out("no_merge", "history contains a merge round identifier that cannot be represented "
+                               "by this panel's integer round field")
     if not merges:
         return out("no_merge", "history holds drafts but no merge round yet")
 

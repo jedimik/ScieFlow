@@ -43,6 +43,7 @@ from scieflow.integrations.scite.public import PublicClient
 from scieflow.research.lib import http as http_lib
 
 REPO = Path(__file__).resolve().parents[2]
+STUB_FILE = REPO / "src" / "scieflow" / "core" / "stub_agent.py"
 SLUG = "2026-10-e2e-review"
 TOKEN = "sk-e2e...fake"
 HOST_ENV = {"SCITE_TOKEN": TOKEN, "UV_CACHE_DIR": "/home/u/.cache/uv"}
@@ -144,14 +145,16 @@ class Fakes:
 
 
 def agents_yml(families: dict[str, str]) -> str:
-    stub = f"{sys.executable} -m scieflow.core.stub_agent {{prompt}}"
+    # The stub is run by file path: a sandboxed child resets PYTHONPATH, so `-m scieflow...`
+    # would import whatever checkout the venv's editable install points at, not this tree.
+    stub = f"{sys.executable} {STUB_FILE} {{prompt}}"
     return "agents:\n" + "".join(
         f'  {a}: {{cmd: "{stub}", enabled: true, timeout_min: 1, tier: primary, '
         f"model_family: {fam}}}\n" for a, fam in families.items())
 
 
 @pytest.fixture
-def project(tmp_path, monkeypatch):
+def project(tmp_path, monkeypatch, grant_credentials, stub_child_home):
     (tmp_path / "config").mkdir()
     for name in ("defaults.yml", "scite-prompts.yml"):
         shutil.copy(REPO / "config" / name, tmp_path / "config" / name)
@@ -159,6 +162,10 @@ def project(tmp_path, monkeypatch):
     (tmp_path / "config" / "scite.yml").write_text(yaml.safe_dump(
         {"max_mcp_calls_per_round": 5, "max_mcp_calls_per_run": 20}))
     shutil.copytree(REPO / "schemas", tmp_path / "schemas")
+    # K sandbox S4: stub agents are dispatched sandboxed and need a credentials entry.
+    # Fixture-only: a fake 0600 token under the isolated credentials dir (tests/conftest.py).
+    # config/sandbox.yml in the repo stays deny-by-default.
+    grant_credentials(tmp_path, *FAMILIES)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
     monkeypatch.delenv("SCIEFLOW_DISPATCH", raising=False)

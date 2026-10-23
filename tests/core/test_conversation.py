@@ -17,7 +17,8 @@ def ws(tmp_path):
 
 
 def test_a_run_without_a_conversation_reads_as_empty(ws):
-    assert conversation.read(ws) == {"agent": "", "session": None, "turns": []}
+    assert conversation.read(ws) == {"agent": "", "session": None, "turns": [],
+                                     'selection_generation': 0, 'recovery_required': False, 'pending_turn_id': None}
 
 
 def test_choosing_an_agent_then_recording_a_session(ws):
@@ -107,7 +108,8 @@ def test_invalid_actor_on_set_agent_is_rejected(ws):
     with pytest.raises(conversation.ConversationError):
         conversation.set_agent(ws, "claude", actor="wizard")
     # File was not modified
-    assert conversation.read(ws) == {"agent": "", "session": None, "turns": []}
+    assert conversation.read(ws) == {"agent": "", "session": None, "turns": [],
+                                     'selection_generation': 0, 'recovery_required': False, 'pending_turn_id': None}
 
 
 def test_add_turn_records_the_jobs_state_when_given(ws):

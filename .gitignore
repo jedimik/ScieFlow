@@ -44,3 +44,9 @@ pipelines/*/stages/*/env/
 
 # Local ticket backlogs written by /to-tickets
 .scratch/
+# Agent credentials never enter git. Tokens live outside the repo in
+# ~/.config/scieflow/credentials/ (0600); per-run agent homes may hold an
+# agent's own login (docs/sandbox.md).
+*.token
+**/agent-home/
+**/.credentials.json

@@ -20,20 +20,12 @@ fi
 echo "== sandbox =="
 if command -v bwrap >/dev/null 2>&1; then
   ok "bwrap $(bwrap --version | awk '{print $2}')"
-  probe="$HOME/.scieflow-doctor-probe-$$"
-  rm -f "$probe"
-  sbtmp="$(mktemp -d)"
-  bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
-        --bind "$sbtmp" "$sbtmp" --chdir "$sbtmp" --unshare-pid --die-with-parent \
-        -- /bin/sh -c "touch '$probe' 2>/dev/null; touch '$sbtmp/inside'" >/dev/null 2>&1 || true
-  if [ -e "$probe" ]; then
-    rm -f "$probe"; bad "bwrap did not confine a write to \$HOME — dispatches will be refused"
-  elif [ -e "$sbtmp/inside" ]; then
-    ok "confines writes (granted path writable, \$HOME blocked)"
+  # S5: the real launcher proves confinement (secret absence, host marker, write blocked).
+  if uv run python -m scieflow.core.sandbox doctor; then
+    ok "sandbox confinement proven through the real launcher"
   else
-    bad "bwrap could not run the probe at all"
+    bad "sandbox confinement not proven — agent dispatches are refused"
   fi
-  rm -rf "$sbtmp"
 else
   bad "bwrap missing — agent dispatches are refused (sudo apt-get install -y bubblewrap)"
 fi

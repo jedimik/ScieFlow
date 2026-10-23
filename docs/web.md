@@ -492,6 +492,41 @@ curl -c cookies.txt "http://127.0.0.1:8765/healthz?token=<token from the printed
 curl -b cookies.txt http://127.0.0.1:8765/api/v1/runs
 ```
 
+## Harness commands
+
+The send form has a second mode, `harness-command`, that marks a chat message as an explicit command request. Only a short, code-owned list of commands can ever run that way, and today the browser and the HTTP API do not run any of them.
+
+- Ordinary chat and a marked turn differ in ordering. Only a marked harness-command turn places the command before the charter; the charter is placed last and appears exactly once in the composed prompt.
+- Ordinary chat, generated turns and merge turns place the charter first.
+- The reply you see is the final parsed reply, not the raw job-output JSON.
+
+**Support list.** `CERTIFIED_POLICIES` is a finite code-owned list with exactly one entry: the raw `/scieflow-menu` command with no arguments, for the one evidenced identity. Unsupported identities run nothing as a command.
+
+**Web and API.** The web UI and HTTP API never execute a marked turn as a command today: `mode=harness-command` sent from the browser or the API is always delivered as ordinary chat, whatever `CERTIFIED_POLICIES` holds. The page then says the capability is not certified on this deployment.
+
+**Input and limits.** The grammar is exact and raw: nothing is normalised, and a marked input with leading whitespace or a NUL character is rejected. The 64 KiB limit applies to marked input only.
+
+**Display caps.** Display caps are measured in these units: 200,000 UTF-16 units in the rendered live DOM, 16 KiB of UTF-8 per SSE wire line, 16 KiB per raw record, 64 KiB per read, and 2 MiB for the K-only parse. The display and file-view effects are shared with ordinary output; the run-event stream has its own boundary.
+
+**Admission on Linux.** Busy or unsafe refusal also applies to ordinary sends and hand-overs. On a platform without the required Linux primitives the reservation is skipped, ordinary chat runs without the new guarantee, and there is no lock fallback.
+
+**Reset and recovery.** The session is reset explicitly: there is no queue, no replay and no exactly-once delivery, and recovery after a restart or a loss requires a deliberate human reset.
+
+**Permissions and CLI-only items.** The current templates skip permission prompts, so do not assume that every tool call asks for permission. Chats, DVC uploads, promotions and remote execution stay separately gated, and a human-marked token does not consent to a consequential workflow action.
+
+**Not enabled anywhere today.** There is no enablement anywhere today: the production resolver builds an incomplete identity, so the `/scieflow-menu` entry is inert in every deployment.
+
+**Residuals.**
+
+- The menu shown is a model reconstruction that may drift from the real menu (R5-1 residual).
+- A D8 residual remains: `~/.claude` is readable by the sandboxed process.
+- The Host/Origin, rebinding and same-origin risk is retained as a residual; hardening is separate work and is not done.
+- Raw job logs can grow on disk, and there is no capture or kill policy for that growth.
+
+Honest limitation: the decisive interception record (source: session-transcript) is written by the claude CLI into k-probe-a1/scratch/agent-home/claude/.claude/projects/, a directory the sandboxed process can write. It is therefore not proof against a hostile agent. G5 may conclude only that interception is certified for a non-hostile pinned CLI binary driving a model restricted to read-only tools. G5 may not claim proof against a compromised binary or against a model holding a write tool.
+
+**Sealed probe suite.** The sealed r14 probe suite is RUN-layout evidence and runs only when it is named explicitly; a new live probe cannot bind on a tree that carries the `/scieflow-menu` entry.
+
 ## What stays CLI-only
 
 A few things are terminal-only on purpose, not because nobody got to them:

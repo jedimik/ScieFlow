@@ -78,14 +78,92 @@ once.
 
 - **List page:** O(runs) × three small YAML reads (`status.yml`, `config.yml`, `budget.yml`).
   Zero event-log reads, zero gate reads, zero proposal previews, zero job listings.
-- **Run page:** one run, target **under ~0.2s** for the band. Measured on a 20-round / 4-agent / 6-section / 2000-event run: band ~159ms, manuscript panel ~134ms, full `GET /runs/r1` ~200ms. Currently met.
+- **Run page:** one run, target **under ~0.2s** for the band. The 2026-10-09 controlled
+  20-round synthetic comparison below observed a candidate band median of **92.150ms**,
+  manuscript panel **43.888ms**, and full `GET /runs/r1` **110.882ms**. These are
+  warm-cache observations, not a guaranteed latency budget or timing assertions.
+
+#### Controlled provenance read-cost measurements — 2026-10-09
+
+Measured at 20:50 UTC on the same Linux x86_64 host, with Python 3.12.3, Git 2.43.0
+and unchanged locked dependencies. Each 2-/20-round fixture has four agents, six
+sections and 2000 real-format synthetic events; these are not scientific results.
+Base is the merged commit `0d7df13e5567ffba1bfe989765346079aff7de47`; candidate is
+the uncommitted Ticket-22 feature worktree, with exact source-file hashes retained
+in the raw records, not a new commit.
+
+Each pair reuses the **same manifest-bound read-only fixture**, tool and interpreter.
+Separate source-selected interpreters ran **serially, base then candidate**, with
+all loaded ScieFlow modules guarded to the selected source. Every operation had a
+mandatory validation preflight, two additional warmups, then seven timed samples.
+Fixture bytes, refs and events were checked unchanged after the reads.
+
+Median whole-operation latency, milliseconds (base → candidate):
+
+| Operation | 2 rounds | 20 rounds |
+|---|---:|---:|
+| `provenance.points` | 57.445 → 17.676 | 110.733 → 22.213 |
+| Standalone public `provenance.diff` | 58.716 → 25.358 | 123.501 → 28.594 |
+| Manuscript panel | 136.999 → 44.679 | 240.485 → 43.888 |
+| Overview band | 155.446 → 62.811 | 291.923 → 92.150 |
+| Authenticated full `GET /runs/r1` | 184.811 → 84.644 | 319.318 → 110.882 |
+
+Processes per timed operation, **total Git / `ls-tree`**; counts were identical
+across all seven samples in each record. Candidate counts are the same for both
+round counts:
+
+| Operation | 2-round base | 20-round base | Candidate, 2 and 20 rounds |
+|---|---:|---:|---:|
+| `provenance.points` | 18 / 7 | 36 / 25 | 6 / 5 |
+| Standalone public `provenance.diff` | 19 / 7 | 37 / 25 | 7 / 5 |
+| Manuscript panel | 37 / 14 | 73 / 50 | 8 / 5 |
+| Overview band | 37 / 14 | 73 / 50 | 8 / 5 |
+| Authenticated full `GET /runs/r1` | 37 / 14 | 73 / 50 | 8 / 5 |
+
+Counters instrument actual `Popen` Git launches; that hook's overhead is included
+in latency. Setup, authentication, validation and reporting are outside timing
+and counting. Every sample validates the real output, including a successful
+nonempty standalone diff and the panel's actual comparison/changed files. The GET
+uses the real authenticated application through an in-process client, not mocked
+HTTP or a launched public server.
+
+Caches are **warm** from identity reads, preflight and warmups. There was no
+filesystem-cache flush or randomized trial; fixed-order shared-host timings are
+observations, not guarantees, cold-cache measurements or correctness thresholds.
+The independent audit checked all four records and 140 raw samples. Durable
+evidence is under `workspace/cloud-dev-tickets-20261008/`: raw records
+`scratch/t22-task3-r2-base-v1.json`, `scratch/t22-task3-r2-candidate-v1.json`,
+`scratch/t22-task3-r20-base-v1.json`, `scratch/t22-task3-r20-candidate-v1.json`;
+commands/logs are the corresponding `scratch/checks/t22-task3-r*-v1.json`/`.txt`.
+Method: `tools/ticket22_benchmark.py`; audit:
+`scratch/checks/t22-task3-measurement-audit-v1.json` and `.txt`. Raw values remain
+authoritative; the tables round to three decimal places. This records measured
+read cost, not whole-ticket verification or completion.
+
+**Historical context, 2026-10-03, different host:** the original 20-round /
+4-agent / 6-section / 2000-event observation was band ~159ms, manuscript panel
+~134ms and full GET ~200ms. It is not the controlled baseline for the new pair.
 
 ### Four hard constraints
 
 1. **`run_overview` must never call `provenance.sync` or `ensure_repo` — only `points()` and `diff()`.** The drafts page runs a
-   full sync on every GET, measured at **0.81s** of git subprocesses on a 20-round / 4-agent /
+   full sync on every GET, historically measured on 2026-10-03 at **0.81s** of git subprocesses on a 20-round / 4-agent /
    6-section run even when nothing changed. That is a recorded, deferred cost and must not be
-   replicated on a second page. `points()` alone measured **0.06s**. `diff` recomputes `points` internally for its ref whitelist, so the panel pays `points` twice — about 130ms of the ~159ms band. That is recorded and deferred to the provenance read-cost ticket (an `allowed=`/`points=` parameter or memoization inside `provenance.diff`); the service layer must not call `_git` itself to skip it, because the whitelist is the only thing stopping an argument-shaped ref reaching `git`.
+   replicated on a second page. The same historical host measured `points()` alone at
+   **0.06s** and duplicate point traversal at about 130ms of the ~159ms band; that
+   double traversal is no longer the candidate's read path. Ticket 22 implements a
+   **provenance-owned, request-scoped immutable memo**, not a persistent/global cache.
+   The panel opens a lazy read scope; public `diff` observes a fresh repository/ref-tip
+   fingerprint before reuse, fully validates both whole-string refs against provenance's
+   own point snapshot, and executes one real diff without traversing unchanged trees
+   twice. Normal standalone `diff` remains independently validating. No caller-supplied
+   `allowed=`/`points=` whitelist and no service `_git` bypass are introduced. Recursive
+   NUL-delimited binary tree reads and the final comparison are bound to observed
+   object IDs and use fixed original-object semantics (`GIT_NO_REPLACE_OBJECTS=1`),
+   rather than replacement-ref-dependent content. Five materialized history branches
+   mean five recursive `ls-tree` processes for both the 2- and 20-round fixtures;
+   returned bytes and runtime still scale with content. This reduces process count,
+   not the amount of history to enumerate or the authority checks protecting Git.
 2. **No summary or cache file.** Recorded here so it is a decision, not an omission a later session
    "fixes".
 3. **Read-only.** No new route, no POST, therefore no `MUTATING_PATHS` entry, no `SAMPLES` case and

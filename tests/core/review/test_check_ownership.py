@@ -131,6 +131,14 @@ def test_unknown_base_is_an_error(repo):
 
 
 def test_this_branch_passes():
+    # The live-tree guard protects the scite branches from K/web files. Once K is integrated
+    # into main (K integration, G6 accepted 2026-10-23), the stale default base
+    # dev/cloud-continuation makes every integrated K file look "touched" by construction, so
+    # this live check is limited to scite branches. Unit tests above still cover the script.
+    branch = subprocess.run(["git", "symbolic-ref", "--short", "-q", "HEAD"],
+                            cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    if not branch.startswith("dev/scite"):
+        pytest.skip(f"live ownership check applies to scite branches only (HEAD is {branch or 'detached'})")
     probe = subprocess.run(["git", "rev-parse", "--verify", "-q", "dev/cloud-continuation"],
                            cwd=ROOT, capture_output=True, text=True)
     if probe.returncode != 0:
