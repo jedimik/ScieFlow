@@ -49,7 +49,8 @@ when to stop.
    change it, propose a `charter-adoption` gate per rule 14 and
    `docs/runs.md#the-charter-what-this-run-agreed-to-do`. A coordinator may
    also be spoken to directly, through a run's conversation on its page in
-   the browser (`docs/runs.md#the-conversation-talking-to-the-coordinator`);
+   the browser (`docs/runs.md#the-conversation-talking-to-the-coordinator`),
+   or from the terminal with `uv run scieflow run say <slug> …` (`docs/cli.md`);
    its turns are recorded in `conversation.yml`, alongside `status.yml`,
    `budget.yml` and `charter.yml` — never hand-edited either.
 5. **Stop criteria** (all active in autonomous mode): max iterations;

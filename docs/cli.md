@@ -101,6 +101,68 @@ uv run scieflow run log SLUG note.NAME [--message TEXT] [--data KEY=VALUE ...]
 ```
 Record a free-form `note.<name>` event — the type must start with `note.`.
 
+### The conversation, curation and previews
+
+The same conversation, curation and preview functions the web workbench
+calls, from the terminal. Each command is one service call: admission, budget
+and sandbox guards are the existing ones, not a second implementation. Reads
+take `--json`. Writes act as the human and refuse to run inside a ScieFlow
+dispatch (exit `1`).
+
+```bash
+uv run scieflow run conversation SLUG [--json]
+uv run scieflow run converse-agent SLUG AGENT [--reset-session] [--expected-revision N]
+uv run scieflow run say SLUG (MESSAGE | --file PATH)
+```
+Show the run's conversation (agent, turns, whether a turn is in flight), choose
+its agent, and send one message. `say` prints the turn's job and reply as JSON.
+`--expected-revision` refuses the change unless the conversation is still at
+that revision.
+
+```bash
+uv run scieflow run start SLUG --goal FILE [--agent A] [--workflow W]
+    [--max-iterations N] [--max-experiment-runs N] [--max-wall-minutes N]
+uv run scieflow run merge-round SLUG
+```
+Create a run from a goal file, and have the named agent take the first turn
+when one is given. `merge-round` sends this round's curation to the
+conversation agent. The round advances only when that turn succeeds.
+
+```bash
+uv run scieflow run curation show SLUG [--json]
+uv run scieflow run curation history SLUG [--json]
+uv run scieflow run curation add SLUG (TEXT | --file PATH)
+uv run scieflow run curation keep SLUG AGENT SECTION (TEXT | --file PATH)
+uv run scieflow run curation edit SLUG BLOCK_ID (TEXT | --file PATH)
+uv run scieflow run curation move SLUG BLOCK_ID POSITION
+uv run scieflow run curation remove SLUG BLOCK_ID
+uv run scieflow run curation note SLUG [TEXT | --file PATH]
+uv run scieflow run curation revert SLUG VERSION
+```
+The curation document: `show` prints each agent's draft, each merged round and
+the document itself. Every write appends a version, and `revert` appends a copy
+of an earlier one rather than rewinding.
+
+```bash
+uv run scieflow run manuscript history SLUG [--json]
+uv run scieflow run manuscript diff SLUG A B [--json]
+```
+The run's provenance points, and a diff between two of them (their `ref`
+strings from `history`).
+
+```bash
+uv run scieflow run cancel SLUG JOB_ID
+```
+Cancel a job. A job that belongs to another run is refused and nothing is
+cancelled.
+
+```bash
+uv run scieflow run preview SLUG SOURCE [--json]
+uv run scieflow run preview SLUG SOURCE --compile
+```
+Without `--compile`, report whether a draft's PDF preview is available and where
+it is. With `--compile`, start the compile as a job (it needs `latexmk`).
+
 ## `scieflow gate`
 
 Approvals the protocols require, stored as data under `gates/` and
