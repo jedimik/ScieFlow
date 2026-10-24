@@ -171,3 +171,15 @@ def test_walltime_seconds():
     assert policy.walltime_seconds("01:30:10") == 5410
     with pytest.raises(policy.PolicyError, match="HH:MM:SS"):
         policy.walltime_seconds("90m")
+
+
+@pytest.mark.parametrize("value", ["slurm", "3"])
+def test_load_remote_refuses_unsupported_scheduler(tmp_path, value):
+    root_dir = tmp_path / "root"
+    (root_dir / "config").mkdir(parents=True)
+    (root_dir / "config" / "remotes.yml").write_text(
+        CFG.replace("scheduler: pbs", f"scheduler: {value}")
+    )
+    with pytest.raises(policy.PolicyError,
+                       match="is not supported \\(supported: pbs\\)"):
+        policy.load_remote(root_dir, "meta")

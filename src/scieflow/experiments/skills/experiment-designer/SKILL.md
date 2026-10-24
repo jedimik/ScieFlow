@@ -29,7 +29,7 @@ parameters, or asks "what should we try next?" after a previous campaign.
 5. **Write the campaign YAML** into `pipelines/<p>/campaigns/<name>.yaml`.
    Fill `notes:` with the hypothesis — future agents rely on it.
 6. **Present for approval:** the YAML, why this grid/these scenarios, what
-   you expect, the run count, and a one-line cost estimate per
+   you expect, the run count, and a one-line effort estimate per
    `skills/model-routing/SKILL.md` (runs x tokens at the execution tier +
    judgment phases at high tier). **Wait for explicit approval.**
 7. After approval, hand off to `skills/experiment-runner/SKILL.md`.
