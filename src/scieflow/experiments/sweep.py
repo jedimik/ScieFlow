@@ -33,6 +33,7 @@ def run_sweep(
             {
                 "run_id": spec.run_id,
                 "params": spec.params,
+                "mode": mode,
                 "status": config["status"],
                 "metrics": (
                     json.loads(metrics_file.read_text())
@@ -44,7 +45,12 @@ def run_sweep(
     results_path = campaign_dir / "results.json"
     results_path.write_text(
         json.dumps(
-            {"campaign": campaign.name, "rank_by": campaign.rank_by, "runs": runs},
+            {
+                "campaign": campaign.name,
+                "rank_by": campaign.rank_by,
+                "mode": mode,
+                "runs": runs,
+            },
             indent=2,
         )
     )

@@ -7,7 +7,7 @@ description: QC methodology — compute metrics, validate results, spot suspicio
 
 ## Workflow
 
-1. `scieflow experiment compare workspace/<slug>/experiments/<campaign>` — ranking + validation per run.
+1. `scieflow experiment compare workspace/<slug>/experiments/<campaign>` — ranking + validation per run (`--direct` runs are listed, not ranked).
 2. `scieflow experiment report workspace/<slug>/experiments/<campaign>` — generates `report.md` and QC plots.
 3. **Look at the artifacts, not just the numbers.** Open the best run's
    output (`workspace/<slug>/experiments/<c>/runs/<id>/artifacts/`) and compare it visually

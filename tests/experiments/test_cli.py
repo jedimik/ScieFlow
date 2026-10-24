@@ -75,7 +75,7 @@ def test_compare_and_metrics_commands(project):
         "--pipelines-dir", str(project / "pipelines"),
     ])
     result = runner.invoke(
-        main, ["compare", str(project / "experiments/gain-sweep")]
+        main, ["compare", "--include-direct", str(project / "experiments/gain-sweep")]
     )
     assert result.exit_code == 0, result.output
     assert "gain-1.0" in result.output

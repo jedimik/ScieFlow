@@ -119,25 +119,37 @@ def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
     results_path = run_sweep(
         campaign, stage, experiments_dir, mode="direct" if direct else "apptainer"
     )
+    if direct:
+        click.echo(
+            "note: --direct runs are for development; they are recorded but not ranked "
+            "by compare/report (pass --include-direct to rank them).",
+            err=True,
+        )
     if budget_run is not None:
         actions.record_spend(budget_run, experiment_runs=len(campaign.expand()))
     click.echo(str(results_path))
 
 
 @experiment.command()
+@click.option("--include-direct", is_flag=True,
+              help="Rank --direct (development) runs too.")
 @click.argument("campaign_dir",
                 type=click.Path(exists=True, file_okay=False, path_type=Path))
-def compare(campaign_dir):
+def compare(campaign_dir, include_direct):
     """Rank a campaign's runs and check validation thresholds."""
-    comparison = compare_campaign(campaign_dir)
+    comparison = compare_campaign(campaign_dir, include_direct=include_direct)
     click.echo(f"campaign: {comparison['campaign']}  (ranked by {comparison['rank_by']})")
     for entry in comparison["ranked"]:
         flag = "PASS" if entry["validation"]["passed"] else "FAIL"
         value = entry["metrics"][comparison["rank_by"]]
         click.echo(f"  {entry['run_id']}  {comparison['rank_by']}={value:.4f}  [{flag}]")
+    for entry in comparison["direct"]:
+        click.echo(f"  {entry['run_id']}  [DIRECT, NOT RANKED]")
     for run_id in comparison["failed"]:
         click.echo(f"  {run_id}  [NOT RANKED]")
     click.echo(f"best: {comparison['best']}")
+    if comparison["direct"]:
+        click.echo("note: --direct runs are for development; pass --include-direct to rank them.")
 
 
 @experiment.command()
@@ -153,11 +165,13 @@ def metrics(run_dir):
 
 
 @experiment.command()
+@click.option("--include-direct", is_flag=True,
+              help="Rank --direct (development) runs too.")
 @click.argument("campaign_dir",
                 type=click.Path(exists=True, file_okay=False, path_type=Path))
-def report(campaign_dir):
+def report(campaign_dir, include_direct):
     """Generate report.md + QC plots for a campaign."""
-    click.echo(str(generate_report(campaign_dir)))
+    click.echo(str(generate_report(campaign_dir, include_direct=include_direct)))
 
 
 @experiment.group()

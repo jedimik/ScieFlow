@@ -64,9 +64,9 @@ def _plot(campaign_dir: Path, comparison: dict) -> Path:
     return out
 
 
-def generate_report(campaign_dir: str | Path) -> Path:
+def generate_report(campaign_dir: str | Path, include_direct: bool = False) -> Path:
     campaign_dir = Path(campaign_dir)
-    comparison = compare_campaign(campaign_dir)
+    comparison = compare_campaign(campaign_dir, include_direct=include_direct)
     campaign = yaml.safe_load((campaign_dir / "campaign.yaml").read_text())
     rank_by = comparison["rank_by"]
     metric_names = campaign["metrics"]
@@ -74,13 +74,23 @@ def generate_report(campaign_dir: str | Path) -> Path:
     lines = [f"# Campaign report: {comparison['campaign']}", ""]
     if campaign.get("notes"):
         lines += [f"> {campaign['notes']}", ""]
-    n_total = len(comparison["ranked"]) + len(comparison["failed"])
+    n_direct = len(comparison["direct"])
+    n_total = len(comparison["ranked"]) + len(comparison["failed"]) + n_direct
     best = comparison["best"]
     best_display = f"`{best}`" if best is not None else "n/a (no runs ranked)"
     lines += [
         f"- runs: {n_total} ({len(comparison['failed'])} failed)",
         f"- ranked by: `{rank_by}`",
         f"- best run: {best_display}",
+    ]
+    if n_direct:
+        lines.append(f"- direct runs (dev-only, not ranked): {n_direct}")
+    if include_direct:
+        lines.append("- direct runs are included in the ranking (development only)")
+    if comparison["mode_unknown"]:
+        unknown = ", ".join(f"`{r}`" for r in comparison["mode_unknown"])
+        lines.append(f"- runs with unknown mode (ranked as recorded): {unknown}")
+    lines += [
         "",
         "## Results",
         "",
@@ -93,7 +103,16 @@ def generate_report(campaign_dir: str | Path) -> Path:
             f"{entry['metrics'].get(m, float('nan')):.4f}" for m in metric_names
         )
         flag = "PASS" if entry["validation"]["passed"] else "FAIL"
-        lines.append(f"| `{entry['run_id']}` | {params} | {values} | {flag} |")
+        tag = " (direct)" if entry["mode"] == "direct" else ""
+        lines.append(f"| `{entry['run_id']}`{tag} | {params} | {values} | {flag} |")
+    for entry in comparison["direct"]:
+        params = ", ".join(f"{k}={v}" for k, v in sorted(entry["params"].items()))
+        values = " | ".join(
+            f"{entry['metrics'].get(m, float('nan')):.4f}" for m in metric_names
+        )
+        lines.append(
+            f"| `{entry['run_id']}` (direct) | {params} | {values} | DIRECT, NOT RANKED |"
+        )
     for run_id in comparison["failed"]:
         lines.append(f"| `{run_id}` | — | " + " | ".join(["—"] * len(metric_names)) + " | NOT RANKED |")
 
