@@ -106,7 +106,7 @@ def project(tmp_path):
     ws = tmp_path / "workspace" / "r1"
     (ws / "logs").mkdir(parents=True)
     # A real run always carries config.yml beside status.yml (run/init.py).
-    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
+    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\nassignments:\n  loop.experiment: [stub, stub2, sleepy, sleepy_turn, stub_disabled, tracer, envcli, claude, codex, probe, outcome, writer]\n")
     status.write_status(ws, status.new_status("r1", "autonomous"))
     return Project(tmp_path)
 

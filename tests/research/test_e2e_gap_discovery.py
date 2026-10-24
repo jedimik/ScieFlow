@@ -46,6 +46,10 @@ def make_root(tmp_path: Path):
 def test_gap_discovery_pipeline(tmp_path, child_env):
     root, ws = make_root(tmp_path)
     rel = ws.relative_to(root)
+    (ws / "config.yml").write_text("assignments:\n  research.search: [stub_a, stub_b, stub_c]\n"
+                                   "  research.gap-analysis: [stub_a, stub_b, stub_c]\n"
+                                   "  research.debate: [stub_a, stub_b, stub_c]\n")
+    (ws / "status.yml").write_text("workflow: gap-discovery\nslug: 2026-07-e2e-gaps\n")
 
     # Phase 1: intake — manifest + processing description, validated
     (ws / "inputs" / "results" / "metrics.csv").write_text("model,acc\nstub,0.9\n")
@@ -58,7 +62,7 @@ def test_gap_discovery_pipeline(tmp_path, child_env):
     for a in AGENTS:
         prompt = ws / "prompts" / f"search-{a}.md"
         prompt.write_text(f"search task\noutput: {rel}/findings/{a}.json\nkind: findings\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(prompt),
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", "--role", "research.search", a, str(prompt),
             str(ws / "logs" / f"search-{a}.log")], cwd=root, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",
             str(ws / "findings" / f"{a}.json")], cwd=root)
@@ -67,7 +71,7 @@ def test_gap_discovery_pipeline(tmp_path, child_env):
     for a in AGENTS:
         prompt = ws / "prompts" / f"gaps-{a}.md"
         prompt.write_text(f"gap task\noutput: {rel}/gaps/{a}.json\nkind: gaps\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(prompt),
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", "--role", "research.gap-analysis", a, str(prompt),
             str(ws / "logs" / f"gaps-{a}.log")], cwd=root, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",
             str(ws / "gaps" / f"{a}.json"), "--schema", "gaps"], cwd=root)
@@ -76,11 +80,11 @@ def test_gap_discovery_pipeline(tmp_path, child_env):
     for a in AGENTS:
         p0 = ws / "prompts" / f"debate-propose-{a}.md"
         p0.write_text(f"propose\noutput: {rel}/debate/round-0/{a}.md\nkind: perspective\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(p0),
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", "--role", "research.debate", a, str(p0),
             str(ws / "logs" / f"debate-0-{a}.log")], cwd=root, env=child_env)
         p1 = ws / "prompts" / f"debate-round-1-{a}.md"
         p1.write_text(f"discuss\noutput: {rel}/debate/round-1/{a}.md\nkind: debate-response\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(p1),
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", "--role", "research.debate", a, str(p1),
             str(ws / "logs" / f"debate-1-{a}.log")], cwd=root, env=child_env)
     assert len(list((ws / "debate" / "round-0").glob("*.md"))) == 3
     assert len(list((ws / "debate" / "round-1").glob("*.md"))) == 3
@@ -202,7 +206,8 @@ def test_robin_gap_discovery_end_to_end_within_the_scite_budget(robin):
               "debate/round-0", "debate/round-1", "reflection", "discovery", "report"):
         (ws / d).mkdir(parents=True)
     (ws / "config.yml").write_text(yaml.safe_dump({
-        "assignments": {"research.gap-analysis": list(FAMILIES),
+        "assignments": {"research.search": list(FAMILIES),
+                        "research.gap-analysis": list(FAMILIES),
                         "research.debate": list(FAMILIES)},
         "review": {"scite": "approved"}}, sort_keys=False))
     (ws / "status.yml").write_text(yaml.safe_dump(
@@ -215,7 +220,7 @@ def test_robin_gap_discovery_end_to_end_within_the_scite_budget(robin):
     for a in FAMILIES:
         p = ws / "prompts" / f"search-{a}.md"
         p.write_text(f"search task\noutput: {rel}/findings/{a}.json\nkind: findings\n")
-        dispatch(root, a, p, ws / "logs" / f"search-{a}.log")
+        dispatch(root, a, p, ws / "logs" / f"search-{a}.log", role="research.search")
 
     # Phase 3, steps 1-2: evidence map + typed detectors (plan first: sends nothing)
     (ws / "discovery" / "query.yml").write_text(yaml.safe_dump({
@@ -249,7 +254,7 @@ def test_robin_gap_discovery_end_to_end_within_the_scite_budget(robin):
     for a in FAMILIES:
         p = ws / "prompts" / f"hypotheses-{a}.md"
         p.write_text(f"hypotheses\noutput: {rel}/hypotheses/{a}.json\nkind: gaps\ngap-id: G3\n")
-        dispatch(root, a, p, ws / "logs" / f"hypotheses-{a}.log")
+        dispatch(root, a, p, ws / "logs" / f"hypotheses-{a}.log", role="research.gap-analysis")
     cli("discover", "pool", GAP_SLUG)
     pooled = json.loads((ws / "discovery" / "hypotheses.json").read_text())["hypotheses"]
     assert [(h["id"], h["author"], h["family"]) for h in pooled] == [
@@ -260,14 +265,14 @@ def test_robin_gap_discovery_end_to_end_within_the_scite_budget(robin):
         for n, kind in ((0, "perspective"), (1, "debate-response")):
             p = ws / "prompts" / f"debate-{n}-{a}.md"
             p.write_text(f"debate\noutput: {rel}/debate/round-{n}/{a}.md\nkind: {kind}\n")
-            dispatch(root, a, p, ws / "logs" / f"debate-{n}-{a}.log")
+            dispatch(root, a, p, ws / "logs" / f"debate-{n}-{a}.log", role="research.debate")
     cli("discover", "debate-status", GAP_SLUG, "H1=consensus", "H2=disputed")
 
     # step 6: blind reflection, then the free pre-check (providers off: nothing sent)
     for a in FAMILIES:
         p = ws / "prompts" / f"reflect-{a}.md"
         p.write_text(f"reflect\noutput: {rel}/reflection/{a}.md\nkind: critique\n")
-        dispatch(root, a, p, ws / "logs" / f"reflect-{a}.log")
+        dispatch(root, a, p, ws / "logs" / f"reflect-{a}.log", role="research.debate")
 
     def tournament_round(r):
         planned = json.loads(cli("discover", "precheck", GAP_SLUG, "--round", str(r), "--plan"))

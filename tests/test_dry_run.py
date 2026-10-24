@@ -20,6 +20,14 @@ KIND_FOR_PHASE = {
     "literature": "literature",
     "synthesize": "synthesis",
 }
+ROLE_FOR_PHASE = {
+    # Roles the run assigns the stub. hypothesize and synthesize have no role of their own
+    # (coordinator judgment, skills/synthesis: "no dispatch"); the stand-in names the nearest.
+    "hypothesize": "loop.experiment",
+    "experiment": "loop.experiment",
+    "literature": "loop.literature",
+    "synthesize": "loop.experiment",
+}
 FILE_FOR_PHASE = {
     "hypothesize": "hypothesis.md",
     "experiment": "results-summary.md",
@@ -28,14 +36,14 @@ FILE_FOR_PHASE = {
 }
 
 
-def dispatch_stub(ws: Path, kind: str, out_path: Path, env: dict) -> None:
+def dispatch_stub(ws: Path, kind: str, out_path: Path, env: dict, role: str) -> None:
     prompt = ws / "logs" / f"{kind}.prompt.md"
     prompt.write_text(f"output: {out_path}\nkind: {kind}\n")
     transcript = ws / "logs" / f"{kind}.transcript.md"
     # S25fix1 (finding 1b): the sandbox is incidental to the dry run (no credential in ROOT's
     # policy, and the dry run must not write one there), so the dispatch is unsandboxed.
     subprocess.run(
-        [sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox",
+        [sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", "--role", role,
          "stub", str(prompt), str(transcript)],
         check=True, env=env,
     )
@@ -47,8 +55,9 @@ def test_full_iteration_then_low_budget_checkpoint(tmp_path, child_env):
     ws = sfx_init.init_workspace(
         "dry-run", goal, tmp_path / "workspace",
         {"approval": "autonomous", "max_iterations": 1,
-         "max_experiment_runs": 6, "max_wall_minutes": 60},
-        ROOT,
+         "max_experiment_runs": 6, "max_wall_minutes": 60,
+         "assignments": {"loop.experiment": ["stub"], "loop.literature": ["stub"]}},
+         ROOT,
     )
     it_dir = ws / "iterations" / "1"
     it_dir.mkdir()
@@ -57,7 +66,8 @@ def test_full_iteration_then_low_budget_checkpoint(tmp_path, child_env):
     st = status_mod.read_status(ws)
     while (phase := status_mod.next_pending(st)) is not None:
         status_mod.write_status(ws, status_mod.mark(st, phase, "running"))
-        dispatch_stub(ws, KIND_FOR_PHASE[phase], it_dir / FILE_FOR_PHASE[phase], child_env)
+        dispatch_stub(ws, KIND_FOR_PHASE[phase], it_dir / FILE_FOR_PHASE[phase], child_env,
+                       ROLE_FOR_PHASE[phase])
         assert (it_dir / FILE_FOR_PHASE[phase]).exists()
         st = status_mod.mark(st, phase, "done")
         status_mod.write_status(ws, st)
@@ -68,7 +78,7 @@ def test_full_iteration_then_low_budget_checkpoint(tmp_path, child_env):
 
     # Notebook entry: produced, validated, appended
     entry_path = it_dir / "notebook-entry.md"
-    dispatch_stub(ws, "notebook-entry", entry_path, child_env)
+    dispatch_stub(ws, "notebook-entry", entry_path, child_env, "loop.experiment")
     entry = entry_path.read_text()
     assert validate_mod.validate_notebook_entry(entry) == []
     with (ws / "notebook.md").open("a") as fh:

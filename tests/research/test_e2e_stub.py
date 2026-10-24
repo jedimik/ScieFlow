@@ -27,6 +27,9 @@ def make_root(tmp_path: Path) -> tuple[Path, Path, dict]:
     ws = tmp_path / "workspace" / "2026-07-e2e"
     for d in ("prompts", "logs", "findings", "reviews", "report"):
         (ws / d).mkdir(parents=True)
+    (ws / "config.yml").write_text("assignments:\n  research.search: [stub_a, stub_b, stub_c]\n"
+                                   "  research.cross-review: [stub_a, stub_b, stub_c]\n")
+    (ws / "status.yml").write_text("workflow: lit-review\nslug: 2026-07-e2e\n")
 
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -53,7 +56,7 @@ def test_lit_review_pipeline(tmp_path, child_env):
     for a in AGENTS:
         prompt = ws / "prompts" / f"search-{a}.md"
         prompt.write_text(f"search task\noutput: {rel}/findings/{a}.json\nkind: findings\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", a, str(prompt),
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", "--role", "research.search", a, str(prompt),
             str(ws / "logs" / f"search-{a}.log")], cwd=root, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",
             str(ws / "findings" / f"{a}.json")], cwd=root)
@@ -62,7 +65,7 @@ def test_lit_review_pipeline(tmp_path, child_env):
     for r, a in itertools.permutations(AGENTS, 2):
         prompt = ws / "prompts" / f"review-{r}-on-{a}.md"
         prompt.write_text(f"review task\noutput: {rel}/reviews/{r}-on-{a}.json\nkind: review\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", r, str(prompt),
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", "--role", "research.cross-review", r, str(prompt),
             str(ws / "logs" / f"review-{r}-on-{a}.log")], cwd=root, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",
             str(ws / "reviews" / f"{r}-on-{a}.json"), "--schema", "review"], cwd=root)

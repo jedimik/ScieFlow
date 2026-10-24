@@ -23,6 +23,9 @@ from scieflow.core import agent_run, events, sandbox, service
 from scieflow.core.project import Project
 from scieflow.core.run import budget, status
 
+ROLE = "loop.experiment"   # M-A A-5: a dispatch inside a run names its role
+
+
 W = Path(sandbox.__file__).resolve().parents[3]
 HAVE_BWRAP = shutil.which("bwrap") is not None
 needs_bwrap = pytest.mark.skipif(not HAVE_BWRAP, reason="bubblewrap not installed")
@@ -87,7 +90,7 @@ def _repo(tmp_path: Path, agent: str = "tracer", cmd: str = "/bin/sh -c {prompt}
     (tmp_path / "schemas" / "status.yml").write_text((W / "schemas" / "status.yml").read_text())
     ws = tmp_path / "workspace" / "r1"
     (ws / "logs").mkdir(parents=True)
-    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
+    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\nassignments:\n  loop.experiment: [stub, stub2, sleepy, sleepy_turn, stub_disabled, tracer, envcli, claude, codex, probe, outcome, writer]\n")
     status.write_status(ws, status.new_status("r1", "autonomous"))
     budget.write_budget(ws, budget.new_budget(3, 10, 60))
     return Project(tmp_path)
@@ -265,7 +268,7 @@ def test_s5_a_leaky_wrap_on_the_cli_is_exit_77_and_job_refused(monkeypatch, tmp_
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sandbox, "wrap", _leaky(lambda: LEAKS[leak](home)))
     with pytest.raises(SystemExit) as exc:
-        agent_run.main(["tracer", str(prompt), str(run / "logs" / "t.md")])
+        agent_run.main(["--role", ROLE, "tracer", str(prompt), str(run / "logs" / "t.md")])
     assert exc.value.code == 77
     assert "job.refused" in _event_types(run)
 
@@ -281,7 +284,7 @@ def test_s5_a_leaky_wrap_on_the_service_path_is_service_error_and_job_refused(
     prompt.write_text("echo hi")
     monkeypatch.setattr(sandbox, "wrap", _leaky(lambda: LEAKS[leak](home)))
     with pytest.raises(service.ServiceError):
-        service.dispatch_agent(project, "tracer", prompt, run / "logs" / "t.md")
+        service.dispatch_agent(project, "tracer", prompt, run / "logs" / "t.md", role=ROLE)
     assert "job.refused" in _event_types(run)
 
 
@@ -382,7 +385,7 @@ def test_s4_residual_a_foreign_owner_is_exit_77_on_the_cli_and_bad_mode_in_docto
     real_getuid = os.getuid
     monkeypatch.setattr(sandbox.os, "getuid", lambda: real_getuid() + 1)
     with pytest.raises(SystemExit) as exc:
-        agent_run.main(["tracer", str(prompt), str(run / "logs" / "t.md")])
+        agent_run.main(["--role", ROLE, "tracer", str(prompt), str(run / "logs" / "t.md")])
     assert exc.value.code == 77
     lines = sandbox.doctor_lines(project)
     assert any("tracer:" in line and "bad-mode" in line for line in lines), lines
@@ -514,7 +517,7 @@ def test_f11_a_hard_linked_token_is_refused_on_the_cli_with_a_named_reason(
     prompt.write_text("echo hi")
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as exc:
-        agent_run.main(["tracer", str(prompt), str(run / "logs" / "t.md")])
+        agent_run.main(["--role", ROLE, "tracer", str(prompt), str(run / "logs" / "t.md")])
     assert exc.value.code == 77
     assert "job.refused" in _event_types(run)
     assert "hard link" in (run / "logs" / "t.md").read_text()

@@ -5,6 +5,9 @@ import pytest
 from scieflow.core import service
 
 
+ROLE = "loop.experiment"   # M-A A-5: a dispatch inside a run names its role
+
+
 @pytest.fixture
 def running_turn(project):
     """A turn already in flight for r1: a still-running job dispatched
@@ -38,7 +41,7 @@ def test_dispatch_blocking_records_a_job(project):
     out = ws / "iterations" / "h.md"
     prompt = ws / "logs" / "p.md"
     prompt.write_text(f"output: {out}\nkind: hypothesis\n")
-    job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md", role=ROLE)
     assert job["state"] == "done" and out.exists()
     assert (ws / "logs" / "t.md").exists()
     assert service.run_detail(project, "r1")["jobs"][0]["id"] == job["id"]
@@ -48,7 +51,7 @@ def test_dispatch_detached_then_cancel(project):
     ws = project.run_dir("r1")
     prompt = ws / "logs" / "p.md"
     prompt.write_text("hi")
-    job = service.dispatch_agent(project, "sleepy", prompt, ws / "logs" / "t.md", detach=True)
+    job = service.dispatch_agent(project, "sleepy", prompt, ws / "logs" / "t.md", detach=True, role=ROLE)
     assert job["state"] == "running"
     cancelled = service.cancel_job(project, job["id"])
     assert cancelled["state"] == "cancelled"
@@ -83,7 +86,7 @@ def test_dispatch_through_the_service_is_sandboxed(project, monkeypatch):
     ws = project.run_dir("r1")
     prompt = ws / "logs" / "p.md"
     prompt.write_text(f"output: {ws / 'out.md'}\nkind: hypothesis\n")
-    service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md", role=ROLE)
     assert seen["sandbox_writable"] is not None
     assert ws in seen["sandbox_writable"]
 
@@ -96,7 +99,7 @@ def test_service_dispatch_refuses_without_a_sandbox(project, monkeypatch):
     prompt = ws / "logs" / "p.md"
     prompt.write_text("go\n")
     with pytest.raises(service.ServiceError, match="bubblewrap"):
-        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md", role=ROLE)
 
 
 def test_service_refusal_leaves_a_job_refused_event_on_the_timeline(project, monkeypatch):
@@ -109,7 +112,7 @@ def test_service_refusal_leaves_a_job_refused_event_on_the_timeline(project, mon
     prompt = ws / "logs" / "p.md"
     prompt.write_text("go\n")
     with pytest.raises(service.ServiceError):
-        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md", role=ROLE)
     refused = [e for e in events.read(ws) if e["type"] == "job.refused"]
     assert len(refused) == 1
     assert refused[0]["data"]["reason"] == "sandbox"
@@ -126,7 +129,7 @@ def test_service_escape_hatch_leaves_a_sandbox_disabled_event(project):
         "unsandboxed_runs:\n  - slug: r1\n    reason: a human decided\n")
     prompt = ws / "logs" / "p.md"
     prompt.write_text(f"output: {ws / 'out.md'}\nkind: hypothesis\n")
-    job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md", role=ROLE)
     assert job["state"] == "done"
     disabled = [e for e in events.read(ws) if e["type"] == "sandbox.disabled"]
     assert len(disabled) == 1
@@ -144,7 +147,7 @@ def test_service_ignores_a_run_config_that_tries_to_disable_the_sandbox(project)
     prompt = ws / "logs" / "p.md"
     prompt.write_text(f"output: {out}\nkind: hypothesis\n")
     with pytest.raises(service.ServiceError, match="config/sandbox.yml"):
-        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+        service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md", role=ROLE)
     assert not out.exists()
 
 
@@ -155,7 +158,7 @@ def test_normal_sandboxed_dispatch_leaves_neither_event(project):
     ws = project.run_dir("r1")
     prompt = ws / "logs" / "p.md"
     prompt.write_text(f"output: {ws / 'out.md'}\nkind: hypothesis\n")
-    job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md")
+    job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / "t.md", role=ROLE)
     assert job["state"] == "done"
     types = {e["type"] for e in events.read(ws)}
     assert "job.refused" not in types
@@ -280,7 +283,7 @@ def test_a_non_turn_agent_job_does_not_block_say(project):
     prompt = ws / "logs" / "campaign.md"
     prompt.write_text("hi")
     job = service.dispatch_agent(project, "sleepy", prompt, ws / "logs" / "campaign.out.md",
-                                 detach=True)   # kind="agent", not a turn
+                                 detach=True, role=ROLE)   # kind="agent", not a turn
     try:
         assert service.conversation_state(project, "r1")["busy"] is False
         result = service.say(project, "r1", "kind: conversation\nstill there?")

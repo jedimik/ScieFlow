@@ -369,7 +369,7 @@ uv run scieflow research validate workspace/<slug>/inputs/manifest.yml --schema 
 uv run scieflow research check-citations --workspace workspace/<slug>
 
 # dispatch one agent headless with a prompt file
-uv run scieflow agent run agy workspace/<slug>/prompts/search-agy.md workspace/<slug>/logs/search-agy.log
+uv run scieflow agent run --role research.search agy workspace/<slug>/prompts/search-agy.md workspace/<slug>/logs/search-agy.log
 
 # export selected papers to Zotero + bib
 uv run scieflow research zotero-export --workspace workspace/<slug>

@@ -30,7 +30,7 @@ when to stop.
    its sandbox confines is refused (`docs/sandbox.md`).
 2. Inter-agent communication is file-based only: write a prompt file to
    `workspace/<slug>/logs/`, then run
-   `uv run scieflow agent run <agent> <prompt> <transcript>` (sub-agents run
+   `uv run scieflow agent run --role <role> <agent> <prompt> <transcript>` (sub-agents run
    from the repo root).
 3. **Approval contract.** `per-campaign`: present each proposed campaign
    YAML to the user and wait for approval before any experiment runs.

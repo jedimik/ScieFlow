@@ -10,6 +10,9 @@ from scieflow.core.project import Project
 from scieflow.core.run import actions, init, status
 
 ROOT = Path(__file__).resolve().parents[1]
+ROLE_FOR_PHASE = {  # see tests/test_dry_run.py: nearest role per phase
+    "hypothesize": "loop.experiment", "experiment": "loop.experiment",
+    "literature": "loop.literature", "synthesize": "loop.experiment"}
 KIND = {"hypothesize": "hypothesis", "experiment": "results-summary",
         "literature": "literature", "synthesize": "synthesis"}
 
@@ -33,7 +36,8 @@ def test_one_iteration_end_to_end(tmp_path, monkeypatch):
     goal.write_text("# Goal\nDry run through the service core.\n")
     ws = init.init_workspace("e2e", goal, tmp_path / "workspace",
                              {"approval": "autonomous", "max_iterations": 1,
-                              "max_experiment_runs": 6, "max_wall_minutes": 60}, ROOT)
+                              "max_experiment_runs": 6, "max_wall_minutes": 60,
+                              "assignments": {"loop.experiment": ["stub"], "loop.literature": ["stub"]}}, ROOT)
     it = ws / "iterations" / "1"
     it.mkdir()
 
@@ -46,7 +50,8 @@ def test_one_iteration_end_to_end(tmp_path, monkeypatch):
                          rationale="inside the approved budget and scope")
         prompt = ws / "logs" / f"{kind}.md"
         prompt.write_text(f"output: {it / (kind + '.md')}\nkind: {kind}\n")
-        job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / f"{kind}.t.md")
+        job = service.dispatch_agent(project, "stub", prompt, ws / "logs" / f"{kind}.t.md",
+                                     role=ROLE_FOR_PHASE[phase])
         assert job["state"] == "done"
         actions.mark_phase(ws, phase, "done")
 
