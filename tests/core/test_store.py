@@ -31,6 +31,9 @@ BUMP = """
 import sys
 from pathlib import Path
 from scieflow.core import store
+# The test is about lost updates, not lock latency: on a loaded shared host a cold interpreter can wait
+# longer than the production 30 s cap for its turn. 300 s still fails a real deadlock.
+store.LOCK_TIMEOUT = 300
 for _ in range(int(sys.argv[2])):
     store.update_yaml(Path(sys.argv[1]), lambda d: {**d, "n": d.get("n", 0) + 1})
 """
@@ -42,7 +45,7 @@ def test_concurrent_updates_never_lose_or_corrupt(tmp_path):
     store.write_yaml(path, {"n": 0})
     procs = [subprocess.Popen([sys.executable, "-c", BUMP, str(path), "25"])
              for _ in range(6)]
-    assert all(p.wait(timeout=120) == 0 for p in procs)
+    assert all(p.wait(timeout=600) == 0 for p in procs)
     assert yaml.safe_load(path.read_text()) == {"n": 150}
 
 

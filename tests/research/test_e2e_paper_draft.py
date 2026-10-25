@@ -52,6 +52,9 @@ def test_paper_draft_pipeline(tmp_path, child_env):
               "manuscript/sections", "report"):
         (ws / d).mkdir(parents=True)
     rel = ws.relative_to(tmp_path)
+    (ws / "config.yml").write_text("assignments:\n  research.draft-authors: [stub_a, stub_b]\n"
+                                   "  research.draft-reviewers: [stub_a, stub_b]\n")
+    (ws / "status.yml").write_text("workflow: paper-draft\nslug: 2026-07-e2e-draft\n")
 
     # Phase 1: intake
     (ws / "inputs" / "results" / "metrics.csv").write_text("model,acc\nstub,0.9\n")
@@ -73,7 +76,7 @@ def test_paper_draft_pipeline(tmp_path, child_env):
                 f"draft\noutput: {rel}/manuscript/drafts/{agent}/{section}.tex\n"
                 "kind: tex-section\n"
             )
-            sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", agent,
+            sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", "--role", "research.draft-authors", agent,
                 str(prompt), str(ws / "logs" / f"draft-{agent}-{section}.log")],
                cwd=tmp_path, env=child_env)
         for section in SECTIONS:
@@ -86,7 +89,7 @@ def test_paper_draft_pipeline(tmp_path, child_env):
         prompt = ws / "prompts" / f"xreview-{reviewer}-round-1.md"
         out = f"{rel}/review/draft-round-1/{reviewer}-on-{author}.json"
         prompt.write_text(f"review\noutput: {out}\nkind: manuscript-review\n")
-        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", reviewer,
+        sh([sys.executable, "-m", "scieflow.core.agent_run", "--no-sandbox", "--role", "research.draft-reviewers", reviewer,
             str(prompt), str(ws / "logs" / f"xreview-{reviewer}.log")],
            cwd=tmp_path, env=child_env)
         sh([sys.executable, "-m", "scieflow.research.validate",

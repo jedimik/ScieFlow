@@ -14,6 +14,9 @@ import yaml
 
 REQUIRED_KEYS = ["host", "user", "auth", "scheduler", "allowed_dirs",
                  "allowed_ops", "limits"]
+# Schedulers the remote runner can drive. M-E turns this into an adapter registry.
+SCHEDULERS = ("pbs",)
+
 REQUIRED_LIMITS = [
     "max_walltime",
     "max_cpus",
@@ -66,6 +69,13 @@ def load_remote(root: Path, name: str) -> Remote:
     missing = [k for k in REQUIRED_KEYS if k not in entry]
     if missing:
         raise PolicyError(f"remote '{name}' missing keys: {', '.join(missing)}")
+    scheduler = entry["scheduler"]
+    if not isinstance(scheduler, str) or scheduler not in SCHEDULERS:
+        raise PolicyError(
+            f"scheduler {scheduler!r} is not supported (supported: "
+            f"{', '.join(SCHEDULERS)}); other schedulers come with the "
+            "scheduler seam (M-E)"
+        )
     missing = [k for k in REQUIRED_LIMITS if k not in entry["limits"]]
     if missing:
         raise PolicyError(f"remote '{name}' limits missing: {', '.join(missing)}")

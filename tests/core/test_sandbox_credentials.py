@@ -25,6 +25,9 @@ from scieflow.core import agent_run, events, jobs, sandbox, service
 from scieflow.core.project import Project
 from scieflow.core.run import budget, status
 
+ROLE = "loop.experiment"   # M-A A-5: a dispatch inside a run names its role
+
+
 W = Path(sandbox.__file__).resolve().parents[3]
 HAVE_BWRAP = shutil.which("bwrap") is not None
 needs_bwrap = pytest.mark.skipif(not HAVE_BWRAP, reason="bubblewrap not installed")
@@ -83,7 +86,7 @@ def _project(tmp_path: Path, agents: dict, credentials: dict | None) -> Project:
     (tmp_path / "schemas" / "status.yml").write_text((W / "schemas" / "status.yml").read_text())
     ws = tmp_path / "workspace" / "r1"
     (ws / "logs").mkdir(parents=True, exist_ok=True)
-    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
+    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\nassignments:\n  loop.experiment: [stub, alpha, beta, stub2, sleepy, sleepy_turn, stub_disabled, tracer, envcli, claude, codex, probe, outcome, writer]\n")
     status.write_status(ws, status.new_status("r1", "autonomous"))
     budget.write_budget(ws, budget.new_budget(3, 10, 60))
     if credentials is not None:
@@ -303,7 +306,7 @@ def test_s4_bwrap_environment_is_the_allow_list_and_no_host_secret_is_visible(tm
     run = project.run_dir("r1")
     prompt = run / "logs" / "p.md"
     prompt.write_text("hi")
-    d = agent_run.prepare(project, "probe", prompt, run)
+    d = agent_run.prepare(project, "probe", prompt, run, role=ROLE)
     job = jobs.run_blocking(project, d.argv, kind="agent", cwd=d.cwd, run_dir=d.run_dir,
                             label="probe", timeout_s=60, sandbox_writable=d.writable,
                             sandbox_layout=d.layout, env=d.env)
@@ -345,7 +348,7 @@ def test_s4_a_token_reaches_only_its_own_agent(tmp_path):
     for agent in ("alpha", "beta"):
         prompt = run / "logs" / f"{agent}.md"
         prompt.write_text(agent)
-        d = agent_run.prepare(project, agent, prompt, run)
+        d = agent_run.prepare(project, agent, prompt, run, role=ROLE)
         job = jobs.run_blocking(project, d.argv, kind="agent", cwd=d.cwd, run_dir=d.run_dir,
                                 label=agent, timeout_s=60, sandbox_writable=d.writable,
                                 sandbox_layout=d.layout, env=d.env)
@@ -375,11 +378,11 @@ def test_s4_the_token_is_never_written_to_the_run_state_or_refusals(
     if outcome == "refusal":
         os.chmod(sandbox.credentials_dir() / "fixture.token", 0o644)
     if outcome != "refusal":
-        d = agent_run.prepare(project, "outcome", prompt, run)
+        d = agent_run.prepare(project, "outcome", prompt, run, role=ROLE)
         assert token not in repr(d)
     code = 0
     try:
-        agent_run.main(["outcome", str(prompt), str(transcript), "--cwd", str(run)])
+        agent_run.main(["--role", ROLE, "outcome", str(prompt), str(transcript), "--cwd", str(run)])
     except SystemExit as exc:
         code = exc.code
     assert code == {"success": 0, "failure": 3, "refusal": 77}[outcome], code
@@ -418,7 +421,7 @@ def test_s4_a_credential_is_refused_for_a_cli_inside_a_writable_grant(tmp_path):
     prompt = run / "logs" / "p.md"
     prompt.write_text("hi")
     with pytest.raises(sandbox.SandboxError, match="inside"):
-        agent_run.prepare(project, "claude", prompt, run)
+        agent_run.prepare(project, "claude", prompt, run, role=ROLE)
 
 
 @pytest.mark.parametrize("prefix, ok", [
@@ -434,11 +437,11 @@ def test_s4_env_prefix_names_are_limited_when_a_credential_is_handed_over(tmp_pa
     prompt = project.run_dir("r1") / "logs" / "p.md"
     prompt.write_text("hi")
     if ok:
-        d = agent_run.prepare(project, "claude", prompt)
+        d = agent_run.prepare(project, "claude", prompt, role=ROLE)
         assert d.writable is not None and d.env is not None
     else:
         with pytest.raises(sandbox.SandboxError):
-            agent_run.prepare(project, "claude", prompt)
+            agent_run.prepare(project, "claude", prompt, role=ROLE)
 
 
 # --- missing credentials: exit 77 with the exact instruction (C10) -----------
@@ -448,7 +451,7 @@ def test_s4_a_missing_claude_entry_names_the_setup_steps(tmp_path):
     prompt = project.run_dir("r1") / "logs" / "p.md"
     prompt.write_text("hi")
     with pytest.raises(sandbox.SandboxError) as exc:
-        agent_run.prepare(project, "claude", prompt)
+        agent_run.prepare(project, "claude", prompt, role=ROLE)
     text = str(exc.value)
     assert "claude setup-token" in text and "chmod 600" in text and "credentials:" in text
     assert str(sandbox.credentials_dir() / "claude.token") in text
@@ -459,7 +462,7 @@ def test_s4_a_missing_entry_for_another_agent_names_the_entry_to_add(tmp_path):
     prompt = project.run_dir("r1") / "logs" / "p.md"
     prompt.write_text("hi")
     with pytest.raises(sandbox.SandboxError, match="codex"):
-        agent_run.prepare(project, "codex", prompt)
+        agent_run.prepare(project, "codex", prompt, role=ROLE)
 
 
 def test_s4_a_missing_entry_is_exit_77_and_job_refused_on_the_cli(tmp_path, monkeypatch):
@@ -469,7 +472,7 @@ def test_s4_a_missing_entry_is_exit_77_and_job_refused_on_the_cli(tmp_path, monk
     prompt.write_text("hi")
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as exc:
-        agent_run.main(["claude", str(prompt), str(run / "logs" / "t.md")])
+        agent_run.main(["--role", ROLE, "claude", str(prompt), str(run / "logs" / "t.md")])
     assert exc.value.code == 77
     assert "job.refused" in [e["type"] for e in events.read(run)]
 
@@ -480,7 +483,7 @@ def test_s4_a_missing_entry_is_a_service_error_and_job_refused(tmp_path):
     prompt = run / "logs" / "p.md"
     prompt.write_text("hi")
     with pytest.raises(service.ServiceError, match="setup-token"):
-        service.dispatch_agent(project, "claude", prompt, run / "logs" / "t.md")
+        service.dispatch_agent(project, "claude", prompt, run / "logs" / "t.md", role=ROLE)
     assert "job.refused" in [e["type"] for e in events.read(run)]
 
 
@@ -488,7 +491,7 @@ def test_s4_an_unsandboxed_dispatch_needs_no_credential_and_no_env(tmp_path):
     project = _repo(tmp_path, "claude", "/bin/true {prompt}", credentials=False)
     prompt = project.run_dir("r1") / "logs" / "p.md"
     prompt.write_text("hi")
-    d = agent_run.prepare(project, "claude", prompt, sandbox_enabled=False)
+    d = agent_run.prepare(project, "claude", prompt, sandbox_enabled=False, role=ROLE)
     assert d.writable is None and d.env is None
 
 
@@ -539,7 +542,7 @@ def test_s4_a_bind_credential_is_carried_into_the_layout_and_adds_no_env_var(
                                   "target": ".codex/auth.json", "reason": "codex login"}})
     prompt = project.run_dir("r1") / "logs" / "p.md"
     prompt.write_text("hi")
-    d = agent_run.prepare(project, "codex", prompt)
+    d = agent_run.prepare(project, "codex", prompt, role=ROLE)
     home_dir = sandbox.agent_home(project.run_dir("r1"), "codex")
     assert d.layout.binds == (((home / ".codex" / "auth.json").resolve(),
                                home_dir / ".codex" / "auth.json", False),)

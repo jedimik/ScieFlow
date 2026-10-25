@@ -1,0 +1,65 @@
+# Parity between the web service layer and the `scieflow` command tree (M-A T5, A-9).
+#
+# One entry per public module-level function of scieflow.core.service (44 on
+# this base). Fields:
+#   cli:   a command path in the assembled `scieflow` tree, walked with
+#          get_command (lazy groups included).
+#   new:   true when M-A T5 adds this command; test (c) then invokes it.
+#   args:  argv used to invoke a `new` command. `{tmp}` is replaced by a
+#          per-test temporary directory.
+#   allow: why the function has no terminal command. A reason, never a
+#          write capability hidden behind it.
+#
+# A new public service function without an entry here fails test (a).
+# An added or removed function updates this table; it is not a test to work around.
+
+functions:
+  # --- allow: internal helpers and web-only aggregates -------------------------
+  run_workspace: {allow: "internal path helper"}
+  job_json: {allow: "internal serialiser"}
+  list_runs_with_budget: {allow: "web dashboard aggregate (M-I)"}
+  workflows: {allow: "web form choices (M-I)"}
+  conversational_agents: {allow: "web picker choices (M-I)"}
+  preview_busy: {allow: "web button-state poll; `run preview` reports the job state (M-I)"}
+  run_overview: {allow: "web page aggregate (M-I)"}
+
+  # --- existing commands ---------------------------------------------------------
+  list_runs: {cli: "run list"}
+  run_detail: {cli: "run show"}
+  create_run: {cli: "run init"}
+  run_events: {cli: "run events"}
+  dispatch_agent: {cli: "agent run"}
+  open_gates: {cli: "gate list"}
+  answer_gate: {cli: "gate answer"}
+  agent_settings: {cli: "agent show"}
+  plan_staffing: {cli: "agent configure"}
+  apply_staffing: {cli: "agent configure"}
+  run_charter: {cli: "run charter"}
+  set_charter: {cli: "run charter"}
+  revert_charter: {cli: "run charter"}
+  mark_phase: {cli: "run mark"}
+  advance_run: {cli: "run advance"}
+  checkpoint_run: {cli: "run checkpoint"}
+  resume_run: {cli: "run resume"}
+  record_spend: {cli: "run spend"}
+
+  # --- added by M-A T5 (new) ------------------------------------------------------
+  cancel_job: {cli: "run cancel", new: true, args: ["r1", "job-1"]}
+  conversation_state: {cli: "run conversation", new: true, args: ["r1"]}
+  say: {cli: "run say", new: true, args: ["r1", "hello"]}
+  merge_round: {cli: "run merge-round", new: true, args: ["r1"]}
+  manuscript_history: {cli: "run manuscript history", new: true, args: ["r1"]}
+  manuscript_diff: {cli: "run manuscript diff", new: true, args: ["r1", "a", "b"]}
+  set_conversation_agent: {cli: "run converse-agent", new: true, args: ["r1", "responder"]}
+  start_run: {cli: "run start", new: true, args: ["r1", "--goal", "{tmp}/goal.md"]}
+  workbench: {cli: "run curation show", new: true, args: ["r1"]}
+  keep_passage: {cli: "run curation keep", new: true, args: ["r1", "claude", "results", "a passage"]}
+  add_own_text: {cli: "run curation add", new: true, args: ["r1", "my own words"]}
+  edit_curation_block: {cli: "run curation edit", new: true, args: ["r1", "b1", "new text"]}
+  move_curation_block: {cli: "run curation move", new: true, args: ["r1", "b1", "0"]}
+  remove_curation_block: {cli: "run curation remove", new: true, args: ["r1", "b1"]}
+  set_curation_note: {cli: "run curation note", new: true, args: ["r1", "a note"]}
+  revert_curation: {cli: "run curation revert", new: true, args: ["r1", "1"]}
+  curation_history: {cli: "run curation history", new: true, args: ["r1"]}
+  compile_preview: {cli: "run preview", new: true, args: ["r1", "agent:claude", "--compile"]}
+  preview_of: {cli: "run preview", new: true, args: ["r1", "agent:claude"]}

@@ -15,7 +15,7 @@ never work around it. `<remote>` below is the remote's name in that file
 ## Setup (once per host, user-facing)
 
 - The user copies `config/remotes.example.yml` → `config/remotes.yml` and
-  fills in host, user, allowed_dirs, allowed_ops, limits. Offer to walk
+  fills in host, user, scheduler (only `pbs` is accepted), allowed_dirs, allowed_ops, limits. Offer to walk
   them through it; never fill in paths you were not given.
 - Optional hardening: suggest the user add Claude Code permission
   deny-rules for bare `ssh`/`scp`/`rsync` so the wrapper is the only path.

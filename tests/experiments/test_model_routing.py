@@ -1,31 +1,35 @@
-from datetime import date
+import re
 from pathlib import Path
 
 import yaml
 
-ROUTING_PATH = Path(__file__).resolve().parents[2] / "src" / "scieflow" / "experiments" / "model-routing.yaml"
+EXPERIMENTS = Path(__file__).resolve().parents[2] / "src" / "scieflow" / "experiments"
+ROUTING_PATH = EXPERIMENTS / "model-routing.yaml"
+SKILL_PATH = EXPERIMENTS / "skills" / "model-routing" / "SKILL.md"
+MODEL_ID = re.compile(r"claude-|gpt-|gemini-")
 
 
 def load_routing():
     return yaml.safe_load(ROUTING_PATH.read_text())
 
 
-def test_as_of_is_a_date():
+def test_no_prices_no_as_of_no_refresh_rule():
     routing = load_routing()
-    assert date.fromisoformat(str(routing["as_of"]))
-    assert routing["refresh_rule"].strip()
+    assert "as_of" not in routing
+    assert "refresh_rule" not in routing
+    assert "usd_per_mtok" not in ROUTING_PATH.read_text()
 
 
-def test_tiers_have_models_with_prices():
+def test_routing_names_no_concrete_model_id():
+    assert not MODEL_ID.search(ROUTING_PATH.read_text())
+
+
+def test_tiers_carry_purpose_only():
     routing = load_routing()
     assert set(routing["tiers"]) == {"high", "standard", "cheap"}
     for tier_name, tier in routing["tiers"].items():
         assert tier["purpose"].strip(), tier_name
-        assert tier["models"], tier_name
-        for cli, entry in tier["models"].items():
-            assert entry["model"], (tier_name, cli)
-            assert entry["usd_per_mtok_in"] > 0, (tier_name, cli)
-            assert entry["usd_per_mtok_out"] > 0, (tier_name, cli)
+        assert set(tier) == {"purpose"}, tier_name
 
 
 def test_every_phase_maps_to_a_defined_tier():
@@ -35,11 +39,10 @@ def test_every_phase_maps_to_a_defined_tier():
         assert tier in routing["tiers"], f"{phase} -> unknown tier {tier}"
 
 
-def test_delegation_covers_every_cli_in_tiers():
+def test_delegation_is_one_role_bound_agent_run():
     routing = load_routing()
-    clis = {cli for tier in routing["tiers"].values() for cli in tier["models"]}
-    assert clis <= set(routing["delegation"]), (
-        f"missing delegation recipe for: {clis - set(routing['delegation'])}"
-    )
-    for cli, recipe in routing["delegation"].items():
-        assert recipe.strip(), cli
+    assert "scieflow agent run --role" in routing["delegation"]
+
+
+def test_skill_has_no_self_commit_instruction():
+    assert not re.search(r"commit", SKILL_PATH.read_text(), re.IGNORECASE)

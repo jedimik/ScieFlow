@@ -37,7 +37,8 @@ from scieflow.integrations.scite.policy import Policy, PolicyError
 
 # Free discovery providers (research/lib/providers.py) reuse this ledger with their
 # own name as the source; only uncached `mcp` rows count against the budgets.
-PROVIDER_SOURCES = ("pubtator", "ctgov", "openalex", "europepmc")
+PROVIDER_SOURCES = ("pubtator", "ctgov", "openalex", "europepmc",
+                    "search-openalex", "search-arxiv", "search-europepmc", "search-crossref")
 SOURCES = ("mcp", "rest", *PROVIDER_SOURCES)
 LOW_FRACTION = 0.10
 # An MCP call holds the budget lock from check to record, so concurrent runs

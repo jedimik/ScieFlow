@@ -26,7 +26,7 @@ def test_compare_campaign_ranks_and_validates(project):
     stage = find_stage(project / "pipelines", "demo", "scale")
     run_sweep(campaign, stage, project / "experiments", mode="direct")
 
-    comparison = compare_campaign(project / "experiments/gain-sweep")
+    comparison = compare_campaign(project / "experiments/gain-sweep", include_direct=True)
     assert comparison["rank_by"] == "ssim"
     assert comparison["best"].endswith("gain-1.0")
     assert comparison["ranked"][0]["validation"]["passed"] is True
@@ -48,7 +48,7 @@ def test_compare_campaign_completed_without_metric_counts_as_failed(project):
     victim["metrics"] = {}
     results_path.write_text(json.dumps(results, indent=2))
 
-    comparison = compare_campaign(project / "experiments/gain-sweep")
+    comparison = compare_campaign(project / "experiments/gain-sweep", include_direct=True)
 
     assert victim["run_id"] in comparison["failed"]
     ranked_ids = [r["run_id"] for r in comparison["ranked"]]
@@ -82,5 +82,5 @@ def test_compare_campaign_resolves_pipeline_local_metric_in_fresh_process(projec
     from scieflow.experiments.metrics import REGISTRY
     REGISTRY.pop("const_half", None)
 
-    comparison = compare_campaign(project / "experiments/gain-sweep")
+    comparison = compare_campaign(project / "experiments/gain-sweep", include_direct=True)
     assert comparison["rank_by"] == "const_half"

@@ -1,10 +1,12 @@
-"""Search OpenAlex. usage: scieflow research search openalex "query" [--limit N] [--from-year YYYY]"""
+"""Search OpenAlex. usage: scieflow research search openalex "query" [--limit N] [--from-year YYYY] [--workspace SLUG]"""
 
 import argparse
 
-from scieflow.research.lib import http, papers
+from scieflow.research.lib import papers
+from scieflow.research.search import registry
 
 API = "https://api.openalex.org/works"
+PROVIDER = "search-openalex"
 
 
 def _abstract(inv: dict | None) -> str | None:
@@ -53,18 +55,28 @@ def norm(work: dict) -> dict:
     )
 
 
+def _count(body) -> int:
+    return len(body.get("results") or []) if isinstance(body, dict) else 0
+
+
+def _search(gw, args) -> list:
+    query = registry.check_query(args.query)            # refused here, before any request
+    fixed: dict = {"per-page": min(args.limit, 200)}
+    if args.from_year:
+        fixed["filter"] = f"from_publication_date:{args.from_year}-01-01"
+    data = gw.get_json(PROVIDER, "search", API, checked={"search": query}, fixed=fixed,
+                       count=_count, validate=registry.expect_object)
+    return [norm(w) for w in data.get("results", [])][: args.limit]
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="scieflow research search openalex")
     ap.add_argument("query")
     ap.add_argument("--limit", type=int, default=25)
     ap.add_argument("--from-year", type=int)
+    registry.add_workspace_option(ap)
     args = ap.parse_args(argv)
-
-    params = {"search": args.query, "per-page": min(args.limit, 200)}
-    if args.from_year:
-        params["filter"] = f"from_publication_date:{args.from_year}-01-01"
-    data = http.get(API, params=params).json()
-    papers.emit([norm(w) for w in data.get("results", [])][: args.limit])
+    registry.run(args.workspace, lambda gw: _search(gw, args))
 
 
 if __name__ == "__main__":

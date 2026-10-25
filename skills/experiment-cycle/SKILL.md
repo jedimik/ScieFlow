@@ -11,9 +11,11 @@ evaluator). Campaign runs are recorded under `workspace/<slug>/experiments/`.
 
 ## Backend selection
 
-The campaign YAML may set `backend: local` (default) or `backend: remote`
-(+ `remote: meta`, per-task resource requests). `local` → dispatch to the
-experiments module as below. `remote` → drive the campaign's tasks yourself via
+The campaign YAML may set `backend: local` (default). `backend: remote` (with
+`remote: meta` and per-task resource requests) is refused by `scieflow experiment`
+(M-A-D5), so a remote campaign is driven by the coordinator, not the loader.
+`local` → dispatch to the experiments module as below. Remote → drive the
+campaign's tasks yourself via
 `skills/remote-exec/SKILL.md` (pull, snakemake dry-run gate, submit,
 monitor, fix, fetch), then write the same results-summary contract to
 `workspace/<slug>/iterations/<n>/results-summary.md` (campaign name, runs
@@ -24,7 +26,7 @@ as one experiment run.
 ## Per-campaign mode (two dispatches)
 
 1. **Design.** Write a prompt file (template below, `MODE: design-only`),
-   then: `uv run scieflow agent run <agent> <prompt> <transcript>`, where
+   then: `uv run scieflow agent run --role loop.experiment <agent> <prompt> <transcript>`, where
    `<agent>` is the agent assigned to `loop.experiment` (`uv run scieflow agent show --workspace <slug> --json`, AGENTS.md rule 13).
    The sub-agent writes the proposed campaign YAML + rationale to the path
    you gave it. Present both to the user by opening a gate:

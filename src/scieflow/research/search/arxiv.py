@@ -1,12 +1,14 @@
-"""Search arXiv. usage: scieflow research search arxiv "query" [--limit N] [--from-year YYYY]"""
+"""Search arXiv. usage: scieflow research search arxiv "query" [--limit N] [--from-year YYYY] [--workspace SLUG]"""
 
 import argparse
 import re
 import xml.etree.ElementTree as ET
 
 from scieflow.research.lib import http, papers
+from scieflow.research.search import registry
 
 API = "https://export.arxiv.org/api/query"
+PROVIDER = "search-arxiv"
 NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 
@@ -34,23 +36,37 @@ def norm(entry: ET.Element) -> dict:
     )
 
 
+def _entries(text: str) -> list:
+    return ET.fromstring(text).findall("atom:entry", NS)
+
+
+def _validate(text: str) -> None:
+    try:
+        ET.fromstring(text)
+    except ET.ParseError:
+        raise http.HTTPFailure("arXiv response is not XML", "MALFORMED") from None
+
+
+def _search(gw, args) -> list:
+    query = registry.check_query(args.query)            # refused here, before any request
+    text = gw.get_text(PROVIDER, "query", API,
+                       composed={"search_query": registry.arxiv_query(query)},
+                       fixed={"max_results": args.limit, "sortBy": "relevance"},
+                       count=lambda t: len(_entries(t)), validate=_validate)
+    records = [norm(e) for e in _entries(text)]
+    if args.from_year:
+        records = [r for r in records if r["year"] and r["year"] >= args.from_year]
+    return records
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="scieflow research search arxiv")
     ap.add_argument("query")
     ap.add_argument("--limit", type=int, default=25)
     ap.add_argument("--from-year", type=int)
+    registry.add_workspace_option(ap)
     args = ap.parse_args(argv)
-
-    params = {
-        "search_query": f"all:{args.query}",
-        "max_results": args.limit,
-        "sortBy": "relevance",
-    }
-    root = ET.fromstring(http.get(API, params=params).text)
-    records = [norm(e) for e in root.findall("atom:entry", NS)]
-    if args.from_year:
-        records = [r for r in records if r["year"] and r["year"] >= args.from_year]
-    papers.emit(records)
+    registry.run(args.workspace, lambda gw: _search(gw, args))
 
 
 if __name__ == "__main__":

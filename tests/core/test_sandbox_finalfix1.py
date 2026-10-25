@@ -24,6 +24,9 @@ from scieflow.core.run import budget, status
 
 # --- helpers -----------------------------------------------------------------
 
+ROLE = "loop.experiment"   # M-A A-5: a dispatch inside a run names its role
+
+
 def _executable(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!/bin/sh\necho fake-uv\n")
@@ -42,7 +45,7 @@ def _repo(tmp_path: Path, policy: dict) -> Project:
         (Path(sandbox.__file__).resolve().parents[3] / "schemas" / "status.yml").read_text())
     ws = tmp_path / "workspace" / "r1"
     (ws / "logs").mkdir(parents=True)
-    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
+    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\nassignments:\n  loop.experiment: [stub, alpha, beta, envopt, stub2, sleepy, sleepy_turn, stub_disabled, tracer, envcli, claude, codex, probe, outcome, writer]\n")
     status.write_status(ws, status.new_status("r1", "autonomous"))
     budget.write_budget(ws, budget.new_budget(3, 10, 60))
     return Project(tmp_path)
@@ -105,7 +108,7 @@ def test_finalfix1_cli_nul_writable_path_exits_77_and_records_refusal(
     prompt.write_text("echo hi")
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as exc:
-        agent_run.main(["tracer", str(prompt), str(run / "logs" / "t.md")])
+        agent_run.main(["--role", ROLE, "tracer", str(prompt), str(run / "logs" / "t.md")])
     assert exc.value.code == 77
     assert "job.refused" in _event_types(run)
     assert "writable" in (run / "logs" / "t.md").read_text()

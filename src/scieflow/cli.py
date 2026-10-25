@@ -17,7 +17,7 @@ GROUPS = {
     "agent": ("scieflow.core.cli", "agent", None, "Dispatch headless agents."),
     "gate": ("scieflow.core.gates", "gate", None,
              "Approvals the protocols require, answered from terminal or browser."),
-    "run": ("scieflow.core.run.cli", "run", None,
+    "run": ("scieflow.core.run.converse_cli", "run", None,
             "A run's state, history and lifecycle."),
     "review": ("scieflow.core.review.cli", "review", None,
                "Draft review: settings, reviewer assignment, evidence, decisions."),

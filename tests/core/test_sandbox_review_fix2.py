@@ -27,6 +27,9 @@ REAL_WRAP = sandbox.wrap
 
 # --- helpers -----------------------------------------------------------------
 
+ROLE = "loop.experiment"   # M-A A-5: a dispatch inside a run names its role
+
+
 def _repo(tmp_path: Path, agent: str = "tracer", cmd: str = "/bin/sh -c {prompt}") -> Project:
     """A project with one agent, run r1, a fake env credential, and a budget."""
     (tmp_path / "config").mkdir()
@@ -44,7 +47,7 @@ def _repo(tmp_path: Path, agent: str = "tracer", cmd: str = "/bin/sh -c {prompt}
         (Path(sandbox.__file__).resolve().parents[3] / "schemas" / "status.yml").read_text())
     ws = tmp_path / "workspace" / "r1"
     (ws / "logs").mkdir(parents=True)
-    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
+    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\nassignments:\n  loop.experiment: [stub, alpha, beta, envopt, stub2, sleepy, sleepy_turn, stub_disabled, tracer, envcli, claude, codex, probe, outcome, writer]\n")
     status.write_status(ws, status.new_status("r1", "autonomous"))
     budget.write_budget(ws, budget.new_budget(3, 10, 60))
     return Project(tmp_path)
@@ -136,7 +139,7 @@ def test_n1_cli_uv_resolving_into_the_run_is_refused_and_recorded(
     prompt.write_text("echo hi")
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as exc:
-        agent_run.main(["tracer", str(prompt), str(run / "logs" / "t.md")])
+        agent_run.main(["--role", ROLE, "tracer", str(prompt), str(run / "logs" / "t.md")])
     assert exc.value.code == 77
     assert "job.refused" in _event_types(run)
     transcript = (run / "logs" / "t.md").read_text()

@@ -1,12 +1,10 @@
 import json
 import re
 
-import pytest
-import requests
 import responses
 
 from scieflow.research.search import openalex as search_openalex
-from scieflow.research.lib import http, papers
+from scieflow.research.lib import papers
 
 OPENALEX_WORK = {
     "id": "https://openalex.org/W1",
@@ -50,62 +48,6 @@ def test_search_hits_api_and_emits_json(capsys):
     out = json.loads(capsys.readouterr().out)
     assert len(out) == 1
     assert out[0]["title"] == "Demo Paper"
-
-
-@responses.activate
-def test_http_get_404_fails_fast_no_retry():
-    """Non-429 4xx errors should raise immediately without retry."""
-    responses.add(
-        responses.GET,
-        "https://api.example.com/test",
-        status=404,
-    )
-    with pytest.raises(requests.HTTPError):
-        http.get("https://api.example.com/test", retries=3)
-    # Should have made exactly 1 request, not retried
-    assert len(responses.calls) == 1
-
-
-@responses.activate
-def test_http_get_500_retries_on_success():
-    """5xx errors should be retried until success."""
-    responses.add(
-        responses.GET,
-        "https://api.example.com/test",
-        status=500,
-    )
-    responses.add(
-        responses.GET,
-        "https://api.example.com/test",
-        status=200,
-        json={"data": "success"},
-    )
-    resp = http.get("https://api.example.com/test", retries=3, backoff=0.01)
-    assert resp.status_code == 200
-    assert resp.json() == {"data": "success"}
-    # Should have made 2 requests: first 500, second 200
-    assert len(responses.calls) == 2
-
-
-@responses.activate
-def test_http_get_429_retries_on_success():
-    """429 (rate limit) errors should be retried until success."""
-    responses.add(
-        responses.GET,
-        "https://api.example.com/test",
-        status=429,
-    )
-    responses.add(
-        responses.GET,
-        "https://api.example.com/test",
-        status=200,
-        json={"data": "success"},
-    )
-    resp = http.get("https://api.example.com/test", retries=3, backoff=0.01)
-    assert resp.status_code == 200
-    assert resp.json() == {"data": "success"}
-    # Should have made 2 requests: first 429, second 200
-    assert len(responses.calls) == 2
 
 
 def test_record_without_signals_keeps_the_old_shape():

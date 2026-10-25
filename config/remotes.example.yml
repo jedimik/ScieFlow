@@ -7,7 +7,7 @@ remotes:
     host: skirit.metacentrum.cz     # login node
     user: YOUR_METACENTRUM_USERNAME
     auth: kerberos        # uses the host PC's ticket (kinit); no keys stored
-    scheduler: pbs
+    scheduler: pbs        # the only supported value; any other is refused
     allowed_dirs:         # the ONLY remote paths the agent may touch
       - /storage/brno2/home/YOUR_USERNAME/projects/example
     allowed_ops: [check, git-status, git-switch, git-pull, mv, qsub, qstat, logs, fetch]

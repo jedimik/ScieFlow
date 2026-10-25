@@ -21,6 +21,9 @@ from scieflow.core import agent_run, jobs, sandbox, service
 from scieflow.core.project import Project
 from scieflow.core.run import budget, status
 
+ROLE = "loop.experiment"   # M-A A-5: a dispatch inside a run names its role
+
+
 W = Path(sandbox.__file__).resolve().parents[3]
 HAVE_BWRAP = shutil.which("bwrap") is not None
 needs_bwrap = pytest.mark.skipif(not HAVE_BWRAP, reason="bubblewrap not installed")
@@ -64,7 +67,7 @@ def _repo(tmp_path: Path, agent: str = "tracer", cmd: str = "/bin/sh -c {prompt}
     (tmp_path / "schemas" / "status.yml").write_text((W / "schemas" / "status.yml").read_text())
     ws = tmp_path / "workspace" / "r1"
     (ws / "logs").mkdir(parents=True)
-    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
+    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\nassignments:\n  loop.experiment: [stub, alpha, envopt, stub2, sleepy, sleepy_turn, stub_disabled, tracer, envcli, claude, codex, probe, outcome, writer]\n")
     status.write_status(ws, status.new_status("r1", "autonomous"))
     budget.write_budget(ws, budget.new_budget(3, 10, 60))
     return tmp_path
@@ -190,7 +193,7 @@ def test_dispatch_creates_no_run_directories(tmp_path):
     prompt = run / "logs" / "p.md"
     prompt.write_text("x")
     before = sorted(str(p) for p in run.rglob("*"))
-    agent_run.prepare(Project(root), "tracer", prompt)
+    agent_run.prepare(Project(root), "tracer", prompt, role=ROLE)
     assert sorted(str(p) for p in run.rglob("*")) == before
     assert not (run / "scratch").exists()
 
@@ -199,7 +202,7 @@ def test_dispatch_env_and_layout_name_the_agent_home(tmp_path):
     root = _repo(tmp_path)
     prompt = root / "workspace" / "r1" / "logs" / "p.md"
     prompt.write_text("x")
-    d = agent_run.prepare(Project(root), "tracer", prompt)
+    d = agent_run.prepare(Project(root), "tracer", prompt, role=ROLE)
     home = _home_of(root / "workspace" / "r1", "tracer")
     assert d.env["HOME"] == str(home)
     assert d.layout is not None and d.layout.home == home
@@ -295,7 +298,7 @@ def test_a_cli_launch_refusal_exits_77_and_records_job_refused(tmp_path, monkeyp
         raise sandbox.SandboxError("launch refused by test")
     monkeypatch.setattr(sandbox, "wrap", refuse)
     with pytest.raises(SystemExit) as exc:
-        agent_run.main(["tracer", str(prompt), str(run / "logs" / "t.md")])
+        agent_run.main(["--role", ROLE, "tracer", str(prompt), str(run / "logs" / "t.md")])
     assert exc.value.code == 77
     assert "job.refused" in [e["type"] for e in events.read(run)]
 
@@ -313,7 +316,7 @@ def test_a_service_launch_refusal_is_service_error_and_job_refused(tmp_path, mon
         raise sandbox.SandboxError("launch refused by test")
     monkeypatch.setattr(sandbox, "wrap", refuse)
     with pytest.raises(service.ServiceError, match="launch refused"):
-        service.dispatch_agent(project, "tracer", prompt, run / "logs" / "t.md")
+        service.dispatch_agent(project, "tracer", prompt, run / "logs" / "t.md", role=ROLE)
     assert "job.refused" in [e["type"] for e in events.read(run)]
 
 
@@ -355,7 +358,7 @@ def test_bwrap_cli_tracer_reads_repo_writes_run_and_hides_secrets(tmp_path, tmp_
     prompt = run / "logs" / "p.md"
     prompt.write_text(_tracer_script(run, root, fake_home))
     env = {**os.environ, "PYTHONPATH": str(W / "src"), "HOME": str(fake_home)}
-    proc = subprocess.run([sys.executable, "-m", "scieflow.core.agent_run", "tracer",
+    proc = subprocess.run([sys.executable, "-m", "scieflow.core.agent_run", "--role", ROLE, "tracer",
                            str(prompt), str(run / "logs" / "t.md")],
                           capture_output=True, text=True, cwd=root, env=env, timeout=120)
     result = (run / "result.txt").read_text() if (run / "result.txt").exists() else ""
@@ -498,7 +501,7 @@ def test_one_layout_object_reaches_verify_and_launch_on_the_service_path(tmp_pat
         return real_wrap(argv, **kw)
     monkeypatch.setattr(sandbox, "dispatch_layout", spy_layout)
     monkeypatch.setattr(sandbox, "wrap", spy_wrap)
-    service.dispatch_agent(project, "tracer", prompt, run / "logs" / "t.md")
+    service.dispatch_agent(project, "tracer", prompt, run / "logs" / "t.md", role=ROLE)
     assert (run / "ok.txt").read_text() == "ok\n"
     assert len(built) == 1 and len(seen) >= 2
     assert all(layout is built[0] for layout in seen)
@@ -605,7 +608,7 @@ def test_a_layout_refusal_on_the_cli_is_exit_77_and_records_job_refused(tmp_path
     root, run, prompt = _linked_scratch_repo(tmp_path, tmp_path_factory)
     monkeypatch.chdir(root)
     with pytest.raises(SystemExit) as exc:
-        agent_run.main(["tracer", str(prompt), str(run / "logs" / "t.md")])
+        agent_run.main(["--role", ROLE, "tracer", str(prompt), str(run / "logs" / "t.md")])
     assert exc.value.code == 77
     assert "job.refused" in [e["type"] for e in events.read(run)]
 
@@ -615,7 +618,7 @@ def test_a_layout_refusal_on_the_service_path_is_service_error_and_job_refused(t
     from scieflow.core import events
     root, run, prompt = _linked_scratch_repo(tmp_path, tmp_path_factory)
     with pytest.raises(service.ServiceError):
-        service.dispatch_agent(Project(root), "tracer", prompt, run / "logs" / "t.md")
+        service.dispatch_agent(Project(root), "tracer", prompt, run / "logs" / "t.md", role=ROLE)
     assert "job.refused" in [e["type"] for e in events.read(run)]
 
 
@@ -739,7 +742,7 @@ def test_bwrap_service_path_tracer_uses_the_same_layout(tmp_path, tmp_path_facto
     prompt.write_text(_tracer_script(run, root, fake_home))
     (root / "src").mkdir()
     (root / "src" / "untouched.py").write_text("original\n")
-    service.dispatch_agent(project, "tracer", prompt, run / "logs" / "t.md")
+    service.dispatch_agent(project, "tracer", prompt, run / "logs" / "t.md", role=ROLE)
     result = (run / "result.txt").read_text()
     assert f"HOME={_home_of(run, 'tracer')}" in result
     assert "write-repo-denied" in result and "PRESENT" not in result
@@ -759,7 +762,7 @@ def test_one_layout_object_reaches_verify_and_launch(tmp_path, monkeypatch):
         seen.append(kw.get("layout"))
         return real_wrap(argv, **kw)
     monkeypatch.setattr(sandbox, "wrap", spy)
-    agent_run.main(["tracer", str(prompt), str(run / "logs" / "t.md")])
+    agent_run.main(["--role", ROLE, "tracer", str(prompt), str(run / "logs" / "t.md")])
     assert len(seen) >= 2 and seen[0] is not None
     assert all(layout is seen[0] for layout in seen)
 
@@ -927,7 +930,7 @@ def test_s2_a_denied_readable_entry_is_exit_77_and_recorded_on_the_cli(tmp_path,
     (root / "config" / "sandbox.yml").write_text(_readable_yaml(("/run", "denied by test")))
     monkeypatch.chdir(root)
     with pytest.raises(SystemExit) as exc:
-        agent_run.main(["tracer", str(prompt), str(run / "logs" / "t.md")])
+        agent_run.main(["--role", ROLE, "tracer", str(prompt), str(run / "logs" / "t.md")])
     assert exc.value.code == 77
     assert "job.refused" in [e["type"] for e in events.read(run)]
 
@@ -941,7 +944,7 @@ def test_s2_a_denied_readable_entry_is_a_service_error_and_recorded(tmp_path):
     prompt.write_text("echo hi")
     (root / "config" / "sandbox.yml").write_text(_readable_yaml(("/run", "denied by test")))
     with pytest.raises(service.ServiceError, match="runtime socket"):
-        service.dispatch_agent(project, "tracer", prompt, run / "logs" / "t.md")
+        service.dispatch_agent(project, "tracer", prompt, run / "logs" / "t.md", role=ROLE)
     assert "job.refused" in [e["type"] for e in events.read(run)]
 
 
@@ -978,7 +981,7 @@ def test_s2_the_cli_reads_the_policy_once_and_carries_readable_into_the_layout(t
         reads.append(project.root)
         return real_load(project)
     monkeypatch.setattr(sandbox, "_load_allowlist", counting)
-    d = agent_run.prepare(Project(root), "tracer", prompt)
+    d = agent_run.prepare(Project(root), "tracer", prompt, role=ROLE)
     assert len(reads) == 1                                        # A2: one captured policy read
     assert d.writable is not None and extra.resolve() in d.layout.readable
 
@@ -1469,7 +1472,7 @@ def test_s3_cli_prepare_resolves_claude_behind_an_env_prefix(tmp_path, tmp_path_
     root = _repo(tmp_path, agent="envcli", cmd="env MAX_THINKING_TOKENS=32000 claude -p {prompt}")
     prompt = root / "workspace" / "r1" / "logs" / "p.md"
     prompt.write_text("hi")
-    d = agent_run.prepare(Project(root), "envcli", prompt)
+    d = agent_run.prepare(Project(root), "envcli", prompt, role=ROLE)
     assert d.argv[:4] == ["env", "MAX_THINKING_TOKENS=32000", "claude", "-p"]
     assert d.layout.installs == (target,)
     assert str(home / ".local" / "bin") in d.env["PATH"].split(":")
@@ -1483,7 +1486,7 @@ def test_s3_cli_env_with_options_is_refused_exit_77_and_recorded(tmp_path, monke
     prompt.write_text("hi")
     monkeypatch.chdir(root)
     with pytest.raises(SystemExit) as exc:
-        agent_run.main(["envopt", str(prompt), str(run / "logs" / "t.md")])
+        agent_run.main(["--role", ROLE, "envopt", str(prompt), str(run / "logs" / "t.md")])
     assert exc.value.code == 77
     assert "job.refused" in [e["type"] for e in events.read(run)]
 
@@ -1498,7 +1501,7 @@ def test_s3_host_and_capture_divergence_is_refused(tmp_path, tmp_path_factory, m
     monkeypatch.setattr(agent_run, "_capture_execution",
                         lambda token, cwd, env: (Path("/usr/bin/true"), (), "/usr/bin/true"))
     with pytest.raises(sandbox.SandboxError, match="launcher"):
-        agent_run.prepare(Project(root), "envcli", prompt)
+        agent_run.prepare(Project(root), "envcli", prompt, role=ROLE)
 
 
 @pytest.mark.parametrize("key", ["session_cmd", "resume_cmd"])
@@ -1540,7 +1543,7 @@ def test_s3_bwrap_a_fake_claude_runs_by_name_and_by_path_with_its_own_path_and_n
     run = project.run_dir("r1")
     prompt = run / "logs" / "p.md"
     prompt.write_text("hi")
-    d = agent_run.prepare(project, "envcli", prompt)
+    d = agent_run.prepare(project, "envcli", prompt, role=ROLE)
     kw = dict(kind="agent", cwd=d.cwd, run_dir=d.run_dir, label=d.agent, timeout_s=60,
               sandbox_writable=d.writable, sandbox_layout=d.layout, env=d.env)
     job = jobs.run_blocking(project, d.argv, **kw)

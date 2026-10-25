@@ -11,6 +11,35 @@ class CampaignError(ValueError):
     pass
 
 
+# Keys this loader understands (M-A-D5). `backend: local` loads; remote
+# campaigns are refused until M-D3, so their keys fail loudly, not silently.
+KNOWN_KEYS = frozenset({
+    "name", "pipeline", "stage", "input", "reference", "metrics", "parameters",
+    "scenarios", "validation", "rank_by", "notes",
+    "backend", "pipeline_dir",  # pipeline_dir: written by `sweep` into campaign.yaml
+})
+REMOTE_ONLY_KEYS = ("remote", "resources")
+REMOTE_REFUSAL = (
+    "remote campaigns are not run by `scieflow experiment` yet; drive them "
+    "through skills/remote-exec/SKILL.md (M-D3 makes them first-class)"
+)
+
+
+def _check_keys(path, data: dict) -> None:
+    backend = data.get("backend", "local")
+    if backend == "remote" or any(k in data for k in REMOTE_ONLY_KEYS):
+        raise CampaignError(f"{path}: {REMOTE_REFUSAL}")
+    if backend != "local":
+        raise CampaignError(
+            f"{path}: backend {backend!r} is not supported (supported: local)"
+        )
+    unknown = sorted(set(data) - KNOWN_KEYS)
+    if unknown:
+        raise CampaignError(
+            f"{path}: unknown campaign key(s): {', '.join(unknown)}"
+        )
+
+
 @dataclass
 class RunSpec:
     run_id: str
@@ -38,6 +67,7 @@ class Campaign:
         data = yaml.safe_load(path.read_text())
         if not isinstance(data, dict):
             raise CampaignError(f"{path}: campaign file must be a YAML mapping")
+        _check_keys(path, data)
         for key in ("name", "pipeline", "stage", "input", "metrics"):
             if key not in data:
                 raise CampaignError(f"{path}: missing required field '{key}'")

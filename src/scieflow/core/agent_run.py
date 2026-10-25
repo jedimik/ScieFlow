@@ -269,6 +269,21 @@ def sandbox_disabled_in_run(project: Project, run_dir: Path | None, *,
     return Path(run_dir).name in sandbox.unsandboxed_runs(project, policy=policy)
 
 
+def _role_required_message(root: Path, run_dir: Path, agent: str) -> str:
+    try:
+        eff = agent_config.resolve_dir(root, run_dir)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise DispatchError(f"invalid owning run configuration: {exc}") from exc
+    roles = []
+    for role, setting in eff.assignments.items():
+        names = setting.value if isinstance(setting.value, list) else [setting.value]
+        if agent in names:
+            roles.append(role)
+    named = ", ".join(sorted(roles)) or "none"
+    return (f"workspace/{run_dir.name}: name the role this dispatch performs with --role ROLE "
+            f"(roles that assign {agent} in this run: {named})")
+
+
 def prepare(project: Project, agent: str, prompt_file: Path,
             cwd: Path | None = None, role: str | None = None, *,
             sandbox_enabled: bool = True,
@@ -285,6 +300,11 @@ def prepare(project: Project, agent: str, prompt_file: Path,
         raise DispatchError(f"invalid owning run configuration: {exc}") from exc
     if override:
         agent_cfg = {**agent_cfg, **override}
+    if role is None and run_dir is not None and not conversational:
+        # M-A A-5: a dispatch inside a run must name the role it performs, so the
+        # role's model/effort and the "wrong agent for this role" rule always apply.
+        # Conversation turns are exempt: their agent is chosen by the human.
+        raise DispatchError(_role_required_message(root, run_dir, agent))
     if role:
         eff = agent_config.resolve_dir(root, run_dir)
         assigned = eff.value(role)

@@ -9,7 +9,7 @@ def test_generate_report(project):
     stage = find_stage(project / "pipelines", "demo", "scale")
     run_sweep(campaign, stage, project / "experiments", mode="direct")
 
-    report_path = generate_report(project / "experiments/gain-sweep")
+    report_path = generate_report(project / "experiments/gain-sweep", include_direct=True)
     text = report_path.read_text()
     assert "# Campaign report: gain-sweep" in text
     assert "gain-1.0" in text          # best run named
@@ -23,11 +23,11 @@ def test_generate_report_preserves_agent_evaluation(project):
     stage = find_stage(project / "pipelines", "demo", "scale")
     run_sweep(campaign, stage, project / "experiments", mode="direct")
 
-    report_path = generate_report(project / "experiments/gain-sweep")
+    report_path = generate_report(project / "experiments/gain-sweep", include_direct=True)
     with report_path.open("a") as f:
         f.write("\n## Evaluation\n\nAgent notes here.\n")
 
-    report_path = generate_report(project / "experiments/gain-sweep")
+    report_path = generate_report(project / "experiments/gain-sweep", include_direct=True)
     text = report_path.read_text()
     assert "Agent notes here." in text
     assert text.count("# Campaign report:") == 1

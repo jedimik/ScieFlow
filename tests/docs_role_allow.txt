@@ -1,0 +1,3 @@
+# Intentional role-less `scieflow agent run` invocations in the docs scope (M-A T4, N4).
+# One per line: path<TAB>matched invocation text<TAB>reason. Prose mentions never need an entry.
+# Empty on purpose: every documented run invocation names its role.

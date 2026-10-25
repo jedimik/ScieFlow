@@ -42,21 +42,28 @@ Recomputes metrics for one run from its `config.yaml`.
 ## scieflow experiment compare
 
 ```bash
-scieflow experiment compare workspace/<slug>/experiments/<campaign>
+scieflow experiment compare workspace/<slug>/experiments/<campaign> [--include-direct]
 ```
 
 Ranks completed runs by `rank_by`, checks validation rules, writes
 `comparison.json`, prints the ranking.
 
+Runs recorded with `--direct` (development only) are **not ranked**: they
+are listed as `DIRECT, NOT RANKED` and never become `best`. Pass
+`--include-direct` to rank them too (development comparisons only). Runs
+whose mode cannot be determined stay ranked, as before, and are listed
+under `mode_unknown` in `comparison.json`.
+
 ## scieflow experiment report
 
 ```bash
-scieflow experiment report workspace/<slug>/experiments/<campaign>
+scieflow experiment report workspace/<slug>/experiments/<campaign> [--include-direct]
 ```
 
 Writes `report.md` and `plots/<rank_by>.png`. Single swept numeric
 parameter → metric-vs-parameter line plot with the best run starred;
-otherwise a per-run bar chart.
+otherwise a per-run bar chart. Direct runs are counted and marked in the
+report and excluded from the ranking unless `--include-direct` is given.
 
 ## scieflow experiment new
 

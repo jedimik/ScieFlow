@@ -12,6 +12,7 @@ from scieflow.core import agent_run
 
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_RUN = [sys.executable, "-m", "scieflow.core.agent_run"]
+ROLE = "loop.experiment"   # M-A A-5: a dispatch inside a run names its role
 
 
 def test_agy_defaults_use_explicit_effort_and_nested_timeouts():
@@ -35,9 +36,11 @@ def test_agy_defaults_use_explicit_effort_and_nested_timeouts():
         assert ("bounded audit" in argv) is not use_stdin
 
 
-def run_dispatch(agent: str, prompt_file: Path, transcript: Path, cwd: Path | None = None):
-    # These prompts belong to no run, which the sandbox refuses by design.
-    argv = [*AGENT_RUN, "--no-sandbox", agent, str(prompt_file), str(transcript)]
+def run_dispatch(agent: str, prompt_file: Path, transcript: Path, cwd: Path | None = None,
+                 role: str | None = None):
+    # A prompt inside a run is given its role (M-A A-5); the others belong to no run.
+    argv = [*AGENT_RUN, "--no-sandbox", *(["--role", role] if role else []),
+            agent, str(prompt_file), str(transcript)]
     if cwd is not None:
         argv += ["--cwd", str(cwd)]
     return subprocess.run(argv, capture_output=True, text=True)
@@ -105,6 +108,7 @@ def test_dispatch_applies_owning_run_agent_override(tmp_path):
         "print(f'model={sys.argv[1]} reasoning={sys.argv[2]}')\n"
     )
     (ws / "config.yml").write_text(
+        "assignments:\n  loop.experiment: stub\n"
         "agent_overrides:\n"
         "  stub:\n"
         f"    cmd: '{sys.executable} {helper} "
@@ -116,7 +120,7 @@ def test_dispatch_applies_owning_run_agent_override(tmp_path):
     prompt.write_text("data only\n")
     transcript = logs / "transcript.md"
 
-    proc = run_dispatch("stub", prompt, transcript)
+    proc = run_dispatch("stub", prompt, transcript, role=ROLE)
 
     assert proc.returncode == 0, proc.stderr
     assert transcript.read_text().strip() == (
@@ -135,6 +139,7 @@ def test_dispatch_applies_override_to_prompt_in_nested_prompt_directory(tmp_path
         "print(f'model={sys.argv[1]} reasoning={sys.argv[2]}')\n"
     )
     (ws / "config.yml").write_text(
+        "assignments:\n  loop.experiment: stub\n"
         "agent_overrides:\n"
         "  stub:\n"
         f"    cmd: '{sys.executable} {helper} "
@@ -146,7 +151,7 @@ def test_dispatch_applies_override_to_prompt_in_nested_prompt_directory(tmp_path
     prompt.write_text("data only\n")
     transcript = ws / "logs" / "review-round-1.txt"
 
-    proc = run_dispatch("stub", prompt, transcript)
+    proc = run_dispatch("stub", prompt, transcript, role=ROLE)
 
     assert proc.returncode == 0, proc.stderr
     assert transcript.read_text().strip() == "model=nested-model reasoning=high"
@@ -161,6 +166,7 @@ def test_dispatch_ignores_nested_logs_config_and_uses_owning_run(tmp_path):
     helper = tmp_path / "show_owner.py"
     helper.write_text("import sys\nprint(sys.argv[1])\n")
     (ws / "config.yml").write_text(
+        "assignments:\n  loop.experiment: stub\n"
         "agent_overrides:\n"
         "  stub:\n"
         f"    cmd: '{sys.executable} {helper} owner'\n"
@@ -174,7 +180,7 @@ def test_dispatch_ignores_nested_logs_config_and_uses_owning_run(tmp_path):
     prompt.write_text("data only\n")
     transcript = nested / "transcript.txt"
 
-    proc = run_dispatch("stub", prompt, transcript)
+    proc = run_dispatch("stub", prompt, transcript, role=ROLE)
 
     assert proc.returncode == 0, proc.stderr
     assert transcript.read_text().strip() == "owner"
@@ -284,12 +290,14 @@ def test_run_overrides_apply_only_inside_the_owning_run(tmp_path, child_env):
     ws = root / "workspace" / "2026-07-test"
     (ws / "prompts").mkdir(parents=True)
     (ws / "status.yml").write_text("workflow: lit-review\n")
-    (ws / "config.yml").write_text("agent_overrides:\n  echoer:\n    model: big\n    reasoning: high\n")
+    (ws / "config.yml").write_text(
+        "assignments:\n  loop.experiment: echoer\n"
+        "agent_overrides:\n  echoer:\n    model: big\n    reasoning: high\n")
     prompt = ws / "prompts" / "task.md"
     prompt.write_text("hi")
     # S25fix1 (finding 1b): the sandbox is incidental to overrides, so this dispatch is
     # unsandboxed and its child gets a fake HOME outside the project root.
-    proc = subprocess.run([*AGENT_RUN, "--no-sandbox", "echoer", str(prompt), str(root / "out.log")],
+    proc = subprocess.run([*AGENT_RUN, "--no-sandbox", "--role", ROLE, "echoer", str(prompt), str(root / "out.log")],
                           capture_output=True, text=True, cwd=root, env=child_env)
     assert proc.returncode == 0, proc.stderr
     assert "m=big r=high" in (root / "out.log").read_text()
@@ -329,7 +337,9 @@ def make_loop_workspace(root: Path, wall_cap: int = 60) -> Path:
     ws = root / "workspace" / "r1"
     (ws / "logs").mkdir(parents=True)
     # A real run always carries config.yml beside status.yml (run/init.py).
-    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\n")
+    (ws / "config.yml").write_text(
+        "slug: r1\napproval: autonomous\n"
+        "assignments:\n  loop.experiment: [stub, writer]\n")
     status.write_status(ws, {**status.new_status("r1", "autonomous")})
     budget.write_budget(ws, budget.new_budget(3, 10, wall_cap))
     return ws
@@ -338,7 +348,7 @@ def make_loop_workspace(root: Path, wall_cap: int = 60) -> Path:
 def dispatch_in_ws(root: Path, ws: Path, agent: str, prompt: str, env: dict):
     (ws / "logs" / "p.md").write_text(prompt)
     return subprocess.run(
-        [*AGENT_RUN, agent, str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        [*AGENT_RUN, "--role", ROLE, agent, str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
         capture_output=True, text=True, cwd=root, env=env,
     )
 
@@ -421,7 +431,7 @@ def test_dispatch_is_refused_when_bubblewrap_is_missing(tmp_path, child_env, gra
     ws = make_loop_workspace(root)
     (ws / "logs" / "p.md").write_text("output: x.md\nkind: hypothesis\n")
     proc = subprocess.run(
-        [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        [*AGENT_RUN, "--role", ROLE, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
         capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path, child_env))
     assert proc.returncode == 77
     assert "bubblewrap" in (proc.stdout + proc.stderr)
@@ -436,7 +446,7 @@ def test_dispatch_is_refused_when_the_sandbox_does_not_confine(tmp_path, child_e
     ws = make_loop_workspace(root)
     (ws / "logs" / "p.md").write_text("output: x.md\nkind: hypothesis\n")
     proc = subprocess.run(
-        [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        [*AGENT_RUN, "--role", ROLE, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
         capture_output=True, text=True, cwd=root, env=fake_bwrap_env(tmp_path, child_env))
     assert proc.returncode == 77
     assert "did not block" in (proc.stdout + proc.stderr + (ws / "logs" / "t.md").read_text())
@@ -450,7 +460,7 @@ def test_no_sandbox_flag_runs_and_records_the_choice(tmp_path, child_env):
     out = ws / "iterations" / "h.md"
     (ws / "logs" / "p.md").write_text(f"output: {out}\nkind: hypothesis\n")
     proc = subprocess.run(
-        [*AGENT_RUN, "--no-sandbox", "stub",
+        [*AGENT_RUN, "--no-sandbox", "--role", ROLE, "stub",
          str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
         capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path, child_env))
     assert proc.returncode == 0, proc.stderr
@@ -466,11 +476,11 @@ def test_an_agent_cannot_disable_its_own_sandbox(tmp_path, child_env):
     root = make_repo(tmp_path)
     ws = make_loop_workspace(root)
     (ws / "config.yml").write_text(
-        "slug: r1\napproval: autonomous\nsandbox: off\n")
+        "slug: r1\napproval: autonomous\nsandbox: off\nassignments:\n  loop.experiment: stub\n")
     out = ws / "iterations" / "h.md"
     (ws / "logs" / "p.md").write_text(f"output: {out}\nkind: hypothesis\n")
     proc = subprocess.run(
-        [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        [*AGENT_RUN, "--role", ROLE, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
         capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path, child_env))
     assert proc.returncode == 77, proc.stdout + proc.stderr
     assert not out.exists()          # nothing ran unconfined
@@ -481,10 +491,10 @@ def test_a_stale_run_sandbox_key_says_where_the_hatch_moved(tmp_path):
     not, so the dispatch is refused with the new location named."""
     root = make_repo(tmp_path)
     ws = make_loop_workspace(root)
-    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\nsandbox: off\n")
+    (ws / "config.yml").write_text("slug: r1\napproval: autonomous\nsandbox: off\nassignments:\n  loop.experiment: stub\n")
     (ws / "logs" / "p.md").write_text("output: x.md\nkind: hypothesis\n")
     proc = subprocess.run(
-        [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        [*AGENT_RUN, "--role", ROLE, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
         capture_output=True, text=True, cwd=root)
     assert proc.returncode == 77
     said = proc.stdout + proc.stderr + (ws / "logs" / "t.md").read_text()
@@ -503,7 +513,7 @@ def test_the_allowlist_can_let_a_run_dispatch_unsandboxed(tmp_path, child_env):
     out = ws / "iterations" / "h.md"
     (ws / "logs" / "p.md").write_text(f"output: {out}\nkind: hypothesis\n")
     proc = subprocess.run(
-        [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        [*AGENT_RUN, "--role", ROLE, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
         capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path, child_env))
     assert proc.returncode == 0, proc.stderr
     assert out.exists()
@@ -518,7 +528,7 @@ def test_the_allowlist_opt_out_does_not_leak_to_other_runs(tmp_path, child_env):
         "unsandboxed_runs:\n  - slug: someone-else\n    reason: not this run\n")
     (ws / "logs" / "p.md").write_text("output: x.md\nkind: hypothesis\n")
     proc = subprocess.run(
-        [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        [*AGENT_RUN, "--role", ROLE, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
         capture_output=True, text=True, cwd=root, env=bwrap_free_env(tmp_path, child_env))
     assert proc.returncode == 77
 
@@ -548,7 +558,7 @@ def test_a_sandboxed_agent_cannot_write_to_module_code(tmp_path, child_env, gran
         "agents:\n"
         f'  writer: {{cmd: "sh -c \'echo hacked > {target} || echo denied; echo ran > {ws}/ran.txt\'", enabled: true, timeout_min: 1}}\n')
     (ws / "logs" / "p.md").write_text("go\n")
-    proc = subprocess.run([*AGENT_RUN, "writer", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+    proc = subprocess.run([*AGENT_RUN, "--role", ROLE, "writer", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
                           capture_output=True, text=True, cwd=root, env=child_env)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert (ws / "ran.txt").exists(), "the agent never ran: the denial would be vacuous"
@@ -565,7 +575,7 @@ def test_a_sandboxed_dispatch_gets_its_own_uv_cache(tmp_path, grant_credentials)
     grant_credentials(root, "stub")     # S4 (A9)
     ws = make_loop_workspace(root)
     (ws / "logs" / "p.md").write_text("go\n")
-    d = prepare(Project(root), "stub", ws / "logs" / "p.md")
+    d = prepare(Project(root), "stub", ws / "logs" / "p.md", role=ROLE)
     assert d.env["UV_CACHE_DIR"] == str((ws / ".uv-cache").resolve())
     assert (Path.home() / ".cache" / "uv") not in d.writable
 
@@ -586,7 +596,7 @@ def test_a_sandboxed_agent_cannot_write_the_shared_uv_cache(tmp_path, child_env,
         "agents:\n"
         f'  writer: {{cmd: "sh -c \'echo hacked > {victim} || echo denied; echo ran > {ws}/ran.txt\'", enabled: true, timeout_min: 1}}\n')
     (ws / "logs" / "p.md").write_text("go\n")
-    proc = subprocess.run([*AGENT_RUN, "writer", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+    proc = subprocess.run([*AGENT_RUN, "--role", ROLE, "writer", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
                           capture_output=True, text=True, cwd=root, env=child_env)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert (ws / "ran.txt").exists(), "the agent never ran: the denial would be vacuous"
@@ -604,7 +614,7 @@ def test_a_writable_grant_that_is_a_file_is_refused_not_a_traceback(tmp_path, ch
     grant_credentials(root, "stub")     # S25fix1 (finding 1b): merged after the grant, so it is the subject
     (ws / "logs" / "p.md").write_text("output: x.md\nkind: hypothesis\n")
     proc = subprocess.run(
-        [*AGENT_RUN, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
+        [*AGENT_RUN, "--role", ROLE, "stub", str(ws / "logs" / "p.md"), str(ws / "logs" / "t.md")],
         capture_output=True, text=True, cwd=root, env=child_env)
     assert proc.returncode == 77, proc.stdout + proc.stderr
     assert "Traceback" not in proc.stderr
@@ -654,7 +664,7 @@ def test_the_charter_is_pinned_to_the_top_of_the_prompt(project_with_run):
     charter.set_text(ws, "Goal: find a better catalyst. Do not change it.")
     prompt_file.write_text("output: x.md\nkind: hypothesis\nNow do the next step.")
 
-    dispatch = agent_run.prepare(project, "stub", prompt_file)
+    dispatch = agent_run.prepare(project, "stub", prompt_file, role=ROLE)
     sent = dispatch.stdin_text or " ".join(dispatch.argv)
 
     assert "find a better catalyst" in sent
@@ -666,7 +676,7 @@ def test_a_run_without_a_charter_composes_the_prompt_unchanged(project_with_run)
     project, ws, prompt_file = project_with_run
     prompt_file.write_text("output: x.md\nkind: hypothesis\nbody")
 
-    dispatch = agent_run.prepare(project, "stub", prompt_file)
+    dispatch = agent_run.prepare(project, "stub", prompt_file, role=ROLE)
     sent = dispatch.stdin_text or " ".join(dispatch.argv)
 
     assert agent_run.CHARTER_HEADER not in sent
@@ -685,7 +695,7 @@ def test_charter_braces_reach_the_agent_literally(project_with_run):
     charter.set_text(ws, "Use {model} and {root}; mind $PATH and `backticks`.")
     prompt_file.write_text("output: x.md\nkind: hypothesis\nbody")
 
-    dispatch = agent_run.prepare(project, "stub", prompt_file)
+    dispatch = agent_run.prepare(project, "stub", prompt_file, role=ROLE)
     sent = dispatch.stdin_text or " ".join(dispatch.argv)
 
     assert "{model}" in sent and "{root}" in sent
@@ -704,7 +714,7 @@ def test_a_charter_that_pushes_the_prompt_over_the_argv_limit_still_sends_it(
     charter.set_text(ws, "G" * 500)
     prompt_file.write_text("output: x.md\nkind: hypothesis\nbody")
 
-    dispatch = agent_run.prepare(project, "stub", prompt_file)
+    dispatch = agent_run.prepare(project, "stub", prompt_file, role=ROLE)
     sent = dispatch.stdin_text or " ".join(dispatch.argv)
     assert "G" * 500 in sent, "the prompt was dropped instead of sent on stdin"
 
@@ -772,7 +782,7 @@ def test_a_charter_that_is_not_a_mapping_fails_the_dispatch_cleanly(project_with
     (ws / "charter.yml").write_text("- just a list\n")
 
     with pytest.raises(agent_run.DispatchError):
-        agent_run.prepare(project, "stub", prompt_file)
+        agent_run.prepare(project, "stub", prompt_file, role=ROLE)
 
 
 def test_malformed_charter_yaml_fails_the_dispatch_cleanly(project_with_run):
@@ -783,7 +793,7 @@ def test_malformed_charter_yaml_fails_the_dispatch_cleanly(project_with_run):
     (ws / "charter.yml").write_text("current: 1\nversions: [\n")
 
     with pytest.raises(agent_run.DispatchError):
-        agent_run.prepare(project, "stub", prompt_file)
+        agent_run.prepare(project, "stub", prompt_file, role=ROLE)
 
 
 # --- K producer baseline, through the existing file-based API ---
