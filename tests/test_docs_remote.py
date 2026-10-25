@@ -35,6 +35,18 @@ def test_docs_state_the_honest_limits():
         assert phrase in text, f"docs/remote.md must mention {phrase!r}"
 
 
+def test_docs_say_dryrun_only_sets_the_variable_and_the_runner_must_honour_it():
+    # Review r1 F1: `dryrun` only sets SCIEFLOW_DRYRUN=1 (zero GPUs, no
+    # scratch). Whether the job is a dry run depends on the runner script.
+    for name, text in (("docs/remote.md", DOC.read_text()),
+                       ("skills/remote-exec/SKILL.md", SKILL.read_text())):
+        assert "only sets `SCIEFLOW_DRYRUN=1`" in text, f"{name} must say dryrun only sets the variable"
+        assert "SCIEFLOW_DRYRUN" in text, f"{name} must name SCIEFLOW_DRYRUN"
+        assert "snakemake -n" in text, f"{name} must say the runner runs snakemake -n when it sees the variable"
+        assert "submits the pipeline as a dry run" not in text, f"{name} overstates the dry run"
+        assert "submits the runner in dry-run" not in text, f"{name} overstates the dry run"
+
+
 def test_mkdocs_nav_lists_the_remote_page():
     text = (ROOT / "mkdocs.yml").read_text()
     assert "  - Remote execution: remote.md" in text.splitlines()

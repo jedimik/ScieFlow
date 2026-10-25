@@ -44,8 +44,11 @@ machine-readable output). That command reads no config and runs no SSH.
 ## Dry-run gate for Snakemake tasks
 
 1. `remote.py dryrun <remote> <dir> <script> --workspace WS --task T` submits
-   the pipeline as a dry run: no GPUs, no scratch, and `SCIEFLOW_DRYRUN=1` in
-   the job environment. A dry run counts toward the task's attempt ceiling.
+   the job with no GPUs, no scratch, and `SCIEFLOW_DRYRUN=1` in the job
+   environment. `dryrun` only sets `SCIEFLOW_DRYRUN=1`. The runner script must
+   check that variable and run `snakemake -n` (or an equivalent dry run). A
+   script that ignores it runs the real pipeline on the dry run's small
+   allocation. A dry run counts toward the task's attempt ceiling.
 2. `remote.py status <remote> <job_id> --workspace WS` until it prints
    `STATE: done`.
 3. `remote.py dag <remote> <job_id> --workspace WS` writes the dry run's log to

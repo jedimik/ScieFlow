@@ -52,8 +52,11 @@ AGENTS.md rule 3 delegation applies, bounded by config/remotes.yml limits)
 2. **Snakemake gate** (MANDATORY when the task runs a Snakemake pipeline —
    most of the user's workloads). Four steps, in this order:
    - `remote.py dryrun <remote> <dir> <script> --workspace WS --task <task>
-     --walltime 00:30:00 --cpus 1 --mem-gb 4`. It submits the runner in dry-run
-     mode: no GPUs, no scratch, and `SCIEFLOW_DRYRUN=1` in the job environment.
+     --walltime 00:30:00 --cpus 1 --mem-gb 4`. It only sets `SCIEFLOW_DRYRUN=1`
+     in the job environment (no GPUs, no scratch). The runner script must check
+     that variable and run `snakemake -n` (or an equivalent dry run). A script
+     that ignores it runs the real pipeline, so confirm the runner honours it
+     before you rely on the gate.
      Use the SAME `--task <task>` name as the real run, so the dry run counts
      against that task's attempt ceiling (the ledger counts attempts by task name).
    - `remote.py status <remote> <job_id> --workspace WS` until `STATE: done`.
