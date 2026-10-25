@@ -7,6 +7,9 @@ any SSH. Exit codes: 0 ok, 1 remote command failed, 2 no Kerberos ticket,
 """
 
 import argparse
+import hashlib
+import json
+import os
 import re
 import shlex
 import sys
@@ -23,6 +26,9 @@ if _SCRIPTS_DIR not in sys.path:
 
 from remote import jobs, policy, schedulers, transport
 from remote.schedulers.base import JobRef, JobSpec, SubmitParseError
+
+# A dry run's recorded plan (dag) larger than this is refused (M-E t3).
+DAG_MAX_BYTES = 10 * 1024 * 1024
 
 
 def _remote_credentials_failed(stderr: str) -> bool:
@@ -425,12 +431,56 @@ def _ledger_job(remote, entry: dict, job_id: str) -> JobRef:
     )
 
 
+def _dag_path(workspace: Path, task: str) -> Path:
+    return Path(workspace) / "remote" / f"dag-{task}.txt"
+
+
+def _dag_problem(workspace: Path, ledger: list, task: str) -> str | None:
+    """Return why --after-dryrun must refuse, or None when the plan is intact.
+
+    Checked from the ledger and the DAG file on disk, before any SSH. Both are
+    agent-writable, so this guards against accidents and skipped steps, not
+    against an agent that rewrites both (plan C5).
+    """
+    dry_runs = [j for j in ledger if j.get("task") == task and j.get("kind") == "dryrun"]
+    if not dry_runs:
+        return f"no dry run recorded for task '{task}'; run dryrun first"
+    latest = dry_runs[-1]
+    if latest.get("state") != "done":
+        return (f"the latest dry run {latest['job_id']} is "
+                f"'{latest.get('state')}', not done")
+    recorded = latest.get("dag_sha256")
+    if not recorded:
+        return f"no DAG recorded for dry run {latest['job_id']}; run dag first"
+    path = _dag_path(workspace, task)
+    if not path.is_file():
+        return f"{path} is missing"
+    if hashlib.sha256(path.read_bytes()).hexdigest() != recorded:
+        return f"{path} changed since it was recorded"
+    return None
+
+
+def _log_ref(remote, entry: dict, job_id: str) -> JobRef:
+    """Build the JobRef behind `logs` and `dag`, re-checking the ledger before SSH."""
+    _ledger_job(remote, entry, job_id)
+    # The ledger is agent-writable: treat dir, sequence and name as untrusted.
+    d = policy.check_dir(remote, entry["dir"])
+    policy.check_token(job_id.split(".")[0], "job sequence")
+    # PBS names default output files from `qsub -N`, which may differ from the
+    # submitted script stem. Older ledger entries predate job_name recording.
+    stem = policy.check_token(
+        entry.get("job_name", Path(entry["script"]).stem), "job name")
+    return JobRef(job_id=job_id, dir=d, job_name=stem)
+
+
 def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
                task: str, walltime: str, cpus: int, mem_gb: int, gpus: int,
                queue: str, name: str | None, scratch_type: str = "none",
                scratch_gb: int = 0,
                environment_assignments: list[str] | None = None,
-               submit_dir: str | None = None) -> int:
+               submit_dir: str | None = None,
+               kind: str = "job",
+               after_dryrun: bool = False) -> int:
     policy.check_scheduler_op(remote, "submit")
     adapter = schedulers.get(remote.scheduler)
     d = policy.check_dir(remote, remote_dir)
@@ -480,6 +530,11 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
         print(notice)
 
     ledger = jobs.load_jobs(workspace)
+    if after_dryrun:
+        problem = _dag_problem(workspace, ledger, task)
+        if problem is not None:
+            print(f"NO_DAG: {problem}", file=sys.stderr)
+            return 1
     lim = remote.limits
     if jobs.attempts(ledger, task) >= 1 + lim["max_fix_attempts"]:
         print(f"LIMIT: task '{task}' already submitted "
@@ -504,7 +559,7 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
     entry = jobs.record_submit(
         ledger, task=task, job_id=job_id, remote_name=remote.name,
         remote_dir=submission_directory, script=script, resources={**res, "queue": queue},
-        environment=environment, job_name=jobname, scheduler=adapter.name,
+        environment=environment, job_name=jobname, scheduler=adapter.name, kind=kind,
     )
     if submit_dir is not None:
         entry["code_dir"] = d
@@ -559,20 +614,89 @@ def cmd_logs(remote, t, job_id: str, *, workspace: Path) -> int:
     if entry is None:
         print(f"UNKNOWN_JOB: {job_id} not in jobs.yml", file=sys.stderr)
         return 1
-    _ledger_job(remote, entry, job_id)
+    job = _log_ref(remote, entry, job_id)
     adapter = schedulers.get(remote.scheduler)
-    # Ledger fields were validated on submit, but re-check: the ledger file
-    # is agent-writable, so treat it as untrusted before shelling out.
-    d = policy.check_dir(remote, entry["dir"])
-    policy.check_token(job_id.split(".")[0], "job sequence")
-    # PBS names default output files from `qsub -N`, which may differ from the
-    # submitted script stem. Older ledger entries predate job_name recording.
-    stem = policy.check_token(
-        entry.get("job_name", Path(entry["script"]).stem), "job name"
-    )
-    result = t.ssh(adapter.logs_command(JobRef(job_id=job_id, dir=d, job_name=stem)))
+    result = t.ssh(adapter.logs_command(job))
     print(result.stdout, end="")
     return 0 if result.returncode == 0 else 1
+
+
+def cmd_schedulers(*, as_json: bool) -> int:
+    """List the scheduler adapters. Needs no config/remotes.yml and no SSH."""
+    rows = []
+    for name in schedulers.names():
+        adapter = schedulers.get(name)
+        ops = {op: adapter.concrete_ops.get(op, op)
+               for op in ("submit", "status", "cancel", "logs")}
+        rows.append({"name": adapter.name, "maturity": adapter.maturity,
+                     "transport": adapter.transport, "ops": ops,
+                     "needs_kerberos": adapter.needs_kerberos})
+    if as_json:
+        print(json.dumps(rows, indent=2, sort_keys=True))
+        return 0
+    for row in rows:
+        ops = row["ops"]
+        print(f"{row['name']} {row['maturity']} {row['transport']} "
+              f"submit={ops['submit']} status={ops['status']} "
+              f"cancel={ops['cancel']} logs={ops['logs']}")
+    return 0
+
+
+def cmd_dryrun(remote, t, remote_dir: str, script: str, *, workspace: Path,
+               task: str, walltime: str, cpus: int, mem_gb: int, queue: str,
+               name: str | None, submit_dir: str | None = None,
+               environment_assignments: list[str] | None = None) -> int:
+    """Submit a dry run: no GPUs, no scratch, SCIEFLOW_DRYRUN=1 in the job (M-E-D4)."""
+    assignments = list(environment_assignments or [])
+    if any(item.split("=", 1)[0] == "SCIEFLOW_DRYRUN" for item in assignments):
+        raise policy.PolicyError(
+            "SCIEFLOW_DRYRUN is set by dryrun and cannot be passed by the caller")
+    return cmd_submit(
+        remote, t, remote_dir, script, workspace=workspace, task=task,
+        walltime=walltime, cpus=cpus, mem_gb=mem_gb, gpus=0, queue=queue,
+        name=name, scratch_type="none", scratch_gb=0,
+        environment_assignments=[*assignments, "SCIEFLOW_DRYRUN=1"],
+        submit_dir=submit_dir, kind="dryrun",
+    )
+
+
+def cmd_dag(remote, t, job_id: str, *, workspace: Path) -> int:
+    """Record a finished dry run's logs as the execution plan of record."""
+    policy.check_scheduler_op(remote, "logs")
+    policy.check_token(job_id, "job id")
+    ledger = jobs.load_jobs(workspace)
+    entry = jobs.find(ledger, job_id)
+    if entry is None:
+        print(f"UNKNOWN_JOB: {job_id} not in jobs.yml", file=sys.stderr)
+        return 1
+    job = _log_ref(remote, entry, job_id)
+    if entry.get("kind") != "dryrun" or entry.get("state") != "done":
+        print(f"NOT_A_DONE_DRYRUN: {job_id} must be a dry run with state done "
+              "(run status first)", file=sys.stderr)
+        return 1
+    task = policy.check_token(entry["task"], "task name")
+    adapter = schedulers.get(remote.scheduler)
+    result = t.ssh(adapter.logs_command(job))
+    if _remote_credentials_failed(result.stderr):
+        return _report_remote_credentials()
+    if result.returncode != 0:
+        print(f"DAG_LOGS_FAILED: {result.stderr.strip()}", file=sys.stderr)
+        return 1
+    data = result.stdout.encode("utf-8")
+    if len(data) > DAG_MAX_BYTES:
+        print(f"DAG_TOO_LARGE: more than {DAG_MAX_BYTES} bytes; nothing recorded",
+              file=sys.stderr)
+        return 1
+    path = _dag_path(workspace, task)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+    digest = hashlib.sha256(data).hexdigest()
+    entry["dag_sha256"] = digest
+    jobs.save_jobs(workspace, ledger)
+    print(f"DAG_RECORDED: {path} sha256={digest}")
+    return 0
 
 
 def cmd_fetch(remote, t, src: str, dest: str, *, workspace: Path) -> int:
@@ -697,6 +821,10 @@ def main(argv=None) -> int:
                 "--env", dest="environment_assignments", action="append",
                 default=[], metavar="NAME=VALUE",
             )
+            p.add_argument(
+                "--after-dryrun", action="store_true",
+                help="refuse unless the task's latest dry run is done and its recorded DAG is unchanged",
+            )
         if name in ("status", "logs"):
             p.add_argument("job_id")
         if name == "status":
@@ -718,8 +846,33 @@ def main(argv=None) -> int:
             p.add_argument("--branch", required=True)
         if name in ("submit", "status", "logs", "fetch", "push"):
             p.add_argument("--workspace", type=Path, required=True)
+    sched = sub.add_parser("schedulers", help="list scheduler adapters (needs no config)")
+    sched.add_argument("--json", action="store_true")
+    dry = sub.add_parser("dryrun", help="submit a dry run: no GPUs, no scratch, SCIEFLOW_DRYRUN=1")
+    dry.add_argument("remote")
+    dry.add_argument("dir")
+    dry.add_argument("script")
+    dry.add_argument("--task", required=True)
+    dry.add_argument("--walltime", default="01:00:00")
+    dry.add_argument("--cpus", type=int, default=1)
+    dry.add_argument("--mem-gb", type=int, default=4)
+    dry.add_argument("--queue", default="default")
+    dry.add_argument("--name")
+    dry.add_argument("--submit-dir", help="allowed PBS working/log directory, separate from code dir")
+    dry.add_argument(
+        "--env", dest="environment_assignments", action="append",
+        default=[], metavar="NAME=VALUE",
+    )
+    dry.add_argument("--workspace", type=Path, required=True)
+    dag = sub.add_parser("dag", help="record a finished dry run's logs as the plan of record")
+    dag.add_argument("remote")
+    dag.add_argument("job_id")
+    dag.add_argument("--workspace", type=Path, required=True)
     args = ap.parse_args(argv)
 
+    if args.cmd == "schedulers":
+        # Listing needs no remote config and no SSH (M-E t3).
+        return cmd_schedulers(as_json=args.json)
     root = Path(__file__).resolve().parents[2]
     try:
         remote = policy.load_remote(root, args.remote)
@@ -766,7 +919,17 @@ def main(argv=None) -> int:
                               scratch_type=args.scratch_type,
                               scratch_gb=args.scratch_gb,
                               environment_assignments=args.environment_assignments,
-                              submit_dir=args.submit_dir)
+                              submit_dir=args.submit_dir,
+                              after_dryrun=args.after_dryrun)
+        if args.cmd == "dryrun":
+            return cmd_dryrun(remote, t, args.dir, args.script,
+                              workspace=args.workspace, task=args.task,
+                              walltime=args.walltime, cpus=args.cpus,
+                              mem_gb=args.mem_gb, queue=args.queue, name=args.name,
+                              submit_dir=args.submit_dir,
+                              environment_assignments=args.environment_assignments)
+        if args.cmd == "dag":
+            return cmd_dag(remote, t, args.job_id, workspace=args.workspace)
         if args.cmd == "status":
             return cmd_status(
                 remote,

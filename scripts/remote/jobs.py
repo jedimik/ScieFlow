@@ -57,7 +57,8 @@ def record_submit(jobs: list, *, task: str, job_id: str, remote_name: str,
                   remote_dir: str, script: str, resources: dict,
                   environment: dict | None = None,
                   job_name: str | None = None,
-                  scheduler: str = DEFAULT_SCHEDULER) -> dict:
+                  scheduler: str = DEFAULT_SCHEDULER,
+                  kind: str = "job") -> dict:
     entry = {
         "task": task,
         "job_id": job_id,
@@ -72,6 +73,9 @@ def record_submit(jobs: list, *, task: str, job_id: str, remote_name: str,
         "attempt": attempts(jobs, task) + 1,
         "submitted": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+    # Real jobs keep the entry shape they had before M-E; only dry runs say so.
+    if kind != "job":
+        entry["kind"] = kind
     jobs.append(entry)
     return entry
 
