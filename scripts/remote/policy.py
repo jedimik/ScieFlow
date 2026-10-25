@@ -12,10 +12,15 @@ from pathlib import Path
 
 import yaml
 
+from remote import schedulers
+from remote.errors import PolicyError
+from remote.schedulers.base import ABSTRACT_OPS
+
 REQUIRED_KEYS = ["host", "user", "auth", "scheduler", "allowed_dirs",
                  "allowed_ops", "limits"]
-# Schedulers the remote runner can drive. M-E turns this into an adapter registry.
-SCHEDULERS = ("pbs",)
+# Registered scheduler names, snapshot for callers. load_remote reads the live
+# registry (schedulers.REGISTRY), not this tuple.
+SCHEDULERS = tuple(sorted(schedulers.REGISTRY))
 
 REQUIRED_LIMITS = [
     "max_walltime",
@@ -39,10 +44,6 @@ _SAFE_ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _SAFE_ENV_VALUE_RE = re.compile(r"^[\w./\-]+$")
 
 
-class PolicyError(Exception):
-    """Operation refused by config/remotes.yml."""
-
-
 @dataclass
 class Remote:
     name: str
@@ -53,6 +54,8 @@ class Remote:
     allowed_dirs: list
     allowed_ops: list
     limits: dict
+    # Set only from an explicit `allow_experimental_scheduler: true` in config.
+    allow_experimental_scheduler: bool = False
 
 
 def load_remote(root: Path, name: str) -> Remote:
@@ -70,16 +73,32 @@ def load_remote(root: Path, name: str) -> Remote:
     if missing:
         raise PolicyError(f"remote '{name}' missing keys: {', '.join(missing)}")
     scheduler = entry["scheduler"]
-    if not isinstance(scheduler, str) or scheduler not in SCHEDULERS:
+    if not isinstance(scheduler, str) or scheduler not in schedulers.REGISTRY:
+        supported = ", ".join(schedulers.names())
         raise PolicyError(
-            f"scheduler {scheduler!r} is not supported (supported: "
-            f"{', '.join(SCHEDULERS)}); other schedulers come with the "
-            "scheduler seam (M-E)"
+            f"scheduler {scheduler!r} is not supported (supported: {supported})"
         )
+    adapter = schedulers.REGISTRY[scheduler]
+    opt_in = entry.get("allow_experimental_scheduler", False)
+    if "allow_experimental_scheduler" in entry and not isinstance(opt_in, bool):
+        raise PolicyError(
+            f"allow_experimental_scheduler on remote '{name}' must be true or false"
+        )
+    if adapter.maturity == "experimental" and opt_in is not True:
+        raise PolicyError(
+            f"scheduler '{scheduler}' is experimental (not yet run against a real "
+            f"cluster); set allow_experimental_scheduler: true on remote '{name}' "
+            "in config/remotes.yml to use it"
+        )
+    adapter.validate_remote(entry)
     missing = [k for k in REQUIRED_LIMITS if k not in entry["limits"]]
     if missing:
         raise PolicyError(f"remote '{name}' limits missing: {', '.join(missing)}")
-    return Remote(name=name, **{k: entry[k] for k in REQUIRED_KEYS})
+    return Remote(
+        name=name,
+        **{k: entry[k] for k in REQUIRED_KEYS},
+        allow_experimental_scheduler=opt_in is True,
+    )
 
 
 def check_op(remote: Remote, op: str) -> None:
@@ -88,6 +107,24 @@ def check_op(remote: Remote, op: str) -> None:
             f"operation '{op}' not in allowed_ops for remote "
             f"'{remote.name}' (allowed: {', '.join(remote.allowed_ops)})"
         )
+
+
+def check_scheduler_op(remote: Remote, abstract: str) -> None:
+    """Authorize a scheduler operation by its abstract or concrete name.
+
+    Passes when ``allowed_ops`` lists the abstract name (submit, status,
+    cancel, logs) or the active adapter's alias (qsub, qstat, qdel, ...).
+    """
+    if abstract not in ABSTRACT_OPS:
+        raise PolicyError(f"unknown scheduler operation '{abstract}'")
+    concrete = schedulers.get(remote.scheduler).concrete_ops.get(abstract)
+    if abstract in remote.allowed_ops or (concrete and concrete in remote.allowed_ops):
+        return
+    alias = f" ({concrete})" if concrete else ""
+    raise PolicyError(
+        f"operation '{abstract}'{alias} not in allowed_ops for remote "
+        f"'{remote.name}' (allowed: {', '.join(remote.allowed_ops)})"
+    )
 
 
 def check_token(value: str, what: str) -> str:

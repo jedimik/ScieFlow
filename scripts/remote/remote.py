@@ -21,10 +21,8 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-from remote import jobs, policy, transport
-
-STATE_MAP = {"Q": "queued", "H": "queued", "R": "running", "E": "running"}
-
+from remote import jobs, policy, schedulers, transport
+from remote.schedulers.base import JobRef, JobSpec, SubmitParseError
 
 def _remote_credentials_failed(stderr: str) -> bool:
     """Recognize observed missing/expired credentials without inspecting secrets."""
@@ -385,13 +383,42 @@ def cmd_verify_thalamus_deployment(remote, t, remote_dir: str, control_dir: str,
     return 0
 
 
+def _check_entry_scheduler(remote, entry: dict, job_id: str) -> None:
+    """Refuse a ledger entry that was submitted to a different scheduler (M-E-D6).
+
+    The ledger is agent-writable, so the scheduler is re-checked here, before
+    any SSH call.
+    """
+    scheduler = jobs.entry_scheduler(entry)
+    if scheduler != remote.scheduler:
+        raise policy.PolicyError(
+            f"job {job_id} was submitted with scheduler '{scheduler}', but "
+            f"remote '{remote.name}' uses '{remote.scheduler}'"
+        )
+
+
+def _ledger_job(remote, entry: dict, job_id: str) -> JobRef:
+    """Check a ledger entry against the remote's scheduler and build its JobRef."""
+    _check_entry_scheduler(remote, entry, job_id)
+    if schedulers.get(remote.scheduler).needs_ledger_dir and (
+        "dir" not in entry or "job_name" not in entry
+    ):
+        raise policy.PolicyError("ledger entry lacks dir/job_name")
+    return JobRef(
+        job_id=job_id,
+        dir=entry.get("dir", ""),
+        job_name=entry.get("job_name", ""),
+    )
+
+
 def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
                task: str, walltime: str, cpus: int, mem_gb: int, gpus: int,
                queue: str, name: str | None, scratch_type: str = "none",
                scratch_gb: int = 0,
                environment_assignments: list[str] | None = None,
                submit_dir: str | None = None) -> int:
-    policy.check_op(remote, "qsub")
+    policy.check_scheduler_op(remote, "submit")
+    adapter = schedulers.get(remote.scheduler)
     d = policy.check_dir(remote, remote_dir)
     policy.check_queue(remote, queue)
     policy.check_token(task, "task name")
@@ -418,6 +445,25 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
     )
     for w in warnings:
         print(f"CLAMPED: {w}")
+    jobname = name or Path(script).stem
+    spec = JobSpec(
+        name=jobname,
+        dir=submission_directory,
+        script=submitted_script,
+        walltime=res["walltime"],
+        cpus=res["cpus"],
+        mem_gb=res["mem_gb"],
+        gpus=res["gpus"],
+        queue=queue,
+        scratch_type=res["scratch_type"],
+        scratch_gb=res["scratch_gb"],
+        env=environment,
+    )
+    # Resource refusals (for example an unsupported scratch type) happen here,
+    # before any SSH call.
+    adapter.resource_args(spec)
+    for notice in adapter.notices(spec):
+        print(notice)
 
     ledger = jobs.load_jobs(workspace)
     lim = remote.limits
@@ -432,50 +478,25 @@ def cmd_submit(remote, t, remote_dir: str, script: str, *, workspace: Path,
               f"queued/running on '{remote.name}' — wait before submitting.")
         return 4
 
-    select = f"select=1:ncpus={res['cpus']}:mem={res['mem_gb']}gb"
-    if res["scratch_gb"] > 0:
-        select += f":{res['scratch_type']}={res['scratch_gb']}gb"
-    if res["gpus"] > 0:
-        select += f":ngpus={res['gpus']}"
-    jobname = name or Path(script).stem
-    env_arg = ""
-    if environment:
-        joined = ",".join(f"{key}={value}" for key, value in environment.items())
-        env_arg = f"-v {shlex.quote(joined)} "
-    result = t.ssh(
-        f"cd {shlex.quote(submission_directory)} && qsub -N {shlex.quote(jobname)} "
-        f"-q {shlex.quote(queue)} "
-        f"-l walltime={shlex.quote(res['walltime'])} "
-        f"-l {shlex.quote(select)} {env_arg}{shlex.quote(submitted_script)}"
-    )
+    result = t.ssh(adapter.submit_command(spec))
     if result.returncode != 0:
-        print(f"QSUB_FAILED: {result.stderr.strip()}", file=sys.stderr)
+        print(f"{adapter.labels['submit']}: {result.stderr.strip()}", file=sys.stderr)
         return 1
-    lines = result.stdout.strip().splitlines()
-    if not lines or not lines[-1].strip():
-        print("QSUB_FAILED: qsub returned success but no job id", file=sys.stderr)
+    try:
+        job_id = adapter.parse_submit(result.stdout)
+    except SubmitParseError as exc:
+        print(f"{adapter.labels['submit']}: {exc}", file=sys.stderr)
         return 1
-    job_id = lines[-1].strip()
     entry = jobs.record_submit(
         ledger, task=task, job_id=job_id, remote_name=remote.name,
         remote_dir=submission_directory, script=script, resources={**res, "queue": queue},
-        environment=environment, job_name=jobname,
+        environment=environment, job_name=jobname, scheduler=adapter.name,
     )
     if submit_dir is not None:
         entry["code_dir"] = d
     jobs.save_jobs(workspace, ledger)
     print(f"SUBMITTED: {job_id} attempt={entry['attempt']}")
     return 0
-
-
-def _qstat_value(output: str, field: str) -> str | None:
-    """Return one allowlisted single-line field from ``qstat -xf`` output."""
-
-    match = re.search(
-        rf"(?m)^\s*{re.escape(field)}\s*=\s*([^\r\n]*)$",
-        output,
-    )
-    return match.group(1).strip() if match else None
 
 
 def cmd_status(
@@ -486,69 +507,56 @@ def cmd_status(
     workspace: Path,
     details: bool = False,
 ) -> int:
-    policy.check_op(remote, "qstat")
+    policy.check_scheduler_op(remote, "status")
     policy.check_token(job_id, "job id")
-    result = t.ssh(f"qstat -xf {shlex.quote(job_id)}")
+    ledger = jobs.load_jobs(workspace)
+    entry = jobs.find(ledger, job_id)
+    if entry is None:
+        # Refused before SSH: a status call cannot pick up an arbitrary id (M-E-D5).
+        print(f"UNKNOWN_JOB: {job_id} not in jobs.yml", file=sys.stderr)
+        return 1
+    job = _ledger_job(remote, entry, job_id)
+    adapter = schedulers.get(remote.scheduler)
+    result = t.ssh(adapter.status_command(job))
     if _remote_credentials_failed(result.stderr):
         return _report_remote_credentials()
     if result.returncode != 0:
-        print(f"QSTAT_FAILED: {result.stderr.strip()}", file=sys.stderr)
+        print(f"{adapter.labels['status']}: {result.stderr.strip()}", file=sys.stderr)
         return 1
-    state_m = re.search(r"job_state\s*=\s*(\w)", result.stdout)
-    exit_m = re.search(r"Exit_status\s*=\s*(-?\d+)", result.stdout)
-    if not state_m:
+    status = adapter.parse_status(result.stdout, job)
+    if status.parse_error:
         print(f"UNPARSEABLE: {result.stdout[:200]}", file=sys.stderr)
         return 1
-    code = state_m.group(1)
-    if code == "F":
-        state = "done" if exit_m and exit_m.group(1) == "0" else "failed"
-    else:
-        state = STATE_MAP.get(code, "queued")
-    ledger = jobs.load_jobs(workspace)
-    jobs.set_state(ledger, job_id, state)
+    jobs.set_state(ledger, job_id, status.state)
     jobs.save_jobs(workspace, ledger)
-    exit_status = exit_m.group(1) if exit_m else "-"
-    print(f"STATE: {state} exit={exit_status}")
+    print(f"STATE: {status.state} exit={status.exit_code}")
     if details:
-        for field in (
-            "resources_used.walltime",
-            "resources_used.cput",
-            "resources_used.cpupercent",
-            "resources_used.mem",
-            "resources_used.vmem",
-            "resources_used.ncpus",
-            "stime",
-            "start_time",
-            "exec_host",
-        ):
-            value = _qstat_value(result.stdout, field)
-            if value is not None:
-                print(f"DETAIL: {field}={value}")
+        for field in adapter.detail_fields:
+            if field in status.details:
+                print(f"DETAIL: {field}={status.details[field]}")
     return 0
 
 
 def cmd_logs(remote, t, job_id: str, *, workspace: Path) -> int:
-    policy.check_op(remote, "logs")
+    policy.check_scheduler_op(remote, "logs")
     policy.check_token(job_id, "job id")
     ledger = jobs.load_jobs(workspace)
-    entry = next((j for j in ledger if j["job_id"] == job_id), None)
+    entry = jobs.find(ledger, job_id)
     if entry is None:
         print(f"UNKNOWN_JOB: {job_id} not in jobs.yml", file=sys.stderr)
         return 1
+    _ledger_job(remote, entry, job_id)
+    adapter = schedulers.get(remote.scheduler)
     # Ledger fields were validated on submit, but re-check: the ledger file
     # is agent-writable, so treat it as untrusted before shelling out.
     d = policy.check_dir(remote, entry["dir"])
-    seq = policy.check_token(job_id.split(".")[0], "job sequence")
+    policy.check_token(job_id.split(".")[0], "job sequence")
     # PBS names default output files from `qsub -N`, which may differ from the
     # submitted script stem. Older ledger entries predate job_name recording.
     stem = policy.check_token(
         entry.get("job_name", Path(entry["script"]).stem), "job name"
     )
-    result = t.ssh(
-        f"cd {shlex.quote(d)} && cat "
-        f"{shlex.quote(f'{stem}.o{seq}')} {shlex.quote(f'{stem}.e{seq}')} "
-        "2>/dev/null"
-    )
+    result = t.ssh(adapter.logs_command(JobRef(job_id=job_id, dir=d, job_name=stem)))
     print(result.stdout, end="")
     return 0 if result.returncode == 0 else 1
 
