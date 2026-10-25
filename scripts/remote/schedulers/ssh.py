@@ -27,7 +27,11 @@ JOB_ID_RE = re.compile(r"\d+\.\d+")
 
 
 def _pid(job_id: str) -> str:
-    return require_digits(job_id.split(".", 1)[0], "job id")
+    pid = require_digits(job_id.split(".", 1)[0], "job id")
+    if int(pid) < 2:
+        # pid 0 and 1 are never a job of this user; refuse before any status or kill (review A1).
+        raise PolicyError(f"unsafe job id (pid must be 2 or more): '{job_id}'")
+    return pid
 
 
 class SshScheduler(Scheduler):

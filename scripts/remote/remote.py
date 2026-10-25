@@ -403,12 +403,21 @@ def _check_entry_scheduler(remote, entry: dict, job_id: str) -> None:
 
 
 def _ledger_job(remote, entry: dict, job_id: str) -> JobRef:
-    """Check a ledger entry against the remote's scheduler and build its JobRef."""
+    """Check a ledger entry against the remote's scheduler and build its JobRef.
+
+    The ledger file is agent-writable. Adapters that build commands from the
+    entry's dir and job name get both re-validated here, before any SSH call
+    (review t2r-r1 F1), exactly as cmd_logs does.
+    """
     _check_entry_scheduler(remote, entry, job_id)
-    if schedulers.get(remote.scheduler).needs_ledger_dir and (
-        "dir" not in entry or "job_name" not in entry
-    ):
-        raise policy.PolicyError("ledger entry lacks dir/job_name")
+    if schedulers.get(remote.scheduler).needs_ledger_dir:
+        if "dir" not in entry or "job_name" not in entry:
+            raise policy.PolicyError("ledger entry lacks dir/job_name")
+        return JobRef(
+            job_id=job_id,
+            dir=policy.check_dir(remote, entry["dir"]),
+            job_name=policy.check_token(entry["job_name"], "job name"),
+        )
     return JobRef(
         job_id=job_id,
         dir=entry.get("dir", ""),
