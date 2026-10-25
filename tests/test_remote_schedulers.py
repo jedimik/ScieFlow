@@ -242,3 +242,64 @@ def test_legacy_ledger_entry_without_scheduler_is_treated_as_pbs(tmp_path, capsy
     assert cli.cmd_status(BASE, t, "7.meta", workspace=tmp_path) == 0
     assert calls[0][-1] == "qstat -xf 7.meta"
     assert capsys.readouterr().out == "STATE: running exit=-\n"
+
+
+# --- authorise before SSH, per command (review t1r F1) ----------------------
+
+def _ledger_entry(**overrides):
+    entry = {
+        "task": "t", "job_id": "5.meta", "remote": "meta", "dir": "/storage/x",
+        "script": "s.sh", "job_name": "s", "state": "queued", "attempt": 1,
+        "scheduler": "pbs",
+    }
+    entry.update(overrides)
+    return entry
+
+
+@pytest.mark.parametrize(
+    "command, abstract, alias",
+    [("submit", "submit", "qsub"), ("status", "status", "qstat"),
+     ("logs", "logs", "logs")],
+)
+def test_op_missing_from_allowed_ops_is_refused_before_ssh(
+        tmp_path, command, abstract, alias):
+    jobs.save_jobs(tmp_path, [_ledger_entry()])
+    restricted = replace(BASE, allowed_ops=["check"])
+    t, calls = counting_transport()
+    with pytest.raises(policy.PolicyError,
+                       match=rf"operation '{abstract}' \({alias}\) not in allowed_ops"):
+        if command == "submit":
+            cli.cmd_submit(restricted, t, "/storage/x/repo", "run.sh",
+                           workspace=tmp_path, task="run", walltime="01:00:00",
+                           cpus=1, mem_gb=1, gpus=0, queue="default", name=None)
+        elif command == "status":
+            cli.cmd_status(restricted, t, "5.meta", workspace=tmp_path)
+        else:
+            cli.cmd_logs(restricted, t, "5.meta", workspace=tmp_path)
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "entry_overrides",
+    [
+        {"dir": "/etc"},
+        {"dir": "/storage/x/../../etc"},
+        {"job_name": "a;touch x"},
+        {"scheduler": 5},
+    ],
+    ids=["dir-outside-allowed", "dir-traversal", "unsafe-job-name", "non-string-scheduler"],
+)
+def test_tampered_ledger_entry_is_refused_by_logs_before_ssh(tmp_path, entry_overrides):
+    jobs.save_jobs(tmp_path, [_ledger_entry(**entry_overrides)])
+    t, calls = counting_transport()
+    with pytest.raises(policy.PolicyError):
+        cli.cmd_logs(BASE, t, "5.meta", workspace=tmp_path)
+    assert calls == []
+
+
+def test_unsafe_job_id_is_refused_by_logs_before_ssh(tmp_path):
+    jobs.save_jobs(tmp_path, [_ledger_entry()])
+    t, calls = counting_transport()
+    with pytest.raises(policy.PolicyError, match="unsafe job id"):
+        cli.cmd_logs(BASE, t, "5;rm.meta", workspace=tmp_path)
+    assert calls == []
