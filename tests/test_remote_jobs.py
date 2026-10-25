@@ -58,3 +58,42 @@ def test_submit_records_custom_job_name():
         resources={"walltime": "01:00:00"}, job_name="custom-name",
     )
     assert entry["job_name"] == "custom-name"
+
+
+def test_set_state_accepts_cancelled_and_unknown():
+    j = []
+    submit(j, job_id="1.meta")
+    jobs.set_state(j, "1.meta", "cancelled")
+    assert j[0]["state"] == "cancelled"
+    jobs.set_state(j, "1.meta", "unknown")
+    assert j[0]["state"] == "unknown"
+
+
+def test_unknown_counts_as_active_so_it_never_frees_a_slot():
+    j = []
+    submit(j, job_id="1.meta")
+    jobs.set_state(j, "1.meta", "unknown")
+    assert jobs.active_count(j, "meta") == 1
+    jobs.set_state(j, "1.meta", "cancelled")
+    assert jobs.active_count(j, "meta") == 0
+
+
+def test_find_returns_first_match_or_none():
+    j = []
+    submit(j, job_id="1.meta")
+    submit(j, task="taskB", job_id="2.meta")
+    assert jobs.find(j, "2.meta") is j[1]
+    assert jobs.find(j, "9.meta") is None
+
+
+def test_record_submit_writes_scheduler_and_legacy_entries_read_as_pbs():
+    j = []
+    entry = submit(j)
+    assert entry["scheduler"] == "pbs"
+    assert jobs.entry_scheduler(entry) == "pbs"
+    assert jobs.entry_scheduler({"job_id": "old.meta"}) == "pbs"
+    slurm = jobs.record_submit(
+        j, task="taskC", job_id="3", remote_name="meta", remote_dir="/storage/x",
+        script="run.sh", resources={}, scheduler="slurm",
+    )
+    assert slurm["scheduler"] == "slurm"

@@ -7,10 +7,10 @@ remotes:
     host: skirit.metacentrum.cz     # login node
     user: YOUR_METACENTRUM_USERNAME
     auth: kerberos        # uses the host PC's ticket (kinit); no keys stored
-    scheduler: pbs        # the only supported value; any other is refused
+    scheduler: pbs        # pbs (certified); slurm, ssh, local are experimental and need allow_experimental_scheduler: true (docs/remote.md)
     allowed_dirs:         # the ONLY remote paths the agent may touch
       - /storage/brno2/home/YOUR_USERNAME/projects/example
-    allowed_ops: [check, git-status, git-switch, git-pull, mv, qsub, qstat, logs, fetch]
+    allowed_ops: [check, git-status, git-switch, git-pull, mv, qsub, qstat, logs, fetch]   # PBS names; abstract names (submit, status, cancel, logs) also work
     limits:
       max_walltime: "24:00:00"
       max_cpus: 16
@@ -21,3 +21,25 @@ remotes:
       queues: [default]
       max_concurrent_jobs: 4
       max_fix_attempts: 3   # automatic fix-and-resubmit ceiling per task
+
+  # Experimental Slurm example (M-E). Not run against a real cluster; read
+  # docs/remote.md ("Honest limits") before uncommenting. The opt-in is required.
+  # slurm-cluster:
+  #   host: login.example.org
+  #   user: YOUR_USERNAME
+  #   auth: kerberos
+  #   scheduler: slurm
+  #   allow_experimental_scheduler: true
+  #   allowed_dirs:
+  #     - /home/YOUR_USERNAME/projects/example
+  #   allowed_ops: [check, submit, status, logs, fetch]
+  #   limits:
+  #     max_walltime: "24:00:00"
+  #     max_cpus: 16
+  #     max_mem_gb: 64
+  #     max_gpus: 0
+  #     max_scratch_gb: 0
+  #     scratch_types: [tmp]
+  #     queues: [default]
+  #     max_concurrent_jobs: 4
+  #     max_fix_attempts: 3
