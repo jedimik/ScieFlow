@@ -8,6 +8,8 @@ kinit instruction for the user.
 import subprocess
 from pathlib import Path
 
+from remote import schedulers
+
 
 def _default_runner(argv):
     # MetaCentrum occasionally emits locale-specific bytes in git diagnostics;
@@ -47,3 +49,49 @@ class Transport:
             "--checksum" if checksum else "--append-verify",
             source_arg, f"{self.target}:{remote_arg}",
         ])
+
+
+class LocalTransport:
+    """Runs the same command strings on this host, through bash (M-E t2).
+
+    Used only by the `local` scheduler adapter. It adds no capability beyond
+    the caller's own shell: the strings still come from the adapter, which
+    builds them from policy-validated fields.
+    """
+
+    def __init__(self, remote, runner=None):
+        self.remote = remote
+        self.runner = runner or _default_runner
+
+    @property
+    def target(self) -> str:
+        return "localhost"
+
+    def local(self, argv: list):
+        return self.runner(list(argv))
+
+    def ssh(self, command: str):
+        return self.runner(["bash", "-c", command])
+
+    def rsync_from(self, remote_path: str, dest: str):
+        return self.runner(["rsync", "-az", remote_path, dest])
+
+    def rsync_to(self, source: str, remote_path: str, *, checksum: bool = False):
+        source_arg = source.rstrip("/")
+        remote_arg = remote_path.rstrip("/") + "/"
+        if not Path(source_arg).is_file():
+            source_arg += "/"
+        return self.runner([
+            "rsync", "-az", "--partial",
+            "--checksum" if checksum else "--append-verify",
+            source_arg, remote_arg,
+        ])
+
+
+def for_remote(remote, runner=None):
+    """Pick the transport the remote's scheduler adapter needs."""
+    adapter = schedulers.get(remote.scheduler)
+    if adapter.transport == "local":
+        return LocalTransport(remote, runner=runner)
+    return Transport(remote, runner=runner)
+

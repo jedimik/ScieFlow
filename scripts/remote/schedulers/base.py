@@ -23,6 +23,26 @@ class SubmitParseError(Exception):
     """The submit command returned no usable job id."""
 
 
+def walltime_to_seconds(walltime: str) -> int:
+    """Convert a validated HH:MM:SS walltime to seconds.
+
+    Adapters cannot import policy.py (it imports this registry), so the
+    conversion lives here. policy.walltime_seconds does the same job.
+    """
+    parts = str(walltime).split(":")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        raise PolicyError(f"bad walltime '{walltime}' (expected HH:MM:SS)")
+    hours, minutes, seconds = (int(p) for p in parts)
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def require_digits(value: str, what: str) -> str:
+    """Refuse a job id component that is not plain digits (invariant d)."""
+    if not isinstance(value, str) or not value.isdigit():
+        raise PolicyError(f"unsafe {what} (expected digits): '{value}'")
+    return value
+
+
 @dataclass(frozen=True)
 class JobSpec:
     """A submission whose fields policy.py has already validated and clamped."""

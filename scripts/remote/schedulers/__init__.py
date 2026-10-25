@@ -2,11 +2,15 @@
 
 REGISTRY is read at call time, never copied, so policy.load_remote and the
 command functions always see the current entries (tests monkeypatch it).
-Only PBS is registered in M-E t1; Slurm, SSH and local follow in t2.
+PBS is certified. Slurm, plain SSH and local are experimental and need the
+allow_experimental_scheduler opt-in (policy.py).
 """
 
 from remote.errors import PolicyError
+from remote.schedulers.local import LocalScheduler
 from remote.schedulers.pbs import PbsScheduler
+from remote.schedulers.slurm import SlurmScheduler
+from remote.schedulers.ssh import SshScheduler
 
 REGISTRY: dict = {}
 
@@ -16,6 +20,9 @@ def _register(adapter) -> None:
 
 
 _register(PbsScheduler())
+_register(SlurmScheduler())
+_register(SshScheduler())
+_register(LocalScheduler())
 
 
 def get(name):

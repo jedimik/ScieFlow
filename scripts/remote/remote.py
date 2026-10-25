@@ -43,6 +43,10 @@ def _report_remote_credentials() -> int:
 
 def cmd_check(remote, t) -> int:
     policy.check_op(remote, "check")
+    if not schedulers.get(remote.scheduler).needs_kerberos:
+        # Local execution has no Kerberos ticket or remote SSH to check.
+        print("OK")
+        return 0
     if t.local(["klist", "-s"]).returncode != 0:
         print("NO_TICKET: no valid Kerberos ticket on this host — stop and "
               "ask the user to run `kinit` (agent must never authenticate).")
@@ -710,7 +714,7 @@ def main(argv=None) -> int:
     root = Path(__file__).resolve().parents[2]
     try:
         remote = policy.load_remote(root, args.remote)
-        t = transport.Transport(remote)
+        t = transport.for_remote(remote)
         if args.cmd == "check":
             return cmd_check(remote, t)
         if args.cmd == "pull":

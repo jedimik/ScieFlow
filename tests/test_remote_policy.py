@@ -173,13 +173,51 @@ def test_walltime_seconds():
         policy.walltime_seconds("90m")
 
 
-@pytest.mark.parametrize("value", ["slurm", "3"])
-def test_load_remote_refuses_unsupported_scheduler(tmp_path, value):
+def _write_cfg(tmp_path, text):
     root_dir = tmp_path / "root"
     (root_dir / "config").mkdir(parents=True)
-    (root_dir / "config" / "remotes.yml").write_text(
-        CFG.replace("scheduler: pbs", f"scheduler: {value}")
-    )
+    (root_dir / "config" / "remotes.yml").write_text(text)
+    return root_dir
+
+
+@pytest.mark.parametrize("value", ["sge", "3"])
+def test_load_remote_refuses_unsupported_scheduler(tmp_path, value):
+    root_dir = _write_cfg(tmp_path, CFG.replace("scheduler: pbs", f"scheduler: {value}"))
     with pytest.raises(policy.PolicyError,
-                       match="is not supported \\(supported: pbs\\)"):
+                       match="is not supported \\(supported: local, pbs, slurm, ssh\\)"):
         policy.load_remote(root_dir, "meta")
+
+
+@pytest.mark.parametrize("value", ["slurm", "ssh", "local"])
+def test_experimental_scheduler_refused_without_opt_in(tmp_path, value):
+    text = CFG.replace("scheduler: pbs", f"scheduler: {value}")
+    if value == "local":
+        text = text.replace("host: skirit.metacentrum.cz", "host: localhost").replace(
+            "auth: kerberos", "auth: none")
+    root_dir = _write_cfg(tmp_path, text)
+    with pytest.raises(policy.PolicyError,
+                       match=f"scheduler '{value}' is experimental"):
+        policy.load_remote(root_dir, "meta")
+
+
+@pytest.mark.parametrize("value", ["slurm", "ssh", "local"])
+def test_experimental_scheduler_loads_with_opt_in(tmp_path, value):
+    text = CFG.replace("scheduler: pbs", f"scheduler: {value}\n    allow_experimental_scheduler: true")
+    if value == "local":
+        text = text.replace("host: skirit.metacentrum.cz", "host: localhost").replace(
+            "auth: kerberos", "auth: none")
+    remote = policy.load_remote(_write_cfg(tmp_path, text), "meta")
+    assert remote.scheduler == value
+    assert remote.allow_experimental_scheduler is True
+
+
+def test_local_scheduler_requires_localhost_and_no_auth(tmp_path):
+    base = CFG.replace("scheduler: pbs", "scheduler: local\n    allow_experimental_scheduler: true")
+    with pytest.raises(policy.PolicyError, match="local"):
+        policy.load_remote(_write_cfg(tmp_path, base), "meta")
+    ok = base.replace("host: skirit.metacentrum.cz", "host: localhost").replace(
+        "auth: kerberos", "auth: none")
+    policy.load_remote(_write_cfg(tmp_path / "b", ok), "meta")
+    bad_auth = ok.replace("auth: none", "auth: kerberos")
+    with pytest.raises(policy.PolicyError, match="local"):
+        policy.load_remote(_write_cfg(tmp_path / "c", bad_auth), "meta")
