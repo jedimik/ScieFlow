@@ -15,13 +15,24 @@ import pytest
 from remote import jobs, policy, remote as cli, schedulers, transport
 from remote.schedulers.base import JobRef
 
-pytestmark = pytest.mark.skipif(
-    any(shutil.which(tool) is None for tool in ("bash", "setsid", "timeout", "rsync", "ps", "pkill")),
-    reason="needs bash, setsid, timeout, rsync, ps and pkill",
-)
+
+REQUIRED_TOOLS = ("bash", "setsid", "timeout", "rsync", "ps", "pkill")
 
 POLL_SECONDS = 10.0
 TERMINAL = ("done", "failed", "cancelled")
+
+
+def require_tools():
+    # Fail loudly, never skip: docs/remote.md promises that a runner without
+    # these tools fails this module instead of skipping it silently.
+    missing = [tool for tool in REQUIRED_TOOLS if shutil.which(tool) is None]
+    if missing:
+        pytest.fail("local end-to-end needs these tools on PATH: " + ", ".join(missing))
+
+
+@pytest.fixture(autouse=True)
+def _required_tools_present():
+    require_tools()
 
 
 @pytest.fixture
@@ -169,3 +180,9 @@ def test_cancel_reaches_the_script_and_ends_the_session(env, capsys):
     while time.monotonic() < deadline and session_alive(sid):
         time.sleep(0.1)
     assert not session_alive(sid), "the cancelled job's session is still alive"
+
+
+def test_missing_tool_fails_loudly(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda tool: None)
+    with pytest.raises(pytest.fail.Exception, match="needs these tools"):
+        require_tools()
