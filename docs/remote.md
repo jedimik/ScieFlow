@@ -56,7 +56,8 @@ machine-readable output). That command reads no config and runs no SSH.
    (`DAG_RECORDED: ...`). A log over 10 MiB is refused.
 4. `remote.py submit ... --task T --after-dryrun` refuses (`NO_DAG`, exit 1,
    before SSH) unless the task's latest dry run is done, its DAG is recorded,
-   and the file on disk still has that hash.
+   and the file on disk still has that hash. The gate matches the dry run by
+   task name only. It does not compare the remote, the script or the directory.
 
 Limits of the gate. `jobs.yml` and `WS/remote/dag-<task>.txt` are both
 agent-writable. The gate protects against accidents and skipped steps. It does
@@ -73,6 +74,9 @@ remote-exec skill makes `--after-dryrun` mandatory for those tasks.
   its output is ambiguous. An `unknown` job still counts toward the concurrency
   ceiling, so it never frees a slot. Check the job by hand before treating it
   as finished.
+- A job already recorded as `done` can later read as `unknown`, for example
+  when Slurm has aged it out of `sacct` and `squeue`. `status` writes the new
+  state to the ledger as it is read, so the job then counts as active again.
 - A PBS state letter that is not recognised maps to `queued`, never to `done`
   (M-E-D7).
 
