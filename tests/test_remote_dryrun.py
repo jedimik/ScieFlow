@@ -268,4 +268,46 @@ def test_after_dryrun_allowed_after_a_valid_dag(tmp_path):
     seed(ws, [dryrun_entry(dag_sha256=hashlib.sha256(text).hexdigest())])
     assert submit_after(remote, t, ws) == 0
     assert len(calls) == 1
-    assert "-v" not in calls[0][-1] or "SCIEFLOW_DRYRUN" not in calls[0][-1]
+    assert "SCIEFLOW_DRYRUN" not in calls[0][-1]
+
+
+def test_forged_dryrun_env_in_a_real_submit_is_not_a_dry_run(tmp_path, capsys):
+    # Review r1 F2: a real submit carrying SCIEFLOW_DRYRUN=1 is recorded as a
+    # real job, so --after-dryrun still refuses it. Zero extra transport calls.
+    remote, t, calls, ws = make(tmp_path, replies=[(0, "102.meta-pbs\n")])
+    assert cli.cmd_submit(remote, t, "/storage/x/repo", "run.sh", workspace=ws,
+                          task="snk", walltime="01:00:00", cpus=1, mem_gb=4,
+                          gpus=0, queue="default", name=None,
+                          environment_assignments=["SCIEFLOW_DRYRUN=1"]) == 0
+    [entry] = jobs.load_jobs(ws)
+    assert entry.get("kind") != "dryrun"
+    entry["state"] = "done"
+    entry["dag_sha256"] = hashlib.sha256(b"plan\n").hexdigest()
+    seed(ws, [entry])
+    assert submit_after(remote, t, ws) == 1
+    assert "NO_DAG" in capsys.readouterr().err
+    assert len(calls) == 1
+
+
+# --- main(): exit-3 mapping and the new subparsers ---------------------------
+
+def test_main_dryrun_with_caller_env_exits_3_with_policy_message(tmp_path, capsys, monkeypatch):
+    remote, t, calls, ws = make(tmp_path)
+    monkeypatch.setattr(policy, "load_remote", lambda *a, **k: remote)
+    monkeypatch.setattr(transport, "for_remote", lambda *a, **k: t)
+    rc = cli.main(["dryrun", "meta", "/storage/x/repo", "run.sh", "--task", "snk",
+                   "--workspace", str(ws), "--env", "SCIEFLOW_DRYRUN=0"])
+    assert rc == 3
+    assert "POLICY:" in capsys.readouterr().err
+    assert calls == []
+
+
+def test_main_submit_after_dryrun_without_ledger_exits_1(tmp_path, capsys, monkeypatch):
+    remote, t, calls, ws = make(tmp_path)
+    monkeypatch.setattr(policy, "load_remote", lambda *a, **k: remote)
+    monkeypatch.setattr(transport, "for_remote", lambda *a, **k: t)
+    rc = cli.main(["submit", "meta", "/storage/x/repo", "run.sh", "--task", "snk",
+                   "--workspace", str(ws), "--after-dryrun"])
+    assert rc == 1
+    assert "NO_DAG" in capsys.readouterr().err
+    assert calls == []
