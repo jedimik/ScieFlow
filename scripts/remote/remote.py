@@ -24,6 +24,7 @@ if _SCRIPTS_DIR not in sys.path:
 from remote import jobs, policy, schedulers, transport
 from remote.schedulers.base import JobRef, JobSpec, SubmitParseError
 
+
 def _remote_credentials_failed(stderr: str) -> bool:
     """Recognize observed missing/expired credentials without inspecting secrets."""
     message = stderr.lower()
