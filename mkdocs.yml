@@ -57,6 +57,7 @@ nav:
   - Runs, jobs and gates: runs.md
   - Web app: web.md
   - Sandbox: sandbox.md
+  - Remote execution: remote.md
   - Architecture: architecture.md
   - CLI reference: cli.md
   - Experiments:
