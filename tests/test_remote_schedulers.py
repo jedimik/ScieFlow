@@ -303,3 +303,50 @@ def test_unsafe_job_id_is_refused_by_logs_before_ssh(tmp_path):
     with pytest.raises(policy.PolicyError, match="unsafe job id"):
         cli.cmd_logs(BASE, t, "5;rm.meta", workspace=tmp_path)
     assert calls == []
+
+
+# --- status re-validates the ledger, as logs does (M-E t2 fix, review t2r-r1 F1) ---
+
+@pytest.mark.parametrize("scheduler", ["ssh", "local", "slurm"])
+@pytest.mark.parametrize(
+    "entry_overrides",
+    [
+        {"dir": "/etc"},
+        {"dir": "/storage/x/../../etc"},
+        {"job_name": "a;touch x"},
+        {"job_name": "../x"},
+    ],
+    ids=["dir-outside-allowed", "dir-traversal", "unsafe-job-name", "job-name-with-slash"],
+)
+def test_tampered_ledger_entry_is_refused_by_status_before_ssh(
+        tmp_path, scheduler, entry_overrides):
+    # Each id is valid for its adapter, so the refusal under test is the tamper check.
+    job_id = "12345" if scheduler == "slurm" else "5.1761400000"
+    remote = replace(BASE, scheduler=scheduler,
+                     allowed_ops=["check", "submit", "status", "cancel", "logs"])
+    entry = _ledger_entry(job_id=job_id, **entry_overrides)
+    entry["scheduler"] = scheduler
+    jobs.save_jobs(tmp_path, [entry])
+    t, calls = counting_transport()
+    with pytest.raises(policy.PolicyError,
+                       match=r"outside allowed_dirs|unsafe (remote path|job name)"):
+        cli.cmd_status(remote, t, job_id, workspace=tmp_path)
+    assert calls == []
+
+
+# --- walltime conversion: adapters and policy must agree (M-E t2 fix, review A2) ---
+
+@pytest.mark.parametrize("walltime", ["00:00:00", "00:02:05", "01:00:00", "24:00:00", "100:00:00"])
+def test_walltime_conversion_matches_policy(walltime):
+    from remote.schedulers.base import walltime_to_seconds
+    assert walltime_to_seconds(walltime) == policy.walltime_seconds(walltime)
+
+
+@pytest.mark.parametrize("walltime", ["1:00", "01:02:03:04", "aa:00:00", ""])
+def test_walltime_refusal_matches_policy(walltime):
+    from remote.schedulers.base import walltime_to_seconds
+    with pytest.raises(errors.PolicyError) as adapter_error:
+        walltime_to_seconds(walltime)
+    with pytest.raises(errors.PolicyError) as policy_error:
+        policy.walltime_seconds(walltime)
+    assert str(adapter_error.value) == str(policy_error.value)

@@ -262,3 +262,26 @@ def test_cmd_logs_runs_the_slurm_logs_command(tmp_path, capsys):
         "cd /storage/x/repo && cat slurm-12345.out slurm-12345.err 2>/dev/null"
     )
     assert capsys.readouterr().out == "out text\n"
+
+
+# --- golden strings for custom name and submit_dir (M-E t2 fix, review t2r-r1 F2) ---
+
+def test_submit_custom_name_golden():
+    assert adapter().submit_command(spec(name="paper1-dag")) == (
+        "cd /storage/x/repo && sbatch --parsable -J paper1-dag -p default "
+        "-t 01:00:00 -N 1 -n 1 -c 1 --mem=4G -o slurm-%j.out -e slurm-%j.err run.sh"
+    )
+
+
+def test_cmd_submit_custom_name_and_submit_dir_golden(tmp_path):
+    t, calls = recording([(0, "12345\n", "")])
+    assert submit(tmp_path, t, name="paper1-dag", submit_dir="/storage/x/logs") == 0
+    assert calls[0][-1] == (
+        "cd /storage/x/logs && sbatch --parsable -J paper1-dag -p default "
+        "-t 01:00:00 -N 1 -n 1 -c 1 --mem=4G -o slurm-%j.out -e slurm-%j.err "
+        "/storage/x/repo/run.sh"
+    )
+    [entry] = jobs.load_jobs(tmp_path)
+    assert entry["dir"] == "/storage/x/logs"
+    assert entry["code_dir"] == "/storage/x/repo"
+    assert entry["job_name"] == "paper1-dag"

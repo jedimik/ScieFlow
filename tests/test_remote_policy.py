@@ -213,11 +213,13 @@ def test_experimental_scheduler_loads_with_opt_in(tmp_path, value):
 
 def test_local_scheduler_requires_localhost_and_no_auth(tmp_path):
     base = CFG.replace("scheduler: pbs", "scheduler: local\n    allow_experimental_scheduler: true")
-    with pytest.raises(policy.PolicyError, match="local"):
+    refusal = ("local scheduler needs host: localhost and auth: none "
+               "on the remote entry in config/remotes.yml")
+    with pytest.raises(policy.PolicyError, match=refusal):
         policy.load_remote(_write_cfg(tmp_path, base), "meta")
     ok = base.replace("host: skirit.metacentrum.cz", "host: localhost").replace(
         "auth: kerberos", "auth: none")
     policy.load_remote(_write_cfg(tmp_path / "b", ok), "meta")
     bad_auth = ok.replace("auth: none", "auth: kerberos")
-    with pytest.raises(policy.PolicyError, match="local"):
+    with pytest.raises(policy.PolicyError, match=refusal):
         policy.load_remote(_write_cfg(tmp_path / "c", bad_auth), "meta")

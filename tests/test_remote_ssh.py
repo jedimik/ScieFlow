@@ -223,3 +223,43 @@ def test_cmd_logs_runs_the_ssh_logs_command(tmp_path, capsys):
     assert cli.cmd_logs(REMOTE, t, "4242.1761400000", workspace=tmp_path) == 0
     assert calls[0][-1] == "cd /storage/x/repo && cat run.o4242 run.e4242 2>/dev/null"
     assert capsys.readouterr().out == "hello\n"
+
+
+# --- pid below 2 is refused before SSH (M-E t2 fix, review t2r-r1 A1) ---
+
+@pytest.mark.parametrize("job_id", ["0.1761400000", "1.1761400000"])
+def test_pid_below_two_is_refused_before_any_ssh(tmp_path, job_id):
+    jobs.save_jobs(tmp_path, [{
+        "task": "run", "job_id": job_id, "remote": "meta",
+        "dir": "/storage/x/repo", "script": "run.sh", "job_name": "run",
+        "resources": {}, "environment": {}, "scheduler": "ssh",
+        "state": "queued", "attempt": 1,
+    }])
+    t, calls = recording()
+    with pytest.raises(PolicyError, match=r"unsafe job id \(pid must be 2 or more\)"):
+        cli.cmd_status(REMOTE, t, job_id, workspace=tmp_path)
+    assert calls == []
+
+
+# --- golden strings for custom name and submit_dir (M-E t2 fix, review t2r-r1 F2) ---
+
+def test_submit_custom_name_golden():
+    assert adapter().submit_command(spec(name="paper1-dag")) == (
+        "cd /storage/x/repo && { setsid nohup bash -c " + shlex.quote(WRAPPER)
+        + " paper1-dag run.sh 3600 </dev/null >/dev/null 2>&1 & "
+        "echo \"$!.$(date +%s)\"; }"
+    )
+
+
+def test_cmd_submit_custom_name_and_submit_dir_golden(tmp_path):
+    t, calls = recording([(0, "4242.1761400000\n", "")])
+    assert submit(tmp_path, t, name="paper1-dag", submit_dir="/storage/x/logs") == 0
+    assert calls[0][-1] == (
+        "cd /storage/x/logs && { setsid nohup bash -c " + shlex.quote(WRAPPER)
+        + " paper1-dag /storage/x/repo/run.sh 3600 </dev/null >/dev/null 2>&1 & "
+        "echo \"$!.$(date +%s)\"; }"
+    )
+    [entry] = jobs.load_jobs(tmp_path)
+    assert entry["dir"] == "/storage/x/logs"
+    assert entry["code_dir"] == "/storage/x/repo"
+    assert entry["job_name"] == "paper1-dag"
