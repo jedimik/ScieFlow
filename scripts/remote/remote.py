@@ -699,7 +699,7 @@ def cmd_dag(remote, t, job_id: str, *, workspace: Path) -> int:
     return 0
 
 
-def cmd_fetch(remote, t, src: str, dest: str, *, workspace: Path) -> int:
+def cmd_fetch(remote, t, src: str, dest: str, *, workspace: Path, root=None) -> int:
     policy.check_op(remote, "fetch")
     s = policy.check_dir(remote, src)
     if src.endswith("/"):
@@ -709,6 +709,7 @@ def cmd_fetch(remote, t, src: str, dest: str, *, workspace: Path) -> int:
     if not dest_path.is_relative_to(ws):
         raise policy.PolicyError(
             f"fetch destination must be inside the workspace: {dest}")
+    _data_egress_fetch(root, remote, dest_path)   # M-B 5.7, before any transport call
     dest_path.mkdir(parents=True, exist_ok=True)
     result = t.rsync_from(s, str(dest_path))
     if result.returncode != 0:
@@ -718,8 +719,30 @@ def cmd_fetch(remote, t, src: str, dest: str, *, workspace: Path) -> int:
     return 0
 
 
+def _data_root(root) -> Path:
+    return Path(root) if root is not None else Path(__file__).resolve().parents[2]
+
+
+def _data_egress_push(root, remote, source: Path) -> None:
+    from scieflow.core.data import egress
+
+    try:
+        egress.push_check(_data_root(root), source, remote.name)
+    except egress.EgressRefused as exc:
+        raise policy.PolicyError(str(exc)) from None
+
+
+def _data_egress_fetch(root, remote, dest: Path) -> None:
+    from scieflow.core.data import egress
+
+    try:
+        egress.fetch_check(_data_root(root), dest, remote.name)
+    except egress.EgressRefused as exc:
+        raise policy.PolicyError(str(exc)) from None
+
+
 def cmd_push(remote, t, src: str, dest: str, *, workspace: Path,
-             checksum: bool = False) -> int:
+             checksum: bool = False, root=None) -> int:
     """Push one workspace directory to an approved remote directory."""
     policy.check_op(remote, "rsync")
     remote_dest = policy.check_dir(remote, dest)
@@ -731,6 +754,7 @@ def cmd_push(remote, t, src: str, dest: str, *, workspace: Path,
         )
     if not source_path.is_dir() and not source_path.is_file():
         raise policy.PolicyError(f"push source must be a file or directory: {src}")
+    _data_egress_push(root, remote, source_path)   # M-B 5.7, before any transport call
     result = (t.rsync_to(str(source_path), remote_dest, checksum=True)
               if checksum else t.rsync_to(str(source_path), remote_dest))
     if result.returncode != 0:
@@ -942,10 +966,10 @@ def main(argv=None) -> int:
             return cmd_logs(remote, t, args.job_id, workspace=args.workspace)
         if args.cmd == "fetch":
             return cmd_fetch(remote, t, args.src, args.dest,
-                             workspace=args.workspace)
+                             workspace=args.workspace, root=root)
         if args.cmd == "push":
             return cmd_push(remote, t, args.src, args.dest,
-                            workspace=args.workspace, checksum=args.checksum)
+                            workspace=args.workspace, checksum=args.checksum, root=root)
         if args.cmd == "git-push":
             return cmd_git_push(remote, t, args.dir, args.branch)
     except policy.PolicyError as exc:
