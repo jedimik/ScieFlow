@@ -28,8 +28,8 @@ The full list of limits is in [Data protection](docs/data-protection.md#what-thi
 
 ## Reporting a vulnerability
 
-Report a vulnerability privately: never a public issue. Open a private security
-advisory on the repository (GitHub: Security, then Report a vulnerability), or
-contact the maintainer directly. Include
+Report a vulnerability privately: never a public issue. Open a private security advisory
+on the repository (GitHub: Security, then Report a vulnerability), or contact the
+maintainer directly. Include
 the version, the steps to reproduce, and what an attacker could gain. Do not
 include real patient or participant data in a report.
