@@ -36,6 +36,9 @@ REDCAP_TIMESTAMP_SUFFIX = "_timestamp"
 DATE_SHARE = 0.9
 HEAD_BYTES = 4096
 MANIFEST_SUFFIX = ".ingest.yml"
+# Run-root names that belong to ScieFlow's own bookkeeping; an output may never claim them (F2).
+RUN_BOOKKEEPING = frozenset({levels.DATA_FILE, "events.jsonl", "status.yml", "budget.yml",
+                             "charter.yml", "conversation.yml", "log.md", "gates"})
 ISO_DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?:[ T]\d{2}:\d{2}(?::\d{2})?)?")
 CZ_DATE = re.compile(r"(\d{1,2})\. ?(\d{1,2})\. ?(\d{4})")
 
@@ -134,6 +137,8 @@ def _target(ws: Path, text) -> tuple[str, Path]:
     parts = PurePosixPath(rel).parts
     if parts[0] == RELEASED_DIR:
         raise IngestError("--out must not be under released/")
+    if parts[0] in RUN_BOOKKEEPING:
+        raise IngestError(f"--out {parts[0]} is run bookkeeping; choose another name (F2)")
     cur = ws
     for part in parts[:-1]:
         cur = cur / part
@@ -249,63 +254,85 @@ def ingest(project, ws, source, out, *, profile="generic", id_col="record_id", d
                                     fh.read(HEAD_BYTES).decode("utf-8-sig", errors="replace"))
     try:
         header, rows_in, stats = _column_stats(source, delim)
-        plan = _plan(header, stats, pol, profile, id_col, date_anchor, drops, keep_free_text)
-        key = load_or_create_salt(project.root.name)
-        salt_id = hashlib.sha256(key).hexdigest()[:8]
-        rows_out = unparsed = 0
-        target.parent.mkdir(parents=True, exist_ok=True)
-        part = target.with_name("." + target.name + ".part")
-        try:
-            with open(part, "w", newline="", encoding="utf-8") as fh:
-                writer = csv.writer(fh)
-                writer.writerow([header[i] for i in plan.kept])
-                rows = _rows(source, delim)
-                next(rows)
-                for row in rows:
-                    row = list(row[:len(header)]) + [""] * (len(header) - len(row))
-                    anchor = (parse_date(row[plan.anchor_idx])
-                              if plan.anchor_idx is not None else None)
-                    out_row = []
-                    for i in plan.kept:
-                        value = row[i]
-                        if i == plan.id_idx:
-                            out_row.append(_pseudonym(value.strip(), key))
-                        elif i in plan.date_cols:
-                            d = parse_date(value) if value.strip() else None
-                            if value.strip() and (d is None or anchor is None):
-                                unparsed += 1
-                            out_row.append("" if d is None or anchor is None
-                                           else str((d - anchor).days))
-                        else:
-                            out_row.append(value)
-                    writer.writerow(out_row)
-                    rows_out += 1
-            os.replace(part, target)
-        except BaseException:
-            part.unlink(missing_ok=True)
-            raise
     except csv.Error:
         raise IngestError("the source is not a parseable table") from None
-    manifest = {
-        "source_name": source.name, "source_sha256": _sha(source),
-        "source_mtime": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(
-            timespec="seconds"),
-        "scieflow_version": __version__, "rows_in": rows_in, "rows_out": rows_out,
-        "columns_kept": [header[i] for i in plan.kept],
-        "columns_dropped": [{"name": header[i], "rule": rule}
-                            for i, rule in sorted(plan.dropped.items())],
-        "dates_converted": [header[i] for i in plan.date_cols],
-        "dates_unparsed": unparsed, "id_column": header[plan.id_idx], "salt_id": salt_id,
-    }
-    target.with_name(target.name + MANIFEST_SUFFIX).write_text(
-        yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True))
+    plan = _plan(header, stats, pol, profile, id_col, date_anchor, drops, keep_free_text)
+    key = load_or_create_salt(project.root.name)
+    salt_id = hashlib.sha256(key).hexdigest()[:8]
+    # The declaration comes first (F2): if it fails, no output is written at all.
     entry = {"path": rel, "level": "L2", "kind": "tabular", "reason": "ingest output",
              "declared_by": "human", "declared_at": _now()}
     try:
         levels.modify(ws, lambda df: df.levels.append(entry))
     except levels.DataFileError as exc:
         raise IngestError(str(exc)) from exc
+    try:
+        rows_out, unparsed = _write(source, delim, header, plan, key, target)
+        manifest = {
+            "source_name": source.name, "source_sha256": _sha(source),
+            "source_mtime": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(
+                timespec="seconds"),
+            "scieflow_version": __version__, "rows_in": rows_in, "rows_out": rows_out,
+            "columns_kept": [header[i] for i in plan.kept],
+            "columns_dropped": [{"name": header[i], "rule": rule}
+                                for i, rule in sorted(plan.dropped.items())],
+            "dates_converted": [header[i] for i in plan.date_cols],
+            "dates_unparsed": unparsed, "id_column": header[plan.id_idx], "salt_id": salt_id,
+        }
+        target.with_name(target.name + MANIFEST_SUFFIX).write_text(
+            yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True))
+    except csv.Error:
+        _discard(target)
+        raise IngestError("the source is not a parseable table") from None
+    except BaseException:
+        _discard(target)
+        raise
     events.emit(ws, "data.ingested", "human", path=rel, rows_in=rows_in, rows_out=rows_out,
                 columns_kept=len(plan.kept), columns_dropped=len(plan.dropped),
                 dates_converted=len(plan.date_cols), dates_unparsed=unparsed)
     return {**manifest, "out": rel, "manifest": rel + MANIFEST_SUFFIX}
+
+
+def _write(source: Path, delim: str, header, plan: _Plan, key: bytes, target: Path) -> tuple[int, int]:
+    """Write the de-identified rows to a part file, then move it into place. (rows_out, unparsed)."""
+    rows_out = unparsed = 0
+    target.parent.mkdir(parents=True, exist_ok=True)
+    part = target.with_name("." + target.name + ".part")
+    try:
+        with open(part, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.writer(fh)
+            writer.writerow([header[i] for i in plan.kept])
+            rows = _rows(source, delim)
+            next(rows)
+            for row in rows:
+                row = list(row[:len(header)]) + [""] * (len(header) - len(row))
+                anchor = (parse_date(row[plan.anchor_idx])
+                          if plan.anchor_idx is not None else None)
+                out_row = []
+                for i in plan.kept:
+                    value = row[i]
+                    if i == plan.id_idx:
+                        out_row.append(_pseudonym(value.strip(), key))
+                    elif i in plan.date_cols:
+                        d = parse_date(value) if value.strip() else None
+                        if value.strip() and (d is None or anchor is None):
+                            unparsed += 1
+                        out_row.append("" if d is None or anchor is None
+                                       else str((d - anchor).days))
+                    else:
+                        out_row.append(value)
+                writer.writerow(out_row)
+                rows_out += 1
+        os.replace(part, target)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    return rows_out, unparsed
+
+
+def _discard(target: Path) -> None:
+    """Remove what a failed ingest wrote: the output, its manifest and any part file (F2)."""
+    for path in (target, target.with_name(target.name + MANIFEST_SUFFIX),
+                 target.with_name("." + target.name + ".part")):
+        path.unlink(missing_ok=True)
+
