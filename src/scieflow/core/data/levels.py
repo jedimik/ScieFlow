@@ -98,7 +98,7 @@ def _check(raw) -> DataFile:
     for key in raw:
         if key not in _TOP_KEYS:
             raise DataFileError(f"data.yml: unknown key {key!r}")
-    if isinstance(raw.get("version"), bool) or raw.get("version") != 1:
+    if type(raw.get("version")) is not int or raw["version"] != 1:
         raise DataFileError("data.yml: version must be 1")
     default = raw.get("default_level", "L0")
     if default not in DECLARABLE:
@@ -118,14 +118,22 @@ def _check(raw) -> DataFile:
 
 
 def read(ws) -> DataFile | Invalid:
-    """The declaration file, or Invalid(reason). A missing file is an empty DataFile."""
+    """The declaration file, or Invalid(reason). A missing file is an empty DataFile.
+
+    A symlink is never followed (Invalid), and a file that cannot be stat'd or read is
+    Invalid too: only a plain absent name counts as "no declarations" (fail-closed, D5).
+    """
     path = Path(ws) / DATA_FILE
-    if not path.exists():
-        return DataFile(present=False)
     try:
+        if path.is_symlink():
+            return Invalid("data.yml: is a symlink; use a regular file")
+        if not path.exists():
+            return DataFile(present=False)
         raw = yaml.safe_load(path.read_text())
-    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+    except yaml.YAMLError:
         return Invalid("data.yml: not readable YAML")
+    except (OSError, UnicodeDecodeError):
+        return Invalid("data.yml: cannot be read")
     if raw is None:
         return Invalid("data.yml: the file is empty")
     try:

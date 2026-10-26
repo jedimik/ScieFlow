@@ -25,6 +25,10 @@ POLICY_FILE = "config/data-policy.yml"
 ENFORCEMENT = ("warn", "refuse")
 TEMPLATE_KEYS = ("cmd", "stdin_cmd", "session_cmd", "resume_cmd")
 SCITE_PROVIDERS = ("scite", "notebooklm")
+# Mirrors research.lib.providers.CATALOGUE (tests/core/data/test_policy.py keeps them equal). Static
+# so that loading the policy never imports the optional `research` extra (`requests`), M-B review F1.
+KNOWN_PROVIDERS = ("pubtator", "ctgov", "openalex", "europepmc", "search-openalex", "search-arxiv",
+                   "search-europepmc", "search-crossref", *SCITE_PROVIDERS)
 LEVELS = ("L0", "L1", "L2")
 KINDS = ("tabular", "imaging", "eeg", "other")
 LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
@@ -118,11 +122,15 @@ def _reason(entry: dict, where: str) -> str:
 
 
 def _endpoint_ok(url: str) -> bool:
+    # Whitespace, control characters and credentials are refused (M-B review F4): the endpoint is
+    # substituted into an argv template, and a credential in it would show up in `levels`.
+    if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in url):
+        return False
     try:
         parts = urlsplit(url)
     except ValueError:
         return False
-    if not parts.hostname:
+    if "@" in parts.netloc or not parts.hostname:
         return False
     if parts.scheme == "https":
         return True
@@ -134,9 +142,20 @@ def _positive(value) -> bool:
 
 
 def load(root) -> Policy:
-    """The project policy. An absent file gives the safe defaults (nothing is safe)."""
+    """The project policy. An absent file gives the safe defaults (nothing is safe).
+
+    A symlink or an unreadable entry is PolicyInvalid, never the defaults: a dangling link
+    must not silently drop `enforcement: refuse` (fail-closed, M-B review F2).
+    """
     path = Path(root) / POLICY_FILE
-    if not path.exists():
+    try:
+        linked = path.is_symlink()
+        present = path.exists()
+    except OSError:
+        raise PolicyInvalid(f"{POLICY_FILE}: cannot be read") from None
+    if linked:
+        raise PolicyInvalid(f"{POLICY_FILE}: is a symlink; use a regular file")
+    if not present:
         return _defaults(present=False)
     try:
         raw = yaml.safe_load(path.read_text())
@@ -145,7 +164,7 @@ def load(root) -> Policy:
     if raw is None:
         return _defaults(present=True)
     _mapping(raw, "top level", _TOP_KEYS)
-    if isinstance(raw.get("version"), bool) or raw.get("version") != 1:
+    if type(raw.get("version")) is not int or raw["version"] != 1:
         _fail("version", "must be 1")
     enforcement = raw.get("enforcement", "warn")
     if enforcement not in ENFORCEMENT:
@@ -156,7 +175,8 @@ def load(root) -> Policy:
         where = f"safe_endpoints[{i}]"
         item = _mapping(item, where, ("url", "reason"), ("url",))
         if not isinstance(item["url"], str) or not _endpoint_ok(item["url"]):
-            _fail(f"{where}.url", "must be https, or http for 127.0.0.1, ::1 or localhost")
+            _fail(f"{where}.url", "must be https (http only for 127.0.0.1, ::1 or localhost), "
+                                  "with no spaces, control characters or credentials")
         _reason(item, where)
         endpoints.append(item["url"])
 
@@ -188,9 +208,7 @@ def load(root) -> Policy:
         _reason(item, where)
         remotes.append(item["remote"])
 
-    from scieflow.research.lib.providers import CATALOGUE
-
-    known = set(CATALOGUE) | set(SCITE_PROVIDERS)
+    known = set(KNOWN_PROVIDERS)
     providers = []
     for i, item in enumerate(_list(raw, "l2_providers")):
         where = f"l2_providers[{i}]"
