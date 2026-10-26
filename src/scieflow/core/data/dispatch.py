@@ -72,12 +72,17 @@ def record_refusal(run_dir: Path | None, agent: str, decision: Decision) -> None
 
 
 def record_decision(run_dir: Path | None, agent: str, decision: Decision | None) -> None:
-    """data.level_resolved and one data.warning per warning, after an allowed dispatch."""
+    """data.level_resolved and one data.warning per warning, after an allowed dispatch.
+
+    An unlabelled default (an L0 run dispatched to a cloud agent) records no level event, so the
+    event stream of every existing dispatch is unchanged (M-B t2 deviation, see the result).
+    """
     if run_dir is None or decision is None:
         return
-    events.emit(run_dir, "data.level_resolved", "system", level=decision.level, agent=agent,
-                boundary=decision.boundary, hidden=len(decision.data_hidden),
-                protected=len(decision.protected))
+    if (decision.level, decision.boundary) != ("L0", "cloud"):
+        events.emit(run_dir, "data.level_resolved", "system", level=decision.level, agent=agent,
+                    boundary=decision.boundary, hidden=len(decision.data_hidden),
+                    protected=len(decision.protected))
     for finding in decision.warnings:
         events.emit(run_dir, "data.warning", "system", rule=finding.rule, path=finding.path,
                     detail=finding.detail)

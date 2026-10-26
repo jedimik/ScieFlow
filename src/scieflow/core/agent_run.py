@@ -615,18 +615,30 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
             raise ValueError('cwd must be a directory')
         if 'sandbox' in data:
             raise sandbox.SandboxError(f'{run / "config.yml"}: {HATCH_MOVED}')
-        protection_probe = sandbox.resolve_turn_protection(project, run_dir=run)   # read only
-        # M-B 5.4: decided on the final configuration and the sandbox state, before any home
-        # is created (a refused turn writes nothing) and before argv or the layout exist.
-        decision = data_dispatch.decide(project, run, agent, cfg,
-                                        sandboxed=protection_probe.sandbox_enabled,
-                                        templates_use_endpoint=data_dispatch.uses_endpoint(cfg))
-        if not decision.allowed:
-            raise data_dispatch.DataRefused(decision)
-        protection = (protection_probe if not create_home else
-                      sandbox.resolve_turn_protection(
-                          project, run_dir=run,
-                          prepare_home=lambda home_run: sandbox.agent_home(home_run, agent)))
+        decided: list = []
+
+        def decide_turn(sandboxed: bool) -> data_dispatch.Decision:
+            # M-B 5.4: decided on the final configuration and the sandbox state, before argv or
+            # the layout exist; a refused turn raises here and neither creates the home nor
+            # records a path fact.
+            found = data_dispatch.decide(project, run, agent, cfg, sandboxed=sandboxed,
+                                         templates_use_endpoint=data_dispatch.uses_endpoint(cfg))
+            decided.append(found)
+            if not found.allowed:
+                raise data_dispatch.DataRefused(found)
+            return found
+
+        def decide_then_home(home_run):
+            # Called by the one capture, for a sandboxed run only, after its policy read and
+            # before any path fact (F3): the decision comes first, so a refused turn creates
+            # no agent home.
+            decide_turn(True)
+            if create_home:
+                sandbox.agent_home(home_run, agent)
+
+        protection = sandbox.resolve_turn_protection(project, run_dir=run,
+                                                     prepare_home=decide_then_home)
+        decision = decided[0] if decided else decide_turn(protection.sandbox_enabled)
         # The allow-list view and the turn's own HOME, computed read-only (A12). The launcher
         # is the CLI as the host resolves it (C7); the capture below must agree with it.
         python = sys.executable
