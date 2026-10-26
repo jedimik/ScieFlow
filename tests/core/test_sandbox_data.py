@@ -95,7 +95,7 @@ def test_wrap_binds_protected_read_only_after_masks_and_before_the_home(tmp_path
     released = t["grant"] / "released"
     released.mkdir()
     mask = [t["grant"] / ".repo"]
-    home = t["grant"] / "scratch" / "agent-home"
+    home = t["grant"] / "scratch" / "agent-home" / "tracer"
     layout = sandbox.Layout(readable=(t["root"],), home=home,
                             protected=(protected, released))
     argv = REAL_WRAP(["/bin/true"], writable=[t["grant"]], cwd=t["grant"], layout=layout,
