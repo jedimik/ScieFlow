@@ -74,12 +74,15 @@ def record_refusal(run_dir: Path | None, agent: str, decision: Decision) -> None
 def record_decision(run_dir: Path | None, agent: str, decision: Decision | None) -> None:
     """data.level_resolved and one data.warning per warning, after an allowed dispatch.
 
-    An unlabelled default (an L0 run dispatched to a cloud agent) records no level event, so the
-    event stream of every existing dispatch is unchanged (M-B t2 deviation, see the result).
+    An unlabelled default (an L0 run dispatched to a cloud agent, with nothing hidden from it and
+    nothing protected) records no level event, so the event stream of every existing plain
+    dispatch is unchanged (M-B t2 deviation). Any hidden or protected path is recorded.
     """
     if run_dir is None or decision is None:
         return
-    if (decision.level, decision.boundary) != ("L0", "cloud"):
+    plain_default = ((decision.level, decision.boundary) == ("L0", "cloud")
+                     and not decision.data_hidden and not decision.protected)
+    if not plain_default:
         events.emit(run_dir, "data.level_resolved", "system", level=decision.level, agent=agent,
                     boundary=decision.boundary, hidden=len(decision.data_hidden),
                     protected=len(decision.protected))
