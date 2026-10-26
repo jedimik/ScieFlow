@@ -25,6 +25,11 @@ REVIEW_EVENTS = (
     "review.matrix_ready", "review.decided", "review.blocker",
     "scite.quota_low", "scite.unavailable",
 )
+# Added by M-B (data protection); additive to the pins below, nothing removed.
+DATA_EVENTS = (
+    "data.declared", "data.level_resolved", "data.warning",
+    "data.released", "data.imported", "data.ingested",
+)
 HUMAN_KINDS = ("review-blocker", "scite-consent")
 
 # The vocabulary before ticket 04 (must survive unchanged).
@@ -150,7 +155,7 @@ def test_cli_opens_every_review_kind(tmp_path, monkeypatch):
 # -- events ----------------------------------------------------------------------
 def test_event_vocabulary_is_additive():
     assert OLD_EVENT_TYPES <= events.TYPES
-    assert events.TYPES == OLD_EVENT_TYPES | set(REVIEW_EVENTS)
+    assert events.TYPES == OLD_EVENT_TYPES | set(REVIEW_EVENTS) | set(DATA_EVENTS)
 
 
 @pytest.mark.parametrize("type_", REVIEW_EVENTS)

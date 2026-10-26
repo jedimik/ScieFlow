@@ -53,6 +53,12 @@ GROUPS = {
         "chats",
         "Back up and restore agent chats, skills, and plugins.",
     ),
+    "data": (
+        "scieflow.core.data.cli",
+        "data",
+        None,
+        "Data protection: declare a run's data level, inspect it, pin safe agents.",
+    ),
 }
 
 

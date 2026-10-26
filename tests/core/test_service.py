@@ -1231,6 +1231,9 @@ def test_progress_adds_no_event_type():
         "review.assigned", "review.pass_done", "review.evidence_built",
         "review.matrix_ready", "review.decided", "review.blocker",
         "scite.quota_low", "scite.unavailable",
+        # Added by M-B (data protection), additive.
+        "data.declared", "data.level_resolved", "data.warning",
+        "data.released", "data.imported", "data.ingested",
     }), "the vocabulary is closed by design; this panel needs no new type"
 
 

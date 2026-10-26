@@ -19,6 +19,7 @@ config/notebooklm.yml
 config/scite.yml
 config/integrations.yml
 config/chats.yml
+config/data-policy.yml
 # Machine-local DVC remote (endpoint + bucket); credentials live in config.local
 .dvc/config
 .env
