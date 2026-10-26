@@ -697,6 +697,8 @@ def _data_checks(layout: Layout | None, tag: str, data_markers: list[Path]) -> l
             quoted = shlex.quote(str(marker))
             checks.append((f"data-hidden:{index}", f"[ -e {quoted} ] || [ -L {quoted} ]"))
         else:
+            # An empty host file has no bytes to leak, so `[ -s ]` cannot tell an empty hidden
+            # file from an empty visible one. That is harmless: only non-empty content is at stake.
             checks.append((f"data-hidden:{index}", f"[ -s {shlex.quote(str(target))} ]"))
     for index, path in enumerate(layout.protected):
         checks.append((f"protected:{index}", f"[ -w {shlex.quote(str(path))} ]"))
