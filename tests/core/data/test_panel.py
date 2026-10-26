@@ -7,6 +7,7 @@ state, and names paths and rule ids, never a value read from a data file.
 import yaml
 
 from scieflow.core import service
+from scieflow.core.data import cli as data_cli
 from scieflow.core.project import Project
 
 PANEL_KEYS = {"reason", "level", "enforcement", "declarations", "warnings", "released",
@@ -56,3 +57,7 @@ def test_an_l2_run_under_warn_enforcement_gets_the_refuse_suggestion(project, ws
     panel = _panel(project)
     assert panel["enforcement"] == "warn"
     assert panel["suggestion"] and "enforcement: refuse" in panel["suggestion"]
+
+
+def test_the_panel_suggestion_is_the_cli_suggestion():
+    assert service._DATA_SUGGESTION == data_cli.SUGGESTION

@@ -2,6 +2,8 @@
 
 import yaml
 
+from scieflow.core import service
+
 
 def _band(page):
     start = page.text.index('id="ov-data"')
@@ -27,3 +29,16 @@ def test_an_undeclared_run_says_l0_and_not_safe_agents_only(client, project):
     band = _band(page)
     assert "L0" in band
     assert "safe agents only" not in band
+
+
+def test_a_failed_data_panel_says_level_unknown_not_a_blank(client, project, monkeypatch):
+    def broken(ws):
+        raise RuntimeError("synthetic panel failure")
+
+    monkeypatch.setitem(service._PANELS, "data", broken)
+    page = client.get("/runs/r1")
+    assert page.status_code == 200
+    band = _band(page)
+    assert "Level unknown" in band
+    assert "Warnings: unknown" in band
+    assert "Level ." not in band
