@@ -14,6 +14,7 @@ from scieflow.core import agent_run, events, jobs, service
 from scieflow.core.data import policy
 from scieflow.core.project import Project
 from scieflow.core.service import ServiceError
+from scieflow.core.turn_input import accept_human_submission
 
 EP = "https://llm.example.org/v1"
 PY = sys.executable
@@ -187,3 +188,106 @@ def test_say_refuses_a_cloud_turn_in_an_l2_run_and_starts_no_job(lab):
     assert "l2-cloud" in str(exc.value)
     assert refused_events(ws) == [("data-level", "l2-cloud", "L2", "conv-a", "cloud")]
     assert jobs.list_jobs(Project(lab), ws) == []
+
+
+# --- M-B t2 fix (review r1 F1, F2): run overrides, the sandboxed safe paths ----------------
+
+CHANGED_CMD = f'{PY} -c "print(2)" --endpoint {{endpoint}} {{prompt}}'
+CHANGED_SESSION = f'{PY} -c "print(2)" --endpoint {{endpoint}} {{prompt}}'
+CONV_SAFE = {
+    "cmd": SAFE_CMD, "family": "claude", "enabled": True, "timeout_min": 1,
+    "session_cmd": f'{PY} -c "print(1)" --endpoint {{endpoint}} {{prompt}}',
+    "resume_cmd": f'{PY} -c "print(1)" --endpoint {{endpoint}} --resume {{session}} {{prompt}}',
+}
+
+
+def set_run_overrides(ws, overrides):
+    data = yaml.safe_load((ws / "config.yml").read_text())
+    data["agent_overrides"] = overrides
+    write_yaml(ws / "config.yml", data)
+
+
+def pin_policy(root, agents, *, enforcement="warn"):
+    """A policy that pins the final templates of each named agent to the synthetic endpoint."""
+    write_yaml(root / "config" / "data-policy.yml", {
+        "version": 1, "enforcement": enforcement,
+        "safe_endpoints": [{"url": EP, "reason": "test"}],
+        "safe_agents": {name: {"endpoint": EP, "reason": "test",
+                               "templates_sha256": policy.pin_sha(cfg)}
+                        for name, cfg in agents.items()},
+    })
+
+
+def add_conversation_agent(root):
+    write_yaml(root / "config" / "agents.yml", {"agents": {**AGENTS, "safe-c": CONV_SAFE}})
+    pin_policy(root, {"safe-a": AGENTS["safe-a"], "safe-c": CONV_SAFE})
+
+
+def give_credentials(root, agents):
+    """Fake 0600 token in the suite's credentials dir and a sandbox.yml entry per agent."""
+    from scieflow.core import sandbox
+
+    token = sandbox.credentials_dir() / "fixture.token"
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("fake-token-fixture\n")
+    token.chmod(0o600)
+    entry = {"mode": "env", "var": "SCIEFLOW_FIXTURE_TOKEN", "file": "fixture.token",
+             "reason": "fake fixture token"}
+    write_yaml(root / "config" / "sandbox.yml",
+               {"credentials": {agent: dict(entry) for agent in agents}})
+
+
+def test_cli_refuses_a_pinned_safe_agent_whose_run_override_changes_its_command(lab):
+    ws = lab / "workspace" / "r1"
+    declare(ws, "L2")
+    pin_policy(lab, {"safe-a": AGENTS["safe-a"]})
+    set_run_overrides(ws, {"safe-a": {"cmd": CHANGED_CMD}})
+    _, argv = run_cli(lab, ["safe-a", "--no-sandbox"])
+    with pytest.raises(SystemExit) as exc:
+        agent_run.main(argv)
+    assert exc.value.code == 78
+    assert "pin-mismatch" in (ws / "logs" / "t.md").read_text()
+    # 5.4 order: an agent that still names {endpoint} but is cloud is refused by its own rule
+    # before the L2 rule; the message carries the pin reason.
+    assert refused_events(ws) == [("data-level", "endpoint-without-safe-entry", "L2", "safe-a",
+                                   "cloud")]
+    assert jobs.list_jobs(Project(lab), ws) == []
+
+
+def test_say_refuses_a_pinned_safe_turn_whose_run_override_changes_its_session_template(lab):
+    ws = lab / "workspace" / "r1"
+    declare(ws, "L2")
+    add_conversation_agent(lab)
+    service.set_conversation_agent(Project(lab), "r1", "safe-c")
+    set_run_overrides(ws, {"safe-c": {"session_cmd": CHANGED_SESSION}})
+    with pytest.raises(ServiceError) as exc:
+        service.say(Project(lab), "r1", "hello there")
+    assert "pin-mismatch" in str(exc.value)
+    assert refused_events(ws) == [("data-level", "endpoint-without-safe-entry", "L2", "safe-c",
+                                   "cloud")]
+    assert jobs.list_jobs(Project(lab), ws) == []
+
+
+def test_a_pinned_safe_turn_in_an_l2_run_is_resolved_with_its_endpoint(lab):
+    ws = lab / "workspace" / "r1"
+    declare(ws, "L2")
+    add_conversation_agent(lab)
+    give_credentials(lab, ["safe-a", "safe-c"])
+    resolved = agent_run.resolve_turn(Project(lab), "safe-c", run_dir=ws, session=None)
+    assert (resolved.data.allowed, resolved.data.boundary) == (True, "safe")
+    prepared = agent_run.prepare_turn(resolved, accept_human_submission("hello there"))
+    assert EP in prepared.argv
+    assert refused_events(ws) == []
+
+
+def test_cli_runs_a_pinned_safe_agent_sandboxed_in_an_l2_run(lab):
+    ws = lab / "workspace" / "r1"
+    declare(ws, "L2")
+    pin_policy(lab, {"safe-a": AGENTS["safe-a"]})
+    give_credentials(lab, ["safe-a"])
+    _, argv = run_cli(lab, ["safe-a"])
+    agent_run.main(argv)
+    assert EP in (ws / "logs" / "t.md").read_text()
+    assert refused_events(ws) == []
+    resolved = events.read(ws, types=("data.level_resolved",))
+    assert [(e["data"]["level"], e["data"]["boundary"]) for e in resolved] == [("L2", "safe")]

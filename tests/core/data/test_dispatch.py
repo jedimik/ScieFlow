@@ -9,7 +9,7 @@ import yaml
 
 from scieflow.core import events, gates
 from scieflow.core.data import policy
-from scieflow.core.data.dispatch import decide
+from scieflow.core.data.dispatch import decide, record_decision
 from scieflow.core.project import Project
 
 EP = "https://llm.example.org/v1"
@@ -188,3 +188,35 @@ def test_decide_emits_no_events(project, ws):
     declare(ws, "L1")
     decide_for(project, "cloud-a", CLOUD_CFG)
     assert events.read(ws) == []
+
+
+# --- M-B t2 fix (review r1 F3): the L0/cloud suppression of data.level_resolved ------------
+
+
+def level_events(ws):
+    return [(e["data"]["level"], e["data"]["boundary"], e["data"]["hidden"], e["data"]["protected"])
+            for e in events.read(ws, types=("data.level_resolved",))]
+
+
+def test_an_l0_cloud_dispatch_beside_an_l2_run_records_the_hidden_count(project, ws):
+    declare(project / "workspace" / "r2", "L2")
+    d = decide_for(project, "cloud-a", CLOUD_CFG)
+    assert d.allowed is True and (d.level, d.boundary) == ("L0", "cloud")
+    assert len(d.data_hidden) == 1 and d.protected == ()
+    record_decision(ws, "cloud-a", d)
+    assert level_events(ws) == [("L0", "cloud", 1, 0)]
+
+
+def test_an_l0_cloud_dispatch_with_a_declaration_file_records_the_protected_count(project, ws):
+    declare(ws, "L0")
+    d = decide_for(project, "cloud-a", CLOUD_CFG)
+    assert d.allowed is True and (d.level, d.boundary) == ("L0", "cloud")
+    assert d.data_hidden == () and len(d.protected) == 1
+    record_decision(ws, "cloud-a", d)
+    assert level_events(ws) == [("L0", "cloud", 0, 1)]
+
+
+def test_a_plain_l0_cloud_dispatch_still_records_no_level_event(project, ws):
+    d = decide_for(project, "cloud-a", CLOUD_CFG)
+    record_decision(ws, "cloud-a", d)
+    assert level_events(ws) == []
