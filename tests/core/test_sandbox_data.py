@@ -14,6 +14,8 @@ import pytest
 import yaml
 
 from scieflow.core import agent_run, sandbox, service
+from scieflow.core.data import policy
+from scieflow.core.data.dispatch import decide
 from scieflow.core.project import Project
 from scieflow.core.run import budget, status
 
@@ -104,10 +106,13 @@ def test_wrap_binds_protected_read_only_after_masks_and_before_the_home(tmp_path
           if tok == "--ro-bind" and i + 2 < len(argv) and argv[i + 1] == argv[i + 2]
           and argv[i + 1] in (str(protected), str(released))]
     assert len(ro) == 2
-    grant_bind = argv.index("--bind", 0)
-    mask_tmpfs = argv.index("--tmpfs", 0)
     home_bind = [i for i, tok in enumerate(argv) if tok == "--bind" and argv[i + 1] == str(home)]
-    assert grant_bind < max(ro) and mask_tmpfs < max(ro)
+    grant_bind = [i for i, tok in enumerate(argv)
+                  if tok == "--bind" and argv[i + 1] == str(t["grant"])]
+    before_protected = [i for i, tok in enumerate(argv[:home_bind[0]])
+                        if tok in ("--bind", "--tmpfs")]
+    assert grant_bind and max(grant_bind) < min(ro)      # after the last grant bind,
+    assert max(before_protected) < min(ro)               # and after the last mask and bind
     assert max(ro) < home_bind[0]
 
 
@@ -206,6 +211,48 @@ def test_verify_refuses_when_a_protected_path_is_writable(monkeypatch, tmp_path)
         sandbox.verify([t["grant"]], t["grant"], layout=layout)
 
 
+@needs_bwrap
+def test_an_l2_project_folder_is_empty_for_a_cloud_dispatch_and_visible_for_a_safe_one(tmp_path):
+    """Ticket item 5 (D18): decide() hides a declared L2 project folder from a cloud agent only.
+
+    Synthetic values only. The safe agent is pinned to a fake endpoint, the cloud agent has no
+    safe entry; both decisions feed their layouts, and bwrap shows each what its boundary allows.
+    """
+    t = _tree(tmp_path)
+    root = t["root"]
+    folder = root / "datasets" / "rbd"
+    folder.mkdir(parents=True)
+    export = folder / "export.csv"
+    export.write_text("synthetic,L2,fake\n")
+    endpoint = "https://llm.example.org/v1"
+    cloud_cfg = {"cmd": "python3 -m stub {prompt}", "enabled": True, "timeout_min": 1}
+    safe_cfg = {"cmd": "{python} -m safe --endpoint {endpoint} {prompt}", "enabled": True,
+                "timeout_min": 1}
+    (root / "config").mkdir()
+    (root / "config" / "data-policy.yml").write_text(yaml.safe_dump({
+        "version": 1, "enforcement": "warn",
+        "safe_endpoints": [{"url": endpoint, "reason": "synthetic"}],
+        "safe_agents": {"safe-a": {"endpoint": endpoint, "reason": "synthetic",
+                                   "templates_sha256": policy.pin_sha(safe_cfg)}},
+        "project_levels": [{"path": "datasets/rbd", "level": "L2", "kind": "tabular",
+                            "reason": "synthetic"}]}, sort_keys=False))
+    cloud = decide(Project(root), t["grant"], "cloud-a", cloud_cfg, sandboxed=True,
+                   templates_use_endpoint=False)
+    safe = decide(Project(root), t["grant"], "safe-a", safe_cfg, sandboxed=True,
+                  templates_use_endpoint=True)
+    assert cloud.allowed and cloud.boundary == "cloud"
+    assert folder.resolve() in cloud.data_hidden
+    assert safe.allowed and safe.boundary == "safe" and safe.data_hidden == ()
+    hidden = sandbox.Layout(readable=(root,), data_hidden=cloud.data_hidden)
+    shown = sandbox.Layout(readable=(root,), data_hidden=safe.data_hidden)
+    blocked = _sh(f"ls {folder}; cat {export}", hidden, t["grant"])
+    assert blocked.stdout == "" and blocked.returncode != 0
+    sandbox.verify([t["grant"]], t["grant"], layout=hidden)
+    seen = _sh(f"ls {folder}; cat {export}", shown, t["grant"])
+    assert seen.returncode == 0
+    assert "export.csv" in seen.stdout and "synthetic,L2,fake" in seen.stdout
+
+
 # --- D. the CLI and conversation paths hand the decision sets to the layout ----
 
 def _l2_run(root: Path, slug: str) -> Path:
@@ -223,6 +270,16 @@ def _l2_run(root: Path, slug: str) -> Path:
     return ws
 
 
+def _protect_run_files(ws: Path) -> tuple[Path, Path]:
+    """The run's declaration file and released folder, the `protected` set of M-B 5.5 (L0 content)."""
+    ws = ws.resolve()
+    (ws / "data.yml").write_text(yaml.safe_dump({
+        "version": 1, "default_level": "L0", "levels": [], "pending_releases": [],
+        "released": [], "imports": []}, sort_keys=False))
+    (ws / "released").mkdir(exist_ok=True)
+    return ws / "data.yml", ws / "released"
+
+
 def test_cli_prepare_hands_the_hidden_and_protected_sets_to_the_layout(project, monkeypatch):
     other = _l2_run(project.root, "r2").resolve()
     seen: dict = {}
@@ -234,18 +291,22 @@ def test_cli_prepare_hands_the_hidden_and_protected_sets_to_the_layout(project, 
     monkeypatch.setattr(sandbox, "dispatch_layout", spy)
     prompt = project.root / "workspace" / "r1" / "logs" / "p.md"
     prompt.write_text("synthetic prompt\n")
-    agent_run.prepare(Project(project.root), "stub", prompt, role=ROLE)
+    run_files = _protect_run_files(project.root / "workspace" / "r1")
+    dispatch = agent_run.prepare(Project(project.root), "stub", prompt, role=ROLE)
     assert tuple(seen["data_hidden"]) == (other,)
-    assert tuple(seen["protected"]) == ()
+    assert set(seen["protected"]) == set(run_files)
+    assert set(dispatch.layout.protected) == set(run_files)
 
 
 def test_turn_layout_and_verify_carry_the_hidden_sets(k_conversational_project, monkeypatch,
                                                      tmp_path_factory):
     project, ws, _ = k_conversational_project
     other = _l2_run(project.root, "r2").resolve()
+    run_files = _protect_run_files(ws)
     service.set_conversation_agent(project, "r1", "k-protocol-fixture")
     resolved = agent_run.resolve_turn(project, "k-protocol-fixture", run_dir=ws, session=None)
     assert other in tuple(resolved.layout.data_hidden)
+    assert set(resolved.layout.protected) == set(run_files)
     seen = []
     real_verify = sandbox.verify
 
@@ -255,3 +316,27 @@ def test_turn_layout_and_verify_carry_the_hidden_sets(k_conversational_project, 
     monkeypatch.setattr(sandbox, "verify", spy)
     service.say(project, "r1", "hello")
     assert seen and other in tuple(seen[0].data_hidden)
+    assert set(run_files) <= set(seen[0].protected)
+
+
+@needs_bwrap
+def test_cli_dispatch_exits_77_and_records_the_refusal_when_a_hidden_l2_run_shows(
+        project, monkeypatch):
+    """Ticket item 4 on the CLI path: a layout whose wrap drops data_hidden is refused before launch."""
+    from scieflow.core import events
+
+    other = _l2_run(project.root, "r2").resolve()
+    ws = project.root / "workspace" / "r1"
+    prompt = ws / "logs" / "p.md"
+    prompt.write_text("synthetic prompt\n")
+    transcript = ws / "logs" / "t.md"
+    monkeypatch.setattr(sandbox, "wrap", _leaky_without("data_hidden"))
+    monkeypatch.chdir(project.root)
+    with pytest.raises(SystemExit) as exit_info:
+        agent_run.main(["--role", ROLE, "stub", str(prompt), str(transcript)])
+    assert exit_info.value.code == agent_run.SANDBOX_EXIT
+    refused = events.read(ws, types=("job.refused",))
+    assert [e["data"]["reason"] for e in refused] == ["sandbox"]
+    assert "sandbox refused" in transcript.read_text()
+    assert not [p for p in other.iterdir() if p.name.startswith(sandbox.MARKER_PREFIX)]
+
