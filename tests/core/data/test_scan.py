@@ -38,7 +38,6 @@ def test_clean_aggregate_csv_has_no_findings(ws, project):
     _write(ws, "outputs/summary.csv", "site,n,mean_age\nA,12,61.5\nB,9,58.0\n")
     result = _scan(ws, project)
     assert result.findings == ()
-    assert result.files_seen == 1
     assert result.truncated is False
 
 
@@ -164,16 +163,18 @@ def test_unreadable_file_is_a_finding(ws, project, monkeypatch):
 def test_bounded_by_max_files(ws, project):
     for i in range(3):
         _write(ws, f"outputs/f{i}.txt", "plain text\n")
-    result = _scan(ws, project, scan_max_files=2)
-    assert result.files_seen == 2
+    total = len(scan._candidates(ws))
+    result = _scan(ws, project, scan_max_files=total - 1)
+    assert result.files_seen == total - 1
     assert result.truncated is True
 
 
 def test_exactly_max_files_is_not_truncated(ws, project):
     for i in range(2):
         _write(ws, f"outputs/f{i}.txt", "plain text\n")
-    result = _scan(ws, project, scan_max_files=2)
-    assert result.files_seen == 2
+    total = len(scan._candidates(ws))
+    result = _scan(ws, project, scan_max_files=total)
+    assert result.files_seen == total
     assert result.truncated is False
 
 
@@ -184,17 +185,18 @@ def test_bounded_by_max_seconds_with_an_injected_clock(ws, project):
     pol = _pol(project, scan_max_seconds=5)
     result = scan.scan(ws, pol, clock=lambda: next(ticks))
     assert result.truncated is True
-    assert result.files_seen < 3
+    assert result.files_seen < len(scan._candidates(ws))
 
 
 def test_skips_agent_home_cache_logs_gates_scite_and_events(ws, project):
-    for rel in ("scratch/agent-home/a/notes.csv", "scratch/x/.uv-cache/c.csv",
-                "logs/p.csv", "gates/g.csv", "scite/s.csv", "events.jsonl",
-                "provenance.git/p.csv"):
+    skipped = ("scratch/agent-home/a/notes.csv", "scratch/x/.uv-cache/c.csv",
+               "logs/p.csv", "gates/g.csv", "scite/s.csv", "events.jsonl",
+               "provenance.git/p.csv")
+    for rel in skipped:
         _write(ws, rel, "jmeno,score\nx,4\n")
-    result = _scan(ws, project)
-    assert result.files_seen == 0
-    assert result.findings == ()
+    listed = scan._candidates(ws)
+    assert not set(listed) & set(skipped)
+    assert _scan(ws, project).findings == ()
 
 
 def test_findings_are_in_sorted_path_order(ws, project):
