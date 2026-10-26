@@ -101,16 +101,16 @@ def test_the_doc_states_the_honest_limits():
 
 
 def test_the_doc_states_the_exit_code_of_each_policy_invalid_refusal():
-    text = DOC.read_text()
+    text = " ".join(DOC.read_text().split())
     assert "A dispatch is refused with rule `policy-invalid` and exit 78" in text
     assert "literature, scite, NotebookLM and remote requests are refused with exit 3" in text
 
 
 def test_the_doc_says_only_a_human_lowers_or_removes_a_declaration():
-    text = DOC.read_text()
+    text = " ".join(DOC.read_text().split())
     assert "Only the user declares L2" not in text
     assert "Only a human can lower or remove a declaration" in text
-    assert "an agent (`--as-agent`) may add one or raise the default" in text
+    assert "An agent (`--as-agent`) may add one or raise the default" in text
 
 
 def test_the_doc_names_every_boundary_reason():

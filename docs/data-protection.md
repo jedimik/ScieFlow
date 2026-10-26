@@ -22,8 +22,9 @@ and its default.
 | `L1.5` | a released aggregate imported into this run from another run (see [Release and import](#release-and-import)) |
 | `L2` | record-level or re-identifiable data, and everything derived from it |
 
-Only the user declares L2. An agent may raise a level, never lower or remove
-one.
+Only a human can lower or remove a declaration. An agent (`--as-agent`) may
+add one or raise the default, but never change or remove an existing
+declaration.
 
 ## Declaring a run's data
 
@@ -45,8 +46,9 @@ inside every dispatch (see [Sandbox hiding](#sandbox-hiding)).
 A `data.yml` that cannot be read is treated as L2 with a reason. It fails
 closed (M-B-D5), so a broken file never silently weakens a run.
 
-The overview band on the run page shows the level, the number of warnings and
-the suggestion below. An L2 run reads "safe agents only".
+The overview band on the run page shows the level, the number of warnings and,
+where it applies, the suggestion to set `enforcement: refuse`. An L2 run reads
+"safe agents only".
 
 ## The policy file
 
@@ -66,8 +68,9 @@ to start. Every key is optional and absent means "nothing is allowed for L2".
 | `scan` | scan limits: `max_files`, `max_bytes_per_file`, `max_seconds` |
 | `ingest.extra_drop` | extra identifier column names for `scieflow data ingest` |
 
-An invalid policy file refuses every dispatch, literature, scite, NotebookLM
-and remote request until it is fixed (exit 3). Messages name the key, never a
+An invalid policy file refuses every request until it is fixed. A dispatch is
+refused with rule `policy-invalid` and exit 78; literature, scite, NotebookLM
+and remote requests are refused with exit 3. Messages name the key, never a
 value from the file.
 
 ## Setting up a safe agent
@@ -114,6 +117,12 @@ have read the new command.
 A launcher script the agent could edit is not a safe launcher. If the launcher
 is writable from an agent-writable folder, the agent is treated as a cloud agent
 (rule id `launcher-writable`), whatever its policy entry says.
+
+`uv run scieflow data levels <slug>` shows each agent's boundary. A cloud
+boundary gives its reason: `not-listed` (the agent has no `safe_agents` entry),
+`no-endpoint-placeholder` (a command template does not use `{endpoint}`),
+`pin-mismatch` (the templates no longer match the pinned hash) or
+`launcher-writable` (the launcher is writable from an agent-writable folder).
 
 ## Dispatch rules
 
