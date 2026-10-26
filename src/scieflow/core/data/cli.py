@@ -257,7 +257,7 @@ def scan_cmd(slug, as_json):
     ws = _run(project, slug)
     pol = _policy_or_fail(project.root)
     found = scan.scan(ws, pol)
-    report_findings(ws, found.findings, enforcement="warn")
+    report_findings(ws, found.findings, enforcement=pol.enforcement)
     rows = [{"path": f.path, "rule": f.rule, "detail": f.detail} for f in found.findings]
     payload = {"slug": slug, "files_seen": found.files_seen, "truncated": found.truncated,
                "findings": rows}

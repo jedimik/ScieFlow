@@ -11,6 +11,7 @@ import csv
 import io
 import os
 import re
+import stat
 import time
 import unicodedata
 from dataclasses import dataclass
@@ -107,7 +108,12 @@ def _candidates(ws: Path) -> list:
 
 
 def _read_bytes(path: Path, limit: int) -> bytes:
-    with open(path, "rb") as fh:
+    """At most `limit` bytes of a regular file. O_NONBLOCK keeps a FIFO that appeared after the
+    lstat from blocking the scan, O_NOFOLLOW refuses a link swapped in after it (M-B t4 F2)."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as fh:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("not a regular file")
         return fh.read(limit)
 
 
@@ -122,9 +128,14 @@ def _table_dialect(name: str, text: str) -> str:
 
 
 def _table(rel: str, head: bytes, cut: bool, extra_drop: frozenset) -> list:
+    """Findings of one table. A detail is a normalised vocabulary term or a column index, never a
+    header cell: in a headerless table the first record is read as the header (M-B t4 F1)."""
     text = head.decode("utf-8-sig", errors="replace")
     delim = _table_dialect(rel.lower(), text)
-    rows = list(csv.reader(io.StringIO(text), delimiter=delim))
+    try:
+        rows = list(csv.reader(io.StringIO(text), delimiter=delim))
+    except csv.Error:          # e.g. a field over the csv field limit (M-B t4 F3)
+        return [Finding(rel, "unreadable", "table not parseable")]
     if cut and rows:
         rows = rows[:-1]            # the byte limit may have cut the last record
     if not rows:
@@ -139,29 +150,34 @@ def _table(rel: str, head: bytes, cut: bool, extra_drop: frozenset) -> list:
         if markers:
             out.append(Finding(rel, "redcap-export", ", ".join([REDCAP_KEY, *markers])))
 
-    for index, raw in enumerate(header):
-        column = names[index]
+    for index, column in enumerate(names):
         if column in IDENTIFIER_COLUMNS or column in extra_drop:
-            out.append(Finding(rel, "identifier-column", raw.strip()))
+            out.append(Finding(rel, "identifier-column", column))
 
-    for index, raw in enumerate(header):
+    for index in range(len(header)):
         values = [row[index].strip() for row in data if index < len(row) and row[index].strip()]
         if any(_BIRTH_NUMBER.fullmatch(v) or _EMAIL.fullmatch(v) or _PHONE.fullmatch(v)
                for v in values):
-            out.append(Finding(rel, "identifier-values", raw.strip()))
+            out.append(Finding(rel, "identifier-values", f"column {index + 1}"))
         if len(values) >= FREE_TEXT_MIN_VALUES:
             mean = sum(len(v) for v in values) / len(values)
             wordy = sum(1 for v in values if len(v.split()) >= FREE_TEXT_WORDS)
             if mean >= FREE_TEXT_MEAN_LENGTH or wordy / len(values) >= FREE_TEXT_WORD_SHARE:
-                out.append(Finding(rel, "free-text-column", raw.strip()))
+                out.append(Finding(rel, "free-text-column", f"column {index + 1}"))
     return out
 
 
 def _inspect(rel: str, full: Path, pol_extra: frozenset, read_limit: int) -> list:
     name = full.name.lower()
     try:
-        if full.is_symlink():
-            return [Finding(rel, "unreadable", "symbolic link not followed")]
+        mode = os.lstat(full).st_mode
+    except OSError as exc:
+        return [Finding(rel, "unreadable", type(exc).__name__)]
+    if stat.S_ISLNK(mode):
+        return [Finding(rel, "unreadable", "symbolic link not followed")]
+    if not stat.S_ISREG(mode):  # a FIFO, socket or device is never opened (M-B t4 F2)
+        return [Finding(rel, "unreadable", "not a regular file")]
+    try:
         head = _read_bytes(full, read_limit)
     except OSError as exc:
         return [Finding(rel, "unreadable", type(exc).__name__)]
