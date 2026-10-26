@@ -386,7 +386,9 @@ def prepare(project: Project, agent: str, prompt_file: Path,
         cli = argv[sandbox.agent_cli_index(argv)]        # A7: an env prefix with options is refused
         located = sandbox.host_launcher(cli, cwd)
         layout = sandbox.dispatch_layout(project, run_dir=run_dir, agent=agent,
-                                         readable=readable, launcher=located)
+                                         readable=readable, launcher=located,
+                                         data_hidden=decision.data_hidden,     # M-B 5.5
+                                         protected=decision.protected)
         layout, credential_env = sandbox.attach_credential(
             layout, sandbox.credentials_of(project, policy=policy), agent=agent, argv=argv,
             located=located, writable=writable, root=project.root)
@@ -648,7 +650,9 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
                                       endpoint=decision.endpoint)
         located = sandbox.host_launcher(first_token, work) if protection.sandbox_enabled else None
         layout = (sandbox.dispatch_layout(project, run_dir=run, agent=agent,
-                                          readable=protection.readable, launcher=located)
+                                          readable=protection.readable, launcher=located,
+                                          data_hidden=decision.data_hidden,    # M-B 5.5
+                                          protected=decision.protected)
                   if protection.sandbox_enabled else None)
         credential_env = None
         if layout is not None:   # S4: the captured credential record; the token is read here only

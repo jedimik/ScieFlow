@@ -134,6 +134,8 @@ class Layout:
     hidden: tuple[Path, ...] = ()
     installs: tuple[Path, ...] = ()
     binds: tuple[tuple[Path, Path, bool], ...] = ()   # S4 (C10): credential binds, applied last
+    data_hidden: tuple[Path, ...] = ()   # M-B 5.5: L2 paths overlaid like `hidden`
+    protected: tuple[Path, ...] = ()     # M-B 5.5: run files bound read-only inside a grant
 
     def __post_init__(self):
         if type(self.readable) is not tuple or any(not _is_abs(p) for p in self.readable):
@@ -154,6 +156,10 @@ class Layout:
                 type(b) is not tuple or len(b) != 3 or not _is_abs(b[0]) or not _is_abs(b[1])
                 or type(b[2]) is not bool for b in self.binds):
             raise TypeError("binds must be an immutable tuple of (absolute source, absolute dest, bool) triples")
+        if type(self.data_hidden) is not tuple or any(not _is_abs(p) for p in self.data_hidden):
+            raise TypeError("data_hidden must be an immutable tuple of absolute Paths")
+        if type(self.protected) is not tuple or any(not _is_abs(p) for p in self.protected):
+            raise TypeError("protected must be an immutable tuple of absolute Paths")
 
 
 def _is_abs(value) -> bool:
@@ -394,6 +400,28 @@ def _hidden_args(hidden: tuple[Path, ...], grants: list[Path]) -> list[str]:
     return out
 
 
+def _protected_args(protected: tuple[Path, ...], grants: list[Path]) -> list[str]:
+    """M-B 5.5: bind each protected run file read-only onto itself, inside a writable grant.
+
+    Fails closed on a missing path, a symbolic link, or a path outside every grant (a read-only
+    bind outside a grant would protect nothing the grant gives). The grant itself is refused:
+    a read-only grant would stop the dispatch writing its own run.
+    """
+    out: list[str] = []
+    for path in protected:
+        target = Path(path)
+        if not any(g in target.parents for g in grants):
+            raise SandboxError(f"protected path {target} must lie inside a writable grant; refused")
+        try:
+            info = target.lstat()
+        except OSError as exc:
+            raise SandboxError(f"protected path cannot be checked, refused: {target}: {exc}") from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise SandboxError(f"protected path is a symbolic link, refused: {target}")
+        out += ["--ro-bind", str(target), str(target)]
+    return out
+
+
 def wrap(argv: list[str], *, writable: list[Path], cwd: Path,
          mask: list[Path] | None = None, layout: Layout | None = None) -> list[str]:
     """`argv` rewritten to run under bubblewrap, seeing only the allow-list root.
@@ -446,7 +474,8 @@ def wrap(argv: list[str], *, writable: list[Path], cwd: Path,
         out += ["--ro-bind", str(resolved), str(resolved)]
     for link, target in layout.links:
         out += ["--symlink", target, str(link)]
-    out += _hidden_args(layout.hidden, grants)               # C14: before the writable binds
+    # C14: before the writable binds. M-B 5.5: data_hidden is overlaid in the same place, once.
+    out += _hidden_args(tuple(dict.fromkeys((*layout.hidden, *layout.data_hidden))), grants)
     for resolved in grants:
         out += ["--bind", str(resolved), str(resolved)]
     # The home is created host-side here, before its binds are emitted (A12).
@@ -455,6 +484,7 @@ def wrap(argv: list[str], *, writable: list[Path], cwd: Path,
         out += ["--bind", str(scratch), str(scratch)]            # F1: a mount point inside
     for path in mask or []:
         out += ["--tmpfs", str(Path(path).resolve())]
+    out += _protected_args(layout.protected, grants)             # M-B 5.5: after masks, before home
     if home is not None:
         out += ["--bind", str(home), str(home)]
     for source, dest, bind_writable in layout.binds:       # S4 (C10): credentials, last
@@ -606,12 +636,20 @@ def _probe_checks(markers) -> list[tuple[str, Path]]:
     return checks
 
 
-def _probe_script(sentinel: Path, probe: Path, checks: list[tuple[str, Path]]) -> str:
-    """The sandboxed command: one structured line per check, then the forbidden write."""
+def _probe_script(sentinel: Path, probe: Path, checks: list[tuple[str, Path]],
+                  extra: list[tuple[str, str]] = ()) -> str:
+    """The sandboxed command: one structured line per check, then the forbidden write.
+
+    `extra` holds M-B 5.5 checks as (id, shell test): the test is true when the sandbox shows
+    the data (a leak), so a check reports `present` exactly when a leak is visible.
+    """
     parts = ["{ printf 'ran\\tyes\\n';"]
     for name, path in checks:
         quoted = shlex.quote(str(path))
         parts.append(f" if [ -e {quoted} ] || [ -L {quoted} ]; then s=present; else s=absent; fi;"
+                     f" printf '%s\\t%s\\n' {shlex.quote(name)} \"$s\";")
+    for name, test in extra:
+        parts.append(f" if {test}; then s=present; else s=absent; fi;"
                      f" printf '%s\\t%s\\n' {shlex.quote(name)} \"$s\";")
     parts.append(f" }} > {shlex.quote(str(sentinel))}; ")
     parts.append(f"touch {shlex.quote(str(probe))} 2>/dev/null; true")
@@ -628,6 +666,41 @@ def _marker_dirs(*, outer, binds, homes, parents) -> list[Path]:
         return list(found)
     single = marker_location(outer=outer, binds=binds, candidates=parents)
     return [single] if isinstance(single, Path) else []
+
+
+def _data_checks(layout: Layout | None, tag: str, data_markers: list[Path]) -> list[tuple[str, str]]:
+    """M-B 5.5: the absence proofs for the data layers of one layout.
+
+    A hidden directory gets a host marker inside it, which must be absent inside the sandbox;
+    a hidden file must be empty inside; a protected path must not be writable inside. Each
+    marker is appended to `data_markers` so every exit path of verify() removes it.
+    """
+    checks: list[tuple[str, str]] = []
+    if layout is None:
+        return checks
+    for index, path in enumerate(layout.data_hidden):
+        target = Path(path)
+        try:
+            info = target.lstat()
+        except OSError as exc:
+            raise SandboxUnavailable(
+                f"confinement could not be verified: a hidden path cannot be checked: {target}: {exc}"
+            ) from exc
+        if stat.S_ISDIR(info.st_mode):
+            try:
+                marker = create_marker(target, f"{tag}-d{index}")
+            except OSError as exc:
+                raise SandboxUnavailable(
+                    f"confinement could not be verified: the host marker cannot be created in "
+                    f"{target}: {exc}") from exc
+            data_markers.append(marker)
+            quoted = shlex.quote(str(marker))
+            checks.append((f"data-hidden:{index}", f"[ -e {quoted} ] || [ -L {quoted} ]"))
+        else:
+            checks.append((f"data-hidden:{index}", f"[ -s {shlex.quote(str(target))} ]"))
+    for index, path in enumerate(layout.protected):
+        checks.append((f"protected:{index}", f"[ -w {shlex.quote(str(path))} ]"))
+    return checks
 
 
 def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
@@ -673,6 +746,7 @@ def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
         extra["layout"] = layout
 
     markers: list[Path] = []
+    data_markers: list[Path] = []
     try:
         try:
             for directory in marker_dirs:                                  # N2: each home
@@ -682,6 +756,7 @@ def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
                 f"confinement could not be verified: the host marker cannot be created: {exc}"
             ) from exc
         checks = _probe_checks(markers)
+        extra_checks = _data_checks(layout, tag, data_markers)             # M-B 5.5
 
         # Positive control 1: prove the probe location is writable on the host.
         # If this fails, we cannot draw any conclusion from its later absence.
@@ -695,7 +770,7 @@ def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
                 f"is not writable: {exc}") from exc
 
         sentinel.unlink(missing_ok=True)
-        script = _probe_script(sentinel, probe, checks)
+        script = _probe_script(sentinel, probe, checks, extra_checks)
         try:
             subprocess.run(wrap(["/bin/sh", "-c", script], writable=writable, cwd=cwd, **extra),
                            capture_output=True, timeout=VERIFY_TIMEOUT_S, check=False)
@@ -712,9 +787,10 @@ def verify(writable: list[Path], cwd: Path, *, mask: list[Path] | None = None,
             text = sentinel.read_text()
         except (OSError, UnicodeDecodeError) as exc:
             raise SandboxUnavailable("confinement proof: the probe result is unreadable") from exc
-        read_probe_results(text, (PROBE_RAN, *(name for name, _path in checks)))
+        read_probe_results(text, (PROBE_RAN, *(name for name, _path in checks),
+                                  *(name for name, _test in extra_checks)))
     finally:
-        for path in (probe, sentinel, *markers):
+        for path in (probe, sentinel, *markers, *data_markers):
             try:
                 path.unlink(missing_ok=True)
             except Exception:
@@ -1079,7 +1155,8 @@ def _install_root(final: Path) -> Path:
 
 
 def dispatch_layout(project: Project, *, run_dir: Path, agent: str,
-                    readable: tuple[Path, ...] = (), launcher: Path | None = None) -> Layout:
+                    readable: tuple[Path, ...] = (), launcher: Path | None = None,
+                    data_hidden: tuple[Path, ...] = (), protected: tuple[Path, ...] = ()) -> Layout:
     """The layout for one agent dispatch: project, Python, ScieFlow, uv, `readable:`, own home.
 
     Reads only (stat/lstat/readlink/listdir), so a resolution can happen before any write.
@@ -1133,7 +1210,8 @@ def dispatch_layout(project: Project, *, run_dir: Path, agent: str,
     dirs = [d for d in (launcher_dir, cli_dir) if d is not None]
     return Layout(readable=granted, links=tuple(kept_links), home=home,
                   launcher_dirs=tuple(dict.fromkeys(dirs)),
-                  hidden=tuple(dict.fromkeys(hidden)), installs=installs_t)
+                  hidden=tuple(dict.fromkeys(hidden)), installs=installs_t,
+                  data_hidden=tuple(data_hidden), protected=tuple(protected))
 
 
 def _launcher_path_needed(directory: Path, layout: Layout) -> bool:
