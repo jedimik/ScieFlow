@@ -66,9 +66,15 @@ def test_no_t5_command_writes_the_policy_file(proj, ws, project, monkeypatch, tm
     dest = project / "workspace" / "r2"
     dest.mkdir(parents=True)
     status.write_status(dest, status.new_status("r2", "autonomous"))
-    CliRunner().invoke(data, ["import", "r2", "--from", "r1", "--release", rid])
-    (ws / "tab.csv").write_text("visit,n\n2020-03-05,12\n")
-    CliRunner().invoke(data, ["ingest", "r1", str(ws / "tab.csv"), "--out", "inputs/t.csv",
-                              "--date-anchor", "visit"])
-    CliRunner().invoke(data, ["audit", "r1", "--json"])
+    imported = CliRunner().invoke(data, ["import", "r2", "--from", "r1", "--release", rid])
+    assert imported.exit_code == 0, imported.output
+    (ws / "tab.csv").write_text("record_id,visit,n\n1,2020-03-05,12\n")
+    ingested = CliRunner().invoke(data, ["ingest", "r1", str(ws / "tab.csv"), "--out",
+                                         "inputs/t.csv", "--date-anchor", "visit"])
+    assert ingested.exit_code == 0, ingested.output
+    (ws / "outputs" / "second.csv").write_text(CLEAN)
+    released = CliRunner().invoke(data, ["release", "r1", "outputs/second.csv", "--reason", "x"])
+    assert released.exit_code == 0, released.output
+    audited = CliRunner().invoke(data, ["audit", "r1", "--json"])
+    assert audited.exit_code == 0, audited.output
     assert (project / "config" / "data-policy.yml").read_bytes() == before

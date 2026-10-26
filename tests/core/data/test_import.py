@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from scieflow.core import events, gates
@@ -107,3 +109,47 @@ def test_the_import_command_exit_codes(proj, ws, project):
     tampered = CliRunner().invoke(data, ["import", "r2", "--from", "r1", "--release", "nope"])
     assert tampered.exit_code == 1
     assert CliRunner().invoke(data, ["import", "r2", "--from", "r1", "--release", rid]).exit_code == 1
+
+
+def sha(path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def test_a_released_record_naming_a_file_elsewhere_copies_nothing(proj, ws, project):  # F3
+    rid = released_run(proj, ws)
+    (ws / "secret.csv").write_text("group,n\nA,99\n")
+    df = yaml.safe_load((ws / "data.yml").read_text())
+    df["released"][0]["file"] = "secret.csv"
+    df["released"][0]["sha256"] = sha(ws / "secret.csv")
+    (ws / "data.yml").write_text(yaml.safe_dump(df, sort_keys=False))
+    dest = make_run(project, "r2")
+    with pytest.raises(release.ReleaseError):
+        release.import_release(proj, dest, ws, rid)
+    assert not (dest / "inputs").exists()
+    assert levels.read(dest).imports == []
+
+
+def test_an_audit_names_a_released_record_that_points_elsewhere(proj, ws, project):  # F3
+    rid = released_run(proj, ws)
+    (ws / "secret.csv").write_text("group,n\nA,99\n")
+    df = yaml.safe_load((ws / "data.yml").read_text())
+    df["released"][0]["file"] = "secret.csv"
+    df["released"][0]["sha256"] = sha(ws / "secret.csv")
+    (ws / "data.yml").write_text(yaml.safe_dump(df, sort_keys=False))
+    assert release.audit(ws)["mismatches"] == 1
+    r = CliRunner().invoke(data, ["audit", "r1"])
+    assert r.exit_code == 1 and "secret.csv" in r.output
+
+
+def test_an_import_record_naming_a_file_elsewhere_is_a_mismatch(proj, ws, project):  # F3
+    rid = released_run(proj, ws)
+    dest = make_run(project, "r2")
+    release.import_release(proj, dest, ws, rid)
+    (dest / "other.csv").write_text(CLEAN)
+    df = yaml.safe_load((dest / "data.yml").read_text())
+    df["imports"][0]["file"] = "other.csv"
+    df["imports"][0]["sha256"] = sha(dest / "other.csv")
+    (dest / "data.yml").write_text(yaml.safe_dump(df, sort_keys=False))
+    report = release.audit(dest)
+    assert report["mismatches"] == 1 and report["imports"][0]["ok"] is False
+

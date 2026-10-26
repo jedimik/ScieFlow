@@ -71,6 +71,44 @@ def manifest(ws, rel="inputs/clean.csv"):
     return yaml.safe_load((ws / (rel + ".ingest.yml")).read_text())
 
 
+def test_a_failed_declaration_leaves_no_output(proj, ws, src, salts, monkeypatch):  # F2
+    def refuse(ws_, change):
+        raise levels.DataFileError("data.yml: forced by the test")
+
+    monkeypatch.setattr(levels, "modify", refuse)
+    with pytest.raises(ingest.IngestError):
+        ingest.ingest(proj, ws, src, "inputs/clean.csv", date_anchor="anchor_date")
+    assert not (ws / "inputs" / "clean.csv").exists()
+    assert not (ws / "inputs" / "clean.csv.ingest.yml").exists()
+
+
+def test_a_failure_after_the_output_is_written_removes_it(proj, ws, src, salts, monkeypatch):  # F2
+    def boom(path):
+        raise OSError("forced by the test")
+
+    monkeypatch.setattr(ingest, "_sha", boom)
+    with pytest.raises(OSError):
+        ingest.ingest(proj, ws, src, "inputs/clean.csv", date_anchor="anchor_date")
+    assert not (ws / "inputs" / "clean.csv").exists()
+    assert not (ws / "inputs" / ".clean.csv.part").exists()
+    # The declaration is kept on purpose: a run with a stale L2 declaration is stricter, never looser.
+    assert levels.run_level(ws) == "L2"
+
+
+@pytest.mark.parametrize("out", ["data.yml", "events.jsonl", "budget.yml", "charter.yml"])
+def test_out_cannot_name_run_bookkeeping(proj, ws, src, salts, out):  # F2
+    with pytest.raises(ingest.IngestError):
+        ingest.ingest(proj, ws, src, out, date_anchor="anchor_date")
+    assert not (ws / out).exists()
+
+
+def test_the_out_data_yml_command_exits_1_and_writes_nothing(proj, ws, src, salts):  # F2
+    r = CliRunner().invoke(data, ["ingest", "r1", str(src), "--out", "data.yml",
+                                  "--date-anchor", "anchor_date"])
+    assert r.exit_code == 1
+    assert not (ws / "data.yml").exists()
+
+
 def test_identifiers_and_rc_are_dropped_and_named_in_the_manifest(proj, ws, src, salts):
     ingest.ingest(proj, ws, src, "inputs/clean.csv", date_anchor="anchor_date")
     assert not {"name", "email", "rc"} & set(header_of(ws))

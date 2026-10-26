@@ -279,3 +279,104 @@ def test_the_release_command_exits_1_on_refusal_and_0_when_the_gate_opens(projec
     ok = CliRunner().invoke(data, ["release", "r1", "outputs/agg.csv", "--reason", "x"])
     assert ok.exit_code == 0, ok.output
     assert gates.list_gates(ws, "open")[0]["id"] in ok.output
+
+
+# -- M-B t5 review r1 (F1, F4, F5): fail-closed counts, orphan gates, test gaps -------------
+BASE_KINDS = {"campaign-approval", "outline-approval", "staffing", "question",
+              "claim-check-consent", "upload", "external-sharing", "tier-promotion",
+              "scope-change", "budget-extension", "charter-adoption", "review-decision",
+              "review-blocker", "scite-consent", "hypothesis-selection"}
+
+
+def test_the_other_kinds_are_unchanged_and_only_the_release_kind_is_added():  # F5d
+    table = yaml.safe_load((REPO / "schemas" / "gates.yml").read_text())["kinds"]
+    assert set(table) == BASE_KINDS | {"data-release"}
+
+
+def test_an_agent_actor_is_refused_by_the_release_hook_itself(proj, ws):  # F5d
+    write(ws, "outputs/agg.csv", CLEAN)
+    g = release.request(proj, ws, "outputs/agg.csv", rid="rel-1")
+    with pytest.raises(gates.GateError):
+        release.on_answer(proj, ws, g, "release", "agent")
+    assert levels.read(ws).pending_releases and not (ws / "released").exists()
+
+
+def test_a_small_count_written_as_a_float_is_refused(project, ws):  # F1
+    assert checks(check(project, write(ws, "outputs/agg.csv", "group,n\nA,3.0\nB,12\n"))) == {"small-cell"}
+
+
+def test_a_small_count_in_exponent_form_is_refused(project, ws):  # F1
+    assert checks(check(project, write(ws, "outputs/agg.csv", "group,n\nA,1e0\nB,12\n"))) == {"small-cell"}
+
+
+def test_a_non_integer_count_is_refused_by_column_and_its_value_is_not_shown(project, ws):  # F1
+    report = check(project, write(ws, "outputs/agg.csv", "group,tally\nA,2.5\n"), counts=("tally",))
+    assert checks(report) == {"counts-unknown"}
+    assert "column 2" in report.problems[0].detail and "2.5" not in repr(report)
+
+
+def test_a_text_value_in_a_count_column_is_refused(project, ws):  # F1
+    assert checks(check(project, write(ws, "outputs/agg.csv", "group,n\nA,three\nB,12\n"))) == {"counts-unknown"}
+
+
+def test_a_missing_count_value_is_not_a_small_cell(project, ws):  # F1 guard
+    assert check(project, write(ws, "outputs/agg.csv", "group,n\nA,NA\nB,12\n")).problems == ()
+
+
+def test_a_failed_pending_write_leaves_no_open_gate(proj, ws, monkeypatch):  # F4
+    write(ws, "outputs/agg.csv", CLEAN)
+
+    def fail(ws_, change, error):
+        raise error("data.yml: forced by the test")
+
+    monkeypatch.setattr(release, "_modify", fail)
+    with pytest.raises(release.ReleaseError):
+        release.request(proj, ws, "outputs/agg.csv", rid="rel-1")
+    assert gates.list_gates(ws, "open") == []
+    assert levels.read(ws).pending_releases == []
+
+
+def test_a_failed_gate_opening_leaves_no_pending_entry(proj, ws, monkeypatch):  # F4 guard
+    write(ws, "outputs/agg.csv", CLEAN)
+
+    def fail(*args, **kwargs):
+        raise gates.GateError("forced by the test")
+
+    monkeypatch.setattr(gates, "open_gate", fail)
+    with pytest.raises((release.ReleaseError, gates.GateError)):
+        release.request(proj, ws, "outputs/agg.csv", rid="rel-1")
+    assert levels.read(ws).pending_releases == []
+
+
+def test_a_policy_tightened_before_the_answer_refuses_it(proj, ws, project):  # F5b
+    (project / "config" / "data-policy.yml").write_text("version: 1\nmin_cell: 5\n")
+    write(ws, "outputs/agg.csv", CLEAN)
+    g = release.request(proj, ws, "outputs/agg.csv", rid="rel-1")
+    (project / "config" / "data-policy.yml").write_text("version: 1\nmin_cell: 10\n")
+    with pytest.raises(gates.GateError):
+        gates.answer(proj, ws, g["id"], "release", actor="human")
+    assert gates.get(ws, g["id"])["state"] == "open"
+    assert not (ws / "released" / "rel-1").exists()
+    assert levels.read(ws).pending_releases
+
+
+def test_a_symlinked_folder_on_the_artifact_path_is_refused(proj, ws):  # F5c
+    real = ws / "real"
+    real.mkdir()
+    write(ws, "real/agg.csv", CLEAN)
+    (ws / "outputs").symlink_to(real)
+    with pytest.raises(release.ReleaseError):
+        release.request(proj, ws, "outputs/agg.csv", rid="rel-1")
+    assert gates.list_gates(ws) == []
+
+
+def test_a_symlinked_released_folder_refuses_the_answer(proj, ws, tmp_path):  # F5c
+    elsewhere = tmp_path / "outside-dir"
+    elsewhere.mkdir()
+    write(ws, "outputs/agg.csv", CLEAN)
+    g = release.request(proj, ws, "outputs/agg.csv", rid="rel-1")
+    (ws / "released").symlink_to(elsewhere)
+    with pytest.raises(gates.GateError):
+        gates.answer(proj, ws, g["id"], "release", actor="human")
+    assert list(elsewhere.iterdir()) == []
+    assert gates.get(ws, g["id"])["state"] == "open"
