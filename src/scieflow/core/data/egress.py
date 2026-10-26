@@ -53,15 +53,17 @@ def runs_touched(root, path) -> list[Path]:
 
 
 def service_check(root, ws, service: str) -> None:
-    """Refuse a request to `service` made for run `ws` when the run is L2 and the service is
-    not in l2_providers. A run below L2 is never refused here (except by an invalid policy)."""
+    """Refuse a request to `service` made for path `ws` when any L2 run it lies inside, contains,
+    or is (the path itself) is not in l2_providers. A run below L2 is never refused here (except
+    by an invalid policy). A sub-folder of an L2 run is decided by that run (M-B t4 review F5)."""
     pol = _load(root)
-    if levels.run_level(ws) != "L2":
-        return
     if service in pol.l2_providers:
         return
-    raise EgressRefused(f"data protection: run {Path(ws).name} is L2; {service} is not in "
-                        "l2_providers (config/data-policy.yml)")
+    for run in [*runs_touched(root, ws), Path(ws)]:
+        if levels.run_level(run) != "L2":
+            continue
+        raise EgressRefused(f"data protection: run {run.name} is L2; {service} is not in "
+                            "l2_providers (config/data-policy.yml)")
 
 
 def push_check(root, source, remote_name: str) -> None:
@@ -96,7 +98,8 @@ def fetch_check(root, dest, remote_name: str) -> None:
                    f"declare the fetched data in run {run.name} (scieflow data declare)")
         if pol.enforcement == "refuse":
             raise EgressRefused(message)
-        rel = dest_path.relative_to(run.resolve()).as_posix()
+        rel = (dest_path.relative_to(run.resolve()).as_posix()
+               if dest_path.is_relative_to(run.resolve()) else ".")   # a folder above the run
         report_findings(run, [Finding(rel, L2_REMOTE_FETCH, "fetched from a remote in l2_remotes")],
                         enforcement="warn")
         return
