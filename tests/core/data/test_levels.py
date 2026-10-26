@@ -1,5 +1,7 @@
 """Run data levels (M-B Part A 5.1): data.yml is read fail-closed (M-B-D5)."""
 
+import os
+
 import pytest
 import yaml
 
@@ -62,6 +64,7 @@ def test_a_valid_file_reads_back_its_declarations(ws):
     ("- just\n- a list\n", "mapping"),               # wrong top-level type
     ("version: 2\nlevels: []\n", "version"),         # unknown version
     ("version: true\nlevels: []\n", "version"),      # a bool is not the integer 1
+    ("version: 1.0\nlevels: []\n", "version"),       # a float 1.0 is not the integer 1 (F3)
     ("levels: []\n", "version"),                     # version is required
     ("version: 1\nsurprise: 1\n", "surprise"),       # unknown top-level key
     ("version: 1\nlevels: nope\n", "levels"),        # wrong type
@@ -99,3 +102,32 @@ def test_invalid_reason_names_the_key_never_a_value(ws):
     assert isinstance(got, levels.Invalid)
     assert "path" in got.reason
     assert "SECRET-PLANT-VALUE" not in got.reason
+
+
+def test_a_dangling_symlink_is_invalid_not_absent(ws):
+    # F2: exists() reports a dangling link as absent, which would read as L0 (fail-open).
+    (ws / "data.yml").symlink_to(ws / "missing-target.yml")
+    got = levels.read(ws)
+    assert isinstance(got, levels.Invalid)
+    assert levels.run_level(ws) == "L2"
+
+
+def test_a_symlinked_data_file_is_invalid_even_when_its_target_is_valid(ws, tmp_path):
+    target = tmp_path / "elsewhere.yml"
+    target.write_text(yaml.safe_dump(base()))
+    (ws / "data.yml").symlink_to(target)
+    got = levels.read(ws)
+    assert isinstance(got, levels.Invalid)
+    assert levels.run_level(ws) == "L2"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_an_unstatable_data_file_is_invalid_not_an_exception(ws):
+    # F2: a permission error on the stat must map to Invalid, not escape as OSError.
+    (ws / "data.yml").write_text(yaml.safe_dump(base()))
+    ws.chmod(0o000)
+    try:
+        got = levels.read(ws)
+    finally:
+        ws.chmod(0o755)
+    assert isinstance(got, levels.Invalid)

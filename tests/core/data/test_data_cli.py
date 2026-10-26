@@ -1,6 +1,7 @@
 """`scieflow data` declare, levels, pin (M-B Part A 5.10) and the event vocabulary (5.11)."""
 
 import json
+import re
 
 import pytest
 import yaml
@@ -169,6 +170,27 @@ def test_pin_prints_the_sha_and_writes_nothing(project):
     assert r.exit_code == 0, r.output
     assert pin_sha(SAFE_STUB) in r.output
     assert not (project / "config" / "data-policy.yml").exists()
+
+
+def test_the_pinned_sha_from_pin_makes_boundary_safe(project):
+    # F5: the sha printed by `pin` is the one that makes `boundary` return safe.
+    from scieflow.core.data.policy import boundary
+
+    printed = re.search(r"[0-9a-f]{64}", run("pin", "safe-stub").output).group(0)
+    write_policy(project, "version: 1\n"
+                 "safe_endpoints:\n  - url: https://llm.example.org/v1\n    reason: t\n"
+                 "safe_agents:\n  safe-stub:\n    endpoint: https://llm.example.org/v1\n"
+                 f"    templates_sha256: \"{printed}\"\n    reason: test\n")
+    pol = policy.load(project)
+    got = boundary(pol, "safe-stub", SAFE_STUB, root=project, writable_areas=[])
+    assert (got.kind, got.reason) == ("safe", "pinned")
+
+
+def test_levels_and_pin_are_allowed_inside_a_dispatch(ws, monkeypatch):
+    # F5: the 5.10 table allows the read-only commands inside a dispatch.
+    monkeypatch.setenv("SCIEFLOW_DISPATCH", "1")
+    assert run("levels", "r1", "--json").exit_code == 0
+    assert run("pin", "safe-stub").exit_code == 0
 
 
 def test_pin_of_an_unknown_agent_is_a_usage_error(project):

@@ -1,6 +1,7 @@
 """Project data policy (M-B Part A 5.2): user-owned, fail-closed, never written by ScieFlow."""
 
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -61,6 +62,10 @@ def test_loopback_http_endpoint_is_accepted(tmp_path):
     ("version: 1\nbogus: 1\n", "bogus"),
     ("version: 2\n", "version"),
     ("version: true\n", "version"),
+    ("version: 1.0\n", "version"),
+    ('version: 1\nsafe_endpoints:\n  - url: "https://llm.example.org/v1 --evil"\n    reason: x\n', "safe_endpoints"),
+    ('version: 1\nsafe_endpoints:\n  - url: "https://user:pw@llm.example.org/v1"\n    reason: x\n', "safe_endpoints"),
+    ('version: 1\nsafe_endpoints:\n  - url: "https://@llm.example.org/v1"\n    reason: x\n', "safe_endpoints"),
     ("version: 1\nenforcement: sometimes\n", "enforcement"),
     ("version: 1\nmin_cell: 0\n", "min_cell"),
     ("version: 1\nmin_cell: true\n", "min_cell"),
@@ -109,3 +114,44 @@ def test_the_example_file_is_shipped_and_the_real_policy_is_gitignored():
     assert (ROOT / "config" / "data-policy.example.yml").is_file()
     lines = (ROOT / ".gitignore").read_text().splitlines()
     assert "config/data-policy.yml" in lines
+
+
+def test_a_credential_in_an_endpoint_is_refused_and_never_echoed(tmp_path):
+    put(tmp_path, 'version: 1\nsafe_endpoints:\n  - url: "https://user:SECRET-PLANT@llm.example.org/v1"\n'
+                  "    reason: x\n")
+    with pytest.raises(PolicyInvalid) as exc:
+        policy.load(tmp_path)
+    assert "safe_endpoints" in str(exc.value)
+    assert "SECRET-PLANT" not in str(exc.value)
+
+
+def test_a_valid_policy_loads_without_the_research_extra(tmp_path, monkeypatch):
+    # F1: on a core-only install `requests` is missing; policy.load must not import the research module.
+    monkeypatch.setitem(sys.modules, "requests", None)
+    monkeypatch.setitem(sys.modules, "scieflow.research.lib.http", None)
+    monkeypatch.setitem(sys.modules, "scieflow.research.lib.providers", None)
+    put(tmp_path, "version: 1\nl2_providers:\n  - name: search-europepmc\n    reason: metadata only\n")
+    assert policy.load(tmp_path).l2_providers == ("search-europepmc",)
+
+
+def test_the_static_provider_names_match_the_catalogue():
+    from scieflow.research.lib.providers import CATALOGUE
+
+    assert set(policy.KNOWN_PROVIDERS) == set(CATALOGUE) | set(policy.SCITE_PROVIDERS)
+
+
+def test_a_dangling_policy_symlink_is_invalid_not_the_defaults(tmp_path):
+    # F2: exists() is False for a dangling link; that would silently drop enforcement: refuse.
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "data-policy.yml").symlink_to(tmp_path / "missing.yml")
+    with pytest.raises(PolicyInvalid):
+        policy.load(tmp_path)
+
+
+def test_a_symlinked_policy_file_is_invalid_even_when_its_target_is_valid(tmp_path):
+    target = tmp_path / "elsewhere.yml"
+    target.write_text("version: 1\n")
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "data-policy.yml").symlink_to(target)
+    with pytest.raises(PolicyInvalid):
+        policy.load(tmp_path)
