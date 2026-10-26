@@ -2356,9 +2356,46 @@ def _progress(ws: Path) -> dict:
     return out
 
 
+_DATA_SUGGESTION = ("suggestion: set enforcement: refuse in config/data-policy.yml "
+                    "(ScieFlow never sets it)")
+
+
+def _data_panel(ws: Path) -> dict:
+    """Panel: the run's data level, declarations and warnings (M-B Part A 5.12).
+
+    Read only. An invalid data.yml or policy file is a `reason` and, for the run,
+    level L2 (fail-closed, M-B-D5), never an exception. Names paths and rule ids,
+    never a value read from a data file."""
+    from scieflow.core.data import egress, levels
+    from scieflow.core.data import policy as data_policy
+
+    info = levels.level_info(ws)
+    got = levels.read(ws)
+    root = egress.root_of_run(ws)
+    reason, pol = info.reason, None
+    try:
+        pol = data_policy.load(root)
+    except data_policy.PolicyInvalid as exc:
+        reason = reason or str(exc)
+    declarations, released, imports = [], [], []
+    if isinstance(got, levels.DataFile):
+        declarations = [{"path": e["path"], "level": e["level"], "kind": e["kind"]}
+                        for e in got.levels]
+        released = [r.get("id") for r in got.released]
+        imports = [i.get("id") for i in got.imports]
+    suggestion = None
+    if pol is not None and pol.enforcement == "warn" and levels.project_has_l2(root, pol):
+        suggestion = _DATA_SUGGESTION
+    return {"reason": reason, "level": info.level,
+            "enforcement": pol.enforcement if pol is not None else None,
+            "declarations": declarations,
+            "warnings": len(events.read(ws, types=("data.warning",))),
+            "released": released, "imports": imports, "suggestion": suggestion}
+
+
 # Panel name -> builder(ws) -> dict.
 _PANELS = {"inventory": _inventory, "manuscript": _manuscript,
-           "attribution": _attribution, "progress": _progress}
+           "attribution": _attribution, "progress": _progress, "data": _data_panel}
 
 
 def run_overview(project: Project, slug: str) -> dict:
