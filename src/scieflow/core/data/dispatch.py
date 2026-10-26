@@ -14,21 +14,21 @@ data file (M-B-D9, D10).
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from scieflow.core import events, sandbox
-from scieflow.core.data import levels, policy
+from scieflow.core.data import levels, policy, scan
+from scieflow.core.data.scan import Finding
 
 # A human answer that approves external sharing of an L1 run (5.4 rule l1-external-sharing).
 EXTERNAL_SHARING_APPROVALS = ("yes", "approve", "approved", "share")
-
-
-@dataclass(frozen=True)
-class Finding:
-    path: str
-    rule: str
-    detail: str
+# Warn-mode dedupe of data.warning events, keyed by (path, size, mtime_ns, rule) (5.6).
+REPORTED = Path("scratch") / "data-scan-reported.json"
+SCAN_LIMIT_DETAIL = "scan stopped at a limit before every file was inspected (config/data-policy.yml)"
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,7 @@ def record_refusal(run_dir: Path | None, agent: str, decision: Decision) -> None
 
 
 def record_decision(run_dir: Path | None, agent: str, decision: Decision | None) -> None:
-    """data.level_resolved and one data.warning per warning, after an allowed dispatch.
+    """data.level_resolved and one data.warning per new warning, after an allowed dispatch.
 
     An unlabelled default (an L0 run dispatched to a cloud agent, with nothing hidden from it and
     nothing protected) records no level event, so the event stream of every existing plain
@@ -86,9 +86,62 @@ def record_decision(run_dir: Path | None, agent: str, decision: Decision | None)
         events.emit(run_dir, "data.level_resolved", "system", level=decision.level, agent=agent,
                     boundary=decision.boundary, hidden=len(decision.data_hidden),
                     protected=len(decision.protected))
-    for finding in decision.warnings:
-        events.emit(run_dir, "data.warning", "system", rule=finding.rule, path=finding.path,
-                    detail=finding.detail)
+    report_findings(run_dir, decision.warnings, enforcement=decision.enforcement)
+
+
+def _report_key(ws: Path, finding: Finding) -> str:
+    try:
+        st = (ws / finding.path).stat()
+        stamp = [st.st_size, st.st_mtime_ns]
+    except OSError:
+        stamp = [-1, -1]
+    return json.dumps([finding.path, *stamp, finding.rule])
+
+
+def _load_reported(ws: Path) -> dict:
+    """The dedupe map. A symbolic link anywhere on its path is ignored (the agent can write scratch)."""
+    if (ws / "scratch").is_symlink() or (ws / REPORTED).is_symlink() or not (ws / REPORTED).is_file():
+        return {}
+    try:
+        raw = json.loads((ws / REPORTED).read_text())
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _save_reported(ws: Path, reported: dict) -> None:
+    if (ws / "scratch").is_symlink():
+        return
+    target = ws / REPORTED
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".data-scan-", suffix=".tmp")
+    with os.fdopen(fd, "w") as fh:
+        fh.write(json.dumps(reported, sort_keys=True))
+    os.replace(tmp, target)
+
+
+def report_findings(ws: Path | None, findings, *, enforcement: str = "warn") -> int:
+    """One data.warning per finding. Under `warn`, a finding already reported for the same file
+    state (path, size, mtime, rule) is not repeated. Under `refuse` the dedupe map is never read
+    (M-B t4). Returns the number of events written."""
+    if ws is None or not findings:
+        return 0
+    ws = Path(ws)
+    dedupe = enforcement == "warn"
+    reported = _load_reported(ws) if dedupe else {}
+    written = 0
+    for finding in findings:
+        key = _report_key(ws, finding)
+        if dedupe and key in reported:
+            continue
+        event = events.emit(ws, "data.warning", "system", rule=finding.rule, path=finding.path,
+                            detail=finding.detail)
+        if dedupe:
+            reported[key] = event["id"]
+        written += 1
+    if dedupe and written:
+        _save_reported(ws, reported)
+    return written
 
 
 def _external_sharing_cleared(ws: Path) -> bool:
@@ -110,6 +163,15 @@ def _outermost(paths) -> tuple:
         if not any(path == other or other in path.parents for other in kept):
             kept.append(path)
     return tuple(kept)
+
+
+def _scan_message(slug: str, found) -> str:
+    """Names paths and rule ids, never a value (M-B-D9)."""
+    named = sorted({(f.path, f.rule) for f in found.findings})
+    listed = "; ".join(f"{path} ({rule})" for path, rule in named[:5])
+    more = f" and {len(named) - 5} more" if len(named) > 5 else ""
+    return (f"run {slug}: the scan found data that looks like patient data: {listed}{more}; "
+            "declare it with `scieflow data declare` or review config/data-policy.yml")
 
 
 def decide(project, run_dir: Path | None, agent: str, final_cfg: dict, *, sandboxed: bool,
@@ -169,6 +231,17 @@ def _decide(project, run_dir: Path | None, agent: str, final_cfg: dict, *, sandb
         if pol.enforcement == "refuse":
             return refuse("l1-external-sharing", finding.detail)
         warnings.append(finding)
+
+    if bound.kind == "cloud" and level != "L2" and ws is not None:
+        found = scan.scan(ws, pol)
+        if found.findings or found.truncated:
+            if pol.enforcement == "refuse":
+                if found.findings:
+                    return refuse("scan-warning", _scan_message(slug, found))
+                return refuse("scan-incomplete", SCAN_LIMIT_DETAIL)
+            warnings.extend(found.findings)
+            if found.truncated:
+                warnings.append(Finding(".", "scan-incomplete", SCAN_LIMIT_DETAIL))
 
     hidden: tuple = ()
     protected: tuple = ()

@@ -14,7 +14,8 @@ from typing import NoReturn
 import click
 
 from scieflow.core import config, events
-from scieflow.core.data import levels, policy
+from scieflow.core.data import levels, policy, scan
+from scieflow.core.data.dispatch import report_findings
 from scieflow.core.project import Project, ProjectError
 
 OK, REFUSED, USAGE, POLICY_INVALID = 0, 1, 2, 3
@@ -244,3 +245,26 @@ def pin_cmd(agent, as_json):
           [f"templates_sha256 for {agent}: {sha}",
            f"paste under safe_agents.{agent} in {policy.POLICY_FILE}:",
            f'    templates_sha256: "{sha}"'])
+
+
+@data.command("scan")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True)
+def scan_cmd(slug, as_json):
+    """Scan a run for undeclared data that looks like patient data. Warnings only; no value
+    is ever printed or recorded. Allowed inside a dispatch."""
+    project = _project()
+    ws = _run(project, slug)
+    pol = _policy_or_fail(project.root)
+    found = scan.scan(ws, pol)
+    report_findings(ws, found.findings, enforcement="warn")
+    rows = [{"path": f.path, "rule": f.rule, "detail": f.detail} for f in found.findings]
+    payload = {"slug": slug, "files_seen": found.files_seen, "truncated": found.truncated,
+               "findings": rows}
+    lines = [f"scanned {found.files_seen} file(s) in run {slug}"
+             + (" (stopped at a scan limit)" if found.truncated else "")]
+    lines += [f"  {row['path']}  {row['rule']}  {row['detail']}" for row in rows]
+    if not rows:
+        lines.append("no findings")
+    _emit(as_json, payload, lines)
+
