@@ -3,6 +3,8 @@
 Every value is synthetic. No test calls a real service or launches an agent.
 """
 
+import json
+
 import yaml
 
 from scieflow.core import events, gates
@@ -135,7 +137,7 @@ def test_enforcement_refuse_turns_the_l1_warning_into_a_refusal(project, ws):
 def _answered_gate(ws, gate_id, *, kind, answer, by):
     directory = ws / gates.GATES_DIR
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{gate_id}.json").write_text(yaml.safe_dump({
+    (directory / f"{gate_id}.json").write_text(json.dumps({
         "id": gate_id, "kind": kind, "state": "answered", "answer": answer,
         "answered_by": by, "options": [], "question": "synthetic"}))
 
