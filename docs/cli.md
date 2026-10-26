@@ -14,9 +14,29 @@ All examples assume you are at the repo root and use `uv run scieflow …`.
 | `0` | success | everywhere |
 | `75` | dispatch refused — the run's `wall_minutes` budget is spent | `scieflow agent run` only (`agent_run.BUDGET_EXIT`); the run is checkpointed automatically |
 | `77` | sandbox could not be established or proven, or a credential, `readable:` entry or hidden path was refused; the dispatch was refused | `scieflow agent run` only (`agent_run.SANDBOX_EXIT`); see [The agent sandbox](sandbox.md) |
+| `78` | a dispatch refused by a data-protection rule (an L2 run, a cloud agent, a policy or a scan rule); the dispatch was refused and no job was created | `scieflow agent run` only (`agent_run.DATA_EXIT`); see [Data protection](data-protection.md) |
 | `124` | the agent process was killed for running past its timeout, with partial output kept | `scieflow agent run`, and any job `jobs.wait` times out on |
 | `2` | `gate wait --timeout` expired without an answer | `scieflow gate wait` |
 | `1` | any other refusal (bad slug, unmet precondition, validation problem) | Click's default for a raised `ClickException`, e.g. `run advance` past `iterations`, `run mark` with a bad phase/state |
+
+## `scieflow data`
+
+The data-protection commands: declare a run's data level, scan for undeclared
+patient data, release a checked aggregate, import it into another run, and
+de-identify a tabular export. Every subcommand accepts `--json`. Exit codes:
+`0` ok, `1` refused or a check failed, `2` usage or not available, `3` invalid
+policy file. The rules are in [Data protection](data-protection.md).
+
+```bash
+uv run scieflow data levels <slug>
+uv run scieflow data declare <slug> 'inputs/*.csv' --level L2 --reason "REDCap export"
+uv run scieflow data scan <slug>
+uv run scieflow data release <slug> outputs/table1.csv --counts n --reason "counts"
+uv run scieflow data import <dest> --from <src> --release <id>
+uv run scieflow data ingest <slug> raw/export.csv --out inputs/clean.csv --profile redcap
+uv run scieflow data audit <slug>
+uv run scieflow data pin <agent>
+```
 
 ## `scieflow run`
 
