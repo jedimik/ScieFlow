@@ -19,6 +19,7 @@ import shutil
 import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
 
 from scieflow.core import events, gates, store
@@ -33,6 +34,7 @@ ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 RECORD_IDS = frozenset({"record_id", "id", "subject", "subject_id", "patient", "patient_id",
                         "pid", "participant", "participant_id"})
 COUNT_NAMES = frozenset({"n", "count", "freq"})
+MISSING_CELLS = frozenset({"na", "nan", "null", "none"})   # a missing count is not a small cell
 PATH_VALUE = re.compile(r"~/\S*|/[^/\s]+/\S*|[A-Za-z]:\\\S*")
 HEADER_RULES = frozenset({"dicom-header", "eeg-header", "binary-tabular", "imaging-file",
                           "unreadable"})
@@ -146,6 +148,7 @@ def _table(path: Path, pol, counts, no_counts: bool) -> list[Problem]:
     delim = scan._table_dialect(path.name.lower(), sample)
     extra = frozenset(normalise(x) for x in pol.extra_drop)
     flagged: set = set()
+    odd_counts: set = set()
     stats: dict = {}
     try:
         with open(path, newline="", encoding="utf-8-sig", errors="replace") as fh:
@@ -178,11 +181,17 @@ def _table(path: Path, pol, counts, no_counts: bool) -> list[Problem]:
                     stat_[1] += len(v)
                     stat_[2] += len(v.split()) >= scan.FREE_TEXT_WORDS
                     if i in count_cols:
-                        try:
-                            value = int(v)
-                        except ValueError:
+                        if v.lower() in MISSING_CELLS:
                             continue
-                        if 0 < value < pol.min_cell:
+                        # Decimal reads "3", "3.0" and "1e0" alike; anything else fails closed (F1).
+                        try:
+                            value = Decimal(v)
+                        except InvalidOperation:
+                            odd_counts.add(i)
+                            continue
+                        if not value.is_finite() or value != value.to_integral_value():
+                            odd_counts.add(i)
+                        elif 0 < value < pol.min_cell:
                             flagged.add(("small-cell", i))
 
             cells(header, False)
@@ -195,6 +204,8 @@ def _table(path: Path, pol, counts, no_counts: bool) -> list[Problem]:
                                                or wordy / n >= scan.FREE_TEXT_WORD_SHARE):
             flagged.add(("free-text-column", i))
     out.extend(Problem(check, f"column {i + 1}") for check, i in flagged)
+    out.extend(Problem("counts-unknown", f"column {i + 1} holds a value that is not a whole-number "
+                                         "count") for i in odd_counts)
     return out
 
 
@@ -306,13 +317,21 @@ def request(project, ws, artifact, *, rid=None, counts=(), no_counts=False, reas
     if report.problems:
         raise ReleaseError(_refusal(rel, report), report=report)
     digest = _sha(path)
-    gate = gates.open_gate(project, ws, GATE_KIND, _question(ws.name, rel, digest, report),
-                           options=list(ANSWERS), files=[rel], in_scope=False, actor="agent")
+    gate_id = store.new_id()
     entry = {"id": rid, "source": rel, "sha256": digest, "checks": list(report.applied),
-             "gate": gate["id"], "requested_at": _now(), "counts": list(counts),
+             "gate": gate_id, "requested_at": _now(), "counts": list(counts),
              "no_counts": bool(no_counts), "reason": str(reason).strip()}
+    # The pending entry is written first, so a failed write opens no gate (F4). If opening the
+    # gate fails, the entry is withdrawn again, so no pending entry is left without a gate.
     _modify(ws, lambda df: df.pending_releases.append(entry), ReleaseError)
-    return gate
+    try:
+        return gates.open_gate(project, ws, GATE_KIND, _question(ws.name, rel, digest, report),
+                               options=list(ANSWERS), files=[rel], in_scope=False, actor="agent",
+                               gate_id=gate_id)
+    except BaseException:
+        _modify(ws, lambda df: _settle(df, gate_id), ReleaseError)
+        raise
+
 
 
 def _settle(df, gate_id: str, record=None) -> None:
@@ -380,10 +399,19 @@ def on_answer(project, ws, gate, answer, actor) -> None:
                 outcome="released")
 
 
-def _verify(ws: Path, rec: dict) -> dict:
+def _record_file(rec: dict, folder: str) -> str:
+    """A record's file must sit directly in its own folder (M-B 5.8); no other path is trusted (F3)."""
+    file = str(rec.get("file", ""))
+    head, _, name = file.rpartition("/")
+    if head != folder or name in ("", ".", ".."):
+        raise ReleaseError(f"record {rec.get('id')} names {file!r}, not a file in {folder}/")
+    return file
+
+
+def _verify(ws: Path, rec: dict, folder: str) -> dict:
     file = str(rec.get("file", ""))
     try:
-        ok = _sha(_locate(ws, file)) == rec.get("sha256")
+        ok = _sha(_locate(ws, _record_file(rec, folder))) == rec.get("sha256")
         reason = "" if ok else "sha256 differs from the record"
     except ReleaseError as exc:
         ok, reason = False, str(exc)
@@ -401,7 +429,7 @@ def import_release(project, dest_ws, src_ws, release_id) -> dict:
     rec = next((r for r in got.released if r.get("id") == release_id), None)
     if rec is None:
         raise ReleaseError(f"no released record {release_id} in run {src_ws.name}")
-    src_file = _locate(src_ws, str(rec["file"]))
+    src_file = _locate(src_ws, _record_file(rec, f"{RELEASED_DIR}/{release_id}"))
     if _sha(src_file) != rec["sha256"]:
         raise ReleaseError(f"released file {rec['file']} does not match its recorded sha256; "
                            "nothing was imported")
@@ -441,8 +469,9 @@ def audit(ws) -> dict:
     if isinstance(got, levels.Invalid):
         return {"invalid": got.reason, "declarations": [], "pending": [], "released": [],
                 "imports": [], "refused": refused, "warnings": warnings, "mismatches": 1}
-    released = [_verify(ws, r) for r in got.released]
-    imports = [_verify(ws, r) for r in got.imports]
+    released = [_verify(ws, r, f"{RELEASED_DIR}/{r.get('id')}") for r in got.released]
+    imports = [_verify(ws, r, f"inputs/{RELEASED_DIR}/{r.get('from')}-{r.get('release')}")
+               for r in got.imports]
     return {"invalid": None, "declarations": list(got.levels),
             "pending": [e.get("id") for e in got.pending_releases], "released": released,
             "imports": imports, "refused": refused, "warnings": warnings,

@@ -68,7 +68,8 @@ def list_gates(ws: Path, state: str | None = None) -> list[dict]:
 
 
 def open_gate(project: Project, ws: Path, kind: str, question: str, options=(),
-              files=(), in_scope: bool = False, actor: str = "agent") -> dict:
+              files=(), in_scope: bool = False, actor: str = "agent",
+              gate_id: str | None = None) -> dict:
     table = kinds(project)
     if kind not in table:
         raise GateError(f"unknown gate kind {kind!r} (known: {', '.join(table)})")
@@ -81,7 +82,7 @@ def open_gate(project: Project, ws: Path, kind: str, question: str, options=(),
                 "would ever write the charter, even if the human answering it "
                 "means to adopt")
     gate = {
-        "id": store.new_id(), "kind": kind, "question": question,
+        "id": gate_id or store.new_id(), "kind": kind, "question": question,
         "options": list(options), "files": [str(f) for f in files],
         "in_scope": bool(in_scope), "requires_human": bool(table[kind]["requires_human"]),
         "state": "open", "opened": _now(), "opened_by": actor,
