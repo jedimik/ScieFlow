@@ -198,6 +198,23 @@ when to stop.
     `review_decisions`) is the user's choice, written with `uv run scieflow
     review configure`; every review is a fresh dispatch.
 
+18. **Data protection** (`docs/data-protection.md`). The user declares what
+    a run holds with `uv run scieflow data declare <slug> <path> --level
+    L0|L1|L2`: `L0` code and metadata, `L1` aggregates, `L2` record-level
+    or re-identifiable data and everything derived from it. You may raise a
+    level (`--as-agent`), never lower or remove one, and you never edit a
+    run's `data.yml` or the user-owned `config/data-policy.yml` (safe
+    agents, `l2_remotes`, `l2_providers`, `enforcement`). In an L2 run only
+    the safe agents listed there are dispatched; every other dispatch is
+    refused (exit 78), and live literature, scite and NotebookLM requests
+    and pushes to remotes not in `l2_remotes` are refused (exit 3). A
+    refusal is a boundary: never copy, summarise or paste L2 content
+    anywhere to get past it. Results leave an L2 run only through `uv run
+    scieflow data release` (a human-only `data-release` gate) and `uv run
+    scieflow data import` into another run. Warnings from `uv run scieflow
+    data scan` (undeclared data that looks like patient data) go to the
+    user with a proposed declaration; they are never silenced.
+
 ## Skills (read the relevant one before acting)
 
 | Task | Skill file |
