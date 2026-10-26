@@ -132,7 +132,8 @@ def test_unscoped_gateway_inside_a_dispatch_for_an_l0_run_is_unchanged(project, 
     assert gw.check("search-openalex", OPENALEX_URL) is None
 
 
-def test_refusal_is_recorded_without_a_value(project, capsys):
+def test_refusal_names_the_run_and_writes_no_job_refused_event(project, capsys):
+    # M-B t4 review F6(d): the gateway refusal writes no job.refused event (no job exists).
     root, ws = project
     declare_l2(ws)
     with pytest.raises(providers.ProviderRefused) as exc:

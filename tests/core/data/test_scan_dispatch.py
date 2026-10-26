@@ -187,6 +187,29 @@ def test_data_scan_json_has_path_rule_and_detail(lab):
     assert payload["truncated"] is False
 
 
+def test_data_scan_output_never_holds_a_headerless_value(lab):
+    # M-B t4 review F1 and F6(c): the planted value sits in the header row of a headerless file.
+    (ws_of(lab) / "inputs" / "contact.csv").write_text(f"{PLANT},4\n910202/5678,5\n")
+    as_json = CliRunner().invoke(data, ["scan", "r1", "--json"])
+    assert as_json.exit_code == 0, as_json.output
+    assert "identifier-values" in as_json.output
+    assert PLANT not in as_json.output
+    as_text = CliRunner().invoke(data, ["scan", "r1"])
+    assert as_text.exit_code == 0, as_text.output
+    assert PLANT not in as_text.output
+
+
+def test_data_scan_in_a_refuse_project_does_not_trust_the_dedupe_file(lab):
+    # M-B t4 review N1: under refuse the dedupe file is never trusted, a manual scan included.
+    first = CliRunner().invoke(data, ["scan", "r1"])
+    assert first.exit_code == 0, first.output
+    assert len(warnings(ws_of(lab))) == 1
+    write_policy(lab, enforcement="refuse")
+    second = CliRunner().invoke(data, ["scan", "r1"])
+    assert second.exit_code == 0, second.output
+    assert len(warnings(ws_of(lab))) == 2
+
+
 def test_data_scan_records_warnings_and_is_allowed_inside_a_dispatch(lab, monkeypatch):
     monkeypatch.setenv("SCIEFLOW_DISPATCH", "1")
     result = CliRunner().invoke(data, ["scan", "r1"])

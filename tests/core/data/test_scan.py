@@ -4,6 +4,8 @@ Every value here is synthetic and obviously fake. No test reads real patient dat
 """
 
 import dataclasses
+import os
+import signal
 
 import pytest
 
@@ -59,9 +61,10 @@ def test_identifier_column_matches_english_and_czech_names(ws, project, header):
 
 
 def test_identifier_column_detail_names_the_column(ws, project):
+    # The detail is the normalised vocabulary term, never the raw header cell (M-B t4 review F1).
     _write(ws, "inputs/people.csv", "score,Příjmení\n4,Synthetic\n")
     (finding,) = [f for f in _scan(ws, project).findings if f.rule == "identifier-column"]
-    assert finding.detail == "Příjmení"
+    assert finding.detail == "prijmeni"
 
 
 def test_extra_drop_from_policy_is_an_identifier_column(ws, project):
@@ -82,10 +85,49 @@ def test_identifier_values_birth_number_email_and_phone(ws, project, value):
     assert ("inputs/contact.csv", "identifier-values") in _rules(result)
 
 
-def test_identifier_values_detail_is_the_column_not_the_value(ws, project):
+def test_identifier_values_detail_is_the_column_index_not_the_header(ws, project):
+    # A header cell of a headerless table is a value, so the detail is a column index (F1).
     _write(ws, "inputs/contact.csv", "contact,score\n900101/1234,4\n")
     (finding,) = [f for f in _scan(ws, project).findings if f.rule == "identifier-values"]
-    assert finding.detail == "contact"
+    assert finding.detail == "column 1"
+
+
+def test_headerless_table_never_puts_a_value_in_a_detail(ws, project):
+    # M-B t4 review F1: the first record of a headerless table is read as its header.
+    _write(ws, "inputs/headerless.csv",
+           "900101/1234,jan.novak@example.test\n910202/5678,eva.x@example.test\n")
+    result = _scan(ws, project)
+    assert ("inputs/headerless.csv", "identifier-values") in _rules(result)
+    details = " ".join(f.detail for f in result.findings)
+    for value in ("900101/1234", "jan.novak", "eva.x", "910202/5678"):
+        assert value not in details
+    assert {f.detail for f in result.findings} <= {"column 1", "column 2"}
+
+
+def test_a_fifo_in_the_run_is_unreadable_and_does_not_block_the_scan(ws, project):
+    # M-B t4 review F2: open() on a FIFO blocks forever, so the scan must never open it.
+    (ws / "inputs").mkdir(exist_ok=True)
+    os.mkfifo(ws / "inputs" / "pipe.csv")
+
+    def on_alarm(signum, frame):
+        raise TimeoutError("the scan blocked on a FIFO")
+
+    previous = signal.signal(signal.SIGALRM, on_alarm)
+    signal.alarm(10)
+    try:
+        result = _scan(ws, project)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+    (finding,) = [f for f in result.findings if f.path == "inputs/pipe.csv"]
+    assert (finding.rule, finding.detail) == ("unreadable", "not a regular file")
+
+
+def test_a_field_over_the_csv_limit_is_unreadable_not_an_error(ws, project):
+    # M-B t4 review F3: csv.Error (field larger than the csv field limit) becomes a finding.
+    _write(ws, "inputs/big.csv", "id,note\n1," + "x" * 300_000 + "\n")
+    result = _scan(ws, project, scan_max_bytes_per_file=1_000_000)
+    assert ("inputs/big.csv", "unreadable") in _rules(result)
 
 
 def test_free_text_column_long_values(ws, project):

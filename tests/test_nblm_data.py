@@ -11,6 +11,7 @@ import yaml
 from nblm import fetch as fetch_mod
 from nblm import nblm
 from nblm import session as session_mod
+from scieflow.core.data import egress
 
 
 @pytest.fixture
@@ -63,11 +64,45 @@ def test_resolve_for_an_l2_run_is_refused(root, tmp_path, capsys):
     assert "data protection" in capsys.readouterr().err
 
 
-def test_a_listed_service_is_not_refused_by_the_data_rule(root, capsys):
+def test_a_listed_service_reaches_the_downstream_call(root, monkeypatch):
+    # M-B t4 review F6(b): "listed -> proceeds" is a real assertion, not only an absent message.
     (root / "config" / "data-policy.yml").write_text(yaml.safe_dump({"version": 1, "l2_providers": [
         {"name": "notebooklm", "reason": "test: reviewed service"}]}))
-    nblm.main(["check", "default", "--workspace", str(_ws(root))])
+    reached = []
+    monkeypatch.setattr(nblm.policy, "load_profile", lambda *a, **k: "profile")
+    monkeypatch.setattr(nblm, "cmd_check", lambda profile, ws: reached.append((profile, ws)) or 0)
+    assert nblm.main(["check", "default", "--workspace", str(_ws(root))]) == 0
+    assert reached == [("profile", _ws(root))]
+
+
+def test_a_sub_folder_of_an_l2_run_is_refused_with_exit_3(root, capsys):
+    # M-B t4 review F5: nblm takes a raw --workspace path, so a sub-folder must not bypass the rule.
+    sub = _ws(root) / "outputs"
+    sub.mkdir()
+    assert nblm.main(["check", "default", "--workspace", str(sub)]) == 3
+    assert "data protection" in capsys.readouterr().err
+
+
+def test_report_for_an_l2_run_is_not_subject_to_the_session_rule(root, tmp_path, monkeypatch,
+                                                                 capsys):
+    # M-B t4 review F6(a): report and extract are local and stay outside the session rule.
+    calls = []
+    monkeypatch.setattr(egress, "service_check", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(nblm.policy, "load_verdicts", lambda root: {})
+    monkeypatch.setattr(nblm.verify_mod, "render_report", lambda *a, **k: "report\n")
+    out = _ws(root) / "nblm" / "audit.md"
+    assert nblm.main(["report", "--workspace", str(_ws(root)), "--out", str(out)]) == 0
+    assert out.read_text() == "report\n"
+    assert calls == []
     assert "data protection" not in capsys.readouterr().err
+
+
+def test_extract_is_not_subject_to_the_session_rule(root, monkeypatch):
+    calls = []
+    monkeypatch.setattr(egress, "service_check", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(nblm, "cmd_extract", lambda *a: 0)
+    assert nblm.main(["extract", "--manuscript", "m.md", "--bib", "b.bib", "--out", "o.yml"]) == 0
+    assert calls == []
 
 
 def test_invalid_policy_refuses_a_session_operation(root, capsys):
