@@ -9,12 +9,13 @@ from __future__ import annotations
 import json
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import NoReturn
 
 import click
 
 from scieflow.core import config, events
-from scieflow.core.data import levels, policy, scan
+from scieflow.core.data import ingest, levels, policy, release, scan
 from scieflow.core.data.dispatch import report_findings
 from scieflow.core.project import Project, ProjectError
 
@@ -267,4 +268,114 @@ def scan_cmd(slug, as_json):
     if not rows:
         lines.append("no findings")
     _emit(as_json, payload, lines)
+
+
+@data.command("release")
+@click.argument("slug")
+@click.argument("artifact")
+@click.option("--id", "rid", default=None, help="Release id (default: a new id).")
+@click.option("--counts", default="", help="Comma-separated count column(s) for small-cell.")
+@click.option("--no-counts", is_flag=True, help="The file has no count column.")
+@click.option("--reason", default="", help="Why this result may leave the run.")
+@click.option("--json", "as_json", is_flag=True)
+def release_cmd(slug, artifact, rid, counts, no_counts, reason, as_json):
+    """Check a run file and open a human-only data-release gate (M-B 5.8)."""
+    _refuse_in_dispatch("release")
+    project = _project()
+    ws = _run(project, slug)
+    names = tuple(c.strip() for c in counts.split(",") if c.strip())
+    if names and no_counts:
+        _fail(USAGE, "release: give --counts or --no-counts, not both")
+    _policy_or_fail(project.root)
+    try:
+        gate = release.request(project, ws, artifact, rid=rid, counts=names,
+                               no_counts=no_counts, reason=reason)
+    except release.ReleaseError as exc:
+        _fail(REFUSED, f"release: refused: {exc}")
+    payload = {"slug": slug, "gate": gate["id"], "kind": gate["kind"], "requires_human": True}
+    lines = [f"opened data-release gate {gate['id']} for run {slug}",
+             f"a human answers it: uv run scieflow gate answer {slug} {gate['id']} release|reject"]
+    _emit(as_json, payload, lines)
+
+
+@data.command("import")
+@click.argument("dest")
+@click.option("--from", "source", required=True, help="The run that released the file.")
+@click.option("--release", "release_id", required=True, help="The release id in SOURCE.")
+@click.option("--json", "as_json", is_flag=True)
+def import_cmd(dest, source, release_id, as_json):
+    """Bring a released file into DEST as an L1.5 import (M-B 5.8)."""
+    _refuse_in_dispatch("import")
+    project = _project()
+    dest_ws = _run(project, dest)
+    src_ws = _run(project, source)
+    try:
+        imp = release.import_release(project, dest_ws, src_ws, release_id)
+    except release.ReleaseError as exc:
+        _fail(REFUSED, f"import: refused: {exc}")
+    payload = {"dest": dest, "from": source, "release": release_id, "file": imp["file"],
+               "sha256": imp["sha256"]}
+    _emit(as_json, payload, [f"imported {release_id} from {source} into {dest}: {imp['file']}"])
+
+
+@data.command("ingest")
+@click.argument("slug")
+@click.argument("source", type=click.Path(path_type=Path))
+@click.option("--out", required=True, help="New run-relative CSV to write.")
+@click.option("--profile", type=click.Choice(["generic", "redcap", "imaging", "eeg"]),
+              default="generic", show_default=True)
+@click.option("--id-col", default="record_id", show_default=True,
+              help="The record id column, replaced by a keyed pseudonym.")
+@click.option("--date-anchor", default=None, help="Anchor date column (dates become days from it).")
+@click.option("--drop", "drops", multiple=True, help="Extra column to drop (repeatable).")
+@click.option("--keep-free-text", is_flag=True, help="Keep free-text columns.")
+@click.option("--json", "as_json", is_flag=True)
+def ingest_cmd(slug, source, out, profile, id_col, date_anchor, drops, keep_free_text, as_json):
+    """De-identify a tabular export into the run and declare it L2 (M-B 5.9)."""
+    _refuse_in_dispatch("ingest")
+    if profile in ("imaging", "eeg"):
+        _fail(USAGE, f"ingest: --profile {profile} is not in M-B; imaging and EEG are "
+                     "de-identified by an external stage (docs/data-protection.md)")
+    project = _project()
+    ws = _run(project, slug)
+    _policy_or_fail(project.root)
+    try:
+        result = ingest.ingest(project, ws, source, out, profile=profile, id_col=id_col,
+                               date_anchor=date_anchor, drops=drops,
+                               keep_free_text=keep_free_text)
+    except ingest.IngestError as exc:
+        _fail(REFUSED, f"ingest: refused: {exc}")
+    payload = {k: result[k] for k in ("out", "manifest", "rows_in", "rows_out", "id_column",
+                                      "salt_id")}
+    lines = [f"ingested {source.name} into run {slug}: {result['out']}",
+             f"rows {result['rows_in']} -> {result['rows_out']}; manifest {result['manifest']}; "
+             "declared L2"]
+    _emit(as_json, payload, lines)
+
+
+@data.command("audit")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True)
+def audit_cmd(slug, as_json):
+    """Declarations, releases and imports, each re-hashed; exit 1 on a mismatch (5.10)."""
+    project = _project()
+    ws = _run(project, slug)
+    report = release.audit(ws)
+    if report["invalid"]:
+        _fail(REFUSED, f"audit: data.yml is invalid: {report['invalid']}")
+    lines = [f"audit of run {slug}"]
+    for d in report["declarations"]:
+        lines.append(f"  declared {d['path']} {d['level']} by {d['declared_by']}")
+    lines.append(f"  pending releases: {len(report['pending'])}")
+    for row in report["released"]:
+        lines.append(f"  released {row['id']} {row['file']} "
+                     f"{'ok' if row['ok'] else 'MISMATCH'} {row['reason']}".rstrip())
+    for row in report["imports"]:
+        lines.append(f"  imported {row['file']} {'ok' if row['ok'] else 'MISMATCH'} "
+                     f"{row['reason']}".rstrip())
+    lines.append(f"  refused for data level: {report['refused']}; "
+                 f"data warnings: {report['warnings']}")
+    _emit(as_json, report, lines)
+    if report["mismatches"]:
+        sys.exit(REFUSED)
 

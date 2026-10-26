@@ -20,4 +20,6 @@ kinds:
   scite-consent:       {requires_human: true,  help: "Send this run's sanitised query plan to scite"}
   # Gap discovery (src/scieflow/research/skills/gap-discovery/SKILL.md, step 11).
   hypothesis-selection: {requires_human: true, help: "Pick the hypotheses paper-draft carries forward"}
+  # Data protection (docs/data-protection.md, M-B 5.8): a checked file leaves an L2 run only on a human release.
+  data-release:        {requires_human: true,  help: "Release a checked aggregate from a run"}
 states: [open, answered, withdrawn]

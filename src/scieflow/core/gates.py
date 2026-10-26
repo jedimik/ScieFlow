@@ -29,6 +29,8 @@ CHARTER_ADOPTION = "charter-adoption"
 ADOPTED = frozenset({"adopt", "yes", "approve", "approved"})
 # Answers to these write the review decision (core/review/decision_gates.py).
 REVIEW_GATE_KINDS = frozenset({"review-decision", "review-blocker"})
+# A data-release answer copies (or drops) a checked file (core/data/release.py, M-B 5.8).
+DATA_RELEASE_KIND = "data-release"
 
 
 class GateError(ValueError):
@@ -117,6 +119,10 @@ def answer(project: Project, ws: Path, gate_id: str, answer: str, actor: str = "
             # a refused decision leaves the gate open (docs/research/review-contract.md).
             from scieflow.core.review import decision_gates
             decision_gates.on_answer(project, ws, gate, answer, actor, rationale, note)
+        if gate["kind"] == DATA_RELEASE_KIND:
+            # Only a human `release` copies a checked file out of an L2 run (M-B 5.8).
+            from scieflow.core.data import release
+            release.on_answer(project, ws, gate, answer, actor)
         gate.update(state="answered", answer=answer, answered=_now(), answered_by=actor,
                     rationale=rationale, note=note)
         path = _path(ws, gate_id)
