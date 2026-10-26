@@ -23,7 +23,9 @@ NON_CATALOGUE_EGRESS = ("scite", "notebooklm", "remote push", "remote fetch", "a
 
 
 def _egress_rows(text):
-    rows = [line for line in text.splitlines() if line.startswith("|")]
+    """The rows of the Egress section only (the levels table above it is not an egress table)."""
+    section = text.split("\n## Egress\n", 1)[1].split("\n## ", 1)[0]
+    rows = [line for line in section.splitlines() if line.startswith("|")]
     return [row for row in rows if "---" not in row and "Destination" not in row]
 
 
@@ -44,7 +46,8 @@ def test_the_egress_table_has_a_row_for_every_catalogue_key():
 def test_the_egress_table_has_a_row_for_every_other_egress_point():
     rows = _egress_rows(DOC.read_text())
     for name in NON_CATALOGUE_EGRESS:
-        assert any(name in row.split("|")[1] for row in rows), f"no egress row for {name}"
+        assert any(name.lower() in row.split("|")[1].lower() for row in rows), \
+            f"no egress row for {name}"
 
 
 def test_every_egress_row_states_its_l2_behaviour():
