@@ -2379,7 +2379,7 @@ def _data_panel(ws: Path) -> dict:
         reason = reason or str(exc)
     declarations, released, imports = [], [], []
     if isinstance(got, levels.DataFile):
-        declarations = [{"path": e["path"], "level": e["level"], "kind": e["kind"]}
+        declarations = [{"path": e["path"], "level": e["level"], "kind": e.get("kind", "other")}
                         for e in got.levels]
         released = [r.get("id") for r in got.released]
         imports = [i.get("id") for i in got.imports]

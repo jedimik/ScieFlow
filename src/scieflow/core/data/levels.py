@@ -24,6 +24,11 @@ DECLARED_BY = ("human", "agent")
 _TOP_KEYS = ("version", "default_level", "levels", "pending_releases", "released", "imports")
 _ENTRY_KEYS = ("path", "level", "kind", "reason", "declared_by", "declared_at")
 _LIST_KEYS = ("pending_releases", "released", "imports")
+# The keys the code indexes in each record list (release.py, levels.py); a record without them
+# would crash a later step, so the loader refuses it instead (M-B review F1).
+_ITEM_KEYS = {"pending_releases": ("id", "source", "sha256", "gate"),
+              "released": ("id", "file", "sha256"),
+              "imports": ("id", "file", "sha256")}
 
 
 class DataFileError(ValueError):
@@ -92,6 +97,17 @@ def _check_entry(entry, index: int) -> None:
         raise DataFileError(f"{where}.declared_by: must be human or agent")
 
 
+def _check_items(key: str, items: list) -> None:
+    """Every release or import record is a mapping with the keys the code reads (M-B review F1)."""
+    for index, item in enumerate(items):
+        where = f"data.yml: {key}[{index}]"
+        if not isinstance(item, dict):
+            raise DataFileError(f"{where}: must be a mapping")
+        for name in _ITEM_KEYS[key]:
+            if name not in item:
+                raise DataFileError(f"{where}: missing key {name!r}")
+
+
 def _check(raw) -> DataFile:
     if not isinstance(raw, dict):
         raise DataFileError("data.yml: top level must be a mapping")
@@ -109,8 +125,10 @@ def _check(raw) -> DataFile:
     for index, entry in enumerate(entries):
         _check_entry(entry, index)
     for key in _LIST_KEYS:
-        if not isinstance(raw.get(key, []), list):
+        items = raw.get(key, [])
+        if not isinstance(items, list):
             raise DataFileError(f"data.yml: {key} must be a list")
+        _check_items(key, items)
     return DataFile(present=True, default_level=default, levels=list(entries),
                     pending_releases=list(raw.get("pending_releases", [])),
                     released=list(raw.get("released", [])),
@@ -122,6 +140,8 @@ def read(ws) -> DataFile | Invalid:
 
     A symlink is never followed (Invalid), and a file that cannot be stat'd or read is
     Invalid too: only a plain absent name counts as "no declarations" (fail-closed, D5).
+    Any failure to parse, including ValueError (an impossible date) and RecursionError
+    (deep nesting), is Invalid as well (M-B review F1).
     """
     path = Path(ws) / DATA_FILE
     try:
@@ -129,11 +149,13 @@ def read(ws) -> DataFile | Invalid:
             return Invalid("data.yml: is a symlink; use a regular file")
         if not path.exists():
             return DataFile(present=False)
-        raw = yaml.safe_load(path.read_text())
-    except yaml.YAMLError:
-        return Invalid("data.yml: not readable YAML")
+        text = path.read_text()
     except (OSError, UnicodeDecodeError):
         return Invalid("data.yml: cannot be read")
+    try:
+        raw = yaml.safe_load(text)
+    except Exception:  # YAMLError, ValueError, RecursionError: all fail closed
+        return Invalid("data.yml: not readable YAML")
     if raw is None:
         return Invalid("data.yml: the file is empty")
     try:

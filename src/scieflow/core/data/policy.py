@@ -158,8 +158,12 @@ def load(root) -> Policy:
     if not present:
         return _defaults(present=False)
     try:
-        raw = yaml.safe_load(path.read_text())
-    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError):
+        raise PolicyInvalid(f"{POLICY_FILE}: not readable YAML") from None
+    try:
+        raw = yaml.safe_load(text)
+    except Exception:  # YAMLError, ValueError, RecursionError: all fail closed (M-B review F1)
         raise PolicyInvalid(f"{POLICY_FILE}: not readable YAML") from None
     if raw is None:
         return _defaults(present=True)
@@ -213,7 +217,7 @@ def load(root) -> Policy:
     for i, item in enumerate(_list(raw, "l2_providers")):
         where = f"l2_providers[{i}]"
         item = _mapping(item, where, ("name", "reason"), ("name",))
-        if item["name"] not in known:
+        if not isinstance(item["name"], str) or item["name"] not in known:
             _fail(f"{where}.name", "is not a known literature service")
         _reason(item, where)
         providers.append(item["name"])
