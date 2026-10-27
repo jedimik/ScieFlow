@@ -6,6 +6,7 @@ fake; nothing reaches a real service. Synthetic data only.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -137,3 +138,94 @@ def test_nblm_session_command_refuses_in_replay_before_any_session(nblm_root, tm
     ws = run(tmp_path, "replay")
     code = nblm.main(["check", "default", "--workspace", str(ws)])
     assert code == 3
+
+
+# --- review evidence build and backfill: refused before the plan's consent, freeze and sources -
+
+FROZEN = b'{"pass": "A", "frozen": true}\n'
+POLICY = SimpleNamespace(enabled=True)
+
+
+class Step:
+    """A step a refused build must never reach: it counts the calls and fails if it runs."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        raise AssertionError("a build step ran after the network refusal point")
+
+
+@pytest.fixture
+def review_run(tmp_path, monkeypatch):
+    """A run with scite approved and a stubbed plan: build() reaches its network check with no
+    real request. Consent, the pass-A freeze and the sources are counting stubs."""
+    from scieflow.core.review import evidence as ev
+    from scieflow.core.review import passes, settings
+
+    ws = run(tmp_path, None)
+    project = SimpleNamespace(root=tmp_path, run_dir=lambda slug: ws)
+    monkeypatch.setattr(settings, "load", lambda project, slug: {"scite": "approved"})
+    monkeypatch.setattr(ev, "plan", lambda ws, round_, policy, slug=None: "PLAN")
+    steps = SimpleNamespace(consent=Step(), freeze=Step(), sources=Step())
+    monkeypatch.setattr(ev, "consent", steps.consent)
+    monkeypatch.setattr(passes, "freeze", steps.freeze)
+    monkeypatch.setattr(ev, "execute", steps.sources)
+    assign = ev.assign_mod.path(ws, 1)
+    assign.parent.mkdir(parents=True, exist_ok=True)
+    assign.write_bytes(FROZEN)
+    return SimpleNamespace(ev=ev, project=project, ws=ws, steps=steps, assign=assign)
+
+
+def _mode(ws: Path, mode: str) -> None:
+    (ws / "network.yml").write_text(yaml.safe_dump({
+        "version": 1, "mode": mode, "set_by": "human",
+        "set_at": "2026-10-27T15:00:00Z", "reason": "test"}), encoding="utf-8")
+
+
+def _assert_nothing_ran(r) -> None:
+    assert r.steps.consent.calls == 0 and r.steps.freeze.calls == 0
+    assert r.steps.sources.calls == 0
+    assert r.assign.read_bytes() == FROZEN
+
+
+@pytest.mark.parametrize("mode", ["replay", "offline"])
+def test_build_refuses_in_a_no_egress_run_before_consent_freeze_and_sources(review_run, mode):
+    _mode(review_run.ws, mode)
+    with pytest.raises(network.NetworkRefused, match="review-evidence cannot be replayed"):
+        review_run.ev.build(review_run.project, "demo", 1, environ={}, policy=POLICY)
+    _assert_nothing_ran(review_run)
+
+
+@pytest.mark.parametrize("mode", ["replay", "offline"])
+def test_backfill_refuses_in_a_no_egress_run_before_consent_freeze_and_sources(
+        review_run, monkeypatch, mode):
+    ev = review_run.ev
+    _mode(review_run.ws, mode)
+    rd = ev._rd(review_run.ws, 1) / ev.EVIDENCE
+    rd.mkdir(parents=True)
+    (rd / "bundle.json").write_text(json.dumps({
+        "scite_status": "quota", "manuscript_hash": "h", "calls": {"skipped": ["doi:x"]}}),
+        encoding="utf-8")
+    monkeypatch.setattr(ev, "manuscript_hash", lambda ws: "h")
+    with pytest.raises(network.NetworkRefused, match="review-evidence cannot be replayed"):
+        ev.backfill(review_run.project, "demo", 1, environ={}, policy=POLICY)
+    _assert_nothing_ran(review_run)
+
+
+@pytest.mark.parametrize("mode", ["replay", "offline"])
+def test_build_plan_still_works_in_a_no_egress_run(review_run, mode):
+    _mode(review_run.ws, mode)
+    out = review_run.ev.build(review_run.project, "demo", 1, plan_only=True, environ={},
+                              policy=POLICY)
+    assert out.plan == "PLAN"
+    _assert_nothing_ran(review_run)
+
+
+def test_control_a_live_run_reaches_the_consent_step(review_run):
+    """Not vacuous: with the run live the same build gets past the network check to consent."""
+    _mode(review_run.ws, "live")
+    with pytest.raises(AssertionError, match="build step ran"):
+        review_run.ev.build(review_run.project, "demo", 1, environ={}, policy=POLICY)
+    assert review_run.steps.consent.calls == 1

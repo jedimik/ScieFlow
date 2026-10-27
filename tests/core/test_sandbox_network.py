@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -119,7 +120,9 @@ def test_a_replaying_runs_network_file_and_snapshots_cannot_change_inside(tmp_pa
     (rec / ("c" * 64 + ".json")).write_text("{}\n", encoding="utf-8")
     net = grant / "network.yml"
     snaps = grant / "snapshots"
-    layout = sandbox.Layout(readable=(t["root"],), protected=(net.resolve(), snaps.resolve()))
+    protected = _decide(t).protected   # the set a dispatch really offers, not a hand-built one
+    assert net.resolve() in protected and snaps.resolve() in protected
+    layout = sandbox.Layout(readable=(t["root"],), protected=protected)
     before = {p: p.read_bytes() for p in (net, rec / ("c" * 64 + ".json"))}
     script = (
         f"if echo x >> {net} 2>/dev/null; then echo leak-append; fi; "
@@ -152,8 +155,80 @@ def test_in_record_mode_a_dispatch_can_write_snapshots(tmp_path):
     t = _tree(tmp_path)
     grant = t["grant"]
     _net(grant, "record")
-    layout = sandbox.Layout(readable=(t["root"],))   # record: nothing under snapshots/ is protected
+    protected = _decide(t).protected
+    assert (grant / "snapshots").resolve() not in protected   # record: snapshots/ stays writable
+    layout = sandbox.Layout(readable=(t["root"],), protected=protected)
     target = grant / "snapshots" / "literature" / ("e" * 64 + ".json")
     proc = _sh(f"echo '{{}}' > {target}; echo done", layout, grant)
     assert proc.stdout.splitlines() == ["done"], proc.stdout + proc.stderr
     assert target.is_file()
+
+
+def _leaky_without(field: str):
+    """A wrap() that drops one protection field from the layout it is given (a leaky layout)."""
+    def wrapped(argv, **kw):
+        if kw.get("layout") is not None:
+            kw["layout"] = replace(kw["layout"], **{field: ()})
+        return REAL_WRAP(argv, **kw)
+    return wrapped
+
+
+@needs_bwrap
+def test_a_leaky_layout_that_drops_the_protected_paths_fails_verify(tmp_path, monkeypatch):
+    t = _tree(tmp_path)
+    grant = t["grant"]
+    _net(grant, "replay")
+    protected = _decide(t).protected
+    net, snaps = (grant / "network.yml").resolve(), (grant / "snapshots").resolve()
+    assert net in protected and snaps in protected   # the t3 paths, not only M-B's data.yml
+    layout = sandbox.Layout(readable=(t["root"],), protected=protected)
+    sandbox.verify([grant], grant, layout=layout)   # control: the real layout confines
+    monkeypatch.setattr(sandbox, "wrap", _leaky_without("protected"))
+    with pytest.raises(sandbox.SandboxUnavailable, match="protected"):
+        sandbox.verify([grant], grant, layout=layout)
+
+
+# --- decide(): the protected set under an L2 default (no network.yml) -------------------------
+
+ENDPOINT = "https://llm.example.org/v1"
+SAFE_CFG = {"cmd": "{python} -m safe --endpoint {endpoint} {prompt}", "enabled": True,
+            "timeout_min": 1}
+
+
+def _l2_safe_run(t: dict) -> None:
+    """An L2 run (no network.yml) and a pinned safe agent, as in test_sandbox_data.py."""
+    from scieflow.core.data import policy as data_policy
+
+    (t["grant"] / "data.yml").write_text(yaml.safe_dump({
+        "version": 1, "default_level": "L2", "levels": [], "pending_releases": [],
+        "released": [], "imports": []}, sort_keys=False), encoding="utf-8")
+    (t["root"] / "config" / "data-policy.yml").write_text(yaml.safe_dump({
+        "version": 1, "enforcement": "warn",
+        "safe_endpoints": [{"url": ENDPOINT, "reason": "synthetic"}],
+        "safe_agents": {"safe-a": {"endpoint": ENDPOINT, "reason": "synthetic",
+                                   "templates_sha256": data_policy.pin_sha(SAFE_CFG)}}},
+        sort_keys=False), encoding="utf-8")
+
+
+def _decide_safe(t):
+    return decide(Project(t["root"]), t["grant"], "safe-a", SAFE_CFG, sandboxed=True,
+                  templates_use_endpoint=True)
+
+
+def test_an_l2_default_protects_an_existing_snapshot_folder(tmp_path):
+    t = _tree(tmp_path)
+    _l2_safe_run(t)
+    got = _decide_safe(t)
+    assert got.allowed and got.boundary == "safe"
+    assert (t["grant"] / "snapshots").resolve() in got.protected
+    assert all(Path(p).name != "network.yml" for p in got.protected)
+
+
+def test_an_l2_default_without_a_snapshot_folder_offers_none(tmp_path):
+    t = _tree(tmp_path)
+    _l2_safe_run(t)
+    (t["grant"] / "snapshots" / "literature").rmdir()
+    (t["grant"] / "snapshots").rmdir()
+    got = _decide_safe(t)
+    assert got.allowed
+    assert all(Path(p).name != "snapshots" for p in got.protected)

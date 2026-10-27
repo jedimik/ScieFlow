@@ -977,6 +977,7 @@ def build(project, slug: str, round_: int, *, plan_only: bool = False, environ=N
           policy: _policy.Policy | None = None, **kw) -> Outcome:
     """The `scieflow review evidence` entry point. Refuses inside a dispatch; with
     `plan_only` sends nothing and writes nothing."""
+    from scieflow.core import network
     from scieflow.core.review import settings as settings_mod
     from scieflow.integrations.scite import mcp as smcp
 
@@ -993,6 +994,7 @@ def build(project, slug: str, round_: int, *, plan_only: bool = False, environ=N
     p = plan(ws, round_, policy, slug=slug)
     if plan_only:
         return Outcome("planned", "ok", plan=p)
+    network.require_live(ws, "review-evidence")   # M-C1 5.7: before the quota, consent and freeze
     if not kw.get("backfill") and _quota_round(ws, round_):
         raise QuotaRoundError(
             f"round {round_}'s evidence stopped at the scite quota or budget: rebuilding it "
