@@ -18,6 +18,7 @@ import unicodedata
 from collections.abc import Callable
 from typing import NoReturn
 
+from scieflow.core import network
 from scieflow.core.project import Project, ProjectError
 from scieflow.core.review.claims import LeakError, check_text
 from scieflow.integrations.scite.policy import PolicyError, exit_code
@@ -33,6 +34,7 @@ _WORD_DIGIT = re.compile(r"(?<=[^\W\d_]) \d(?= [^\W\d_])")
 
 EXIT_REFUSED = 3
 EXIT_FAILED = 1
+EXIT_MISS = 6   # M-C1: a no-egress run has no snapshot for the request; nothing was sent
 
 
 def _folded(query: str) -> str:
@@ -83,15 +85,23 @@ def add_workspace_option(ap) -> None:
                          "Without it the search is recorded in the per-day ledger only.")
 
 
-def gateway(workspace: str | None, start=None) -> providers.Gateway:
+def add_network_option(ap) -> None:
+    ap.add_argument("--network", choices=network.MODES, default=None,
+                    help="This run's network mode for the search: live; record (also keep each "
+                         "answer as a snapshot in the run); replay or offline (no request is sent, "
+                         "a miss exits 6). Without it the run's own mode applies. A flag can "
+                         "tighten the mode, never loosen it.")
+
+
+def gateway(workspace: str | None, start=None, network_mode: str | None = None) -> providers.Gateway:
     project = Project.discover(start)
     policy = providers.load(project.root)
     if workspace is None:
-        return providers.Gateway.unscoped(policy)
+        return providers.Gateway.unscoped(policy, network=network_mode)
     ws = project.run_dir(workspace)
     if not ws.is_dir():
         raise ProjectError(f"no run workspace/{workspace} in this project")
-    return providers.Gateway(ws, policy)
+    return providers.Gateway(ws, policy, network=network_mode)
 
 
 def _fail(code: int, message: str) -> NoReturn:
@@ -99,14 +109,17 @@ def _fail(code: int, message: str) -> NoReturn:
     sys.exit(code)
 
 
-def run(workspace: str | None, search: Callable[[providers.Gateway], list]) -> None:
+def run(workspace: str | None, search: Callable[[providers.Gateway], list],
+        network_mode: str | None = None) -> None:
     """Build the gateway, run `search(gw)` (which checks the query before it sends
     anything), print the records. Refusals and failures end the process with a code."""
     try:
-        gw = gateway(workspace)
+        gw = gateway(workspace, network_mode=network_mode)
         records = search(gw)
     except LeakError as exc:
         _fail(EXIT_REFUSED, str(exc))  # the message already starts with "refused:"
+    except network.NetworkMiss as exc:
+        _fail(EXIT_MISS, str(exc))
     except PolicyError as exc:
         _fail(exit_code(exc), f"refused: {exc}")
     except http.HTTPFailure as exc:

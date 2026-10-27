@@ -64,8 +64,9 @@ def main(argv=None) -> None:
     ap.add_argument("--limit", type=int, default=25)
     ap.add_argument("--from-year", type=int)
     registry.add_workspace_option(ap)
+    registry.add_network_option(ap)
     args = ap.parse_args(argv)
-    registry.run(args.workspace, lambda gw: _search(gw, args))
+    registry.run(args.workspace, lambda gw: _search(gw, args), network_mode=args.network)
 
 
 if __name__ == "__main__":
