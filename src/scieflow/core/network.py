@@ -17,7 +17,9 @@ modes; it can never loosen a no-egress mode.
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -40,6 +42,10 @@ class NetworkRefused(PolicyError):
 
 class NetworkUsage(ValueError):
     """A network option used without the run it needs (exit 1)."""
+
+
+class NetworkWriteError(ValueError):
+    """network.yml the writer refuses to touch (a symbolic link). Exit 1; nothing is written."""
 
 
 class NetworkMiss(PolicyError):
@@ -132,3 +138,85 @@ def resolve(ws, service: str, *, flag: str | None = None) -> Resolved:
         raise NetworkRefused(f"network: run {ws.name} is {base.mode}; "
                              "a command option cannot loosen it")
     return Resolved(flag, "flag", "miss")
+
+
+def base(ws) -> tuple[str, str]:
+    """(mode, origin) of a run before any service is named: its file, or else its data level.
+
+    An invalid file is offline (fail closed); an L2 run without a file replays (M-C1-D6)."""
+    ws = Path(ws)
+    state, value = _file_state(ws)
+    if state == "file":
+        return value, "file"
+    if state == "invalid":
+        return "offline", "invalid"
+    if levels.run_level(ws) == "L2":
+        return "replay", "l2-default"
+    return "live", "default"
+
+
+def replays(ws) -> bool:
+    """Whether the run replays its snapshots for some service (so they are protected in a dispatch)."""
+    mode, _ = base(ws)
+    return mode in ("replay", "offline")
+
+
+def require_live(ws, service: str) -> None:
+    """Refuse a service that cannot be replayed when the run's own file replays (M-C1 5.7).
+
+    Only a file (valid or invalid) counts. An L2 default is left to the M-B rules, unchanged."""
+    if ws is None:
+        return
+    resolved = resolve(ws, service)
+    if resolved.origin in ("file", "invalid") and resolved.mode in ("replay", "offline"):
+        raise NetworkRefused(f"network: run {Path(ws).name} is {resolved.mode}; "
+                             f"{service} cannot be replayed and is refused")
+
+
+def describe(ws) -> dict:
+    """What `scieflow research network` shows: mode, origin and, for a file, who set it and why."""
+    ws = Path(ws)
+    mode, origin = base(ws)
+    doc = {"mode": mode, "origin": origin, "set_by": None, "set_at": None, "reason": None}
+    if origin == "file":
+        raw = yaml.safe_load((ws / FILE).read_text(encoding="utf-8"))
+        doc.update(set_by=raw["set_by"], set_at=raw["set_at"], reason=raw["reason"])
+    return doc
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def write_mode(ws, mode: str, *, actor: str, reason: str) -> dict:
+    """Write network.yml atomically (temp file, then rename). The caller has checked the rules."""
+    if mode not in MODES or actor not in SET_BY:
+        raise NetworkUsage("network: unknown mode or actor")
+    path = Path(ws) / FILE
+    _refuse_link(path)
+    record = {"version": VERSION, "mode": mode, "set_by": actor, "set_at": now(), "reason": reason}
+    _atomic(path, yaml.safe_dump(record, sort_keys=False, allow_unicode=True))
+    return record
+
+
+def clear(ws) -> None:
+    """Delete network.yml: the run goes back to its data level's default."""
+    path = Path(ws) / FILE
+    _refuse_link(path)
+    path.unlink(missing_ok=True)
+
+
+def _refuse_link(path: Path) -> None:
+    if path.is_symlink():
+        raise NetworkWriteError(f"{FILE} is a symbolic link; it is never written through one")
+
+
+def _atomic(path: Path, text: str) -> None:
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".network-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise

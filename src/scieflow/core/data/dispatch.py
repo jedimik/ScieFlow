@@ -20,7 +20,7 @@ import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from scieflow.core import events, sandbox
+from scieflow.core import events, network, sandbox
 from scieflow.core.data import levels, policy, scan
 from scieflow.core.data.scan import Finding
 
@@ -256,6 +256,12 @@ def _decide(project, run_dir: Path | None, agent: str, final_cfg: dict, *, sandb
         released = ws / "released"
         if released.is_dir() and not released.is_symlink():
             items.append(released.resolve())
+        net_file = ws / network.FILE
+        if net_file.is_file() and not net_file.is_symlink():
+            items.append(net_file.resolve())
+        snaps = ws / "snapshots"
+        if network.replays(ws) and snaps.is_dir() and not snaps.is_symlink():
+            items.append(snaps.resolve())
         protected = tuple(items)
     return Decision(True, None, "", level, bound.kind, bound.endpoint, hidden, protected,
                     tuple(warnings), pol.enforcement)

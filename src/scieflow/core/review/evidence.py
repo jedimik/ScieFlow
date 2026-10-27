@@ -913,9 +913,11 @@ def execute(p: Plan, ws: Path, policy: _policy.Policy, *, ledger=None, cache=Non
     A round that ends `scite_status: quota` tells the user once per run
     (`scite.unavailable`; the MCP client already emits it for a QUOTA error, so
     this covers a spent budget)."""
+    from scieflow.core import network
     from scieflow.integrations.scite.cache import Cache
     from scieflow.integrations.scite.ledger import Ledger, default_dir
 
+    network.require_live(ws, "review-evidence")   # M-C1 5.7: refused in replay/offline, first
     ws = Path(ws)
     ledger = ledger or Ledger(ws, policy)
     cache = cache or Cache(default_dir() / "cache", policy.cache_ttl_days)

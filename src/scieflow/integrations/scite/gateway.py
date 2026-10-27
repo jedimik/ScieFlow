@@ -26,7 +26,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
-from scieflow.core import events
+from scieflow.core import events, network
 from scieflow.integrations.scite import policy as _policy
 from scieflow.integrations.scite.cache import Cache, normalise_params, request_key
 from scieflow.integrations.scite.ledger import Ledger
@@ -49,6 +49,7 @@ def _count(n) -> int | None:
 def request(policy: _policy.Policy, cache: Cache, ledger: Ledger, *, source: str, op: str,
             params: Mapping, round: int | None, ttl_class: str,  # noqa: A002
             transport: Transport) -> Result:
+    network.require_live(ledger.ws, "scite")   # M-C1 5.7: refused in replay/offline, first
     if source == "mcp":
         _policy.check_tool(policy, op)
     elif source == "rest":
