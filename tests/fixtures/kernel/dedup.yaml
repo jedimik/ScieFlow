@@ -1,0 +1,859 @@
+# Dedup gold set: labeled record pairs.
+#
+# Size (D17): >= 200 labeled pairs. This file has 210: 110 same, 100 different.
+#
+# Two kinds of duplicate matter and they exercise different code paths:
+#   1. Same DOI, two sources. Caught by exact DOI match. The titles still differ in casing,
+#      entity escaping, and subtitle handling, because OpenAlex and Crossref genuinely render
+#      the same paper differently. These are REAL divergences, harvested live, not simulated.
+#   2. Same paper, one side carrying no DOI. Only the normalized-title path can catch these,
+#      and it is the case that actually matters: preprints and grey literature are where
+#      duplicates hide.
+#
+# The 'different' pairs include hard negatives: real papers on the same topic with similar
+# titles that are NOT the same work. Merging those is not a missed optimization, it is data
+# destruction, and it is the failure a loose similarity threshold produces.
+
+axis: dedup
+labels: [same, different]
+items:
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.ins.2016.01.082", title: "Deep learning approach for active classification of electrocardiogram signals"}
+    b: {source: crossref, doi: "10.1016/j.ins.2016.01.082", title: "Deep learning approach for active classification of electrocardiogram signals"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1038/s41591-018-0268-3", title: "Cardiologist-level arrhythmia detection and classification in ambulatory electrocardiogram"}
+    b: {source: crossref, doi: "10.1038/s41591-018-0268-3", title: "Cardiologist-level arrhythmia detection and classification in ambulatory electrocardiogram"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1001/jamacardio.2019.0640", title: "Development and Validation of a Deep-Learning Model to Screen for Hyperkalemia From the El"}
+    b: {source: crossref, doi: "10.1001/jamacardio.2019.0640", title: "Development and Validation of a Deep-Learning Model to Screen for Hyperkalemia From the El"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.isci.2021.102373", title: "Interpretable deep learning for automatic diagnosis of 12-lead electrocardiogram"}
+    b: {source: crossref, doi: "10.1016/j.isci.2021.102373", title: "Interpretable deep learning for automatic diagnosis of 12-lead electrocardiogram"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.asoc.2019.105778", title: "Electrocardiogram soft computing using hybrid deep learning CNN-ELM"}
+    b: {source: crossref, doi: "10.1016/j.asoc.2019.105778", title: "Electrocardiogram soft computing using hybrid deep learning CNN-ELM"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1038/s41591-020-0791-x", title: "Deep learning models for electrocardiograms are susceptible to adversarial attack"}
+    b: {source: crossref, doi: "10.1038/s41591-020-0791-x", title: "Deep learning models for electrocardiograms are susceptible to adversarial attack"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.cmpb.2019.105001", title: "Deep learning approaches for automatic detection of sleep apnea events from an electrocard"}
+    b: {source: crossref, doi: "10.1016/j.cmpb.2019.105001", title: "Deep learning approaches for automatic detection of sleep apnea events from an electrocard"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1111/jce.13889", title: "Prospective validation of a deep learning electrocardiogram algorithm for the detection of"}
+    b: {source: crossref, doi: "10.1111/jce.13889", title: "Prospective validation of a deep learning electrocardiogram algorithm for the detection of"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/s2589-7500(20)30107-2", title: "Automatic multilabel electrocardiogram diagnosis of heart rhythm or conduction abnormaliti"}
+    b: {source: crossref, doi: "10.1016/s2589-7500(20)30107-2", title: "Automatic multilabel electrocardiogram diagnosis of heart rhythm or conduction abnormaliti"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.jacadv.2023.100686", title: "Clinical Applications, Methodology, and Scientific Reporting of Electrocardiogram Deep-Lea"}
+    b: {source: crossref, doi: "10.1016/j.jacadv.2023.100686", title: "Clinical Applications, Methodology, and Scientific Reporting of Electrocardiogram Deep-Lea"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.neucom.2020.04.076", title: "Generating electrocardiogram signals by deep learning"}
+    b: {source: crossref, doi: "10.1016/j.neucom.2020.04.076", title: "Generating electrocardiogram signals by deep learning"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1007/s12530-023-09559-0", title: "An enhanced ResNet-50 deep learning model for arrhythmia detection using electrocardiogram"}
+    b: {source: crossref, doi: "10.1007/s12530-023-09559-0", title: "An enhanced ResNet-50 deep learning model for arrhythmia detection using electrocardiogram"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1038/s41591-018-0240-2", title: "Screening for cardiac contractile dysfunction using an artificial intelligence-enabled ele"}
+    b: {source: crossref, doi: "10.1038/s41591-018-0240-2", title: "Screening for cardiac contractile dysfunction using an artificial intelligence-enabled ele"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/tem.2021.3104751", title: "Explainable Deep Learning-Based Approach for Multilabel Classification of Electrocardiogra"}
+    b: {source: crossref, doi: "10.1109/tem.2021.3104751", title: "Explainable Deep Learning-Based Approach for Multilabel Classification of Electrocardiogra"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1186/s12911-021-01521-x", title: "Classification of COVID-19 electrocardiograms by using hexaxial feature mapping and deep l"}
+    b: {source: crossref, doi: "10.1186/s12911-021-01521-x", title: "Classification of COVID-19 electrocardiograms by using hexaxial feature mapping and deep l"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.artmed.2020.101919", title: "Continuous blood pressure measurement from one-channel electrocardiogram signal using deep"}
+    b: {source: crossref, doi: "10.1016/j.artmed.2020.101919", title: "Continuous blood pressure measurement from one-channel electrocardiogram signal using deep"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.jcmg.2021.08.004", title: "Using Deep-Learning Algorithms to Simultaneously Identify Right and Left Ventricular Dysfu"}
+    b: {source: crossref, doi: "10.1016/j.jcmg.2021.08.004", title: "Using Deep-Learning Algorithms to Simultaneously Identify Right and Left Ventricular Dysfu"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.21037/cdt.2019.12.10", title: "Automated detection of cardiovascular disease by electrocardiogram signal analysis: a deep"}
+    b: {source: crossref, doi: "10.21037/cdt.2019.12.10", title: "Automated detection of cardiovascular disease by electrocardiogram signal analysis: a deep"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1111/exsy.12864", title: "Internet of things and deep learning enabled healthcare disease diagnosis using biomedical"}
+    b: {source: crossref, doi: "10.1111/exsy.12864", title: "Internet of things and deep learning enabled healthcare disease diagnosis using biomedical"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1038/s41598-021-92172-5", title: "A new deep learning algorithm of 12-lead electrocardiogram for identifying atrial fibrilla"}
+    b: {source: crossref, doi: "10.1038/s41598-021-92172-5", title: "A new deep learning algorithm of 12-lead electrocardiogram for identifying atrial fibrilla"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.ijcard.2020.12.065", title: "External validation of a deep learning electrocardiogram algorithm to detect ventricular d"}
+    b: {source: crossref, doi: "10.1016/j.ijcard.2020.12.065", title: "External validation of a deep learning electrocardiogram algorithm to detect ventricular d"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.jelectrocard.2018.11.013", title: "A deep neural network learning algorithm outperforms a conventional algorithm for emergenc"}
+    b: {source: crossref, doi: "10.1016/j.jelectrocard.2018.11.013", title: "A deep neural network learning algorithm outperforms a conventional algorithm for emergenc"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1088/1361-6579/aaf339", title: "Deep learning in the cross-time frequency domain for sleep staging from a single-lead elec"}
+    b: {source: crossref, doi: "10.1088/1361-6579/aaf339", title: "Deep learning in the cross-time frequency domain for sleep staging from a single-lead elec"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.4258/hir.2021.27.1.19", title: "Effectiveness of Transfer Learning for Deep Learning-Based Electrocardiogram Analysis"}
+    b: {source: crossref, doi: "10.4258/hir.2021.27.1.19", title: "Effectiveness of Transfer Learning for Deep Learning-Based Electrocardiogram Analysis"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.sbsr.2022.100502", title: "Electrocardiogram based arrhythmia classification using wavelet transform with deep learni"}
+    b: {source: crossref, doi: "10.1016/j.sbsr.2022.100502", title: "Electrocardiogram based arrhythmia classification using wavelet transform with deep learni"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/msp.2021.3134634", title: "Self-Supervised Representation Learning: Introduction, advances, and challenges"}
+    b: {source: crossref, doi: "10.1109/msp.2021.3134634", title: "Self-Supervised Representation Learning: Introduction, advances, and challenges"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1007/s11263-023-01852-4", title: "Context Autoencoder for Self-supervised Representation Learning"}
+    b: {source: crossref, doi: "10.1007/s11263-023-01852-4", title: "Context Autoencoder for Self-supervised Representation Learning"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/cvpr.2019.01061", title: "Self-Supervised Representation Learning by Rotation Feature Decoupling"}
+    b: {source: crossref, doi: "10.1109/cvpr.2019.01061", title: "Self-Supervised Representation Learning by Rotation Feature Decoupling"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/cvpr.2019.00202", title: "Revisiting Self-Supervised Visual Representation Learning"}
+    b: {source: crossref, doi: "10.1109/cvpr.2019.00202", title: "Revisiting Self-Supervised Visual Representation Learning"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/iccv48922.2021.00647", title: "Spatio-temporal Self-Supervised Representation Learning for 3D Point Clouds"}
+    b: {source: crossref, doi: "10.1109/iccv48922.2021.00647", title: "Spatio-temporal Self-Supervised Representation Learning for 3D Point Clouds"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.compbiomed.2021.105114", title: "Self-supervised representation learning from 12-lead ECG data"}
+    b: {source: crossref, doi: "10.1016/j.compbiomed.2021.105114", title: "Self-supervised representation learning from 12-lead ECG data"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.knosys.2022.109631", title: "Graph Barlow Twins: A self-supervised representation learning framework for graphs"}
+    b: {source: crossref, doi: "10.1016/j.knosys.2022.109631", title: "Graph Barlow Twins: A self-supervised representation learning framework for graphs"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/cvpr.2019.01118", title: "Self-Supervised Representation Learning From Videos for Facial Action Unit Detection"}
+    b: {source: crossref, doi: "10.1109/cvpr.2019.01118", title: "Self-Supervised Representation Learning From Videos for Facial Action Unit Detection"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/tii.2023.3280337", title: "A Multihead Attention Self-Supervised Representation Model for Industrial Sensors Anomaly"}
+    b: {source: crossref, doi: "10.1109/tii.2023.3280337", title: "A Multihead Attention Self-Supervised Representation Model for Industrial Sensors Anomaly"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/cvpr.2017.607", title: "Self-Supervised Video Representation Learning with Odd-One-Out Networks"}
+    b: {source: crossref, doi: "10.1109/cvpr.2017.607", title: "Self-Supervised Video Representation Learning with Odd-One-Out Networks"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.18653/v1/2021.acl-long.393", title: "ConSERT: A Contrastive Framework for Self-Supervised Sentence Representation Transfer"}
+    b: {source: crossref, doi: "10.18653/v1/2021.acl-long.393", title: "ConSERT: A Contrastive Framework for Self-Supervised Sentence Representation Transfer"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.patrec.2022.02.007", title: "Mixing up contrastive learning: Self-supervised representation learning for time series"}
+    b: {source: crossref, doi: "10.1016/j.patrec.2022.02.007", title: "Mixing up contrastive learning: Self-supervised representation learning for time series"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/iccv48922.2021.00937", title: "Solving Inefficiency of Self-supervised Representation Learning"}
+    b: {source: crossref, doi: "10.1109/iccv48922.2021.00937", title: "Solving Inefficiency of Self-supervised Representation Learning"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.21437/interspeech.2022-143", title: "XLS-R: Self-supervised Cross-lingual Speech Representation Learning at Scale"}
+    b: {source: crossref, doi: "10.21437/interspeech.2022-143", title: "XLS-R: Self-supervised Cross-lingual Speech Representation Learning at Scale"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1609/aaai.v33i01.33018545", title: "Self-Supervised Video Representation Learning with Space-Time Cubic Puzzles"}
+    b: {source: crossref, doi: "10.1609/aaai.v33i01.33018545", title: "Self-Supervised Video Representation Learning with Space-Time Cubic Puzzles"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/taffc.2020.3014842", title: "Self-Supervised ECG Representation Learning for Emotion Recognition"}
+    b: {source: crossref, doi: "10.1109/taffc.2020.3014842", title: "Self-Supervised ECG Representation Learning for Emotion Recognition"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/isbi45749.2020.9098666", title: "Self-Supervised Representation Learning for Ultrasound Video"}
+    b: {source: crossref, doi: "10.1109/isbi45749.2020.9098666", title: "Self-Supervised Representation Learning for Ultrasound Video"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.3390/rs12111868", title: "Self-Supervised Representation Learning for Remote Sensing Image Change Detection Based on"}
+    b: {source: crossref, doi: "10.3390/rs12111868", title: "Self-Supervised Representation Learning for Remote Sensing Image Change Detection Based on"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/taslp.2021.3095662", title: "TERA: Self-Supervised Learning of Transformer Encoder Representation for Speech"}
+    b: {source: crossref, doi: "10.1109/taslp.2021.3095662", title: "TERA: Self-Supervised Learning of Transformer Encoder Representation for Speech"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1038/s42256-023-00640-6", title: "Multitask joint strategies of self-supervised representation learning on biomedical networ"}
+    b: {source: crossref, doi: "10.1038/s42256-023-00640-6", title: "Multitask joint strategies of self-supervised representation learning on biomedical networ"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/tcsvt.2020.3003048", title: "Deep Self-Supervised Representation Learning for Free-Hand Sketch"}
+    b: {source: crossref, doi: "10.1109/tcsvt.2020.3003048", title: "Deep Self-Supervised Representation Learning for Free-Hand Sketch"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1145/3459637.3482389", title: "Self-supervised Representation Learning on Dynamic Graphs"}
+    b: {source: crossref, doi: "10.1145/3459637.3482389", title: "Self-supervised Representation Learning on Dynamic Graphs"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/tkde.2021.3090866", title: "Self-supervised Learning: Generative or Contrastive"}
+    b: {source: crossref, doi: "10.1109/tkde.2021.3090866", title: "Self-supervised Learning: Generative or Contrastive"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/iccv.2019.00334", title: "Self-Supervised Representation Learning From Multi-Domain Data"}
+    b: {source: crossref, doi: "10.1109/iccv.2019.00334", title: "Self-Supervised Representation Learning From Multi-Domain Data"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/tsm.2020.3038165", title: "Self-Supervised Representation Learning for Wafer Bin Map Defect Pattern Classification"}
+    b: {source: crossref, doi: "10.1109/tsm.2020.3038165", title: "Self-Supervised Representation Learning for Wafer Bin Map Defect Pattern Classification"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/tbme.2012.2208112", title: "Atrial Fibrillation Detection Using an iPhone 4S"}
+    b: {source: crossref, doi: "10.1109/tbme.2012.2208112", title: "Atrial Fibrillation Detection Using an iPhone 4S"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.bspc.2020.102194", title: "Automated Atrial Fibrillation Detection using a Hybrid CNN-LSTM Network on Imbalanced ECG"}
+    b: {source: crossref, doi: "10.1016/j.bspc.2020.102194", title: "Automated Atrial Fibrillation Detection using a Hybrid CNN-LSTM Network on Imbalanced ECG"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1093/eurheartj/ehq278", title: "Guidelines for the management of atrial fibrillation: The Task Force for the Management of"}
+    b: {source: crossref, doi: "10.1093/eurheartj/ehq278", title: "Guidelines for the management of atrial fibrillation: The Task Force for the Management of"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1056/nejm199809033391003", title: "Spontaneous Initiation of Atrial Fibrillation by Ectopic Beats Originating in the Pulmonar"}
+    b: {source: crossref, doi: "10.1056/nejm199809033391003", title: "Spontaneous Initiation of Atrial Fibrillation by Ectopic Beats Originating in the Pulmonar"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.jelectrocard.2009.06.006", title: "Improvements in atrial fibrillation detection for real-time monitoring"}
+    b: {source: crossref, doi: "10.1016/j.jelectrocard.2009.06.006", title: "Improvements in atrial fibrillation detection for real-time monitoring"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1161/circulationaha.108.811877", title: "Detection and Quantification of Left Atrial Structural Remodeling With Delayed-Enhancement"}
+    b: {source: crossref, doi: "10.1161/circulationaha.108.811877", title: "Detection and Quantification of Left Atrial Structural Remodeling With Delayed-Enhancement"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1152/ajpheart.00561.2010", title: "Accurate estimation of entropy in very short physiological time series: the problem of atr"}
+    b: {source: crossref, doi: "10.1152/ajpheart.00561.2010", title: "Accurate estimation of entropy in very short physiological time series: the problem of atr"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1212/wnl.0000000000002282", title: "Predictors for atrial fibrillation detection after cryptogenic stroke"}
+    b: {source: crossref, doi: "10.1212/wnl.0000000000002282", title: "Predictors for atrial fibrillation detection after cryptogenic stroke"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/jbhi.2017.2688473", title: "Atrial Fibrillation Detection via Accelerometer and Gyroscope of a Smartphone"}
+    b: {source: crossref, doi: "10.1109/jbhi.2017.2688473", title: "Atrial Fibrillation Detection via Accelerometer and Gyroscope of a Smartphone"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1186/1475-925x-8-38", title: "Atrial fibrillation detection by heart rate variability in Poincare plot"}
+    b: {source: crossref, doi: "10.1186/1475-925x-8-38", title: "Atrial fibrillation detection by heart rate variability in Poincare plot"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1093/eurheartj/ehw210", title: "2016 ESC Guidelines for the management of atrial fibrillation developed in collaboration w"}
+    b: {source: crossref, doi: "10.1093/eurheartj/ehw210", title: "2016 ESC Guidelines for the management of atrial fibrillation developed in collaboration w"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1093/europace/euw295", title: "2016 ESC Guidelines for the management of atrial fibrillation developed in collaboration w"}
+    b: {source: crossref, doi: "10.1093/europace/euw295", title: "2016 ESC Guidelines for the management of atrial fibrillation developed in collaboration w"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1093/eurheartj/ehaa612", title: "2020 ESC Guidelines for the diagnosis and management of atrial fibrillation developed in c"}
+    b: {source: crossref, doi: "10.1093/eurheartj/ehaa612", title: "2020 ESC Guidelines for the diagnosis and management of atrial fibrillation developed in c"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1056/nejmoa1313600", title: "Cryptogenic Stroke and Underlying Atrial Fibrillation"}
+    b: {source: crossref, doi: "10.1056/nejmoa1313600", title: "Cryptogenic Stroke and Underlying Atrial Fibrillation"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.jacc.2018.03.003", title: "Smartwatch Algorithm for Automated Detection of Atrial Fibrillation"}
+    b: {source: crossref, doi: "10.1016/j.jacc.2018.03.003", title: "Smartwatch Algorithm for Automated Detection of Atrial Fibrillation"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1001/jamacardio.2018.0136", title: "Passive Detection of Atrial Fibrillation Using a Commercially Available Smartwatch"}
+    b: {source: crossref, doi: "10.1001/jamacardio.2018.0136", title: "Passive Detection of Atrial Fibrillation Using a Commercially Available Smartwatch"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1038/s41598-019-49092-2", title: "Atrial Fibrillation Detection from Wrist Photoplethysmography Signals Using Smartwatches"}
+    b: {source: crossref, doi: "10.1038/s41598-019-49092-2", title: "Atrial Fibrillation Detection from Wrist Photoplethysmography Signals Using Smartwatches"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1109/tbme.2013.2264721", title: "Time-Varying Coherence Function for Atrial Fibrillation Detection"}
+    b: {source: crossref, doi: "10.1109/tbme.2013.2264721", title: "Time-Varying Coherence Function for Atrial Fibrillation Detection"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1046/j.1540-8167.2001.00809.x", title: "Pulmonary Vein Dilation in Patients with Atrial Fibrillation: Detection by Magnetic Resona"}
+    b: {source: crossref, doi: "10.1046/j.1540-8167.2001.00809.x", title: "Pulmonary Vein Dilation in Patients with Atrial Fibrillation: Detection by Magnetic Resona"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: openalex, doi: "10.1016/j.hrthm.2018.06.037", title: "Assessing the accuracy of an automated atrial fibrillation detection algorithm using smart"}
+    b: {source: crossref, doi: "10.1016/j.hrthm.2018.06.037", title: "Assessing the accuracy of an automated atrial fibrillation detection algorithm using smart"}
+    why: "same paper, two indexes, identical title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.ins.2016.01.082", title: "Deep learning approach for active classification of electrocardiogram signals"}
+    b: {source: arxiv, doi: "", title: "deep learning approach for active classification of electrocardiogram signals"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1038/s41591-018-0268-3", title: "Cardiologist-level arrhythmia detection and classification in ambulatory electrocardiogram"}
+    b: {source: arxiv, doi: "", title: "cardiologist-level arrhythmia detection and classification in ambulatory electrocardiogram"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1001/jamacardio.2019.0640", title: "Development and Validation of a Deep-Learning Model to Screen for Hyperkalemia From the El"}
+    b: {source: arxiv, doi: "", title: "development and validation of a deep-learning model to screen for hyperkalemia from the el"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.isci.2021.102373", title: "Interpretable deep learning for automatic diagnosis of 12-lead electrocardiogram"}
+    b: {source: arxiv, doi: "", title: "interpretable deep learning for automatic diagnosis of 12-lead electrocardiogram"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.asoc.2019.105778", title: "Electrocardiogram soft computing using hybrid deep learning CNN-ELM"}
+    b: {source: arxiv, doi: "", title: "electrocardiogram soft computing using hybrid deep learning cnn-elm"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1038/s41591-020-0791-x", title: "Deep learning models for electrocardiograms are susceptible to adversarial attack"}
+    b: {source: arxiv, doi: "", title: "deep learning models for electrocardiograms are susceptible to adversarial attack"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.cmpb.2019.105001", title: "Deep learning approaches for automatic detection of sleep apnea events from an electrocard"}
+    b: {source: arxiv, doi: "", title: "deep learning approaches for automatic detection of sleep apnea events from an electrocard"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1111/jce.13889", title: "Prospective validation of a deep learning electrocardiogram algorithm for the detection of"}
+    b: {source: arxiv, doi: "", title: "prospective validation of a deep learning electrocardiogram algorithm for the detection of"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/s2589-7500(20)30107-2", title: "Automatic multilabel electrocardiogram diagnosis of heart rhythm or conduction abnormaliti"}
+    b: {source: arxiv, doi: "", title: "automatic multilabel electrocardiogram diagnosis of heart rhythm or conduction abnormaliti"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.jacadv.2023.100686", title: "Clinical Applications, Methodology, and Scientific Reporting of Electrocardiogram Deep-Lea"}
+    b: {source: arxiv, doi: "", title: "clinical applications, methodology, and scientific reporting of electrocardiogram deep-lea"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.neucom.2020.04.076", title: "Generating electrocardiogram signals by deep learning"}
+    b: {source: arxiv, doi: "", title: "generating electrocardiogram signals by deep learning"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1007/s12530-023-09559-0", title: "An enhanced ResNet-50 deep learning model for arrhythmia detection using electrocardiogram"}
+    b: {source: arxiv, doi: "", title: "an enhanced resnet-50 deep learning model for arrhythmia detection using electrocardiogram"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1038/s41591-018-0240-2", title: "Screening for cardiac contractile dysfunction using an artificial intelligence-enabled ele"}
+    b: {source: arxiv, doi: "", title: "screening for cardiac contractile dysfunction using an artificial intelligence-enabled ele"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1109/tem.2021.3104751", title: "Explainable Deep Learning-Based Approach for Multilabel Classification of Electrocardiogra"}
+    b: {source: arxiv, doi: "", title: "explainable deep learning-based approach for multilabel classification of electrocardiogra"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1186/s12911-021-01521-x", title: "Classification of COVID-19 electrocardiograms by using hexaxial feature mapping and deep l"}
+    b: {source: arxiv, doi: "", title: "classification of covid-19 electrocardiograms by using hexaxial feature mapping and deep l"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.artmed.2020.101919", title: "Continuous blood pressure measurement from one-channel electrocardiogram signal using deep"}
+    b: {source: arxiv, doi: "", title: "continuous blood pressure measurement from one-channel electrocardiogram signal using deep"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.jcmg.2021.08.004", title: "Using Deep-Learning Algorithms to Simultaneously Identify Right and Left Ventricular Dysfu"}
+    b: {source: arxiv, doi: "", title: "using deep-learning algorithms to simultaneously identify right and left ventricular dysfu"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.21037/cdt.2019.12.10", title: "Automated detection of cardiovascular disease by electrocardiogram signal analysis: a deep"}
+    b: {source: arxiv, doi: "", title: "automated detection of cardiovascular disease by electrocardiogram signal analysis - a dee"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1111/exsy.12864", title: "Internet of things and deep learning enabled healthcare disease diagnosis using biomedical"}
+    b: {source: arxiv, doi: "", title: "internet of things and deep learning enabled healthcare disease diagnosis using biomedical"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1038/s41598-021-92172-5", title: "A new deep learning algorithm of 12-lead electrocardiogram for identifying atrial fibrilla"}
+    b: {source: arxiv, doi: "", title: "a new deep learning algorithm of 12-lead electrocardiogram for identifying atrial fibrilla"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.ijcard.2020.12.065", title: "External validation of a deep learning electrocardiogram algorithm to detect ventricular d"}
+    b: {source: arxiv, doi: "", title: "external validation of a deep learning electrocardiogram algorithm to detect ventricular d"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.jelectrocard.2018.11.013", title: "A deep neural network learning algorithm outperforms a conventional algorithm for emergenc"}
+    b: {source: arxiv, doi: "", title: "a deep neural network learning algorithm outperforms a conventional algorithm for emergenc"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1088/1361-6579/aaf339", title: "Deep learning in the cross-time frequency domain for sleep staging from a single-lead elec"}
+    b: {source: arxiv, doi: "", title: "deep learning in the cross-time frequency domain for sleep staging from a single-lead elec"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.4258/hir.2021.27.1.19", title: "Effectiveness of Transfer Learning for Deep Learning-Based Electrocardiogram Analysis"}
+    b: {source: arxiv, doi: "", title: "effectiveness of transfer learning for deep learning-based electrocardiogram analysis"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.sbsr.2022.100502", title: "Electrocardiogram based arrhythmia classification using wavelet transform with deep learni"}
+    b: {source: arxiv, doi: "", title: "electrocardiogram based arrhythmia classification using wavelet transform with deep learni"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1109/msp.2021.3134634", title: "Self-Supervised Representation Learning: Introduction, advances, and challenges"}
+    b: {source: arxiv, doi: "", title: "self-supervised representation learning - introduction, advances, and challenges"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1007/s11263-023-01852-4", title: "Context Autoencoder for Self-supervised Representation Learning"}
+    b: {source: arxiv, doi: "", title: "context autoencoder for self-supervised representation learning"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1109/cvpr.2019.01061", title: "Self-Supervised Representation Learning by Rotation Feature Decoupling"}
+    b: {source: arxiv, doi: "", title: "self-supervised representation learning by rotation feature decoupling"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1109/cvpr.2019.00202", title: "Revisiting Self-Supervised Visual Representation Learning"}
+    b: {source: arxiv, doi: "", title: "revisiting self-supervised visual representation learning"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1109/iccv48922.2021.00647", title: "Spatio-temporal Self-Supervised Representation Learning for 3D Point Clouds"}
+    b: {source: arxiv, doi: "", title: "spatio-temporal self-supervised representation learning for 3d point clouds"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.compbiomed.2021.105114", title: "Self-supervised representation learning from 12-lead ECG data"}
+    b: {source: arxiv, doi: "", title: "self-supervised representation learning from 12-lead ecg data"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.knosys.2022.109631", title: "Graph Barlow Twins: A self-supervised representation learning framework for graphs"}
+    b: {source: arxiv, doi: "", title: "graph barlow twins - a self-supervised representation learning framework for graphs"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1109/cvpr.2019.01118", title: "Self-Supervised Representation Learning From Videos for Facial Action Unit Detection"}
+    b: {source: arxiv, doi: "", title: "self-supervised representation learning from videos for facial action unit detection"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1109/tii.2023.3280337", title: "A Multihead Attention Self-Supervised Representation Model for Industrial Sensors Anomaly"}
+    b: {source: arxiv, doi: "", title: "a multihead attention self-supervised representation model for industrial sensors anomaly"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1109/cvpr.2017.607", title: "Self-Supervised Video Representation Learning with Odd-One-Out Networks"}
+    b: {source: arxiv, doi: "", title: "self-supervised video representation learning with odd-one-out networks"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.18653/v1/2021.acl-long.393", title: "ConSERT: A Contrastive Framework for Self-Supervised Sentence Representation Transfer"}
+    b: {source: arxiv, doi: "", title: "consert - a contrastive framework for self-supervised sentence representation transfer"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1016/j.patrec.2022.02.007", title: "Mixing up contrastive learning: Self-supervised representation learning for time series"}
+    b: {source: arxiv, doi: "", title: "mixing up contrastive learning - self-supervised representation learning for time series"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1109/iccv48922.2021.00937", title: "Solving Inefficiency of Self-supervised Representation Learning"}
+    b: {source: arxiv, doi: "", title: "solving inefficiency of self-supervised representation learning"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.21437/interspeech.2022-143", title: "XLS-R: Self-supervised Cross-lingual Speech Representation Learning at Scale"}
+    b: {source: arxiv, doi: "", title: "xls-r - self-supervised cross-lingual speech representation learning at scale"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: same
+    a: {source: crossref, doi: "10.1609/aaai.v33i01.33018545", title: "Self-Supervised Video Representation Learning with Space-Time Cubic Puzzles"}
+    b: {source: arxiv, doi: "", title: "self-supervised video representation learning with space-time cubic puzzles"}
+    why: "same paper, one side has no DOI: must match on normalized title"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.ins.2016.01.082", title: "Deep learning approach for active classification of electrocardiogram signals"}
+    b: {source: openalex, doi: "10.1109/isbi45749.2020.9098666", title: "Self-Supervised Representation Learning for Ultrasound Video"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1038/s41591-018-0268-3", title: "Cardiologist-level arrhythmia detection and classification in ambulatory electrocardiogram"}
+    b: {source: openalex, doi: "10.1109/msp.2021.3134634", title: "Self-Supervised Representation Learning: Introduction, advances, and challenges"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1001/jamacardio.2019.0640", title: "Development and Validation of a Deep-Learning Model to Screen for Hyperkalemia From the El"}
+    b: {source: openalex, doi: "10.1109/cvpr.2019.01061", title: "Self-Supervised Representation Learning by Rotation Feature Decoupling"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.isci.2021.102373", title: "Interpretable deep learning for automatic diagnosis of 12-lead electrocardiogram"}
+    b: {source: openalex, doi: "10.1001/jamacardio.2019.0640", title: "Development and Validation of a Deep-Learning Model to Screen for Hyperkalemia From the El"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.asoc.2019.105778", title: "Electrocardiogram soft computing using hybrid deep learning CNN-ELM"}
+    b: {source: openalex, doi: "10.1109/tsm.2020.3038165", title: "Self-Supervised Representation Learning for Wafer Bin Map Defect Pattern Classification"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1038/s41591-020-0791-x", title: "Deep learning models for electrocardiograms are susceptible to adversarial attack"}
+    b: {source: openalex, doi: "10.1161/circulationaha.108.811877", title: "Detection and Quantification of Left Atrial Structural Remodeling With Delayed-Enhancement"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.cmpb.2019.105001", title: "Deep learning approaches for automatic detection of sleep apnea events from an electrocard"}
+    b: {source: openalex, doi: "10.1016/j.knosys.2022.109631", title: "Graph Barlow Twins: A self-supervised representation learning framework for graphs"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1111/jce.13889", title: "Prospective validation of a deep learning electrocardiogram algorithm for the detection of"}
+    b: {source: openalex, doi: "10.1016/j.jacc.2018.03.003", title: "Smartwatch Algorithm for Automated Detection of Atrial Fibrillation"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/s2589-7500(20)30107-2", title: "Automatic multilabel electrocardiogram diagnosis of heart rhythm or conduction abnormaliti"}
+    b: {source: openalex, doi: "10.1016/j.jelectrocard.2009.06.006", title: "Improvements in atrial fibrillation detection for real-time monitoring"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.jacadv.2023.100686", title: "Clinical Applications, Methodology, and Scientific Reporting of Electrocardiogram Deep-Lea"}
+    b: {source: openalex, doi: "10.1016/j.asoc.2019.105778", title: "Electrocardiogram soft computing using hybrid deep learning CNN-ELM"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1007/s12530-023-09559-0", title: "An enhanced ResNet-50 deep learning model for arrhythmia detection using electrocardiogram"}
+    b: {source: openalex, doi: "10.1109/cvpr.2019.01118", title: "Self-Supervised Representation Learning From Videos for Facial Action Unit Detection"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1038/s41591-018-0240-2", title: "Screening for cardiac contractile dysfunction using an artificial intelligence-enabled ele"}
+    b: {source: openalex, doi: "10.1109/tem.2021.3104751", title: "Explainable Deep Learning-Based Approach for Multilabel Classification of Electrocardiogra"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/tem.2021.3104751", title: "Explainable Deep Learning-Based Approach for Multilabel Classification of Electrocardiogra"}
+    b: {source: openalex, doi: "10.1038/s41591-020-0791-x", title: "Deep learning models for electrocardiograms are susceptible to adversarial attack"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1186/s12911-021-01521-x", title: "Classification of COVID-19 electrocardiograms by using hexaxial feature mapping and deep l"}
+    b: {source: openalex, doi: "10.1016/j.ins.2016.01.082", title: "Deep learning approach for active classification of electrocardiogram signals"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.artmed.2020.101919", title: "Continuous blood pressure measurement from one-channel electrocardiogram signal using deep"}
+    b: {source: openalex, doi: "10.1111/exsy.12864", title: "Internet of things and deep learning enabled healthcare disease diagnosis using biomedical"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.jcmg.2021.08.004", title: "Using Deep-Learning Algorithms to Simultaneously Identify Right and Left Ventricular Dysfu"}
+    b: {source: openalex, doi: "10.1007/s11263-023-01852-4", title: "Context Autoencoder for Self-supervised Representation Learning"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.21037/cdt.2019.12.10", title: "Automated detection of cardiovascular disease by electrocardiogram signal analysis: a deep"}
+    b: {source: openalex, doi: "10.18653/v1/2021.acl-long.393", title: "ConSERT: A Contrastive Framework for Self-Supervised Sentence Representation Transfer"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1111/exsy.12864", title: "Internet of things and deep learning enabled healthcare disease diagnosis using biomedical"}
+    b: {source: openalex, doi: "10.1109/iccv.2019.00334", title: "Self-Supervised Representation Learning From Multi-Domain Data"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1038/s41598-021-92172-5", title: "A new deep learning algorithm of 12-lead electrocardiogram for identifying atrial fibrilla"}
+    b: {source: openalex, doi: "10.21437/interspeech.2022-143", title: "XLS-R: Self-supervised Cross-lingual Speech Representation Learning at Scale"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.ijcard.2020.12.065", title: "External validation of a deep learning electrocardiogram algorithm to detect ventricular d"}
+    b: {source: openalex, doi: "10.1186/1475-925x-8-38", title: "Atrial fibrillation detection by heart rate variability in Poincare plot"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.jelectrocard.2018.11.013", title: "A deep neural network learning algorithm outperforms a conventional algorithm for emergenc"}
+    b: {source: openalex, doi: "10.1016/j.bspc.2020.102194", title: "Automated Atrial Fibrillation Detection using a Hybrid CNN-LSTM Network on Imbalanced ECG"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1088/1361-6579/aaf339", title: "Deep learning in the cross-time frequency domain for sleep staging from a single-lead elec"}
+    b: {source: openalex, doi: "10.1109/iccv48922.2021.00937", title: "Solving Inefficiency of Self-supervised Representation Learning"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.4258/hir.2021.27.1.19", title: "Effectiveness of Transfer Learning for Deep Learning-Based Electrocardiogram Analysis"}
+    b: {source: openalex, doi: "10.1007/s10439-009-9740-z", title: "Automatic Real Time Detection of Atrial Fibrillation"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.sbsr.2022.100502", title: "Electrocardiogram based arrhythmia classification using wavelet transform with deep learni"}
+    b: {source: openalex, doi: "10.1046/j.1540-8167.2001.00809.x", title: "Pulmonary Vein Dilation in Patients with Atrial Fibrillation: Detection by Magnetic Resona"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/msp.2021.3134634", title: "Self-Supervised Representation Learning: Introduction, advances, and challenges"}
+    b: {source: openalex, doi: "10.1001/jama.2021.6128", title: "Effect of Implantable vs Prolonged External Electrocardiographic Monitoring on Atrial Fibr"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1007/s11263-023-01852-4", title: "Context Autoencoder for Self-supervised Representation Learning"}
+    b: {source: openalex, doi: "10.1093/eurheartj/ehw210", title: "2016 ESC Guidelines for the management of atrial fibrillation developed in collaboration w"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/cvpr.2019.01061", title: "Self-Supervised Representation Learning by Rotation Feature Decoupling"}
+    b: {source: openalex, doi: "10.1016/j.artmed.2020.101919", title: "Continuous blood pressure measurement from one-channel electrocardiogram signal using deep"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/cvpr.2019.00202", title: "Revisiting Self-Supervised Visual Representation Learning"}
+    b: {source: openalex, doi: "10.1001/jamacardio.2018.0136", title: "Passive Detection of Atrial Fibrillation Using a Commercially Available Smartwatch"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/iccv48922.2021.00647", title: "Spatio-temporal Self-Supervised Representation Learning for 3D Point Clouds"}
+    b: {source: openalex, doi: "10.1007/s12530-023-09559-0", title: "An enhanced ResNet-50 deep learning model for arrhythmia detection using electrocardiogram"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.compbiomed.2021.105114", title: "Self-supervised representation learning from 12-lead ECG data"}
+    b: {source: openalex, doi: "10.1109/taslp.2021.3095662", title: "TERA: Self-Supervised Learning of Transformer Encoder Representation for Speech"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.knosys.2022.109631", title: "Graph Barlow Twins: A self-supervised representation learning framework for graphs"}
+    b: {source: openalex, doi: "10.1145/3459637.3482389", title: "Self-supervised Representation Learning on Dynamic Graphs"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/cvpr.2019.01118", title: "Self-Supervised Representation Learning From Videos for Facial Action Unit Detection"}
+    b: {source: openalex, doi: "10.1109/tbme.2012.2208112", title: "Atrial Fibrillation Detection Using an iPhone 4S"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/cvpr.2017.607", title: "Self-Supervised Video Representation Learning with Odd-One-Out Networks"}
+    b: {source: openalex, doi: "10.1016/j.ijcard.2020.12.065", title: "External validation of a deep learning electrocardiogram algorithm to detect ventricular d"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.18653/v1/2021.acl-long.393", title: "ConSERT: A Contrastive Framework for Self-Supervised Sentence Representation Transfer"}
+    b: {source: openalex, doi: "10.1016/j.sbsr.2022.100502", title: "Electrocardiogram based arrhythmia classification using wavelet transform with deep learni"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.patrec.2022.02.007", title: "Mixing up contrastive learning: Self-supervised representation learning for time series"}
+    b: {source: openalex, doi: "10.1016/j.isci.2021.102373", title: "Interpretable deep learning for automatic diagnosis of 12-lead electrocardiogram"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/iccv48922.2021.00937", title: "Solving Inefficiency of Self-supervised Representation Learning"}
+    b: {source: openalex, doi: "10.1016/j.jelectrocard.2018.11.013", title: "A deep neural network learning algorithm outperforms a conventional algorithm for emergenc"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.21437/interspeech.2022-143", title: "XLS-R: Self-supervised Cross-lingual Speech Representation Learning at Scale"}
+    b: {source: openalex, doi: "10.1109/tkde.2021.3090866", title: "Self-supervised Learning: Generative or Contrastive"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1609/aaai.v33i01.33018545", title: "Self-Supervised Video Representation Learning with Space-Time Cubic Puzzles"}
+    b: {source: openalex, doi: "10.1109/cvpr.2019.00202", title: "Revisiting Self-Supervised Visual Representation Learning"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/taffc.2020.3014842", title: "Self-Supervised ECG Representation Learning for Emotion Recognition"}
+    b: {source: openalex, doi: "10.1038/s41598-019-49092-2", title: "Atrial Fibrillation Detection from Wrist Photoplethysmography Signals Using Smartwatches"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/isbi45749.2020.9098666", title: "Self-Supervised Representation Learning for Ultrasound Video"}
+    b: {source: openalex, doi: "10.1038/s41598-021-92172-5", title: "A new deep learning algorithm of 12-lead electrocardiogram for identifying atrial fibrilla"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.3390/rs12111868", title: "Self-Supervised Representation Learning for Remote Sensing Image Change Detection Based on"}
+    b: {source: openalex, doi: "10.1016/j.patrec.2022.02.007", title: "Mixing up contrastive learning: Self-supervised representation learning for time series"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/taslp.2021.3095662", title: "TERA: Self-Supervised Learning of Transformer Encoder Representation for Speech"}
+    b: {source: openalex, doi: "10.1007/s40846-022-00681-z", title: "Atrial Fibrillation Detection Using a Feedforward Neural Network"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1038/s42256-023-00640-6", title: "Multitask joint strategies of self-supervised representation learning on biomedical networ"}
+    b: {source: openalex, doi: "10.1186/s12911-021-01521-x", title: "Classification of COVID-19 electrocardiograms by using hexaxial feature mapping and deep l"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/tcsvt.2020.3003048", title: "Deep Self-Supervised Representation Learning for Free-Hand Sketch"}
+    b: {source: openalex, doi: "10.1016/j.hrthm.2018.06.037", title: "Assessing the accuracy of an automated atrial fibrillation detection algorithm using smart"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1145/3459637.3482389", title: "Self-supervised Representation Learning on Dynamic Graphs"}
+    b: {source: openalex, doi: "10.1093/eurheartj/ehq278", title: "Guidelines for the management of atrial fibrillation: The Task Force for the Management of"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/tkde.2021.3090866", title: "Self-supervised Learning: Generative or Contrastive"}
+    b: {source: openalex, doi: "10.1093/eurheartj/ehaa612", title: "2020 ESC Guidelines for the diagnosis and management of atrial fibrillation developed in c"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/iccv.2019.00334", title: "Self-Supervised Representation Learning From Multi-Domain Data"}
+    b: {source: openalex, doi: "10.1088/1361-6579/aaf339", title: "Deep learning in the cross-time frequency domain for sleep staging from a single-lead elec"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/tsm.2020.3038165", title: "Self-Supervised Representation Learning for Wafer Bin Map Defect Pattern Classification"}
+    b: {source: openalex, doi: "10.1038/s42256-023-00640-6", title: "Multitask joint strategies of self-supervised representation learning on biomedical networ"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/tbme.2012.2208112", title: "Atrial Fibrillation Detection Using an iPhone 4S"}
+    b: {source: openalex, doi: "10.1109/jbhi.2017.2688473", title: "Atrial Fibrillation Detection via Accelerometer and Gyroscope of a Smartphone"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.bspc.2020.102194", title: "Automated Atrial Fibrillation Detection using a Hybrid CNN-LSTM Network on Imbalanced ECG"}
+    b: {source: openalex, doi: "10.1109/tcsvt.2020.3003048", title: "Deep Self-Supervised Representation Learning for Free-Hand Sketch"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1093/eurheartj/ehq278", title: "Guidelines for the management of atrial fibrillation: The Task Force for the Management of"}
+    b: {source: openalex, doi: "10.1161/strokeaha.119.025384", title: "Left Atrial Volume Index Is Associated With Cardioembolic Stroke and Atrial Fibrillation D"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1056/nejm199809033391003", title: "Spontaneous Initiation of Atrial Fibrillation by Ectopic Beats Originating in the Pulmonar"}
+    b: {source: openalex, doi: "10.1016/s2589-7500(20)30107-2", title: "Automatic multilabel electrocardiogram diagnosis of heart rhythm or conduction abnormaliti"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.jelectrocard.2009.06.006", title: "Improvements in atrial fibrillation detection for real-time monitoring"}
+    b: {source: openalex, doi: "10.1109/iccv48922.2021.00647", title: "Spatio-temporal Self-Supervised Representation Learning for 3D Point Clouds"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1161/circulationaha.108.811877", title: "Detection and Quantification of Left Atrial Structural Remodeling With Delayed-Enhancement"}
+    b: {source: openalex, doi: "10.1016/j.jcmg.2021.08.004", title: "Using Deep-Learning Algorithms to Simultaneously Identify Right and Left Ventricular Dysfu"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1152/ajpheart.00561.2010", title: "Accurate estimation of entropy in very short physiological time series: the problem of atr"}
+    b: {source: openalex, doi: "10.1056/nejm199809033391003", title: "Spontaneous Initiation of Atrial Fibrillation by Ectopic Beats Originating in the Pulmonar"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1212/wnl.0000000000002282", title: "Predictors for atrial fibrillation detection after cryptogenic stroke"}
+    b: {source: openalex, doi: "10.1109/taffc.2020.3014842", title: "Self-Supervised ECG Representation Learning for Emotion Recognition"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/jbhi.2017.2688473", title: "Atrial Fibrillation Detection via Accelerometer and Gyroscope of a Smartphone"}
+    b: {source: openalex, doi: "10.21037/cdt.2019.12.10", title: "Automated detection of cardiovascular disease by electrocardiogram signal analysis: a deep"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1186/1475-925x-8-38", title: "Atrial fibrillation detection by heart rate variability in Poincare plot"}
+    b: {source: openalex, doi: "10.1056/nejmoa1313600", title: "Cryptogenic Stroke and Underlying Atrial Fibrillation"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1093/eurheartj/ehw210", title: "2016 ESC Guidelines for the management of atrial fibrillation developed in collaboration w"}
+    b: {source: openalex, doi: "10.1016/j.jacadv.2023.100686", title: "Clinical Applications, Methodology, and Scientific Reporting of Electrocardiogram Deep-Lea"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1093/europace/euw295", title: "2016 ESC Guidelines for the management of atrial fibrillation developed in collaboration w"}
+    b: {source: openalex, doi: "10.1016/s0140-6736(21)01698-6", title: "Implantable loop recorder detection of atrial fibrillation to prevent stroke (The LOOP Stu"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1093/eurheartj/ehaa612", title: "2020 ESC Guidelines for the diagnosis and management of atrial fibrillation developed in c"}
+    b: {source: openalex, doi: "10.1109/cvpr.2017.607", title: "Self-Supervised Video Representation Learning with Odd-One-Out Networks"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1056/nejmoa1313600", title: "Cryptogenic Stroke and Underlying Atrial Fibrillation"}
+    b: {source: openalex, doi: "10.4258/hir.2021.27.1.19", title: "Effectiveness of Transfer Learning for Deep Learning-Based Electrocardiogram Analysis"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.jacc.2018.03.003", title: "Smartwatch Algorithm for Automated Detection of Atrial Fibrillation"}
+    b: {source: openalex, doi: "10.1212/wnl.0000000000002282", title: "Predictors for atrial fibrillation detection after cryptogenic stroke"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1001/jamacardio.2018.0136", title: "Passive Detection of Atrial Fibrillation Using a Commercially Available Smartwatch"}
+    b: {source: openalex, doi: "10.1109/tbme.2013.2264721", title: "Time-Varying Coherence Function for Atrial Fibrillation Detection"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1038/s41598-019-49092-2", title: "Atrial Fibrillation Detection from Wrist Photoplethysmography Signals Using Smartwatches"}
+    b: {source: openalex, doi: "10.1609/aaai.v33i01.33018545", title: "Self-Supervised Video Representation Learning with Space-Time Cubic Puzzles"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/tbme.2013.2264721", title: "Time-Varying Coherence Function for Atrial Fibrillation Detection"}
+    b: {source: openalex, doi: "10.1016/j.compbiomed.2021.105114", title: "Self-supervised representation learning from 12-lead ECG data"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1046/j.1540-8167.2001.00809.x", title: "Pulmonary Vein Dilation in Patients with Atrial Fibrillation: Detection by Magnetic Resona"}
+    b: {source: openalex, doi: "10.3390/rs12111868", title: "Self-Supervised Representation Learning for Remote Sensing Image Change Detection Based on"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.hrthm.2018.06.037", title: "Assessing the accuracy of an automated atrial fibrillation detection algorithm using smart"}
+    b: {source: openalex, doi: "10.1111/jce.13889", title: "Prospective validation of a deep learning electrocardiogram algorithm for the detection of"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1001/jama.2021.6128", title: "Effect of Implantable vs Prolonged External Electrocardiographic Monitoring on Atrial Fibr"}
+    b: {source: openalex, doi: "10.1093/europace/euw295", title: "2016 ESC Guidelines for the management of atrial fibrillation developed in collaboration w"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1161/strokeaha.119.025384", title: "Left Atrial Volume Index Is Associated With Cardioembolic Stroke and Atrial Fibrillation D"}
+    b: {source: openalex, doi: "10.1152/ajpheart.00561.2010", title: "Accurate estimation of entropy in very short physiological time series: the problem of atr"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/s0140-6736(21)01698-6", title: "Implantable loop recorder detection of atrial fibrillation to prevent stroke (The LOOP Stu"}
+    b: {source: openalex, doi: "10.1038/s41591-018-0268-3", title: "Cardiologist-level arrhythmia detection and classification in ambulatory electrocardiogram"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1007/s40846-022-00681-z", title: "Atrial Fibrillation Detection Using a Feedforward Neural Network"}
+    b: {source: openalex, doi: "10.1038/s41591-018-0240-2", title: "Screening for cardiac contractile dysfunction using an artificial intelligence-enabled ele"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1007/s10439-009-9740-z", title: "Automatic Real Time Detection of Atrial Fibrillation"}
+    b: {source: openalex, doi: "10.1016/j.cmpb.2019.105001", title: "Deep learning approaches for automatic detection of sleep apnea events from an electrocard"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.ins.2016.01.082", title: "Deep learning approach for active classification of electrocardiogram signals"}
+    b: {source: openalex, doi: "10.1109/isbi45749.2020.9098666", title: "Self-Supervised Representation Learning for Ultrasound Video"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1038/s41591-018-0268-3", title: "Cardiologist-level arrhythmia detection and classification in ambulatory electrocardiogram"}
+    b: {source: openalex, doi: "10.1109/msp.2021.3134634", title: "Self-Supervised Representation Learning: Introduction, advances, and challenges"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1001/jamacardio.2019.0640", title: "Development and Validation of a Deep-Learning Model to Screen for Hyperkalemia From the El"}
+    b: {source: openalex, doi: "10.1109/cvpr.2019.01061", title: "Self-Supervised Representation Learning by Rotation Feature Decoupling"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.isci.2021.102373", title: "Interpretable deep learning for automatic diagnosis of 12-lead electrocardiogram"}
+    b: {source: openalex, doi: "10.1001/jamacardio.2019.0640", title: "Development and Validation of a Deep-Learning Model to Screen for Hyperkalemia From the El"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.asoc.2019.105778", title: "Electrocardiogram soft computing using hybrid deep learning CNN-ELM"}
+    b: {source: openalex, doi: "10.1109/tsm.2020.3038165", title: "Self-Supervised Representation Learning for Wafer Bin Map Defect Pattern Classification"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1038/s41591-020-0791-x", title: "Deep learning models for electrocardiograms are susceptible to adversarial attack"}
+    b: {source: openalex, doi: "10.1161/circulationaha.108.811877", title: "Detection and Quantification of Left Atrial Structural Remodeling With Delayed-Enhancement"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.cmpb.2019.105001", title: "Deep learning approaches for automatic detection of sleep apnea events from an electrocard"}
+    b: {source: openalex, doi: "10.1016/j.knosys.2022.109631", title: "Graph Barlow Twins: A self-supervised representation learning framework for graphs"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1111/jce.13889", title: "Prospective validation of a deep learning electrocardiogram algorithm for the detection of"}
+    b: {source: openalex, doi: "10.1016/j.jacc.2018.03.003", title: "Smartwatch Algorithm for Automated Detection of Atrial Fibrillation"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/s2589-7500(20)30107-2", title: "Automatic multilabel electrocardiogram diagnosis of heart rhythm or conduction abnormaliti"}
+    b: {source: openalex, doi: "10.1016/j.jelectrocard.2009.06.006", title: "Improvements in atrial fibrillation detection for real-time monitoring"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1016/j.jacadv.2023.100686", title: "Clinical Applications, Methodology, and Scientific Reporting of Electrocardiogram Deep-Lea"}
+    b: {source: openalex, doi: "10.1016/j.asoc.2019.105778", title: "Electrocardiogram soft computing using hybrid deep learning CNN-ELM"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1007/s12530-023-09559-0", title: "An enhanced ResNet-50 deep learning model for arrhythmia detection using electrocardiogram"}
+    b: {source: openalex, doi: "10.1109/cvpr.2019.01118", title: "Self-Supervised Representation Learning From Videos for Facial Action Unit Detection"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1038/s41591-018-0240-2", title: "Screening for cardiac contractile dysfunction using an artificial intelligence-enabled ele"}
+    b: {source: openalex, doi: "10.1109/tem.2021.3104751", title: "Explainable Deep Learning-Based Approach for Multilabel Classification of Electrocardiogra"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1109/tem.2021.3104751", title: "Explainable Deep Learning-Based Approach for Multilabel Classification of Electrocardiogra"}
+    b: {source: openalex, doi: "10.1038/s41591-020-0791-x", title: "Deep learning models for electrocardiograms are susceptible to adversarial attack"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: openalex, doi: "10.1186/s12911-021-01521-x", title: "Classification of COVID-19 electrocardiograms by using hexaxial feature mapping and deep l"}
+    b: {source: openalex, doi: "10.1016/j.ins.2016.01.082", title: "Deep learning approach for active classification of electrocardiogram signals"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1016/j.bspc.2020.102194", title: "Automated Atrial Fibrillation Detection using a Hybrid CNN-LSTM Network on Imbalanced ECG"}
+    b: {source: crossref, doi: "10.1109/iccv.2019.00334", title: "Self-Supervised Representation Learning From Multi-Domain Data"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1109/msp.2021.3134634", title: "Self-Supervised Representation Learning: Introduction, advances, and challenges"}
+    b: {source: crossref, doi: "10.1088/1361-6579/aaf339", title: "Deep learning in the cross-time frequency domain for sleep staging from a single-lead elec"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1109/iccv48922.2021.00647", title: "Spatio-temporal Self-Supervised Representation Learning for 3D Point Clouds"}
+    b: {source: crossref, doi: "10.1016/j.knosys.2022.109631", title: "Graph Barlow Twins: A self-supervised representation learning framework for graphs"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.21037/cdt.2019.12.10", title: "Automated detection of cardiovascular disease by electrocardiogram signal analysis: a deep"}
+    b: {source: crossref, doi: "10.1007/s12530-023-09559-0", title: "An enhanced ResNet-50 deep learning model for arrhythmia detection using electrocardiogram"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1109/cvpr.2019.01118", title: "Self-Supervised Representation Learning From Videos for Facial Action Unit Detection"}
+    b: {source: crossref, doi: "10.1109/tsm.2020.3038165", title: "Self-Supervised Representation Learning for Wafer Bin Map Defect Pattern Classification"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1109/tbme.2013.2264721", title: "Time-Varying Coherence Function for Atrial Fibrillation Detection"}
+    b: {source: crossref, doi: "10.1046/j.1540-8167.2001.00809.x", title: "Pulmonary Vein Dilation in Patients with Atrial Fibrillation: Detection by Magnetic Resona"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1007/s12530-023-09559-0", title: "An enhanced ResNet-50 deep learning model for arrhythmia detection using electrocardiogram"}
+    b: {source: crossref, doi: "10.1093/eurheartj/ehaa612", title: "2020 ESC Guidelines for the diagnosis and management of atrial fibrillation developed in c"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1109/msp.2021.3134634", title: "Self-Supervised Representation Learning: Introduction, advances, and challenges"}
+    b: {source: crossref, doi: "10.1056/nejm199809033391003", title: "Spontaneous Initiation of Atrial Fibrillation by Ectopic Beats Originating in the Pulmonar"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1109/cvpr.2019.01061", title: "Self-Supervised Representation Learning by Rotation Feature Decoupling"}
+    b: {source: crossref, doi: "10.1109/tkde.2021.3090866", title: "Self-supervised Learning: Generative or Contrastive"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1109/tsm.2020.3038165", title: "Self-Supervised Representation Learning for Wafer Bin Map Defect Pattern Classification"}
+    b: {source: crossref, doi: "10.1109/cvpr.2019.01061", title: "Self-Supervised Representation Learning by Rotation Feature Decoupling"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1038/s41598-021-92172-5", title: "A new deep learning algorithm of 12-lead electrocardiogram for identifying atrial fibrilla"}
+    b: {source: crossref, doi: "10.1186/1475-925x-8-38", title: "Atrial fibrillation detection by heart rate variability in Poincare plot"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1088/1361-6579/aaf339", title: "Deep learning in the cross-time frequency domain for sleep staging from a single-lead elec"}
+    b: {source: crossref, doi: "10.1016/s0140-6736(21)01698-6", title: "Implantable loop recorder detection of atrial fibrillation to prevent stroke (The LOOP Stu"}
+    why: "distinct papers, distinct DOIs"
+  - label: different
+    a: {source: crossref, doi: "10.1109/taslp.2021.3095662", title: "TERA: Self-Supervised Learning of Transformer Encoder Representation for Speech"}
+    b: {source: crossref, doi: "10.1016/j.neucom.2020.04.076", title: "Generating electrocardiogram signals by deep learning"}
+    why: "distinct papers, distinct DOIs"

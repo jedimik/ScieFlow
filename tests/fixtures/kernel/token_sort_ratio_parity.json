@@ -1,0 +1,1507 @@
+{
+ "generator": "rapidfuzz.fuzz.token_sort_ratio",
+ "rapidfuzz_version": "3.14.6",
+ "note": "recorded offline from the local uv wheel cache by the M-C1 plan card; expected values for the pure-Python shim",
+ "cases": [
+  {
+   "a": "",
+   "b": "",
+   "score": 100.0
+  },
+  {
+   "a": "a",
+   "b": "",
+   "score": 0.0
+  },
+  {
+   "a": "",
+   "b": "b",
+   "score": 0.0
+  },
+  {
+   "a": "deep learning a review",
+   "b": "a review of deep learning",
+   "score": 93.61702127659575
+  },
+  {
+   "a": "rem sleep behaviour disorder",
+   "b": "rem sleep behavior disorder",
+   "score": 98.18181818181819
+  },
+  {
+   "a": "idiopathic rem sleep behavior disorder a review",
+   "b": "idiopathic rem sleep behaviour disorder review",
+   "score": 96.7741935483871
+  },
+  {
+   "a": "learning of sleep",
+   "b": "rbd learning sleep",
+   "score": 85.71428571428572
+  },
+  {
+   "a": "for",
+   "b": "study",
+   "score": 0.0
+  },
+  {
+   "a": "behavior the",
+   "b": "the behavior",
+   "score": 100.0
+  },
+  {
+   "a": "parkinson in eeg sleep",
+   "b": "parkinson eeg synuclein sleep",
+   "score": 74.50980392156863
+  },
+  {
+   "a": "deep review",
+   "b": "review deep",
+   "score": 100.0
+  },
+  {
+   "a": "disease model network study network",
+   "b": "study network disease disorder model",
+   "score": 76.05633802816901
+  },
+  {
+   "a": "model synuclein behaviour model review in",
+   "b": "model synuclein behaviour model in review",
+   "score": 100.0
+  },
+  {
+   "a": "the network disease neural of learning",
+   "b": "of the learning disease neural network",
+   "score": 100.0
+  },
+  {
+   "a": "cohort",
+   "b": "cohort",
+   "score": 100.0
+  },
+  {
+   "a": "learning rbd deep for of study behaviour of rbd disease",
+   "b": "behaviour learning deep rbd rbd study of of for disease",
+   "score": 100.0
+  },
+  {
+   "a": "alpha study alpha in in behaviour in behaviour alpha",
+   "b": "alpha behaviour in alpha in behaviour alpha in study",
+   "score": 100.0
+  },
+  {
+   "a": "and synuclein for learning model eeg disease learning rem",
+   "b": "learning learning rem disease model and synuclein for eeg",
+   "score": 100.0
+  },
+  {
+   "a": "behavior network behavior disease of network study rem",
+   "b": "disease of rem behavior network network alpha study",
+   "score": 91.42857142857143
+  },
+  {
+   "a": "rbd cohort deep",
+   "b": "deep cohort rbd",
+   "score": 100.0
+  },
+  {
+   "a": "eeg the",
+   "b": "eeg the",
+   "score": 100.0
+  },
+  {
+   "a": "deep of network review neural network rem synuclein in review",
+   "b": "review in review of synuclein neural rem network network deep",
+   "score": 100.0
+  },
+  {
+   "a": "synuclein learning parkinson",
+   "b": "parkinson of learning",
+   "score": 73.46938775510203
+  },
+  {
+   "a": "of eeg of in eeg eeg a disorder in behavior",
+   "b": "in in eeg behavior of review of eeg eeg disorder",
+   "score": 90.10989010989012
+  },
+  {
+   "a": "behavior sleep cohort eeg sleep alpha disease",
+   "b": "alpha sleep cohort sleep eeg behavior the",
+   "score": 86.04651162790698
+  },
+  {
+   "a": "cohort behavior",
+   "b": "model cohort",
+   "score": 44.44444444444444
+  },
+  {
+   "a": "rbd for learning eeg eeg the eeg the",
+   "b": "eeg the rbd for learning eeg eeg the",
+   "score": 100.0
+  },
+  {
+   "a": "model deep parkinson",
+   "b": "parkinson cohort model",
+   "score": 76.19047619047619
+  },
+  {
+   "a": "cohort disease the behavior and rem",
+   "b": "cohort rem the disease and neural",
+   "score": 76.47058823529412
+  },
+  {
+   "a": "sleep deep",
+   "b": "eeg deep",
+   "score": 77.77777777777779
+  },
+  {
+   "a": "and model in of",
+   "b": "of in and model",
+   "score": 100.0
+  },
+  {
+   "a": "review rem synuclein and disorder deep",
+   "b": "synuclein rem deep a review and",
+   "score": 84.05797101449275
+  },
+  {
+   "a": "learning parkinson deep behaviour disease study",
+   "b": "learning study disease deep parkinson behaviour",
+   "score": 100.0
+  },
+  {
+   "a": "network in study behaviour",
+   "b": "behaviour study in behaviour",
+   "score": 70.37037037037037
+  },
+  {
+   "a": "disorder and cohort parkinson disease rbd of cohort synuclein parkinson",
+   "b": "and disease parkinson cohort disorder synuclein and parkinson of rbd",
+   "score": 93.5251798561151
+  },
+  {
+   "a": "behaviour deep",
+   "b": "behaviour deep",
+   "score": 100.0
+  },
+  {
+   "a": "in behaviour sleep neural learning behavior of synuclein a cohort",
+   "b": "behaviour a of synuclein learning behavior sleep cohort in neural",
+   "score": 100.0
+  },
+  {
+   "a": "a review review and disorder and cohort",
+   "b": "cohort a review and and disorder review",
+   "score": 100.0
+  },
+  {
+   "a": "review disease eeg",
+   "b": "eeg review disease",
+   "score": 100.0
+  },
+  {
+   "a": "the disorder learning neural and parkinson for for",
+   "b": "disorder the learning for disorder for and neural",
+   "score": 80.8080808080808
+  },
+  {
+   "a": "in the disorder rbd cohort rem",
+   "b": "behaviour disorder rbd in cohort rem",
+   "score": 78.78787878787878
+  },
+  {
+   "a": "behavior disorder",
+   "b": "behavior disorder",
+   "score": 100.0
+  },
+  {
+   "a": "sleep rem cohort behaviour study disease network in review",
+   "b": "sleep eeg study cohort behaviour review disease in network",
+   "score": 93.10344827586206
+  },
+  {
+   "a": "a eeg deep review and rem",
+   "b": "review eeg and rem deep a",
+   "score": 100.0
+  },
+  {
+   "a": "cohort",
+   "b": "sleep",
+   "score": 0.0
+  },
+  {
+   "a": "a and rem parkinson",
+   "b": "rem a parkinson and",
+   "score": 100.0
+  },
+  {
+   "a": "behavior behaviour of",
+   "b": "of behavior behaviour",
+   "score": 100.0
+  },
+  {
+   "a": "a of review the",
+   "b": "review the of a",
+   "score": 100.0
+  },
+  {
+   "a": "eeg in",
+   "b": "in eeg",
+   "score": 100.0
+  },
+  {
+   "a": "rbd synuclein synuclein of the for a alpha",
+   "b": "rbd synuclein a alpha the for of synuclein",
+   "score": 100.0
+  },
+  {
+   "a": "eeg",
+   "b": "eeg",
+   "score": 100.0
+  },
+  {
+   "a": "neural",
+   "b": "neural",
+   "score": 100.0
+  },
+  {
+   "a": "rem and of sleep eeg deep sleep sleep",
+   "b": "deep sleep rem of sleep and sleep eeg",
+   "score": 100.0
+  },
+  {
+   "a": "network disorder disorder review",
+   "b": "review network disorder disorder",
+   "score": 100.0
+  },
+  {
+   "a": "in cohort",
+   "b": "cohort in",
+   "score": 100.0
+  },
+  {
+   "a": "for disorder study alpha deep eeg disease",
+   "b": "disorder eeg alpha for study disease deep",
+   "score": 100.0
+  },
+  {
+   "a": "deep alpha study of rbd of deep",
+   "b": "deep study alpha of of behavior rbd",
+   "score": 84.84848484848484
+  },
+  {
+   "a": "of disorder review disease",
+   "b": "disorder disease review of",
+   "score": 100.0
+  },
+  {
+   "a": "neural in rem eeg rem network cohort disorder rem",
+   "b": "rem neural in cohort rem network disorder rem network",
+   "score": 88.23529411764706
+  },
+  {
+   "a": "synuclein the neural synuclein synuclein cohort rbd",
+   "b": "synuclein the neural in synuclein cohort rbd",
+   "score": 86.31578947368422
+  },
+  {
+   "a": "a deep synuclein",
+   "b": "a deep a",
+   "score": 50.0
+  },
+  {
+   "a": "a of in disease neural cohort for rem learning",
+   "b": "disease cohort rem of neural in a learning for",
+   "score": 100.0
+  },
+  {
+   "a": "for for rem network learning disease eeg review a the",
+   "b": "rem review eeg disease for synuclein for a the network",
+   "score": 82.2429906542056
+  },
+  {
+   "a": "in behavior cohort disease the alpha",
+   "b": "alpha disease the cohort in behavior",
+   "score": 100.0
+  },
+  {
+   "a": "eeg behaviour",
+   "b": "behaviour for",
+   "score": 76.92307692307692
+  },
+  {
+   "a": "sleep network disorder and learning disorder disease sleep disease",
+   "b": "disease the disorder sleep disorder disease learning network and",
+   "score": 95.38461538461537
+  },
+  {
+   "a": "learning review for neural for",
+   "b": "for review neural learning for",
+   "score": 100.0
+  },
+  {
+   "a": "neural and and in a neural disease study",
+   "b": "study neural neural in a disease and and",
+   "score": 100.0
+  },
+  {
+   "a": "in",
+   "b": "in",
+   "score": 100.0
+  },
+  {
+   "a": "rbd model behaviour study",
+   "b": "rbd for model behaviour",
+   "score": 79.16666666666666
+  },
+  {
+   "a": "review rbd learning study rem parkinson synuclein sleep",
+   "b": "learning rbd study review sleep synuclein rem parkinson",
+   "score": 100.0
+  },
+  {
+   "a": "rbd alpha network disease review of learning behaviour alpha disease",
+   "b": "rbd disease learning behaviour alpha disease alpha of review network",
+   "score": 100.0
+  },
+  {
+   "a": "behaviour behavior cohort rem neural review disorder of",
+   "b": "behavior behaviour disorder cohort rem review behaviour neural",
+   "score": 88.88888888888889
+  },
+  {
+   "a": "learning alpha the parkinson and parkinson of network disease",
+   "b": "and learning disease network disease parkinson parkinson of the",
+   "score": 88.70967741935483
+  },
+  {
+   "a": "the review behaviour rbd rem cohort",
+   "b": "rem rbd the review rem cohort",
+   "score": 78.125
+  },
+  {
+   "a": "of of of a disease eeg sleep review",
+   "b": "eeg review of sleep of disease a of",
+   "score": 100.0
+  },
+  {
+   "a": "deep a",
+   "b": "deep a",
+   "score": 100.0
+  },
+  {
+   "a": "network disorder sleep eeg behavior learning deep disorder review",
+   "b": "disorder eeg learning deep disorder sleep review behavior network",
+   "score": 100.0
+  },
+  {
+   "a": "model for behaviour model in learning review eeg",
+   "b": "behaviour in for cohort model learning eeg model",
+   "score": 85.41666666666666
+  },
+  {
+   "a": "sleep in the of rbd study disorder alpha a",
+   "b": "of rbd study a alpha in disorder the sleep",
+   "score": 100.0
+  },
+  {
+   "a": "rbd disease",
+   "b": "rbd disease",
+   "score": 100.0
+  },
+  {
+   "a": "learning a study behavior neural eeg in",
+   "b": "learning eeg a neural cohort in study",
+   "score": 89.47368421052632
+  },
+  {
+   "a": "of disease deep rbd in rbd disease sleep sleep the",
+   "b": "sleep disease of the rbd sleep deep disease in rbd",
+   "score": 100.0
+  },
+  {
+   "a": "in a behavior the eeg cohort",
+   "b": "and a in cohort the behavior",
+   "score": 85.71428571428572
+  },
+  {
+   "a": "rbd behavior behaviour of study a",
+   "b": "rbd behavior a learning study of",
+   "score": 83.07692307692307
+  },
+  {
+   "a": "behavior eeg alpha rbd cohort network",
+   "b": "eeg behavior alpha network cohort rbd",
+   "score": 100.0
+  },
+  {
+   "a": "network model study parkinson eeg deep sleep a",
+   "b": "alpha eeg study sleep deep a network model",
+   "score": 81.81818181818181
+  },
+  {
+   "a": "a and deep cohort cohort review behaviour study disorder for",
+   "b": "deep cohort a cohort study behaviour and for disorder of",
+   "score": 93.10344827586206
+  },
+  {
+   "a": "behaviour learning review sleep disorder sleep of",
+   "b": "of for sleep behaviour review sleep disorder",
+   "score": 90.32258064516128
+  },
+  {
+   "a": "study",
+   "b": "study",
+   "score": 100.0
+  },
+  {
+   "a": "study in sleep study disorder disease deep cohort sleep learning",
+   "b": "study disorder deep learning cohort study in disease sleep sleep",
+   "score": 100.0
+  },
+  {
+   "a": "of behavior a review alpha",
+   "b": "a review of model alpha",
+   "score": 77.55102040816327
+  },
+  {
+   "a": "study model network eeg alpha a alpha eeg parkinson behavior",
+   "b": "network study behavior eeg parkinson eeg model a alpha alpha",
+   "score": 100.0
+  },
+  {
+   "a": "disorder for sleep in network behavior",
+   "b": "sleep for disorder in behavior network",
+   "score": 100.0
+  },
+  {
+   "a": "model",
+   "b": "model",
+   "score": 100.0
+  },
+  {
+   "a": "of review",
+   "b": "behavior review",
+   "score": 66.66666666666667
+  },
+  {
+   "a": "deep eeg synuclein behavior study cohort the a",
+   "b": "a synuclein deep eeg cohort study the behavior",
+   "score": 100.0
+  },
+  {
+   "a": "neural neural eeg",
+   "b": "disease neural neural",
+   "score": 84.21052631578947
+  },
+  {
+   "a": "parkinson model",
+   "b": "parkinson model",
+   "score": 100.0
+  },
+  {
+   "a": "of behaviour disorder behavior and of",
+   "b": "disorder of and behaviour of behavior",
+   "score": 100.0
+  },
+  {
+   "a": "network of alpha a network learning behaviour synuclein",
+   "b": "a learning of network network behaviour network alpha",
+   "score": 83.33333333333334
+  },
+  {
+   "a": "disorder eeg",
+   "b": "disorder eeg",
+   "score": 100.0
+  },
+  {
+   "a": "parkinson",
+   "b": "parkinson",
+   "score": 100.0
+  },
+  {
+   "a": "review rem a study disease sleep eeg network alpha for",
+   "b": "the study rem a disease review sleep alpha for eeg",
+   "score": 88.46153846153845
+  },
+  {
+   "a": "model study cohort deep neural deep eeg study disease",
+   "b": "disease deep deep cohort study model eeg neural study",
+   "score": 100.0
+  },
+  {
+   "a": "deep behaviour behavior sleep behaviour and cohort rbd network review",
+   "b": "deep cohort review behavior behaviour behaviour sleep rbd network and",
+   "score": 100.0
+  },
+  {
+   "a": "deep rbd behavior",
+   "b": "deep behavior rbd",
+   "score": 100.0
+  },
+  {
+   "a": "neural rem and deep for deep review disorder for",
+   "b": "deep disorder for rem disorder and deep for neural",
+   "score": 83.6734693877551
+  },
+  {
+   "a": "eeg study sleep rbd neural",
+   "b": "sleep study rbd neural cohort",
+   "score": 83.63636363636364
+  },
+  {
+   "a": "network behaviour rbd synuclein",
+   "b": "synuclein sleep rbd behaviour",
+   "score": 76.66666666666666
+  },
+  {
+   "a": "rbd in behavior",
+   "b": "network in rbd",
+   "score": 48.275862068965516
+  },
+  {
+   "a": "in in synuclein",
+   "b": "synuclein in a",
+   "score": 89.65517241379311
+  },
+  {
+   "a": "behaviour the rem",
+   "b": "rem the rbd",
+   "score": 64.28571428571428
+  },
+  {
+   "a": "the and model disease a a of disorder",
+   "b": "disease a the disorder of and a of",
+   "score": 92.95774647887323
+  },
+  {
+   "a": "network rem parkinson study rbd eeg rem neural learning",
+   "b": "neural rbd eeg learning network rem parkinson study learning",
+   "score": 88.69565217391305
+  },
+  {
+   "a": "cohort rbd in",
+   "b": "network rbd cohort",
+   "score": 77.41935483870968
+  },
+  {
+   "a": "parkinson review behavior neural",
+   "b": "parkinson review neural behavior",
+   "score": 100.0
+  },
+  {
+   "a": "and a of disorder",
+   "b": "and disorder a of",
+   "score": 100.0
+  },
+  {
+   "a": "model model cohort parkinson alpha sleep neural alpha",
+   "b": "neural alpha model model alpha cohort parkinson sleep",
+   "score": 100.0
+  },
+  {
+   "a": "of and parkinson cohort",
+   "b": "of parkinson cohort and",
+   "score": 100.0
+  },
+  {
+   "a": "disorder eeg synuclein parkinson of disease disorder parkinson behavior",
+   "b": "behavior disorder parkinson of parkinson eeg synuclein disease disorder",
+   "score": 100.0
+  },
+  {
+   "a": "a disorder study rem eeg rem",
+   "b": "rem study for disorder a eeg",
+   "score": 92.85714285714286
+  },
+  {
+   "a": "a in eeg of and",
+   "b": "eeg of in the and",
+   "score": 81.25
+  },
+  {
+   "a": "in disorder review deep disease rem the review",
+   "b": "rem in deep a review disorder the review",
+   "score": 88.37209302325581
+  },
+  {
+   "a": "in learning alpha the sleep disease rbd",
+   "b": "learning rbd sleep the in disease alpha",
+   "score": 100.0
+  },
+  {
+   "a": "for network",
+   "b": "for network",
+   "score": 100.0
+  },
+  {
+   "a": "alpha",
+   "b": "alpha",
+   "score": 100.0
+  },
+  {
+   "a": "rbd cohort cohort synuclein cohort disorder synuclein disorder",
+   "b": "disorder cohort cohort cohort synuclein rbd disorder disorder",
+   "score": 84.55284552845528
+  },
+  {
+   "a": "in",
+   "b": "deep",
+   "score": 0.0
+  },
+  {
+   "a": "in review behaviour",
+   "b": "behaviour review in",
+   "score": 100.0
+  },
+  {
+   "a": "disease sleep model neural sleep behavior rem rem",
+   "b": "model sleep rem disease sleep behavior neural rem",
+   "score": 100.0
+  },
+  {
+   "a": "sleep disease model alpha behaviour in behavior of eeg",
+   "b": "in sleep alpha disease model eeg behaviour of behavior",
+   "score": 100.0
+  },
+  {
+   "a": "behavior eeg network in for the disorder alpha of synuclein",
+   "b": "disorder the alpha synuclein in network for sleep of eeg",
+   "score": 86.95652173913044
+  },
+  {
+   "a": "disease behavior review behaviour the eeg disorder and",
+   "b": "disease behavior the disorder eeg and review deep",
+   "score": 89.32038834951457
+  },
+  {
+   "a": "model eeg study eeg rem alpha eeg in",
+   "b": "rem in model alpha eeg study eeg eeg",
+   "score": 100.0
+  },
+  {
+   "a": "parkinson network for",
+   "b": "behavior for network",
+   "score": 53.65853658536586
+  },
+  {
+   "a": "of rbd",
+   "b": "of rbd",
+   "score": 100.0
+  },
+  {
+   "a": "disorder",
+   "b": "disorder",
+   "score": 100.0
+  },
+  {
+   "a": "review disease behavior",
+   "b": "behavior review disease",
+   "score": 100.0
+  },
+  {
+   "a": "eeg",
+   "b": "eeg",
+   "score": 100.0
+  },
+  {
+   "a": "in in the synuclein review and rbd and",
+   "b": "the in review and in and synuclein rbd",
+   "score": 100.0
+  },
+  {
+   "a": "a behaviour eeg network",
+   "b": "network behaviour eeg a",
+   "score": 100.0
+  },
+  {
+   "a": "model synuclein learning review neural alpha disorder for",
+   "b": "neural synuclein review model alpha for learning review",
+   "score": 85.71428571428572
+  },
+  {
+   "a": "cohort behavior parkinson cohort deep for",
+   "b": "behavior cohort for parkinson cohort deep",
+   "score": 100.0
+  },
+  {
+   "a": "a deep network a disorder of neural",
+   "b": "neural deep disorder of network a a",
+   "score": 100.0
+  },
+  {
+   "a": "sleep behaviour rem and",
+   "b": "sleep and behaviour rem",
+   "score": 100.0
+  },
+  {
+   "a": "parkinson synuclein disease model",
+   "b": "parkinson disease synuclein model",
+   "score": 100.0
+  },
+  {
+   "a": "in in rem rem rem cohort",
+   "b": "in rem rem a cohort rem",
+   "score": 89.36170212765957
+  },
+  {
+   "a": "alpha sleep review",
+   "b": "alpha review review",
+   "score": 81.08108108108108
+  },
+  {
+   "a": "neural parkinson disease synuclein review rbd rem eeg alpha",
+   "b": "neural review synuclein disease rbd rem alpha parkinson eeg",
+   "score": 100.0
+  },
+  {
+   "a": "cohort network in",
+   "b": "in network a",
+   "score": 75.86206896551724
+  },
+  {
+   "a": "rem learning",
+   "b": "rem learning",
+   "score": 100.0
+  },
+  {
+   "a": "rem",
+   "b": "neural",
+   "score": 22.22222222222222
+  },
+  {
+   "a": "review behavior behaviour in for rem disease alpha behavior",
+   "b": "behavior in alpha disease review rem for behaviour behavior",
+   "score": 100.0
+  },
+  {
+   "a": "in learning rem rbd",
+   "b": "rbd learning rem in",
+   "score": 100.0
+  },
+  {
+   "a": "behaviour",
+   "b": "behaviour",
+   "score": 100.0
+  },
+  {
+   "a": "and learning disorder a",
+   "b": "learning a and disorder",
+   "score": 100.0
+  },
+  {
+   "a": "deep",
+   "b": "for",
+   "score": 0.0
+  },
+  {
+   "a": "neural",
+   "b": "neural",
+   "score": 100.0
+  },
+  {
+   "a": "learning network review eeg of cohort eeg rem synuclein in",
+   "b": "review eeg synuclein rem network cohort learning learning of eeg",
+   "score": 95.08196721311475
+  },
+  {
+   "a": "learning alpha sleep for study synuclein in model eeg",
+   "b": "study sleep for eeg in synuclein of alpha model",
+   "score": 88.0
+  },
+  {
+   "a": "parkinson the learning eeg eeg",
+   "b": "eeg eeg the learning parkinson",
+   "score": 100.0
+  },
+  {
+   "a": "sleep behaviour cohort cohort and study alpha study",
+   "b": "cohort sleep study and study eeg alpha behaviour",
+   "score": 90.9090909090909
+  },
+  {
+   "a": "cohort",
+   "b": "the",
+   "score": 22.22222222222222
+  },
+  {
+   "a": "rbd learning sleep eeg review sleep rem a in rem",
+   "b": "a rem eeg learning rem rbd sleep review sleep eeg",
+   "score": 94.84536082474226
+  },
+  {
+   "a": "and of cohort",
+   "b": "and of cohort",
+   "score": 100.0
+  },
+  {
+   "a": "sleep synuclein eeg behavior and",
+   "b": "sleep eeg behavior synuclein and",
+   "score": 100.0
+  },
+  {
+   "a": "and sleep disease in deep deep of sleep",
+   "b": "sleep disease deep of deep sleep and in",
+   "score": 100.0
+  },
+  {
+   "a": "study synuclein and of network rbd behavior behaviour behaviour",
+   "b": "behaviour behavior network rbd and synuclein study behaviour of",
+   "score": 100.0
+  },
+  {
+   "a": "learning review the",
+   "b": "review learning the",
+   "score": 100.0
+  },
+  {
+   "a": "neural of rbd and deep model cohort alpha neural",
+   "b": "and of model rbd alpha deep neural cohort neural",
+   "score": 100.0
+  },
+  {
+   "a": "rbd and rbd cohort of of neural alpha study deep",
+   "b": "cohort alpha of deep rbd study and rbd rbd of",
+   "score": 88.17204301075269
+  },
+  {
+   "a": "the review deep disease",
+   "b": "deep review the for",
+   "score": 76.19047619047619
+  },
+  {
+   "a": "and",
+   "b": "of",
+   "score": 0.0
+  },
+  {
+   "a": "synuclein network in neural model rbd",
+   "b": "neural in synuclein network disease rbd",
+   "score": 81.57894736842105
+  },
+  {
+   "a": "and for eeg network rbd",
+   "b": "network rbd synuclein for eeg",
+   "score": 73.07692307692308
+  },
+  {
+   "a": "deep in deep the eeg study network rem behaviour",
+   "b": "eeg in network rem behaviour the study deep deep",
+   "score": 100.0
+  },
+  {
+   "a": "for disorder learning a learning neural",
+   "b": "disorder learning a neural neural for",
+   "score": 86.8421052631579
+  },
+  {
+   "a": "neural behavior learning",
+   "b": "learning behavior behavior",
+   "score": 68.0
+  },
+  {
+   "a": "in synuclein disease for",
+   "b": "disease for synuclein in",
+   "score": 100.0
+  },
+  {
+   "a": "in synuclein rem cohort and behavior disease the model",
+   "b": "model disease synuclein and cohort behavior rem in the",
+   "score": 100.0
+  },
+  {
+   "a": "for parkinson behavior sleep model a behaviour learning cohort",
+   "b": "a cohort learning behaviour model sleep parkinson for behavior",
+   "score": 100.0
+  },
+  {
+   "a": "disease of eeg disease in parkinson synuclein rbd",
+   "b": "disease of in eeg rbd synuclein disease parkinson",
+   "score": 100.0
+  },
+  {
+   "a": "deep study sleep for review",
+   "b": "for study deep review sleep",
+   "score": 100.0
+  },
+  {
+   "a": "network neural behavior network",
+   "b": "neural network behavior network",
+   "score": 100.0
+  },
+  {
+   "a": "the for a and alpha behaviour synuclein",
+   "b": "the a synuclein learning and alpha for",
+   "score": 77.92207792207793
+  },
+  {
+   "a": "rbd cohort rem and deep deep disorder learning",
+   "b": "and deep learning deep rem cohort rbd disorder",
+   "score": 100.0
+  },
+  {
+   "a": "behavior the cohort behaviour network learning learning review",
+   "b": "network review behaviour cohort learning the behavior learning",
+   "score": 100.0
+  },
+  {
+   "a": "learning rem rbd neural deep rbd deep cohort",
+   "b": "deep neural cohort deep rbd learning rbd rem",
+   "score": 100.0
+  },
+  {
+   "a": "of review learning alpha rem model network disease the",
+   "b": "model learning disease rem alpha review the sleep of",
+   "score": 86.79245283018868
+  },
+  {
+   "a": "in rem in disorder behavior disorder",
+   "b": "rem in cohort behavior in disorder",
+   "score": 85.71428571428572
+  },
+  {
+   "a": "review rem",
+   "b": "a review",
+   "score": 77.77777777777779
+  },
+  {
+   "a": "in the disease neural",
+   "b": "disease neural the parkinson",
+   "score": 73.46938775510203
+  },
+  {
+   "a": "rbd study cohort behaviour a model network model",
+   "b": "model study behaviour cohort a model rbd network",
+   "score": 100.0
+  },
+  {
+   "a": "parkinson parkinson the behavior review behaviour a network network in",
+   "b": "in review behavior alpha network network parkinson behaviour the parkinson",
+   "score": 97.22222222222221
+  },
+  {
+   "a": "disease review cohort synuclein of in",
+   "b": "synuclein disease in cohort of disease",
+   "score": 80.0
+  },
+  {
+   "a": "alpha rbd learning",
+   "b": "learning rbd alpha",
+   "score": 100.0
+  },
+  {
+   "a": "disorder review the synuclein in network of the",
+   "b": "disorder in the network review synuclein the of",
+   "score": 100.0
+  },
+  {
+   "a": "disease synuclein and model deep a of disorder",
+   "b": "of disorder model synuclein synuclein and deep disease",
+   "score": 88.0
+  },
+  {
+   "a": "behavior disorder disorder disease eeg review alpha neural deep the",
+   "b": "disease review alpha the disorder disorder deep eeg behavior neural",
+   "score": 100.0
+  },
+  {
+   "a": "in for of learning disease behavior synuclein",
+   "b": "in behavior of for learning synuclein disease",
+   "score": 100.0
+  },
+  {
+   "a": "study",
+   "b": "study",
+   "score": 100.0
+  },
+  {
+   "a": "parkinson behavior behavior and rbd",
+   "b": "parkinson rbd behavior and behavior",
+   "score": 100.0
+  },
+  {
+   "a": "network",
+   "b": "network",
+   "score": 100.0
+  },
+  {
+   "a": "disease and",
+   "b": "disease alpha",
+   "score": 75.0
+  },
+  {
+   "a": "review and eeg disorder of behaviour network",
+   "b": "eeg review behaviour behaviour and network disorder",
+   "score": 86.31578947368422
+  },
+  {
+   "a": "of model",
+   "b": "model of",
+   "score": 100.0
+  },
+  {
+   "a": "review behaviour review parkinson study alpha parkinson cohort a alpha",
+   "b": "alpha study parkinson parkinson review a model review cohort behaviour",
+   "score": 91.42857142857143
+  },
+  {
+   "a": "eeg eeg model cohort sleep model neural rem",
+   "b": "model eeg cohort neural rem eeg model sleep",
+   "score": 100.0
+  },
+  {
+   "a": "cohort rbd behaviour review disease the rbd for network",
+   "b": "behaviour review parkinson rbd rbd the network disease cohort",
+   "score": 87.93103448275862
+  },
+  {
+   "a": "synuclein model alpha model disease behavior neural sleep cohort",
+   "b": "neural model synuclein sleep alpha disease behavior in model",
+   "score": 91.93548387096774
+  },
+  {
+   "a": "of rem neural disease rbd deep rem sleep disease",
+   "b": "rem rbd sleep disease of deep neural disease rem",
+   "score": 100.0
+  },
+  {
+   "a": "eeg neural deep cohort sleep and parkinson",
+   "b": "deep in eeg sleep cohort and parkinson",
+   "score": 92.5
+  },
+  {
+   "a": "the study deep neural synuclein cohort disease for parkinson the",
+   "b": "learning synuclein neural cohort for study the parkinson the deep",
+   "score": 86.82170542635659
+  },
+  {
+   "a": "disorder sleep behavior of a",
+   "b": "a disorder behavior sleep of",
+   "score": 100.0
+  },
+  {
+   "a": "learning neural",
+   "b": "behavior learning",
+   "score": 50.0
+  },
+  {
+   "a": "a learning the network the",
+   "b": "learning learning network the a",
+   "score": 77.19298245614034
+  },
+  {
+   "a": "model disease disease rbd learning and for deep and",
+   "b": "disease rbd for disease learning model deep and and",
+   "score": 100.0
+  },
+  {
+   "a": "a disorder",
+   "b": "a disorder",
+   "score": 100.0
+  },
+  {
+   "a": "review rem the synuclein",
+   "b": "the synuclein for review",
+   "score": 91.66666666666666
+  },
+  {
+   "a": "parkinson neural for rbd of a a in",
+   "b": "for a neural in of cohort a parkinson",
+   "score": 84.50704225352112
+  },
+  {
+   "a": "alpha deep parkinson model",
+   "b": "model deep parkinson alpha",
+   "score": 100.0
+  },
+  {
+   "a": "study for sleep",
+   "b": "study sleep for",
+   "score": 100.0
+  },
+  {
+   "a": "disorder a a sleep",
+   "b": "a sleep disorder and",
+   "score": 94.73684210526316
+  },
+  {
+   "a": "rbd model deep neural the sleep of model review",
+   "b": "deep review sleep of the model neural rbd model",
+   "score": 100.0
+  },
+  {
+   "a": "eeg",
+   "b": "review",
+   "score": 44.44444444444444
+  },
+  {
+   "a": "neural rem deep disease and a neural rbd behaviour",
+   "b": "a behaviour deep disease neural rbd and rem disorder",
+   "score": 90.19607843137256
+  },
+  {
+   "a": "behavior for",
+   "b": "behavior and",
+   "score": 66.66666666666667
+  },
+  {
+   "a": "sleep of review a study",
+   "b": "sleep of study review a",
+   "score": 100.0
+  },
+  {
+   "a": "neural learning",
+   "b": "neural learning",
+   "score": 100.0
+  },
+  {
+   "a": "rem model disease",
+   "b": "sleep model disease",
+   "score": 83.33333333333334
+  },
+  {
+   "a": "behavior parkinson",
+   "b": "parkinson behavior",
+   "score": 100.0
+  },
+  {
+   "a": "the and eeg study sleep parkinson",
+   "b": "the parkinson study study and eeg",
+   "score": 87.87878787878788
+  },
+  {
+   "a": "and the eeg deep neural neural",
+   "b": "eeg study and the deep neural",
+   "score": 84.7457627118644
+  },
+  {
+   "a": "review deep",
+   "b": "the review",
+   "score": 57.14285714285714
+  },
+  {
+   "a": "disorder synuclein study of parkinson rem study",
+   "b": "rem cohort study parkinson of synuclein disorder",
+   "score": 86.31578947368422
+  },
+  {
+   "a": "sleep behavior review disorder neural and rbd",
+   "b": "rbd sleep behavior review neural disorder and",
+   "score": 100.0
+  },
+  {
+   "a": "of rem for",
+   "b": "rem for of",
+   "score": 100.0
+  },
+  {
+   "a": "a cohort model",
+   "b": "model cohort a",
+   "score": 100.0
+  },
+  {
+   "a": "disorder rem synuclein network disease in",
+   "b": "behavior synuclein in network disorder disease",
+   "score": 85.0574712643678
+  },
+  {
+   "a": "",
+   "b": "ccdcaééaéacdaéññ eeb",
+   "score": 0.0
+  },
+  {
+   "a": "ce漢eddcaadeñañb 漢éñbbb漢bd d漢b ",
+   "b": "c漢é漢bd漢cecñ  c",
+   "score": 33.333333333333336
+  },
+  {
+   "a": "ññ",
+   "b": "漢漢b",
+   "score": 0.0
+  },
+  {
+   "a": "b 漢ñeba edñcñb漢b漢bé漢a漢",
+   "b": "",
+   "score": 0.0
+  },
+  {
+   "a": "e céc añ ccdb dbdecéañbañ",
+   "b": "ed bdb",
+   "score": 32.25806451612904
+  },
+  {
+   "a": "ñ漢bñ 漢ñc",
+   "b": "céacaaéañaññe",
+   "score": 28.57142857142857
+  },
+  {
+   "a": "ebbañaad dbña",
+   "b": " bbee漢ébeédcéacñ abcedbeñbb",
+   "score": 41.02564102564102
+  },
+  {
+   "a": " 漢漢c",
+   "b": " ññbéd漢eddéñeéb漢b",
+   "score": 21.052631578947366
+  },
+  {
+   "a": "eb ñdddcee ecdéé漢eb cea",
+   "b": "eb ñ",
+   "score": 29.629629629629626
+  },
+  {
+   "a": "ecaeñababc bb漢dañd",
+   "b": "ccdécb漢cd c漢",
+   "score": 33.333333333333336
+  },
+  {
+   "a": "dbbañceaéñ漢漢d bcdbaññe 漢ñcéae",
+   "b": "ñ",
+   "score": 6.666666666666665
+  },
+  {
+   "a": "ebéed ad漢cebce  aéñdbd d 漢 ",
+   "b": "aeñb",
+   "score": 27.586206896551722
+  },
+  {
+   "a": "ceac cbc漢 ac  cea dceée b",
+   "b": "c ñe 漢ñeñ漢 ñacdañaedbbña漢éac",
+   "score": 38.46153846153846
+  },
+  {
+   "a": " ee",
+   "b": "漢  ca",
+   "score": 0.0
+  },
+  {
+   "a": "c漢ecc d ",
+   "b": "d ade漢dac漢 ññ cdñeé漢bdb ébéc漢漢",
+   "score": 27.027027027027028
+  },
+  {
+   "a": "d 漢 漢cbadcb ñb eabñadca漢",
+   "b": "acaecñ漢é漢dec",
+   "score": 44.44444444444444
+  },
+  {
+   "a": "deéé漢bbeabaeaeéece漢ñacéb",
+   "b": "a漢ac漢c a b漢ñéedc",
+   "score": 35.0
+  },
+  {
+   "a": "é漢dee éeéñc漢cceaé bñcedb",
+   "b": "cñéécñdd",
+   "score": 31.25
+  },
+  {
+   "a": "é 漢 ñ e eé c",
+   "b": "ñba漢bd漢",
+   "score": 21.052631578947366
+  },
+  {
+   "a": "bdbdcadbé漢badecd é e漢ceéa",
+   "b": " cce c漢 ",
+   "score": 25.806451612903224
+  },
+  {
+   "a": "ébae漢ñ漢é漢 eñb bñdeéccde漢b",
+   "b": "céaabeddñdé漢cacañbda d",
+   "score": 38.297872340425535
+  },
+  {
+   "a": "é 漢d ",
+   "b": "ñbd éñaebbñée 漢漢c",
+   "score": 28.57142857142857
+  },
+  {
+   "a": "aeécñ",
+   "b": "cab eéaca漢céedñ",
+   "score": 50.0
+  },
+  {
+   "a": "a ééé漢dd漢ceaéa",
+   "b": "añe漢eé 漢cb 漢dñeedcééñdécécé d",
+   "score": 32.55813953488372
+  },
+  {
+   "a": "db aeec漢  éaee漢ab  ññ",
+   "b": "b漢écd漢ebbééa漢ad ad",
+   "score": 43.24324324324324
+  },
+  {
+   "a": "ññbebdada a漢é beñdbdbñbñ",
+   "b": " éeccñccébñcd",
+   "score": 33.333333333333336
+  },
+  {
+   "a": "bac",
+   "b": "bb ña漢",
+   "score": 44.44444444444444
+  },
+  {
+   "a": "é",
+   "b": "cééda漢ecaeac漢cé ",
+   "score": 12.5
+  },
+  {
+   "a": "c béeaccéab",
+   "b": "béñdé漢 dbcd",
+   "score": 45.45454545454546
+  },
+  {
+   "a": "漢漢é aéññ漢cé漢 é éb漢bddññ ddc ab",
+   "b": "d漢cadc céaae漢ca 漢ñdñdébcé漢 ñ",
+   "score": 48.275862068965516
+  },
+  {
+   "a": "cédé ñbae漢漢ecc  漢ñ decéñ bñ",
+   "b": " a",
+   "score": 7.4074074074074066
+  },
+  {
+   "a": "bcé",
+   "b": "eñb漢漢be cñcaaé",
+   "score": 23.529411764705888
+  },
+  {
+   "a": "bbñ漢aé漢e é漢b dc",
+   "b": " 漢eeddñé漢",
+   "score": 43.47826086956522
+  },
+  {
+   "a": "漢c",
+   "b": "eñbbaéeacdbé",
+   "score": 14.28571428571429
+  },
+  {
+   "a": "éb漢c漢ñ",
+   "b": "aa漢a 漢漢aeéaéñ",
+   "score": 31.57894736842105
+  },
+  {
+   "a": " 漢",
+   "b": "bdñ c漢 eded漢é",
+   "score": 14.28571428571429
+  },
+  {
+   "a": "a",
+   "b": "e",
+   "score": 0.0
+  },
+  {
+   "a": "éab ññ漢é ñ e漢",
+   "b": "ñab漢bedéa",
+   "score": 36.36363636363637
+  },
+  {
+   "a": "dcéb ec bcñéñcñdaebe",
+   "b": "a漢ñ漢c bb漢caé é édñ aa 漢aééñ",
+   "score": 25.531914893617024
+  },
+  {
+   "a": "daecd ",
+   "b": "漢ca漢d bañ ña漢cccaab",
+   "score": 25.0
+  },
+  {
+   "a": "漢c",
+   "b": "ñé  漢 bc ñdeédcéébadéae a",
+   "score": 7.692307692307687
+  },
+  {
+   "a": "漢漢ccaé漢d deéñ",
+   "b": "漢ca",
+   "score": 37.5
+  },
+  {
+   "a": " d bdbñ漢éñéeecébééaaabc caeé漢",
+   "b": "漢bb eeedñddacac bañcc  漢éa",
+   "score": 37.735849056603776
+  },
+  {
+   "a": "ecdac",
+   "b": "dé漢漢adb漢ab漢aéc",
+   "score": 31.57894736842105
+  },
+  {
+   "a": " ea漢漢ec bd漢 漢bññdñaaa",
+   "b": " b漢漢e漢abcdeñeñ漢éaañéñaeé db漢",
+   "score": 46.808510638297875
+  },
+  {
+   "a": " 漢ñcñdc",
+   "b": "dce漢aead漢bcéa漢bcéb",
+   "score": 25.0
+  },
+  {
+   "a": "  e漢aecaéébd漢cébabñ añb",
+   "b": "ñ eécdaaa",
+   "score": 33.333333333333336
+  },
+  {
+   "a": "cb",
+   "b": "ñcdécd ñ   a caaa",
+   "score": 11.764705882352944
+  },
+  {
+   "a": "漢cééc漢 ad a ",
+   "b": "ñebñ 漢 cddd",
+   "score": 27.27272727272727
+  },
+  {
+   "a": "漢d  éñd",
+   "b": "漢éébe漢cdé debaéddcbeac",
+   "score": 35.71428571428571
+  },
+  {
+   "a": "ñ漢adba漢ebed",
+   "b": "ññ  ceñ  eañ漢漢éea",
+   "score": 30.76923076923077
+  },
+  {
+   "a": "ñ",
+   "b": "dañaaeca漢ñ",
+   "score": 18.181818181818176
+  },
+  {
+   "a": "bé漢ñd b漢édedñ d bcaedcé ca",
+   "b": "a漢adéeeéñdc漢ñcbe   daa ",
+   "score": 47.82608695652174
+  },
+  {
+   "a": " ea c 漢漢",
+   "b": "éñ abéc c aa 漢",
+   "score": 38.095238095238095
+  },
+  {
+   "a": "bdec漢edab cñ",
+   "b": "éddbbebññbaadedñd 漢ñ ",
+   "score": 37.5
+  },
+  {
+   "a": "漢ñedd baéad aa c aa c  a漢cbé",
+   "b": "漢añeñ漢ecñb漢ddédddéb eéébabañb",
+   "score": 39.28571428571429
+  },
+  {
+   "a": "d bcañ漢c漢eda漢dcdc漢ab漢bdbbbee漢d",
+   "b": "ññecadébadñ édañc aaébb",
+   "score": 37.735849056603776
+  },
+  {
+   "a": "e漢béé漢 é ccd",
+   "b": "eñbeaebdññbaé漢 dñacbeeeé漢",
+   "score": 32.432432432432435
+  },
+  {
+   "a": "edc漢ée漢漢be漢aaeéc",
+   "b": "ca ñ",
+   "score": 19.999999999999996
+  },
+  {
+   "a": "é漢eéééabcedcaa",
+   "b": " é be dbebb é漢漢eb ",
+   "score": 26.66666666666667
+  }
+ ]
+}
