@@ -9,15 +9,18 @@ import inspect
 import json
 import re
 import shutil
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import yaml
 
-from scieflow.core import events
+from scieflow.core import events, network
 from scieflow.integrations.scite.ledger import default_dir
-from scieflow.research.lib import providers
+from scieflow.research.lib import providers, snapshots
 from scieflow.research.search import arxiv, crossref, europepmc, openalex, registry
+
+REPO = Path(__file__).resolve().parents[3]
 
 OPENALEX_URL = "https://api.openalex.org/works"
 ARXIV_URL = "https://export.arxiv.org/api/query"
@@ -261,3 +264,110 @@ def test_an_l2_run_answers_a_snapshot_without_transport_and_refuses_a_miss(proje
 
 def test_check_keeps_its_signature():
     assert list(inspect.signature(providers.Gateway.check).parameters) == ["self", "provider", "url"]
+
+
+# --- review r1 fixes (t2f): structure, record preflight, write errors, coverage ----------------
+
+def test_a_record_refuses_a_linked_snapshot_folder_before_it_sends(project, wire, capsys, tmp_path):
+    _, ws = project
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (ws / "snapshots").symlink_to(elsewhere, target_is_directory=True)
+    code, out, err = run(openalex, [QUERY, "--workspace", "demo", "--network", "record"], capsys)
+    assert code == 3 and "symbolic link" in err
+    assert wire.calls == [] and out == ""
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_a_failed_snapshot_write_is_a_clean_error_not_a_traceback(project, wire, capsys, monkeypatch):
+    _, ws = project
+
+    def full_disk(src, dst):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(snapshots.os, "replace", full_disk)
+    code, out, err = run(openalex, [QUERY, "--workspace", "demo", "--network", "record"], capsys)
+    assert code == 1 and "could not be written" in err
+    assert err.startswith("error: snapshots/literature/search-openalex/")
+    assert out == "" and snapshot_files(ws) == []
+
+
+def test_a_replay_miss_cannot_fall_through_to_the_transport(project, wire, monkeypatch):
+    root, ws = project
+    write_network(ws, "replay")
+
+    def miss_returned_not_raised(self, *args):
+        return network.NetworkMiss("search-openalex", "search", "0" * 64, "replay", "demo")
+
+    monkeypatch.setattr(providers.Gateway, "_miss", miss_returned_not_raised)
+    gw = providers.Gateway(ws, providers.load(root))
+    with pytest.raises(network.NetworkMiss):
+        gw.get_json("search-openalex", "search", OPENALEX_URL,
+                    checked={"search": registry.check_query(QUERY)}, fixed={"per-page": 25})
+    assert wire.calls == []
+
+
+def test_a_record_call_writes_its_ledger_row_and_its_cache_entry(project, wire, capsys):
+    root, ws = project
+    gw = providers.Gateway(ws, providers.load(root), network="record")
+    gw.get_json("search-openalex", "search", OPENALEX_URL,
+                checked={"search": registry.check_query(QUERY)}, fixed={"per-page": 25})
+    [snap_file] = snapshot_files(ws)
+    snap = json.loads(snap_file.read_text(encoding="utf-8"))
+    rows = [json.loads(x) for x in (ws / "scite" / "ledger.jsonl").read_text().splitlines()]
+    assert [(r["source"], r["op"], r["cached"], r["status"]) for r in rows] == [
+        ("search-openalex", "search", False, "ok")]
+    assert rows[0]["results"] == snap["results"] and rows[0]["key"] == snap_file.stem
+    hit = gw.cache.get(snap_file.stem, "search")
+    assert isinstance(hit, dict) and hit["value"] == snap["response_body"]
+
+
+def test_a_replay_miss_writes_no_ledger_row_and_no_event_at_all(project, wire, capsys):
+    _, ws = project
+    code, _, _ = run(openalex, [QUERY, "--workspace", "demo", "--network", "replay"], capsys)
+    assert code == 6 and wire.calls == []
+    assert not (ws / "scite" / "ledger.jsonl").exists()
+    assert events.read(ws) == []
+
+
+def test_an_l2_run_without_a_network_file_cannot_be_loosened_by_a_flag(project, wire, capsys):
+    _, ws = project
+    declare_l2(ws)
+    for flag in ("live", "record"):
+        code, _, err = run(openalex, [QUERY, "--workspace", "demo", "--network", flag], capsys)
+        assert code == 3 and "cannot loosen" in err
+    assert wire.calls == []
+
+
+@pytest.mark.parametrize("flag", ["live", "record"])
+def test_a_dispatch_cannot_loosen_a_replaying_run_with_a_flag(project, wire, capsys, monkeypatch, flag):
+    _, ws = project
+    write_network(ws, "replay")
+    monkeypatch.setenv("UV_CACHE_DIR", str(ws / ".uv-cache"))
+    code, _, err = run(openalex, [QUERY, "--network", flag], capsys)
+    assert code == 3 and "cannot loosen" in err
+    assert wire.calls == []
+
+
+def test_the_discovery_pipeline_replays_a_recorded_provider_call_with_zero_transport(project, wire):
+    from scieflow.research.discovery import pipeline
+    from scieflow.research.lib import pubtator
+
+    root, ws = project
+    shutil.copy(REPO / "config" / "integrations.example.yml", root / "config" / "integrations.yml")
+    pt_relations = "https://www.ncbi.nlm.nih.gov/research/pubtator3-api/relations"
+    fixture = json.loads((REPO / "tests" / "fixtures" / "discovery" / "pubtator"
+                          / "relations_rbd.json").read_text(encoding="utf-8"))
+    wire.answers[pt_relations] = lambda: _json_answer(fixture)
+    project_ = SimpleNamespace(root=root)
+    rbd = "@DISEASE_REM_Sleep_Behavior_Disorder"
+
+    write_network(ws, "record")
+    recorded = pubtator.relations(pipeline._gateway(project_, ws), rbd)
+    assert wire.calls == [pt_relations]
+
+    write_network(ws, "replay")
+    wire.answers.clear()
+    wire.calls.clear()
+    replayed = pubtator.relations(pipeline._gateway(project_, ws), rbd)
+    assert replayed == recorded and wire.calls == []

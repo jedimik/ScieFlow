@@ -453,11 +453,13 @@ class Gateway:
                 found, value = self._cached(provider, op, key, req, ttl_class)
                 if found:
                     return value
-            self._miss(resolved, provider, op, key, run)
+            raise self._miss(resolved, provider, op, key, run)
         if resolved.mode == "live":
             found, value = self._cached(provider, op, key, req, ttl_class)
             if found:
                 return value
+        if resolved.mode == "record" and run is not None:
+            snapshots.ensure_writable(run, provider=provider, key=key)   # before anything is sent
         try:
             # never follow a redirect: the next host would be one nobody checked
             resp = http.send("GET", url, params=req, retries=self.retries,
@@ -483,9 +485,12 @@ class Gateway:
         except (TypeError, ValueError, OSError):
             pass
         if resolved.mode == "record" and run is not None:
-            rec = snapshots.write(run, provider=provider, op=op, key=key, url=url,
-                                  request_params=req, body_kind="text" if as_text else "json",
-                                  response_body=value, results=n)
+            try:
+                rec = snapshots.write(run, provider=provider, op=op, key=key, url=url,
+                                      request_params=req, body_kind="text" if as_text else "json",
+                                      response_body=value, results=n)
+            except OSError as exc:
+                raise snapshots.write_failed(run, provider, key, exc) from None
             events.emit(run, "literature.snapshot", action="recorded", provider=provider, op=op,
                         key=key, response_hash=rec["response_hash"])
         return value
@@ -501,15 +506,16 @@ class Gateway:
             return True, hit["value"]
         return False, None
 
-    def _miss(self, resolved, provider: str, op: str, key: str, run) -> None:
-        """A no-egress request that nothing answers: nothing is sent (M-C1 5.6). An L2 run's
-        unlisted service raises the M-B refusal instead of the typed miss."""
+    def _miss(self, resolved, provider: str, op: str, key: str, run):
+        """The exception for a no-egress request that nothing answers: nothing is sent (M-C1 5.6).
+        Returned, not raised, so each call site says `raise` and control cannot fall through to a
+        transport. An L2 run's unlisted service raises the M-B refusal instead of the typed miss."""
         from scieflow.core import network
 
         if resolved.on_miss == "m-b":
             self._data_check(provider)
-        raise network.NetworkMiss(provider, op, key, resolved.mode,
-                                  run.name if run is not None else "-")
+        return network.NetworkMiss(provider, op, key, resolved.mode,
+                                   run.name if run is not None else "-")
 
     def _record(self, provider, op, results, key, req, error) -> None:
         status = "ok" if error is None else "error"

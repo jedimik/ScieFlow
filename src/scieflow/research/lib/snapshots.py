@@ -32,6 +32,10 @@ class SnapshotCorrupt(providers.ProviderRefused):
     """A snapshot that fails its checks, or a path through a symbolic link (exit 3)."""
 
 
+class SnapshotWriteError(ValueError):
+    """A snapshot the Gateway could not write. The search ran; the command fails (exit 1)."""
+
+
 def path(ws, provider: str, key: str) -> Path:
     """The file of one snapshot. The provider must be a catalogued one; the key 64 hex digits."""
     if provider not in providers.CATALOGUE:
@@ -57,6 +61,23 @@ def _no_links(ws, target: Path) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def write_failed(ws, provider: str, key: str, exc: OSError) -> SnapshotWriteError:
+    """The refusal for a snapshot the disk would not take: names the relative path only."""
+    rel = _rel(Path(ws), path(ws, provider, key))
+    return SnapshotWriteError(f"{rel} could not be written ({exc.strerror or 'OS error'})")
+
+
+def ensure_writable(ws, *, provider: str, key: str) -> None:
+    """Before a record-mode request is sent: the snapshot's place is plain and can be created.
+    A symbolic link or an unwritable folder refuses here, so nothing is sent for it."""
+    target = path(ws, provider, key)
+    _no_links(ws, target)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise write_failed(ws, provider, key, exc) from None
 
 
 def write(ws, *, provider: str, op: str, key: str, url: str, request_params: dict,
@@ -114,6 +135,9 @@ def load(ws, *, provider: str, op: str, key: str, url: str, request_params: dict
          and (data["body_kind"] == "text") == isinstance(data["response_body"], str),
          "its body kind does not match its body"),
         (data["response_hash"] == digest, "its body does not match its hash"),
+        (isinstance(data["results"], int) and not isinstance(data["results"], bool)
+         and data["results"] >= 0, "its result count is not a non-negative integer"),
+        (isinstance(data["retrieved_at"], str), "its retrieval time is not a string"),
     )
     for ok, why in checks:
         if not ok:

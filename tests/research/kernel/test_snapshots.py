@@ -144,3 +144,24 @@ def test_an_interrupted_write_leaves_no_partial_file(run, monkeypatch):
     assert not _file(run).exists()
     folder = run / "snapshots" / "literature" / PROVIDER
     assert not list(folder.glob("*"))
+
+
+@pytest.mark.parametrize("field, value", [
+    ("results", "ZZTAMPER"),
+    ("results", -5),
+    ("results", None),
+    ("results", True),
+    ("results", {"ZZTAMPER": 1}),
+    ("retrieved_at", 2026),
+    ("retrieved_at", ["ZZTAMPER"]),
+])
+def test_malformed_result_count_or_retrieval_time_is_corrupt_and_never_echoed(run, field, value):
+    _write(run)
+    doc = json.loads(_file(run).read_text(encoding="utf-8"))
+    doc[field] = value
+    _file(run).write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(snapshots.SnapshotCorrupt) as exc:
+        _load(run)
+    message = str(exc.value)
+    assert f"snapshots/literature/{PROVIDER}/{KEY}.json" in message
+    assert "ZZTAMPER" not in message
