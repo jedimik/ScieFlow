@@ -47,7 +47,38 @@ def test_an_import_makes_the_run_at_least_l15(ws):
 
 
 def test_an_import_never_lowers_a_declared_l2(ws):
-    write_data(ws, base(levels=[entry("a.csv", "L2")], imports=[{"id": "i1"}]))
+    write_data(ws, base(levels=[entry("a.csv", "L2")],
+                        imports=[{"id": "i1", "file": "inputs/released/s/a.csv",
+                                  "sha256": "0" * 64}]))
+    assert levels.run_level(ws) == "L2"
+
+
+@pytest.mark.parametrize("raw", [
+    "version: 1\nlevels: []\nnote: 2026-13-45\n",                        # ValueError (impossible date)
+    "version: 1\nlevels: []\nnote: " + "[" * 5000 + "]" * 5000 + "\n",  # RecursionError
+])
+def test_a_yaml_load_crash_is_invalid_not_an_exception(ws, raw):
+    # M-B review F1: yaml.safe_load raises ValueError and RecursionError, which escaped the loader.
+    (ws / "data.yml").write_text(raw)
+    got = levels.read(ws)
+    assert isinstance(got, levels.Invalid)
+    assert levels.run_level(ws) == "L2"
+
+
+@pytest.mark.parametrize("key, bad", [
+    ("released", [1, 2]),                                            # not a mapping
+    ("released", [{"id": "r1", "file": "released/r1/a.csv"}]),       # sha256 missing
+    ("imports", ["x"]),
+    ("imports", [{"id": "i1"}]),                                     # file and sha256 missing
+    ("pending_releases", [None]),
+    ("pending_releases", [{"id": "p1", "source": "outputs/a.csv"}]),  # sha256 and gate missing
+])
+def test_release_and_import_items_must_be_complete_mappings(ws, key, bad):
+    # M-B review F1: a non-mapping item crashed the data panel and audit with AttributeError.
+    write_data(ws, base(**{key: bad}))
+    got = levels.read(ws)
+    assert isinstance(got, levels.Invalid)
+    assert key in got.reason
     assert levels.run_level(ws) == "L2"
 
 

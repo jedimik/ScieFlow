@@ -52,6 +52,24 @@ def test_a_broken_data_file_is_l2_with_a_reason_and_no_exception(project, ws):
     assert panel["reason"]
 
 
+def test_a_non_mapping_release_item_is_l2_and_never_raises_in_the_panel(project, ws):
+    # M-B review F1: released: [1, 2] crashed the panel with AttributeError.
+    (ws / "data.yml").write_text(yaml.safe_dump({"version": 1, "released": [1, 2]}))
+    panel = _panel(project)
+    assert panel["level"] == "L2"
+    assert panel["reason"]
+
+
+def test_a_declaration_without_a_kind_defaults_to_other_in_the_panel(project, ws):
+    # M-B final fix F1 (same class): kind is optional in the loader, so the panel must not index it.
+    (ws / "data.yml").write_text(yaml.safe_dump({"version": 1, "levels": [{
+        "path": "inputs/x.csv", "level": "L2", "reason": "synthetic", "declared_by": "human",
+        "declared_at": "2026-10-26T10:00:00Z"}]}))
+    panel = _panel(project)
+    assert panel["level"] == "L2"
+    assert panel["declarations"] == [{"path": "inputs/x.csv", "level": "L2", "kind": "other"}]
+
+
 def test_an_l2_run_under_warn_enforcement_gets_the_refuse_suggestion(project, ws):
     _declare_l2(ws)
     panel = _panel(project)

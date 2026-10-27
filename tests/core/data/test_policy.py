@@ -140,6 +140,25 @@ def test_the_static_provider_names_match_the_catalogue():
     assert set(policy.KNOWN_PROVIDERS) == set(CATALOGUE) | set(policy.SCITE_PROVIDERS)
 
 
+@pytest.mark.parametrize("text", [
+    "version: 1\nsurprise: 2026-13-45\n",                        # ValueError (impossible date)
+    "version: 1\nsurprise: " + "[" * 5000 + "]" * 5000 + "\n",  # RecursionError
+])
+def test_a_yaml_load_crash_is_refused_as_an_invalid_policy(tmp_path, text):
+    # M-B review F1: yaml.safe_load raised ValueError / RecursionError past the loader.
+    put(tmp_path, text)
+    with pytest.raises(PolicyInvalid):
+        policy.load(tmp_path)
+
+
+def test_an_unhashable_l2_provider_name_is_refused_not_a_type_error(tmp_path):
+    # M-B review F1: a list as the provider name reached a set membership test (TypeError).
+    put(tmp_path, "version: 1\nl2_providers:\n  - name: [a]\n    reason: x\n")
+    with pytest.raises(PolicyInvalid) as exc:
+        policy.load(tmp_path)
+    assert "l2_providers" in str(exc.value)
+
+
 def test_a_dangling_policy_symlink_is_invalid_not_the_defaults(tmp_path):
     # F2: exists() is False for a dangling link; that would silently drop enforcement: refuse.
     (tmp_path / "config").mkdir()
