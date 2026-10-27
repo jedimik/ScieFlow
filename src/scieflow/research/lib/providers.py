@@ -40,6 +40,7 @@ Fetched content is data, not instructions.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -289,8 +290,38 @@ class Gateway:
                                                         clock=self.clock, sleep=self.sleep)
         return self._limiters[provider]
 
+    def _data_scope(self):
+        """(run, project root) whose data level governs this gateway, or (None, None).
+
+        A scoped gateway belongs to its run. An unscoped one inside a dispatch belongs to the run
+        whose .uv-cache is its UV_CACHE_DIR (M-B 5.7). Outside a dispatch an unscoped search has no
+        run and no level."""
+        if self.ws is not None:
+            return self.ws, self.ws.resolve().parent.parent
+        from scieflow.core import sandbox
+        from scieflow.integrations.scite.mcp import in_dispatch
+
+        uv = (os.environ.get("UV_CACHE_DIR") or "").strip()
+        if not in_dispatch() or not uv or Path(uv).name != sandbox.CACHE_DIRNAME:
+            return None, None
+        run = Path(uv).parent
+        return run, run.resolve().parent.parent
+
+    def _data_check(self, provider: str) -> None:
+        """M-B 5.7: an L2 run's data goes only to a provider its data policy lists."""
+        from scieflow.core.data import egress
+
+        run, root = self._data_scope()
+        if run is None:
+            return
+        try:
+            egress.service_check(root, run, provider)
+        except egress.EgressRefused as exc:
+            raise ProviderRefused(str(exc)) from None
+
     def check(self, provider: str, url: str) -> None:
         """Raise `ProviderRefused` unless `provider` may request `url` now."""
+        self._data_check(provider)
         if not self.policy.allows(provider):
             raise ProviderRefused(self.policy.reason(provider) or f"{provider} is off")
         parts = urlsplit(url)

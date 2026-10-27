@@ -27,6 +27,7 @@ import yaml
 from scieflow.core import agent_config
 from scieflow.core import config
 from scieflow.core import events
+from scieflow.core.data import dispatch as data_dispatch
 from scieflow.core import jobs
 from scieflow.core import legacy
 from scieflow.core import sandbox
@@ -44,6 +45,7 @@ PROMPT_ARGV_LIMIT = int(legacy.env("SCIEFLOW_PROMPT_ARGV_LIMIT", "100000"))
 
 BUDGET_EXIT = 75   # EX_TEMPFAIL: refused, not failed — never an agent's own code
 SANDBOX_EXIT = 77  # EX_NOPERM: refused for want of a sandbox, not an agent failure
+DATA_EXIT = 78     # refused by a data-protection rule (M-B 5.11); never an agent's own code
 
 
 class DispatchError(Exception):
@@ -61,6 +63,7 @@ class Dispatch:
     writable: list[Path] | None = None    # None means this dispatch is unsandboxed
     env: dict | None = field(default=None, repr=False)   # None: inherit; carries a token (S4)
     layout: sandbox.Layout | None = None  # the allow-list view; verify and launch share it
+    data: data_dispatch.Decision | None = field(default=None, repr=False)  # M-B decision
 
 
 def _prompt_via_stdin_safe(template: str) -> bool:
@@ -85,32 +88,34 @@ def _prompt_via_stdin_safe(template: str) -> bool:
 
 def build_argv(agent_cfg: dict, prompt: str, root: Path,
                include_prompt: bool = True, template: str | None = None,
-               session: str = "") -> list[str]:
+               session: str = "", endpoint: str = "") -> list[str]:
     model = str(agent_cfg.get("model", ""))
     reasoning = str(agent_cfg.get("reasoning", ""))
     cmd_template = template if template is not None else agent_cfg["cmd"]
     return _template_argv(cmd_template, prompt, root, model=model, reasoning=reasoning,
-                          python=sys.executable, session=session, include_prompt=include_prompt)
+                          python=sys.executable, session=session, include_prompt=include_prompt,
+                          endpoint=endpoint)
 
 
 def _template_token(token: str, prompt: str, root: Path, *, model: str,
-                    reasoning: str, python: str, session: str) -> str:
+                    reasoning: str, python: str, session: str, endpoint: str = "") -> str:
     """Expand recognized ORIGINAL-token placeholders once; inserted values are literal."""
     values = {'model': model, 'reasoning': reasoning, 'root': str(root),
-              'python': python, 'session': session, 'prompt': prompt}
-    return re.sub(r'\{(model|reasoning|root|python|session|prompt)\}',
+              'python': python, 'session': session, 'prompt': prompt, 'endpoint': endpoint}
+    return re.sub(r'\{(model|reasoning|root|python|session|prompt|endpoint)\}',
                   lambda match: values[match.group(1)], token)
 
 
 def _template_argv(cmd_template: str, prompt: str, root: Path, *, model: str,
-                   reasoning: str, python: str, session: str, include_prompt: bool) -> list[str]:
+                   reasoning: str, python: str, session: str, include_prompt: bool,
+                   endpoint: str = "") -> list[str]:
     """Split BEFORE literal substitution; all effect-bearing operands are arguments."""
     argv = []
     for token in shlex.split(cmd_template):
         if not include_prompt and "{prompt}" in token:
             continue
         argv.append(_template_token(token, prompt, root, model=model, reasoning=reasoning,
-                                    python=python, session=session))
+                                    python=python, session=session, endpoint=endpoint))
     return argv
 
 
@@ -330,6 +335,19 @@ def prepare(project: Project, agent: str, prompt_file: Path,
             raise DispatchError(
                 f"{agent} cannot host a conversation: no {key} in its configuration")
 
+    # M-B C3: the sandbox on/off state is read before argv, so the data decision (which fills
+    # {endpoint} for a safe agent) can use it. Only the order changed; the values are the same.
+    policy = sandbox.read_policy(project) if run_dir is not None else None   # one read (A2)
+    disabled = sandbox_disabled_in_run(project, run_dir, policy=policy)
+    use_sandbox = sandbox_enabled and not disabled
+    writable = (sandbox.writable_for(project, run_dir=run_dir, coordinator=False, policy=policy)
+                if use_sandbox else None)
+    decision = data_dispatch.decide(project, run_dir, agent, agent_cfg, sandboxed=use_sandbox,
+                                    templates_use_endpoint=data_dispatch.uses_endpoint(agent_cfg))
+    if not decision.allowed:
+        raise data_dispatch.DataRefused(decision)
+    endpoint = decision.endpoint
+
     use_stdin = len(prompt.encode()) > PROMPT_ARGV_LIMIT
     if use_stdin and conversational:
         # The conversational template (session_cmd/resume_cmd) must win over
@@ -344,22 +362,18 @@ def prepare(project: Project, agent: str, prompt_file: Path,
                 f"{len(prompt.encode())} bytes, over the {PROMPT_ARGV_LIMIT}-byte argv "
                 "limit — it cannot be sent this way")
         argv = build_argv(agent_cfg, prompt, root, include_prompt=False,
-                          template=template, session=session or "")
+                          template=template, session=session or "", endpoint=endpoint)
     elif use_stdin and "stdin_cmd" in agent_cfg:
         argv = build_argv(agent_cfg, prompt, root, include_prompt=False,
-                          template=agent_cfg["stdin_cmd"])
+                          template=agent_cfg["stdin_cmd"], endpoint=endpoint)
     elif use_stdin:
         # No stdin_cmd: drop the {prompt} token from the normal command and
         # send the text on stdin instead (stdin_text below carries it).
         argv = build_argv(agent_cfg, prompt, root, include_prompt=False,
-                          template=template, session=session or "")
+                          template=template, session=session or "", endpoint=endpoint)
     else:
-        argv = build_argv(agent_cfg, prompt, root, template=template, session=session or "")
-    policy = sandbox.read_policy(project) if run_dir is not None else None   # one read (A2)
-    disabled = sandbox_disabled_in_run(project, run_dir, policy=policy)
-    use_sandbox = sandbox_enabled and not disabled
-    writable = (sandbox.writable_for(project, run_dir=run_dir, coordinator=False, policy=policy)
-                if use_sandbox else None)
+        argv = build_argv(agent_cfg, prompt, root, template=template, session=session or "",
+                          endpoint=endpoint)
     # The allow-list view and the dispatch's own HOME, computed read-only (A12). The
     # `readable:` grants come from the same captured policy read (A2). The CLI path
     # creates the home in wrap(), next to the writable mkdir; the turn path creates it
@@ -372,7 +386,9 @@ def prepare(project: Project, agent: str, prompt_file: Path,
         cli = argv[sandbox.agent_cli_index(argv)]        # A7: an env prefix with options is refused
         located = sandbox.host_launcher(cli, cwd)
         layout = sandbox.dispatch_layout(project, run_dir=run_dir, agent=agent,
-                                         readable=readable, launcher=located)
+                                         readable=readable, launcher=located,
+                                         data_hidden=decision.data_hidden,     # M-B 5.5
+                                         protected=decision.protected)
         layout, credential_env = sandbox.attach_credential(
             layout, sandbox.credentials_of(project, policy=policy), agent=agent, argv=argv,
             located=located, writable=writable, root=project.root)
@@ -382,7 +398,8 @@ def prepare(project: Project, agent: str, prompt_file: Path,
     return Dispatch(agent=agent, argv=argv, cwd=cwd,
                     stdin_text=prompt if use_stdin else None,
                     timeout_s=float(agent_cfg.get("timeout_min", 10)) * 60,
-                    run_dir=run_dir, writable=writable, env=env, layout=layout)
+                    run_dir=run_dir, writable=writable, env=env, layout=layout,
+                    data=decision)
 
 
 def _check_launcher_capture(token: str, cwd: Path, env: dict, located: Path | None) -> None:
@@ -413,6 +430,8 @@ def _validate_turn_record(record) -> None:
                     len(pair) == 2 and all(type(item) is str for item in pair) for pair in value))
         elif f.name == 'layout':
             valid = value is None or type(value) is sandbox.Layout
+        elif f.name == 'data':
+            valid = value is None or type(value) is data_dispatch.Decision
         elif f.name == 'argv':
             valid = type(value) is tuple and bool(value) and all(type(item) is str for item in value)
         elif f.name in ('accepted_bytes', 'composed_bytes'):
@@ -454,6 +473,7 @@ class ResolvedTurn:
     execution_path: Path | None = None
     execution_facts: tuple[sandbox.ProtectionPath, ...] = ()
     layout: sandbox.Layout | None = None
+    data: data_dispatch.Decision | None = field(default=None, repr=False)
 
     def __post_init__(self):
         _validate_turn_record(self)
@@ -597,19 +617,42 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
             raise ValueError('cwd must be a directory')
         if 'sandbox' in data:
             raise sandbox.SandboxError(f'{run / "config.yml"}: {HATCH_MOVED}')
-        protection = (sandbox.resolve_turn_protection(project, run_dir=run) if not create_home else
-                      sandbox.resolve_turn_protection(
-                          project, run_dir=run,
-                          prepare_home=lambda home_run: sandbox.agent_home(home_run, agent)))
+        decided: list = []
+
+        def decide_turn(sandboxed: bool) -> data_dispatch.Decision:
+            # M-B 5.4: decided on the final configuration and the sandbox state, before argv or
+            # the layout exist; a refused turn raises here and neither creates the home nor
+            # records a path fact.
+            found = data_dispatch.decide(project, run, agent, cfg, sandboxed=sandboxed,
+                                         templates_use_endpoint=data_dispatch.uses_endpoint(cfg))
+            decided.append(found)
+            if not found.allowed:
+                raise data_dispatch.DataRefused(found)
+            return found
+
+        def decide_then_home(home_run):
+            # Called by the one capture, for a sandboxed run only, after its policy read and
+            # before any path fact (F3): the decision comes first, so a refused turn creates
+            # no agent home.
+            decide_turn(True)
+            if create_home:
+                sandbox.agent_home(home_run, agent)
+
+        protection = sandbox.resolve_turn_protection(project, run_dir=run,
+                                                     prepare_home=decide_then_home)
+        decision = decided[0] if decided else decide_turn(protection.sandbox_enabled)
         # The allow-list view and the turn's own HOME, computed read-only (A12). The launcher
         # is the CLI as the host resolves it (C7); the capture below must agree with it.
         python = sys.executable
         first_token = shlex.split(templates[1] if session else templates[0])[0]
         first_token = _template_token(first_token, '', root, model=model, reasoning=reasoning,
-                                      python=python, session=session or '')
+                                      python=python, session=session or '',
+                                      endpoint=decision.endpoint)
         located = sandbox.host_launcher(first_token, work) if protection.sandbox_enabled else None
         layout = (sandbox.dispatch_layout(project, run_dir=run, agent=agent,
-                                          readable=protection.readable, launcher=located)
+                                          readable=protection.readable, launcher=located,
+                                          data_hidden=decision.data_hidden,    # M-B 5.5
+                                          protected=decision.protected)
                   if protection.sandbox_enabled else None)
         credential_env = None
         if layout is not None:   # S4: the captured credential record; the token is read here only
@@ -637,7 +680,7 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
         return ResolvedTurn(agent, family, root, run, work, session, templates[0], templates[1],
                             model, reasoning, python, PROMPT_ARGV_LIMIT, float(timeout) * 60,
                             protection, env_items, identity, text, version, charter_digest,
-                            execution_path, execution_facts, layout)
+                            execution_path, execution_facts, layout, data=decision)
     except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError, charter.CharterError) as exc:
         raise DispatchError(f'invalid conversational turn configuration: {exc}') from exc
 
@@ -667,7 +710,8 @@ def prepare_turn(resolved: ResolvedTurn, submission: HumanSubmission) -> Prepare
         raise DispatchError(f'{resolved.agent} cannot send oversized conversational input safely via stdin')
     argv = _template_argv(template, composed, resolved.root, model=resolved.model,
                           reasoning=resolved.reasoning, python=resolved.python_executable,
-                          include_prompt=not use_stdin, session=resolved.session or '')
+                          include_prompt=not use_stdin, session=resolved.session or '',
+                          endpoint=resolved.data.endpoint if resolved.data is not None else '')
     if resolved.execution_path is not None:
         argv[0] = str(resolved.execution_path)
     return PreparedTurn(resolved.agent, resolved.family, resolved.run_dir, resolved.cwd,
@@ -711,12 +755,18 @@ def main(argv: list[str] | None = None) -> None:
                     sandbox_enabled=not args.no_sandbox)
     except DispatchError as e:
         sys.exit(str(e))
+    except data_dispatch.DataRefused as e:
+        # M-B 5.4/5.11: refused before any job, launch or sandbox work; exit 78.
+        _refuse(args.transcript_file, data_dispatch.refusal_text(args.agent, e.decision) + "\n")
+        data_dispatch.record_refusal(refusal_run_dir(args.prompt_file), args.agent, e.decision)
+        sys.exit(DATA_EXIT)
     except sandbox.SandboxError as e:
         _refuse(args.transcript_file, f"{args.agent}: sandbox refused, {e}\n")
         run_dir = refusal_run_dir(args.prompt_file)
         if run_dir is not None:
             events.emit(run_dir, "job.refused", "system", reason="sandbox", detail=str(e))
         sys.exit(SANDBOX_EXIT)
+    data_dispatch.record_decision(d.run_dir, d.agent, d.data)
 
     if d.writable is None:
         if d.run_dir is not None:

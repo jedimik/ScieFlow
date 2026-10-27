@@ -1,0 +1,21 @@
+# ScieFlow data policy (M-B). Copy this file to config/data-policy.yml and edit the copy.
+# ScieFlow never writes config/data-policy.yml, and it ships no entries (D11): every key
+# below is commented out, so nothing is safe, nothing is allowed for L2 and enforcement
+# is warn until you add your own entries. Full reference: docs/data-protection.md.
+#
+# version: 1
+# enforcement: warn            # warn | refuse   (refuse is never set for you)
+# safe_endpoints:              # the only endpoints a safe agent may use
+#   - url: https://llm.example.org/v1     # https, or http only for 127.0.0.1, ::1, localhost
+#     reason: "your institution's endpoint"
+# safe_agents:                 # an agent is safe only when pinned to its command templates
+#   my-safe-agent:
+#     endpoint: https://llm.example.org/v1     # must be one of safe_endpoints
+#     templates_sha256: "<64 hex digits from: uv run scieflow data pin my-safe-agent>"
+#     reason: "your reason"
+# l2_remotes: []               # config/remotes.yml entries that may hold L2 data
+# l2_providers: []             # literature services an L2 run may still query
+# project_levels: []           # data folders outside any run, e.g. {path: ~/data, level: L2, kind: tabular, reason: "..."}
+# min_cell: 5                  # smallest publishable count in a released aggregate
+# scan: {max_files: 2000, max_bytes_per_file: 65536, max_seconds: 5}
+# ingest: {extra_drop: []}     # extra identifier column names for `scieflow data ingest`

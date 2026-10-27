@@ -28,6 +28,9 @@ from nblm import fetch, ledger, policy, resolve as resolve_mod
 from nblm import session as session_mod
 from nblm import verify as verify_mod
 
+# Commands that open a NotebookLM session or send/fetch for a run (C2): refused for an L2 run.
+SESSION_CMDS = ("check", "resolve", "fetch", "upload", "verify", "ask")
+
 
 def _root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -295,6 +298,14 @@ def main(argv=None) -> int:
         if args.cmd == "report":
             out = args.out or (args.workspace / "nblm" / "citation-audit.md")
             return cmd_report(args.workspace, out)
+
+        if args.cmd in SESSION_CMDS and getattr(args, "workspace", None):
+            # M-B 5.7 / C2: an L2 run's data reaches NotebookLM only when the policy lists it.
+            from scieflow.core.data import egress
+            try:
+                egress.service_check(root, args.workspace, "notebooklm")
+            except egress.EgressRefused as exc:
+                raise policy.PolicyError(str(exc)) from None
 
         profile = policy.load_profile(root, args.profile)
         if args.cmd == "check":

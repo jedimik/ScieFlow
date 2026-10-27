@@ -33,6 +33,10 @@ TYPES = frozenset({
     "review.assigned", "review.pass_done", "review.evidence_built",
     "review.matrix_ready", "review.decided", "review.blocker",
     "scite.quota_low", "scite.unavailable",
+    # Data protection (docs/data-protection.md, M-B): declarations, resolved levels,
+    # warnings, releases and imports, ingests (counts only, never values).
+    "data.declared", "data.level_resolved", "data.warning",
+    "data.released", "data.imported", "data.ingested",
 })
 
 

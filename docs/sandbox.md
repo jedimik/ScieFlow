@@ -286,6 +286,21 @@ User-owned files in `config/` (for example `config/remotes.yml`,
 secrets the sandbox hides, and the agents use some of them (see
 [residuals](#residuals)).
 
+## Data-protection hiding
+
+A cloud dispatch into a run that holds record-level data (level L2) sees less
+than the rules above. Every other L2 run of the project, and every L2 folder the
+policy lists, is hidden from it, as a directory overlay or an empty file. The
+run's own `data.yml` and its `released/` folder are bound read-only, so the agent
+cannot raise, lower or forge a declaration or a release. A safe agent, as set by
+`config/data-policy.yml`, is not hidden from its own run's data.
+
+Two new proofs run before every dispatch. A marker written on the host inside a
+hidden directory must be absent inside the sandbox, a hidden file must read
+empty, and a protected path must not be writable. A failed proof refuses the
+dispatch (exit 77). The rules and their rule ids are in
+[Data protection](data-protection.md).
+
 ## Refusals
 
 On the command line, a refused dispatch exits with code **77**. The other codes

@@ -139,6 +139,16 @@
     {% if not pg.complete %}<p class="dim">The event log is incomplete: {{ pg.notes|join("; ") }}.</p>{% endif %}
   {% endif %}
   </div>
+
+  {% set dt = overview.data %}
+  <div id="ov-data">
+  <h3>Data level</h3>
+  {% if dt.reason %}
+    <p class="dim">{{ dt.reason }}</p>
+  {% endif %}
+  <p>Level {{ dt.level or "unknown" }}{% if dt.level == "L2" %} &mdash; safe agents only{% endif %}. Warnings: {{ dt.warnings if dt.warnings is defined else "unknown" }}{% if dt.enforcement %} (enforcement: {{ dt.enforcement }}){% endif %}.</p>
+  {% if dt.suggestion %}<p class="dim">{{ dt.suggestion }}</p>{% endif %}
+  </div>
 </section>
 
 <h2>The agreed plan</h2>

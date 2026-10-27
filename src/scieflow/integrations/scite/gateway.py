@@ -57,6 +57,12 @@ def request(policy: _policy.Policy, cache: Cache, ledger: Ledger, *, source: str
         raise ValueError(f"unknown source {source!r} (mcp or rest)")
     if ledger.ws is None:
         raise _policy.PolicyError("scite requests are made for a run (no run workspace given)")
+    from scieflow.core.data import egress
+
+    try:   # M-B 5.7: an L2 run's data is sent to scite only when config/data-policy.yml lists it
+        egress.service_check(egress.root_of_run(ledger.ws), ledger.ws, "scite")
+    except egress.EgressRefused as exc:
+        raise _policy.PolicyError(str(exc)) from None
     if source == "mcp" and (not isinstance(round, int) or isinstance(round, bool) or round < 1):
         raise ValueError(f"MCP requests need a review round >= 1, got {round!r}")
 

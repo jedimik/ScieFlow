@@ -29,6 +29,8 @@ CHARTER_ADOPTION = "charter-adoption"
 ADOPTED = frozenset({"adopt", "yes", "approve", "approved"})
 # Answers to these write the review decision (core/review/decision_gates.py).
 REVIEW_GATE_KINDS = frozenset({"review-decision", "review-blocker"})
+# A data-release answer copies (or drops) a checked file (core/data/release.py, M-B 5.8).
+DATA_RELEASE_KIND = "data-release"
 
 
 class GateError(ValueError):
@@ -66,7 +68,8 @@ def list_gates(ws: Path, state: str | None = None) -> list[dict]:
 
 
 def open_gate(project: Project, ws: Path, kind: str, question: str, options=(),
-              files=(), in_scope: bool = False, actor: str = "agent") -> dict:
+              files=(), in_scope: bool = False, actor: str = "agent",
+              gate_id: str | None = None) -> dict:
     table = kinds(project)
     if kind not in table:
         raise GateError(f"unknown gate kind {kind!r} (known: {', '.join(table)})")
@@ -79,7 +82,7 @@ def open_gate(project: Project, ws: Path, kind: str, question: str, options=(),
                 "would ever write the charter, even if the human answering it "
                 "means to adopt")
     gate = {
-        "id": store.new_id(), "kind": kind, "question": question,
+        "id": gate_id or store.new_id(), "kind": kind, "question": question,
         "options": list(options), "files": [str(f) for f in files],
         "in_scope": bool(in_scope), "requires_human": bool(table[kind]["requires_human"]),
         "state": "open", "opened": _now(), "opened_by": actor,
@@ -117,6 +120,10 @@ def answer(project: Project, ws: Path, gate_id: str, answer: str, actor: str = "
             # a refused decision leaves the gate open (docs/research/review-contract.md).
             from scieflow.core.review import decision_gates
             decision_gates.on_answer(project, ws, gate, answer, actor, rationale, note)
+        if gate["kind"] == DATA_RELEASE_KIND:
+            # Only a human `release` copies a checked file out of an L2 run (M-B 5.8).
+            from scieflow.core.data import release
+            release.on_answer(project, ws, gate, answer, actor)
         gate.update(state="answered", answer=answer, answered=_now(), answered_by=actor,
                     rationale=rationale, note=note)
         path = _path(ws, gate_id)

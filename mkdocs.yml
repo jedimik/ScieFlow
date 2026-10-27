@@ -58,6 +58,7 @@ nav:
   - Web app: web.md
   - Sandbox: sandbox.md
   - Remote execution: remote.md
+  - Data protection: data-protection.md
   - Architecture: architecture.md
   - CLI reference: cli.md
   - Experiments:
