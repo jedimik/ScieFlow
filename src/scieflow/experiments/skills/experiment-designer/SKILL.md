@@ -25,7 +25,9 @@ parameters, or asks "what should we try next?" after a previous campaign.
 4. **Pick metrics and validation.** With ground truth: `ssim`, `psnr`, `mse`
    for images. Set `rank_by` to the metric that matches the goal, and
    `validation` thresholds for minimum acceptability. No reference data means
-   no metrics — flag this to the user instead of inventing numbers.
+   no metrics — flag this to the user instead of inventing numbers. If the run
+   has `design/design.yml`, use only metrics that SAP outcomes name
+   (`uv run scieflow design show <slug> --json`, field `sap_metrics`).
 5. **Write the campaign YAML** into `pipelines/<p>/campaigns/<name>.yaml`.
    Fill `notes:` with the hypothesis — future agents rely on it.
 6. **Present for approval:** the YAML, why this grid/these scenarios, what

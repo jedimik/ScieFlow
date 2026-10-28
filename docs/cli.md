@@ -40,6 +40,24 @@ uv run scieflow data audit <slug>
 uv run scieflow data pin <agent>
 ```
 
+## `scieflow design`
+
+The study-design commands: create, check, render and show a run's design and
+analysis plan, lock it with a human approval, and amend a locked design. Every
+read accepts `--json`. Exit codes: `0` ok, `1` refused or a check failed, `2`
+usage. The design, its rules and the campaign refusals are in
+[Study design and SAP](experiments/design.md).
+
+```bash
+uv run scieflow design init <slug> --type rct --title "Synthetic RCT"
+uv run scieflow design check <slug>
+uv run scieflow design render <slug>
+uv run scieflow design show <slug> --json
+uv run scieflow design lock <slug>
+uv run scieflow design amend <slug> --summary "..." --rationale "..."
+uv run scieflow design guidelines --check
+```
+
 ## `scieflow run`
 
 A run's state, history and lifecycle. Every subcommand needs the run's

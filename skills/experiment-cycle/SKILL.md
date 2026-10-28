@@ -70,6 +70,21 @@ waits for the user.
     campaign name, runs count, failed count, metrics table, best
     configuration, anomalies, and the campaign report path.
 
+## Locked design
+
+If the run holds `design/design.yml`, `run` and `sweep` check it before anything
+runs (`docs/experiments/design.md`):
+
+- Locked and approved by a human: every campaign metric must be named by a SAP
+  outcome (`metric: <name>`). A campaign with an unnamed metric is refused
+  (`out-of-sap`). Adding one needs `uv run scieflow design amend`, a human-only
+  gate.
+- Not locked yet, or edited since its lock: refused (`design-unlocked`,
+  `design-modified`). Do not work around a refusal.
+- Computational designs: warnings only, except the integrity refusals.
+
+A refusal runs nothing and spends nothing. Report the rule id to the user.
+
 ## Afterwards
 
 - Verify the summary exists and states run counts; extract `K` = number of

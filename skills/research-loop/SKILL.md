@@ -61,6 +61,24 @@ max-iterations, converged, low-budget — with `uv run scieflow run checkpoint
 advance <slug> --as-agent` (refused, with a checkpoint, once `iterations` is
 spent) and continue.
 
+## Study design
+
+For a non-computational question, the `hypothesize` phase of iteration 1 also
+writes the study design, before any `experiment` phase (AGENTS.md rule 19;
+`docs/experiments/design.md`):
+
+1. `uv run scieflow design init <slug> --type <study type>`, then fill in
+   `design/design.yml`: the outcomes, the SAP and the sample size.
+2. Size the study with `uv run scieflow experiment power <family> ... --out
+   design/power/<name>.json`. Never do the arithmetic yourself.
+3. `uv run scieflow design check <slug>` until it reports no errors.
+4. `uv run scieflow design lock <slug>`, then `uv run scieflow gate wait <slug>
+   <id>`. Only a human answers the `design-lock` gate.
+
+The `experiment` phase starts only after the human has approved the lock. A
+computational design (the image-processing pipelines) only warns when it is
+unlocked.
+
 ## Approval gates
 
 Approvals are gates (AGENTS.md rule 14): open one with `uv run scieflow gate
