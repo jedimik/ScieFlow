@@ -1,0 +1,42 @@
+# Transcribed from reviews/m-d1-reporting-skeletons.yml (M-D1 t2). Every item is a skeleton
+# entry: nothing is verified until a human checks this file against source.doi and records it.
+version: 1
+id: "tripod-ai"
+name: "TRIPOD+AI"
+version_label: "2024"
+applies_to: ["prediction-model"]
+granularity: "top-level"
+source: {citation: "Collins GS, Moons KGM, Dhiman P, et al. TRIPOD+AI statement: updated guidance for reporting clinical prediction models that use regression or machine learning methods. BMJ 2024;385:e078378.", doi: "10.1136/bmj-2023-078378"}
+verification:
+  status: "unverified"
+  note: "Item ids and labels were written offline from knowledge (M-D1 planning). Check them against the official checklist (source.doi) before relying on them."
+  verified_by: null
+  verified_at: null
+items:
+  - {id: "1", topic: "Title", sections: ["title"], evidence: "statement"}
+  - {id: "2", topic: "Abstract", sections: ["abstract"], evidence: "statement"}
+  - {id: "3", topic: "Background", sections: ["introduction"], evidence: "statement"}
+  - {id: "4", topic: "Objectives", sections: ["introduction"], evidence: "statement"}
+  - {id: "5", topic: "Data sources", sections: ["methods"], evidence: "statement"}
+  - {id: "6", topic: "Participants", sections: ["methods"], evidence: "statement"}
+  - {id: "7", topic: "Data preparation", sections: ["methods"], evidence: "statement"}
+  - {id: "8", topic: "Outcome", sections: ["methods"], evidence: "statement"}
+  - {id: "9", topic: "Predictors", sections: ["methods"], evidence: "statement"}
+  - {id: "10", topic: "Sample size", sections: ["methods"], evidence: "number"}
+  - {id: "11", topic: "Missing data", sections: ["methods"], evidence: "statement"}
+  - {id: "12", topic: "Analytical methods", sections: ["methods"], evidence: "statement"}
+  - {id: "13", topic: "Class imbalance", sections: ["methods"], evidence: "statement"}
+  - {id: "14", topic: "Fairness", sections: ["methods"], evidence: "statement"}
+  - {id: "15", topic: "Model output", sections: ["methods"], evidence: "statement"}
+  - {id: "16", topic: "Training versus evaluation", sections: ["methods"], evidence: "statement"}
+  - {id: "17", topic: "Ethical approval", sections: ["methods"], evidence: "statement"}
+  - {id: "18", topic: "Open science", sections: ["other"], evidence: "statement"}
+  - {id: "19", topic: "Patient and public involvement", sections: ["methods"], evidence: "statement"}
+  - {id: "20", topic: "Participants (results)", sections: ["results"], evidence: "table"}
+  - {id: "21", topic: "Model development", sections: ["results"], evidence: "statement"}
+  - {id: "22", topic: "Model specification", sections: ["results"], evidence: "statement"}
+  - {id: "23", topic: "Model performance", sections: ["results"], evidence: "number"}
+  - {id: "24", topic: "Model updating", sections: ["results"], evidence: "statement"}
+  - {id: "25", topic: "Interpretation", sections: ["discussion"], evidence: "statement"}
+  - {id: "26", topic: "Limitations", sections: ["discussion"], evidence: "statement"}
+  - {id: "27", topic: "Usability and implications", sections: ["discussion"], evidence: "statement"}

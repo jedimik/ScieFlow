@@ -1,0 +1,328 @@
+# M-D1 planning artifact (card t_7b40c299, 2026-10-27): reporting-guideline checklist SKELETONS.
+# Ticket t2 turns each entry of `guidelines` into config/reporting/<id>.yml (plan section 5.3), copying
+# id, name, version, applies_to, source, items exactly; every file gets verification.status: unverified.
+#
+# HONEST STATUS: written by the planner from knowledge, offline. Item ids follow the official checklists'
+# numbering as the planner knows it; `topic` is a short neutral label in ScieFlow's own words, NOT the
+# official item text. DOIs were not resolved (no network in planning). Nothing here may be presented as
+# verified until a human checks the file against the official checklist named in `source` and records it
+# (verification.status: verified, verified_by, verified_at). TRIPOD+AI and SPIRIT 2013 carry top-level
+# items only (granularity: top-level). CONSORT 2025 and SPIRIT 2025 updates exist and are NOT included
+# (plan residual R4).
+#
+# sections: title | abstract | introduction | methods | results | discussion | other
+# evidence: statement | number | table | figure | diagram | registration
+version: 1
+guidelines:
+  - id: consort-2010
+    name: CONSORT 2010
+    version: "2010"
+    applies_to: [rct]
+    granularity: full
+    source: {citation: "Schulz KF, Altman DG, Moher D; CONSORT Group. CONSORT 2010 Statement: updated guidelines for reporting parallel group randomised trials. BMJ 2010;340:c332.", doi: "10.1136/bmj.c332"}
+    items:
+      - {id: "1a", topic: "Title says randomised trial", sections: [title], evidence: statement}
+      - {id: "1b", topic: "Structured summary", sections: [abstract], evidence: statement}
+      - {id: "2a", topic: "Background and rationale", sections: [introduction], evidence: statement}
+      - {id: "2b", topic: "Objectives or hypotheses", sections: [introduction], evidence: statement}
+      - {id: "3a", topic: "Trial design and allocation ratio", sections: [methods], evidence: statement}
+      - {id: "3b", topic: "Method changes after start", sections: [methods], evidence: statement}
+      - {id: "4a", topic: "Eligibility criteria", sections: [methods], evidence: statement}
+      - {id: "4b", topic: "Settings and locations", sections: [methods], evidence: statement}
+      - {id: "5", topic: "Interventions per group", sections: [methods], evidence: statement}
+      - {id: "6a", topic: "Prespecified outcomes", sections: [methods], evidence: statement}
+      - {id: "6b", topic: "Outcome changes after start", sections: [methods], evidence: statement}
+      - {id: "7a", topic: "Sample size determination", sections: [methods], evidence: number}
+      - {id: "7b", topic: "Interim analyses and stopping", sections: [methods], evidence: statement}
+      - {id: "8a", topic: "Sequence generation method", sections: [methods], evidence: statement}
+      - {id: "8b", topic: "Randomisation type and restriction", sections: [methods], evidence: statement}
+      - {id: "9", topic: "Allocation concealment", sections: [methods], evidence: statement}
+      - {id: "10", topic: "Who generated, enrolled, assigned", sections: [methods], evidence: statement}
+      - {id: "11a", topic: "Blinding after assignment", sections: [methods], evidence: statement}
+      - {id: "11b", topic: "Similarity of interventions", sections: [methods], evidence: statement}
+      - {id: "12a", topic: "Statistical methods for outcomes", sections: [methods], evidence: statement}
+      - {id: "12b", topic: "Additional analyses methods", sections: [methods], evidence: statement}
+      - {id: "13a", topic: "Participant flow per group", sections: [results], evidence: diagram}
+      - {id: "13b", topic: "Losses and exclusions", sections: [results], evidence: number}
+      - {id: "14a", topic: "Recruitment and follow-up dates", sections: [results], evidence: statement}
+      - {id: "14b", topic: "Why the trial ended", sections: [results], evidence: statement}
+      - {id: "15", topic: "Baseline characteristics", sections: [results], evidence: table}
+      - {id: "16", topic: "Numbers analysed per group", sections: [results], evidence: number}
+      - {id: "17a", topic: "Outcome estimates and precision", sections: [results], evidence: number}
+      - {id: "17b", topic: "Absolute and relative effects", sections: [results], evidence: number}
+      - {id: "18", topic: "Ancillary analyses", sections: [results], evidence: number}
+      - {id: "19", topic: "Harms per group", sections: [results], evidence: table}
+      - {id: "20", topic: "Limitations", sections: [discussion], evidence: statement}
+      - {id: "21", topic: "Generalisability", sections: [discussion], evidence: statement}
+      - {id: "22", topic: "Interpretation", sections: [discussion], evidence: statement}
+      - {id: "23", topic: "Registration", sections: [other], evidence: registration}
+      - {id: "24", topic: "Protocol access", sections: [other], evidence: statement}
+      - {id: "25", topic: "Funding", sections: [other], evidence: statement}
+  - id: strobe
+    name: STROBE
+    version: "2007"
+    applies_to: [cohort, case-control, cross-sectional]
+    granularity: full
+    source: {citation: "von Elm E, Altman DG, Egger M, et al. The Strengthening the Reporting of Observational Studies in Epidemiology (STROBE) statement. Lancet 2007;370:1453-1457.", doi: "10.1016/S0140-6736(07)61602-X"}
+    items:
+      - {id: "1a", topic: "Design named in title or abstract", sections: [title, abstract], evidence: statement}
+      - {id: "1b", topic: "Informative balanced abstract", sections: [abstract], evidence: statement}
+      - {id: "2", topic: "Background and rationale", sections: [introduction], evidence: statement}
+      - {id: "3", topic: "Objectives and hypotheses", sections: [introduction], evidence: statement}
+      - {id: "4", topic: "Study design", sections: [methods], evidence: statement}
+      - {id: "5", topic: "Setting, locations, dates", sections: [methods], evidence: statement}
+      - {id: "6a", topic: "Eligibility and selection", sections: [methods], evidence: statement}
+      - {id: "6b", topic: "Matching criteria", sections: [methods], evidence: statement}
+      - {id: "7", topic: "Variables defined", sections: [methods], evidence: statement}
+      - {id: "8", topic: "Data sources and measurement", sections: [methods], evidence: statement}
+      - {id: "9", topic: "Efforts to address bias", sections: [methods], evidence: statement}
+      - {id: "10", topic: "Study size", sections: [methods], evidence: number}
+      - {id: "11", topic: "Quantitative variables handling", sections: [methods], evidence: statement}
+      - {id: "12a", topic: "Statistical methods and confounding", sections: [methods], evidence: statement}
+      - {id: "12b", topic: "Subgroups and interactions", sections: [methods], evidence: statement}
+      - {id: "12c", topic: "Missing data", sections: [methods], evidence: statement}
+      - {id: "12d", topic: "Follow-up, matching or sampling", sections: [methods], evidence: statement}
+      - {id: "12e", topic: "Sensitivity analyses", sections: [methods], evidence: statement}
+      - {id: "13a", topic: "Numbers at each stage", sections: [results], evidence: number}
+      - {id: "13b", topic: "Reasons for non-participation", sections: [results], evidence: statement}
+      - {id: "13c", topic: "Flow diagram", sections: [results], evidence: diagram}
+      - {id: "14a", topic: "Participant characteristics", sections: [results], evidence: table}
+      - {id: "14b", topic: "Missing data per variable", sections: [results], evidence: number}
+      - {id: "14c", topic: "Follow-up time", sections: [results], evidence: number}
+      - {id: "15", topic: "Outcome data", sections: [results], evidence: number}
+      - {id: "16a", topic: "Unadjusted and adjusted estimates", sections: [results], evidence: number}
+      - {id: "16b", topic: "Category boundaries", sections: [results], evidence: statement}
+      - {id: "16c", topic: "Absolute risk translation", sections: [results], evidence: number}
+      - {id: "17", topic: "Other analyses", sections: [results], evidence: number}
+      - {id: "18", topic: "Key results", sections: [discussion], evidence: statement}
+      - {id: "19", topic: "Limitations", sections: [discussion], evidence: statement}
+      - {id: "20", topic: "Interpretation", sections: [discussion], evidence: statement}
+      - {id: "21", topic: "Generalisability", sections: [discussion], evidence: statement}
+      - {id: "22", topic: "Funding", sections: [other], evidence: statement}
+  - id: stard-2015
+    name: STARD 2015
+    version: "2015"
+    applies_to: [diagnostic-accuracy]
+    granularity: full
+    source: {citation: "Bossuyt PM, Reitsma JB, Bruns DE, et al. STARD 2015: an updated list of essential items for reporting diagnostic accuracy studies. BMJ 2015;351:h5527.", doi: "10.1136/bmj.h5527"}
+    items:
+      - {id: "1", topic: "Identified as accuracy study", sections: [title], evidence: statement}
+      - {id: "2", topic: "Structured abstract", sections: [abstract], evidence: statement}
+      - {id: "3", topic: "Background and intended use", sections: [introduction], evidence: statement}
+      - {id: "4", topic: "Objectives and hypotheses", sections: [introduction], evidence: statement}
+      - {id: "5", topic: "Prospective or retrospective", sections: [methods], evidence: statement}
+      - {id: "6", topic: "Eligibility criteria", sections: [methods], evidence: statement}
+      - {id: "7", topic: "Basis for identifying participants", sections: [methods], evidence: statement}
+      - {id: "8", topic: "Where and when identified", sections: [methods], evidence: statement}
+      - {id: "9", topic: "Consecutive, random or convenience", sections: [methods], evidence: statement}
+      - {id: "10a", topic: "Index test details", sections: [methods], evidence: statement}
+      - {id: "10b", topic: "Reference standard details", sections: [methods], evidence: statement}
+      - {id: "11", topic: "Reference standard rationale", sections: [methods], evidence: statement}
+      - {id: "12a", topic: "Index test cut-offs", sections: [methods], evidence: statement}
+      - {id: "12b", topic: "Reference standard cut-offs", sections: [methods], evidence: statement}
+      - {id: "13a", topic: "Index test assessor blinding", sections: [methods], evidence: statement}
+      - {id: "13b", topic: "Reference assessor blinding", sections: [methods], evidence: statement}
+      - {id: "14", topic: "Accuracy estimation methods", sections: [methods], evidence: statement}
+      - {id: "15", topic: "Indeterminate results handling", sections: [methods], evidence: statement}
+      - {id: "16", topic: "Missing data handling", sections: [methods], evidence: statement}
+      - {id: "17", topic: "Variability analyses", sections: [methods], evidence: statement}
+      - {id: "18", topic: "Intended sample size", sections: [methods], evidence: number}
+      - {id: "19", topic: "Participant flow diagram", sections: [results], evidence: diagram}
+      - {id: "20", topic: "Baseline characteristics", sections: [results], evidence: table}
+      - {id: "21a", topic: "Severity distribution", sections: [results], evidence: number}
+      - {id: "21b", topic: "Alternative diagnoses distribution", sections: [results], evidence: number}
+      - {id: "22", topic: "Interval between tests", sections: [results], evidence: statement}
+      - {id: "23", topic: "Index by reference cross-tabulation", sections: [results], evidence: table}
+      - {id: "24", topic: "Accuracy estimates and precision", sections: [results], evidence: number}
+      - {id: "25", topic: "Adverse events from testing", sections: [results], evidence: statement}
+      - {id: "26", topic: "Limitations", sections: [discussion], evidence: statement}
+      - {id: "27", topic: "Implications for practice", sections: [discussion], evidence: statement}
+      - {id: "28", topic: "Registration", sections: [other], evidence: registration}
+      - {id: "29", topic: "Protocol access", sections: [other], evidence: statement}
+      - {id: "30", topic: "Funding", sections: [other], evidence: statement}
+  - id: tripod-ai
+    name: TRIPOD+AI
+    version: "2024"
+    applies_to: [prediction-model]
+    granularity: top-level
+    source: {citation: "Collins GS, Moons KGM, Dhiman P, et al. TRIPOD+AI statement: updated guidance for reporting clinical prediction models that use regression or machine learning methods. BMJ 2024;385:e078378.", doi: "10.1136/bmj-2023-078378"}
+    items:
+      - {id: "1", topic: "Title", sections: [title], evidence: statement}
+      - {id: "2", topic: "Abstract", sections: [abstract], evidence: statement}
+      - {id: "3", topic: "Background", sections: [introduction], evidence: statement}
+      - {id: "4", topic: "Objectives", sections: [introduction], evidence: statement}
+      - {id: "5", topic: "Data sources", sections: [methods], evidence: statement}
+      - {id: "6", topic: "Participants", sections: [methods], evidence: statement}
+      - {id: "7", topic: "Data preparation", sections: [methods], evidence: statement}
+      - {id: "8", topic: "Outcome", sections: [methods], evidence: statement}
+      - {id: "9", topic: "Predictors", sections: [methods], evidence: statement}
+      - {id: "10", topic: "Sample size", sections: [methods], evidence: number}
+      - {id: "11", topic: "Missing data", sections: [methods], evidence: statement}
+      - {id: "12", topic: "Analytical methods", sections: [methods], evidence: statement}
+      - {id: "13", topic: "Class imbalance", sections: [methods], evidence: statement}
+      - {id: "14", topic: "Fairness", sections: [methods], evidence: statement}
+      - {id: "15", topic: "Model output", sections: [methods], evidence: statement}
+      - {id: "16", topic: "Training versus evaluation", sections: [methods], evidence: statement}
+      - {id: "17", topic: "Ethical approval", sections: [methods], evidence: statement}
+      - {id: "18", topic: "Open science", sections: [other], evidence: statement}
+      - {id: "19", topic: "Patient and public involvement", sections: [methods], evidence: statement}
+      - {id: "20", topic: "Participants (results)", sections: [results], evidence: table}
+      - {id: "21", topic: "Model development", sections: [results], evidence: statement}
+      - {id: "22", topic: "Model specification", sections: [results], evidence: statement}
+      - {id: "23", topic: "Model performance", sections: [results], evidence: number}
+      - {id: "24", topic: "Model updating", sections: [results], evidence: statement}
+      - {id: "25", topic: "Interpretation", sections: [discussion], evidence: statement}
+      - {id: "26", topic: "Limitations", sections: [discussion], evidence: statement}
+      - {id: "27", topic: "Usability and implications", sections: [discussion], evidence: statement}
+  - id: prisma-2020
+    name: PRISMA 2020
+    version: "2020"
+    applies_to: [systematic-review]
+    granularity: full
+    source: {citation: "Page MJ, McKenzie JE, Bossuyt PM, et al. The PRISMA 2020 statement: an updated guideline for reporting systematic reviews. BMJ 2021;372:n71.", doi: "10.1136/bmj.n71"}
+    items:
+      - {id: "1", topic: "Title identifies systematic review", sections: [title], evidence: statement}
+      - {id: "2", topic: "Abstract", sections: [abstract], evidence: statement}
+      - {id: "3", topic: "Rationale", sections: [introduction], evidence: statement}
+      - {id: "4", topic: "Objectives", sections: [introduction], evidence: statement}
+      - {id: "5", topic: "Eligibility criteria", sections: [methods], evidence: statement}
+      - {id: "6", topic: "Information sources", sections: [methods], evidence: statement}
+      - {id: "7", topic: "Search strategy", sections: [methods], evidence: statement}
+      - {id: "8", topic: "Selection process", sections: [methods], evidence: statement}
+      - {id: "9", topic: "Data collection process", sections: [methods], evidence: statement}
+      - {id: "10a", topic: "Outcome data items", sections: [methods], evidence: statement}
+      - {id: "10b", topic: "Other data items", sections: [methods], evidence: statement}
+      - {id: "11", topic: "Risk of bias assessment", sections: [methods], evidence: statement}
+      - {id: "12", topic: "Effect measures", sections: [methods], evidence: statement}
+      - {id: "13a", topic: "Eligibility for each synthesis", sections: [methods], evidence: statement}
+      - {id: "13b", topic: "Data preparation for synthesis", sections: [methods], evidence: statement}
+      - {id: "13c", topic: "Tabulation and display", sections: [methods], evidence: statement}
+      - {id: "13d", topic: "Synthesis methods", sections: [methods], evidence: statement}
+      - {id: "13e", topic: "Heterogeneity exploration", sections: [methods], evidence: statement}
+      - {id: "13f", topic: "Sensitivity analyses", sections: [methods], evidence: statement}
+      - {id: "14", topic: "Reporting bias assessment", sections: [methods], evidence: statement}
+      - {id: "15", topic: "Certainty assessment", sections: [methods], evidence: statement}
+      - {id: "16a", topic: "Search and selection results", sections: [results], evidence: diagram}
+      - {id: "16b", topic: "Excluded near-eligible studies", sections: [results], evidence: statement}
+      - {id: "17", topic: "Study characteristics", sections: [results], evidence: table}
+      - {id: "18", topic: "Risk of bias in studies", sections: [results], evidence: table}
+      - {id: "19", topic: "Results of individual studies", sections: [results], evidence: table}
+      - {id: "20a", topic: "Synthesis characteristics", sections: [results], evidence: statement}
+      - {id: "20b", topic: "Statistical synthesis results", sections: [results], evidence: number}
+      - {id: "20c", topic: "Heterogeneity results", sections: [results], evidence: statement}
+      - {id: "20d", topic: "Sensitivity analysis results", sections: [results], evidence: statement}
+      - {id: "21", topic: "Reporting biases", sections: [results], evidence: statement}
+      - {id: "22", topic: "Certainty of evidence", sections: [results], evidence: statement}
+      - {id: "23a", topic: "General interpretation", sections: [discussion], evidence: statement}
+      - {id: "23b", topic: "Evidence limitations", sections: [discussion], evidence: statement}
+      - {id: "23c", topic: "Review process limitations", sections: [discussion], evidence: statement}
+      - {id: "23d", topic: "Implications", sections: [discussion], evidence: statement}
+      - {id: "24a", topic: "Registration", sections: [other], evidence: registration}
+      - {id: "24b", topic: "Protocol access", sections: [other], evidence: statement}
+      - {id: "24c", topic: "Protocol amendments", sections: [other], evidence: statement}
+      - {id: "25", topic: "Support", sections: [other], evidence: statement}
+      - {id: "26", topic: "Competing interests", sections: [other], evidence: statement}
+      - {id: "27", topic: "Data, code and materials", sections: [other], evidence: statement}
+  - id: spirit-2013
+    name: SPIRIT 2013
+    version: "2013"
+    applies_to: [rct]
+    granularity: top-level
+    source: {citation: "Chan AW, Tetzlaff JM, Altman DG, et al. SPIRIT 2013 statement: defining standard protocol items for clinical trials. Ann Intern Med 2013;158:200-207.", doi: "10.7326/0003-4819-158-3-201302050-00583"}
+    items:
+      - {id: "1", topic: "Title", sections: [title], evidence: statement}
+      - {id: "2", topic: "Trial registration", sections: [other], evidence: registration}
+      - {id: "3", topic: "Protocol version", sections: [other], evidence: statement}
+      - {id: "4", topic: "Funding", sections: [other], evidence: statement}
+      - {id: "5", topic: "Roles and responsibilities", sections: [other], evidence: statement}
+      - {id: "6", topic: "Background and rationale", sections: [introduction], evidence: statement}
+      - {id: "7", topic: "Objectives", sections: [introduction], evidence: statement}
+      - {id: "8", topic: "Trial design", sections: [introduction], evidence: statement}
+      - {id: "9", topic: "Study setting", sections: [methods], evidence: statement}
+      - {id: "10", topic: "Eligibility criteria", sections: [methods], evidence: statement}
+      - {id: "11", topic: "Interventions", sections: [methods], evidence: statement}
+      - {id: "12", topic: "Outcomes", sections: [methods], evidence: statement}
+      - {id: "13", topic: "Participant timeline", sections: [methods], evidence: diagram}
+      - {id: "14", topic: "Sample size", sections: [methods], evidence: number}
+      - {id: "15", topic: "Recruitment", sections: [methods], evidence: statement}
+      - {id: "16", topic: "Allocation", sections: [methods], evidence: statement}
+      - {id: "17", topic: "Blinding", sections: [methods], evidence: statement}
+      - {id: "18", topic: "Data collection methods", sections: [methods], evidence: statement}
+      - {id: "19", topic: "Data management", sections: [methods], evidence: statement}
+      - {id: "20", topic: "Statistical methods", sections: [methods], evidence: statement}
+      - {id: "21", topic: "Data monitoring", sections: [methods], evidence: statement}
+      - {id: "22", topic: "Harms", sections: [methods], evidence: statement}
+      - {id: "23", topic: "Auditing", sections: [methods], evidence: statement}
+      - {id: "24", topic: "Research ethics approval", sections: [other], evidence: statement}
+      - {id: "25", topic: "Protocol amendments", sections: [other], evidence: statement}
+      - {id: "26", topic: "Consent or assent", sections: [other], evidence: statement}
+      - {id: "27", topic: "Confidentiality", sections: [other], evidence: statement}
+      - {id: "28", topic: "Declaration of interests", sections: [other], evidence: statement}
+      - {id: "29", topic: "Access to data", sections: [other], evidence: statement}
+      - {id: "30", topic: "Ancillary and post-trial care", sections: [other], evidence: statement}
+      - {id: "31", topic: "Dissemination policy", sections: [other], evidence: statement}
+      - {id: "32", topic: "Informed consent materials", sections: [other], evidence: statement}
+      - {id: "33", topic: "Biological specimens", sections: [other], evidence: statement}
+  - id: arrive-2.0
+    name: ARRIVE 2.0
+    version: "2.0"
+    applies_to: [animal]
+    granularity: full
+    source: {citation: "Percie du Sert N, Hurst V, Ahluwalia A, et al. The ARRIVE guidelines 2.0: updated guidelines for reporting animal research. PLoS Biol 2020;18(7):e3000410.", doi: "10.1371/journal.pbio.3000410"}
+    items:
+      - {id: "1", topic: "Study design", sections: [methods], evidence: statement, group: essential}
+      - {id: "2", topic: "Sample size", sections: [methods], evidence: number, group: essential}
+      - {id: "3", topic: "Inclusion and exclusion criteria", sections: [methods], evidence: statement, group: essential}
+      - {id: "4", topic: "Randomisation", sections: [methods], evidence: statement, group: essential}
+      - {id: "5", topic: "Blinding", sections: [methods], evidence: statement, group: essential}
+      - {id: "6", topic: "Outcome measures", sections: [methods], evidence: statement, group: essential}
+      - {id: "7", topic: "Statistical methods", sections: [methods], evidence: statement, group: essential}
+      - {id: "8", topic: "Experimental animals", sections: [methods], evidence: statement, group: essential}
+      - {id: "9", topic: "Experimental procedures", sections: [methods], evidence: statement, group: essential}
+      - {id: "10", topic: "Results", sections: [results], evidence: number, group: essential}
+      - {id: "11", topic: "Abstract", sections: [abstract], evidence: statement, group: recommended}
+      - {id: "12", topic: "Background", sections: [introduction], evidence: statement, group: recommended}
+      - {id: "13", topic: "Objectives", sections: [introduction], evidence: statement, group: recommended}
+      - {id: "14", topic: "Ethical statement", sections: [methods], evidence: statement, group: recommended}
+      - {id: "15", topic: "Housing and husbandry", sections: [methods], evidence: statement, group: recommended}
+      - {id: "16", topic: "Animal care and monitoring", sections: [methods], evidence: statement, group: recommended}
+      - {id: "17", topic: "Interpretation and implications", sections: [discussion], evidence: statement, group: recommended}
+      - {id: "18", topic: "Generalisability and translation", sections: [discussion], evidence: statement, group: recommended}
+      - {id: "19", topic: "Protocol registration", sections: [other], evidence: registration, group: recommended}
+      - {id: "20", topic: "Data access", sections: [other], evidence: statement, group: recommended}
+      - {id: "21", topic: "Declaration of interests", sections: [other], evidence: statement, group: recommended}
+  - id: cheers-2022
+    name: CHEERS 2022
+    version: "2022"
+    applies_to: [economic-evaluation]
+    granularity: full
+    source: {citation: "Husereau D, Drummond M, Augustovski F, et al. Consolidated Health Economic Evaluation Reporting Standards 2022 (CHEERS 2022) statement. BMJ 2022;376:e067975.", doi: "10.1136/bmj-2021-067975"}
+    items:
+      - {id: "1", topic: "Title", sections: [title], evidence: statement}
+      - {id: "2", topic: "Abstract", sections: [abstract], evidence: statement}
+      - {id: "3", topic: "Background and objectives", sections: [introduction], evidence: statement}
+      - {id: "4", topic: "Health economic analysis plan", sections: [methods], evidence: statement}
+      - {id: "5", topic: "Study population", sections: [methods], evidence: statement}
+      - {id: "6", topic: "Setting and location", sections: [methods], evidence: statement}
+      - {id: "7", topic: "Comparators", sections: [methods], evidence: statement}
+      - {id: "8", topic: "Perspective", sections: [methods], evidence: statement}
+      - {id: "9", topic: "Time horizon", sections: [methods], evidence: statement}
+      - {id: "10", topic: "Discount rate", sections: [methods], evidence: number}
+      - {id: "11", topic: "Selection of outcomes", sections: [methods], evidence: statement}
+      - {id: "12", topic: "Measurement of outcomes", sections: [methods], evidence: statement}
+      - {id: "13", topic: "Valuation of outcomes", sections: [methods], evidence: statement}
+      - {id: "14", topic: "Resources and costs", sections: [methods], evidence: statement}
+      - {id: "15", topic: "Currency, price date, conversion", sections: [methods], evidence: statement}
+      - {id: "16", topic: "Model rationale and description", sections: [methods], evidence: statement}
+      - {id: "17", topic: "Analytics and assumptions", sections: [methods], evidence: statement}
+      - {id: "18", topic: "Heterogeneity", sections: [methods], evidence: statement}
+      - {id: "19", topic: "Distributional effects", sections: [methods], evidence: statement}
+      - {id: "20", topic: "Uncertainty", sections: [methods], evidence: statement}
+      - {id: "21", topic: "Engagement approach", sections: [methods], evidence: statement}
+      - {id: "22", topic: "Study parameters", sections: [results], evidence: table}
+      - {id: "23", topic: "Main results", sections: [results], evidence: number}
+      - {id: "24", topic: "Effect of uncertainty", sections: [results], evidence: statement}
+      - {id: "25", topic: "Effect of engagement", sections: [results], evidence: statement}
+      - {id: "26", topic: "Findings, limitations, generalisability", sections: [discussion], evidence: statement}
+      - {id: "27", topic: "Funding", sections: [other], evidence: statement}
+      - {id: "28", topic: "Conflicts of interest", sections: [other], evidence: statement}

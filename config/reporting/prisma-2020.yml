@@ -1,0 +1,57 @@
+# Transcribed from reviews/m-d1-reporting-skeletons.yml (M-D1 t2). Every item is a skeleton
+# entry: nothing is verified until a human checks this file against source.doi and records it.
+version: 1
+id: "prisma-2020"
+name: "PRISMA 2020"
+version_label: "2020"
+applies_to: ["systematic-review"]
+granularity: "full"
+source: {citation: "Page MJ, McKenzie JE, Bossuyt PM, et al. The PRISMA 2020 statement: an updated guideline for reporting systematic reviews. BMJ 2021;372:n71.", doi: "10.1136/bmj.n71"}
+verification:
+  status: "unverified"
+  note: "Item ids and labels were written offline from knowledge (M-D1 planning). Check them against the official checklist (source.doi) before relying on them."
+  verified_by: null
+  verified_at: null
+items:
+  - {id: "1", topic: "Title identifies systematic review", sections: ["title"], evidence: "statement"}
+  - {id: "2", topic: "Abstract", sections: ["abstract"], evidence: "statement"}
+  - {id: "3", topic: "Rationale", sections: ["introduction"], evidence: "statement"}
+  - {id: "4", topic: "Objectives", sections: ["introduction"], evidence: "statement"}
+  - {id: "5", topic: "Eligibility criteria", sections: ["methods"], evidence: "statement"}
+  - {id: "6", topic: "Information sources", sections: ["methods"], evidence: "statement"}
+  - {id: "7", topic: "Search strategy", sections: ["methods"], evidence: "statement"}
+  - {id: "8", topic: "Selection process", sections: ["methods"], evidence: "statement"}
+  - {id: "9", topic: "Data collection process", sections: ["methods"], evidence: "statement"}
+  - {id: "10a", topic: "Outcome data items", sections: ["methods"], evidence: "statement"}
+  - {id: "10b", topic: "Other data items", sections: ["methods"], evidence: "statement"}
+  - {id: "11", topic: "Risk of bias assessment", sections: ["methods"], evidence: "statement"}
+  - {id: "12", topic: "Effect measures", sections: ["methods"], evidence: "statement"}
+  - {id: "13a", topic: "Eligibility for each synthesis", sections: ["methods"], evidence: "statement"}
+  - {id: "13b", topic: "Data preparation for synthesis", sections: ["methods"], evidence: "statement"}
+  - {id: "13c", topic: "Tabulation and display", sections: ["methods"], evidence: "statement"}
+  - {id: "13d", topic: "Synthesis methods", sections: ["methods"], evidence: "statement"}
+  - {id: "13e", topic: "Heterogeneity exploration", sections: ["methods"], evidence: "statement"}
+  - {id: "13f", topic: "Sensitivity analyses", sections: ["methods"], evidence: "statement"}
+  - {id: "14", topic: "Reporting bias assessment", sections: ["methods"], evidence: "statement"}
+  - {id: "15", topic: "Certainty assessment", sections: ["methods"], evidence: "statement"}
+  - {id: "16a", topic: "Search and selection results", sections: ["results"], evidence: "diagram"}
+  - {id: "16b", topic: "Excluded near-eligible studies", sections: ["results"], evidence: "statement"}
+  - {id: "17", topic: "Study characteristics", sections: ["results"], evidence: "table"}
+  - {id: "18", topic: "Risk of bias in studies", sections: ["results"], evidence: "table"}
+  - {id: "19", topic: "Results of individual studies", sections: ["results"], evidence: "table"}
+  - {id: "20a", topic: "Synthesis characteristics", sections: ["results"], evidence: "statement"}
+  - {id: "20b", topic: "Statistical synthesis results", sections: ["results"], evidence: "number"}
+  - {id: "20c", topic: "Heterogeneity results", sections: ["results"], evidence: "statement"}
+  - {id: "20d", topic: "Sensitivity analysis results", sections: ["results"], evidence: "statement"}
+  - {id: "21", topic: "Reporting biases", sections: ["results"], evidence: "statement"}
+  - {id: "22", topic: "Certainty of evidence", sections: ["results"], evidence: "statement"}
+  - {id: "23a", topic: "General interpretation", sections: ["discussion"], evidence: "statement"}
+  - {id: "23b", topic: "Evidence limitations", sections: ["discussion"], evidence: "statement"}
+  - {id: "23c", topic: "Review process limitations", sections: ["discussion"], evidence: "statement"}
+  - {id: "23d", topic: "Implications", sections: ["discussion"], evidence: "statement"}
+  - {id: "24a", topic: "Registration", sections: ["other"], evidence: "registration"}
+  - {id: "24b", topic: "Protocol access", sections: ["other"], evidence: "statement"}
+  - {id: "24c", topic: "Protocol amendments", sections: ["other"], evidence: "statement"}
+  - {id: "25", topic: "Support", sections: ["other"], evidence: "statement"}
+  - {id: "26", topic: "Competing interests", sections: ["other"], evidence: "statement"}
+  - {id: "27", topic: "Data, code and materials", sections: ["other"], evidence: "statement"}

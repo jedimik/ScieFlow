@@ -1,0 +1,21 @@
+# Format of a reporting checklist file: config/reporting/<id>.yml (M-D1 plan section 5.3).
+# Read by src/scieflow/core/design/reporting.py, which fails closed on any violation.
+# The shipped checklists are skeletons: every file carries verification.status: unverified
+# until a human checks it against the official checklist named in `source`.
+format_version: 1
+file_keys:
+  required: [version, id, name, version_label, applies_to, granularity, source, verification, items]
+  optional: []
+source_keys: [citation, doi]
+verification_keys: [status, note, verified_by, verified_at]
+item_keys:
+  required: [id, topic, sections, evidence]
+  optional: [group]
+topic_max_length: 60
+doi_pattern: '^10\.\d{4,9}/\S+$'
+enums:
+  granularity: [full, top-level]
+  sections: [title, abstract, introduction, methods, results, discussion, other]
+  evidence: [statement, number, table, figure, diagram, registration]
+  verification_status: [unverified, verified]
+  item_groups: [essential, recommended]

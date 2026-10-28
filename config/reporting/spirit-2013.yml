@@ -1,0 +1,48 @@
+# Transcribed from reviews/m-d1-reporting-skeletons.yml (M-D1 t2). Every item is a skeleton
+# entry: nothing is verified until a human checks this file against source.doi and records it.
+version: 1
+id: "spirit-2013"
+name: "SPIRIT 2013"
+version_label: "2013"
+applies_to: ["rct"]
+granularity: "top-level"
+source: {citation: "Chan AW, Tetzlaff JM, Altman DG, et al. SPIRIT 2013 statement: defining standard protocol items for clinical trials. Ann Intern Med 2013;158:200-207.", doi: "10.7326/0003-4819-158-3-201302050-00583"}
+verification:
+  status: "unverified"
+  note: "Item ids and labels were written offline from knowledge (M-D1 planning). Check them against the official checklist (source.doi) before relying on them."
+  verified_by: null
+  verified_at: null
+items:
+  - {id: "1", topic: "Title", sections: ["title"], evidence: "statement"}
+  - {id: "2", topic: "Trial registration", sections: ["other"], evidence: "registration"}
+  - {id: "3", topic: "Protocol version", sections: ["other"], evidence: "statement"}
+  - {id: "4", topic: "Funding", sections: ["other"], evidence: "statement"}
+  - {id: "5", topic: "Roles and responsibilities", sections: ["other"], evidence: "statement"}
+  - {id: "6", topic: "Background and rationale", sections: ["introduction"], evidence: "statement"}
+  - {id: "7", topic: "Objectives", sections: ["introduction"], evidence: "statement"}
+  - {id: "8", topic: "Trial design", sections: ["introduction"], evidence: "statement"}
+  - {id: "9", topic: "Study setting", sections: ["methods"], evidence: "statement"}
+  - {id: "10", topic: "Eligibility criteria", sections: ["methods"], evidence: "statement"}
+  - {id: "11", topic: "Interventions", sections: ["methods"], evidence: "statement"}
+  - {id: "12", topic: "Outcomes", sections: ["methods"], evidence: "statement"}
+  - {id: "13", topic: "Participant timeline", sections: ["methods"], evidence: "diagram"}
+  - {id: "14", topic: "Sample size", sections: ["methods"], evidence: "number"}
+  - {id: "15", topic: "Recruitment", sections: ["methods"], evidence: "statement"}
+  - {id: "16", topic: "Allocation", sections: ["methods"], evidence: "statement"}
+  - {id: "17", topic: "Blinding", sections: ["methods"], evidence: "statement"}
+  - {id: "18", topic: "Data collection methods", sections: ["methods"], evidence: "statement"}
+  - {id: "19", topic: "Data management", sections: ["methods"], evidence: "statement"}
+  - {id: "20", topic: "Statistical methods", sections: ["methods"], evidence: "statement"}
+  - {id: "21", topic: "Data monitoring", sections: ["methods"], evidence: "statement"}
+  - {id: "22", topic: "Harms", sections: ["methods"], evidence: "statement"}
+  - {id: "23", topic: "Auditing", sections: ["methods"], evidence: "statement"}
+  - {id: "24", topic: "Research ethics approval", sections: ["other"], evidence: "statement"}
+  - {id: "25", topic: "Protocol amendments", sections: ["other"], evidence: "statement"}
+  - {id: "26", topic: "Consent or assent", sections: ["other"], evidence: "statement"}
+  - {id: "27", topic: "Confidentiality", sections: ["other"], evidence: "statement"}
+  - {id: "28", topic: "Declaration of interests", sections: ["other"], evidence: "statement"}
+  - {id: "29", topic: "Access to data", sections: ["other"], evidence: "statement"}
+  - {id: "30", topic: "Ancillary and post-trial care", sections: ["other"], evidence: "statement"}
+  - {id: "31", topic: "Dissemination policy", sections: ["other"], evidence: "statement"}
+  - {id: "32", topic: "Informed consent materials", sections: ["other"], evidence: "statement"}
+  - {id: "33", topic: "Biological specimens", sections: ["other"], evidence: "statement"}
