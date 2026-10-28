@@ -256,6 +256,13 @@ def _decide(project, run_dir: Path | None, agent: str, final_cfg: dict, *, sandb
         released = ws / "released"
         if released.is_dir() and not released.is_symlink():
             items.append(released.resolve())
+        # M-D1 5.5: the design ledger and its locked copies, once they exist (the host writes them).
+        lock_ledger = ws / "design" / "lock.jsonl"
+        if lock_ledger.is_file() and not lock_ledger.is_symlink():
+            items.append(lock_ledger.resolve())
+        locked_designs = ws / "design" / "locked"
+        if locked_designs.is_dir() and not locked_designs.is_symlink():
+            items.append(locked_designs.resolve())
         net_file = ws / network.FILE
         if net_file.is_file() and not net_file.is_symlink():
             items.append(net_file.resolve())

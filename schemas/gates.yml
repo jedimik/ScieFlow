@@ -22,4 +22,6 @@ kinds:
   hypothesis-selection: {requires_human: true, help: "Pick the hypotheses paper-draft carries forward"}
   # Data protection (docs/data-protection.md, M-B 5.8): a checked file leaves an L2 run only on a human release.
   data-release:        {requires_human: true,  help: "Release a checked aggregate from a run"}
+  # Study design (docs/experiments/design.md, M-D1 5.5): a locked design and its amendments are human-only.
+  design-lock:         {requires_human: true,  help: "Lock or amend a run's study design and analysis plan"}
 states: [open, answered, withdrawn]

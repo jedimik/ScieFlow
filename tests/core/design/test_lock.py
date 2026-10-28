@@ -225,8 +225,9 @@ def _remove_copy(lws):
 
 
 def _edit_copy(lws):
+    """Change a value of the locked copy (the title, not the comment above it: comments are not content)."""
     path = lws / "design" / "locked" / "v1" / "design.yml"
-    path.write_text(path.read_text().replace("Synthetic", "Changed", 1))
+    path.write_text(path.read_text().replace("Synthetic two-arm", "Changed two-arm", 1))
 
 
 def _symlink_ledger(lws):

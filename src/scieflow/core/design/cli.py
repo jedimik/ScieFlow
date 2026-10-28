@@ -17,7 +17,7 @@ from typing import NoReturn
 import click
 
 from scieflow.core.config import repo_root
-from scieflow.core.design import model, reporting, render, templates
+from scieflow.core.design import lock, model, reporting, render, templates
 from scieflow.core.design import schema as design_schema
 from scieflow.core.design.model import Absent, Invalid, Problem, Report
 from scieflow.core.project import Project, ProjectError
@@ -213,36 +213,74 @@ def render_cmd(slug: str) -> None:
     click.echo(f"wrote design/design.md (design sha256 {digest[:12]})")
 
 
+@design.command("lock")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def lock_cmd(slug: str, as_json: bool) -> None:
+    """Lock the design: opens a design-lock gate that only a human answers (approve or reject)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        gate = lock.lock(project, ws)
+    except lock.LockError as exc:
+        _fail(REFUSED, str(exc))
+    _emit(as_json, gate, [f"opened design-lock gate {gate['id']} for run {slug}",
+                          f"a human answers it: scieflow gate answer {slug} {gate['id']} approve|reject"])
+
+
+@design.command("amend")
+@click.argument("slug")
+@click.option("--summary", required=True, help="What changes, in one line.")
+@click.option("--rationale", required=True, help="Why it changes.")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def amend_cmd(slug: str, summary: str, rationale: str, as_json: bool) -> None:
+    """Amend a locked design: opens a design-lock gate with the diff; a human approves version N+1."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        gate = lock.amend(project, ws, summary, rationale)
+    except lock.LockError as exc:
+        _fail(REFUSED, str(exc))
+    _emit(as_json, gate, [f"opened design-lock gate {gate['id']} (amendment) for run {slug}",
+                          f"a human answers it: scieflow gate answer {slug} {gate['id']} approve|reject"])
+
+
 @design.command("show")
 @click.argument("slug")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
 def show_cmd(slug: str, as_json: bool) -> None:
-    """Show the design's status, hash and SAP metric names (read-only)."""
+    """Show the design's lock state, hashes and SAP metric names (read-only)."""
     project = _project()
     ws = _run(project, slug)
-    got = model.load(ws)
+    st = lock.state(project, ws)
     types = _study_types(project)
-    if isinstance(got, Absent):
+    study = st.study_type if st.study_type in types else None
+    if st.status == "none":
         payload = {"slug": slug, "status": "none"}
         lines = [f"run {slug}: no design (status none)"]
-    elif isinstance(got, Invalid):
-        payload = {"slug": slug, "status": "invalid", "reason": got.reason}
-        lines = [f"run {slug}: design invalid ({got.reason})"]
-    else:
-        report = _report(project, ws, got)
-        if not model.is_plain_json(report):
-            payload = {"slug": slug, "status": "invalid", "errors": len(report.errors),
-                       "warnings": len(report.warnings),
-                       "reason": "a value is not plain JSON (rule json-value); run design check"}
-            lines = [f"run {slug}: design invalid (a value is not plain JSON, rule json-value), "
-                     f"{len(report.errors)} error(s)"]
+    elif st.status == "invalid":
+        got = model.load(ws)
+        if isinstance(got, Invalid):
+            reason = got.reason
+            payload = {"slug": slug, "status": "invalid", "reason": reason}
         else:
-            digest = model.content_hash(got)
-            study = got.get("study_type")
-            study = study if study in types else None
-            payload = {"slug": slug, "status": "draft", "study_type": study,
-                       "content_hash": digest, "errors": len(report.errors),
-                       "warnings": len(report.warnings), "sap_metrics": model.sap_metrics(got)}
-            lines = [f"run {slug}: draft ({study or 'unknown'}), {len(report.errors)} error(s), "
-                     f"{len(report.warnings)} warning(s), sha256 {digest[:12]}"]
+            reason = "a value is not plain JSON (rule json-value); run design check"
+            payload = {"slug": slug, "status": "invalid", "errors": len(st.report.errors),
+                       "warnings": len(st.report.warnings), "reason": reason}
+        lines = [f"run {slug}: design invalid ({reason})"]
+    else:
+        report = st.report or Report()
+        payload = {"slug": slug, "status": st.status, "study_type": study,
+                   "content_hash": st.design_hash, "errors": len(report.errors),
+                   "warnings": len(report.warnings), "sap_metrics": st.sap_metrics,
+                   "version": st.version, "in_force_hash": st.in_force_hash,
+                   "current_hash": st.current_hash, "pending_gate": st.pending_gate,
+                   "trail": st.trail, "problem": st.problem}
+        shown = (st.current_hash or st.design_hash or "-")[:12]
+        lines = [f"run {slug}: {st.status} ({study or 'unknown'}), version {st.version or '-'}, "
+                 f"{len(report.errors)} error(s), {len(report.warnings)} warning(s), sha256 {shown}"]
+        if st.problem:
+            lines.append(f"ledger: {st.problem}")
+        if st.pending_gate:
+            lines.append(f"pending gate: {st.pending_gate}")
     _emit(as_json, payload, lines)
