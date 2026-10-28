@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import click
@@ -10,6 +11,9 @@ from scieflow.core.run import actions
 from .campaign import Campaign, RunSpec
 from .compare import compare_campaign
 from .envbuild import build_sif
+from .power import FAMILIES as POWER_FAMILIES
+from .power import PowerError, PowerUsageError, render_json, render_text
+from .power import solve as solve_power
 from .report import generate_report
 from .runner import execute_run, recompute_metrics
 from .scaffold import new_pipeline, new_stage
@@ -172,6 +176,82 @@ def metrics(run_dir):
 def report(campaign_dir, include_direct):
     """Generate report.md + QC plots for a campaign."""
     click.echo(str(generate_report(campaign_dir, include_direct=include_direct)))
+
+
+def _write_power_out(path: Path, text: str, force: bool) -> None:
+    """Write a power document atomically; never through a symlink."""
+    if path.is_symlink():
+        raise click.ClickException(f"refusing to write through a symlink: {path}")
+    if path.exists() and not force:
+        raise click.ClickException(f"{path} exists; pass --force to replace it")
+    tmp = path.with_name(f".{path.name}.tmp")
+    try:
+        tmp.unlink(missing_ok=True)
+        with open(tmp, "x", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except OSError as e:
+        raise click.ClickException(f"cannot write {path}: {e.strerror}") from e
+
+
+@experiment.command("power")
+@click.argument("family", type=click.Choice(POWER_FAMILIES))
+@click.option("--alpha", type=float, default=0.05, show_default=True,
+              help="Significance level (0 < alpha <= 0.5).")
+@click.option("--power", "target_power", type=float,
+              help="Target power, e.g. 0.8. Solved for when omitted.")
+@click.option("--n", type=float,
+              help="Sample size: first group (t-ind, proportions), subjects or pairs "
+                   "(t-paired, t-one, correlation), total (anova). Solved for when omitted.")
+@click.option("--events", type=float,
+              help="Survival: number of events. Solved for when omitted.")
+@click.option("--effect-size", type=float,
+              help="Cohen's d (t), f (anova) or h (proportions). Solved for when omitted.")
+@click.option("--p1", type=float, help="Proportions: first proportion (use with --p2).")
+@click.option("--p2", type=float, help="Proportions: second proportion (use with --p1).")
+@click.option("--r", type=float, help="Correlation coefficient.")
+@click.option("--hazard-ratio", type=float, help="Survival: hazard ratio.")
+@click.option("--groups", type=int, help="ANOVA: number of groups (at least 2).")
+@click.option("--ratio", type=float,
+              help="t-ind, proportions: second group divided by the first (default 1).")
+@click.option("--allocation", type=float,
+              help="Survival: share of subjects in group 1 (default 0.5).")
+@click.option("--event-probability", type=float,
+              help="Survival: probability of an event per subject; then --n is solved "
+                   "as the subject count.")
+@click.option("--alternative", type=click.Choice(["two-sided", "larger", "smaller"]),
+              default=None, help="Default two-sided. Use larger for one-sided tests.")
+@click.option("--json", "as_json", is_flag=True,
+              help="Print the deterministic JSON document.")
+@click.option("--out", type=click.Path(dir_okay=False, path_type=Path),
+              help="Write the JSON document to this file.")
+@click.option("--force", is_flag=True,
+              help="Replace an existing --out file. A symlink is never written.")
+def power_cmd(family, alpha, target_power, n, events, effect_size, p1, p2, r, hazard_ratio,
+              groups, ratio, allocation, event_probability, alternative, as_json, out, force):
+    """Sample size, power or effect size for a planned study.
+
+    Give every input you know and leave exactly one unknown: the sample size
+    (--n, or --events for survival), --power, or --effect-size. Statistics only;
+    no data are read. Families: t-ind, t-paired, t-one, anova, proportions,
+    correlation, survival.
+    """
+    try:
+        doc = solve_power(
+            family, alpha=alpha, power=target_power, n=n, events=events,
+            effect_size=effect_size, p1=p1, p2=p2, r=r, hazard_ratio=hazard_ratio,
+            groups=groups, ratio=ratio, allocation=allocation,
+            event_probability=event_probability, alternative=alternative,
+        )
+    except PowerUsageError as e:
+        raise click.UsageError(str(e)) from e
+    except PowerError as e:
+        raise click.ClickException(str(e)) from e
+    if out is not None:
+        _write_power_out(out, render_json(doc), force)
+        click.echo(str(out))
+        return
+    click.echo(render_json(doc) if as_json else render_text(doc), nl=False)
 
 
 @experiment.group()
