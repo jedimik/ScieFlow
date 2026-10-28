@@ -188,7 +188,9 @@ def snapshots_list_cmd(slug, as_json):
 @click.argument("slug")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
 def snapshots_verify_cmd(slug, as_json):
-    """Check every recorded answer (shape, key, request, body hash); exit 1 naming each bad file."""
+    """Check every recorded answer (shape, file name, provider, body hash); exit 1 naming each bad file.
+
+    The stored request is not re-checked here; a replay checks it when it reads the answer."""
     import json
 
     snaps = _snapshots()

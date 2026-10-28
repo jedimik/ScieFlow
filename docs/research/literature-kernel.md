@@ -92,7 +92,7 @@ retrieval time. Only the Gateway writes snapshots.
 
 ```bash
 uv run scieflow research snapshots list <slug> [--json]
-uv run scieflow research snapshots verify <slug> [--json]    # shape, key, request and body hash of every file
+uv run scieflow research snapshots verify <slug> [--json]    # shape, file name, provider and body hash of every file
 uv run scieflow research snapshots copy <source> <target> [--json]
 ```
 

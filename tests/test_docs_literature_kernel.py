@@ -67,6 +67,8 @@ def test_the_page_names_every_command_it_documents():
                     "scieflow research snapshots list", "scieflow research snapshots verify",
                     "scieflow research snapshots copy"):
         assert command in text, f"literature-kernel.md does not document `{command}`"
+    assert "shape, file name, provider and body hash of every file" in text
+    assert "shape, key, request and body hash" not in text
 
 
 def test_the_documented_commands_exist_in_the_cli():
