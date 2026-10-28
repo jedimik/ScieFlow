@@ -68,7 +68,7 @@ def test_matches_statsmodels(case):
         return
     sm = TTestIndPower() if family == "t-ind" else TTestPower()
     if case["solve"] == "n":
-        expected = sm.solve_power(effect_size=case["effect_size"], nobs=None, alpha=alpha,
+        expected = sm.solve_power(effect_size=case["effect_size"], nobs1=None, alpha=alpha,
                                   power=case["power"], ratio=case.get("ratio", 1), alternative=alt) \
             if family == "t-ind" else \
             sm.solve_power(effect_size=case["effect_size"], nobs=None, alpha=alpha,
@@ -76,7 +76,7 @@ def test_matches_statsmodels(case):
         key = "n1" if family == "t-ind" else "n"
         assert math.isclose(doc["result"][key], expected, rel_tol=1e-6)
     elif case["solve"] == "power":
-        expected = sm.power(effect_size=case["effect_size"], nobs=case["n"], alpha=alpha,
+        expected = sm.power(effect_size=case["effect_size"], nobs1=case["n"], alpha=alpha,
                             ratio=case.get("ratio", 1), alternative=alt) \
             if family == "t-ind" else \
             sm.power(effect_size=case["effect_size"], nobs=case["n"], alpha=alpha, alternative=alt)
