@@ -136,6 +136,16 @@ def test_text_output_shows_assumptions():
     assert "equal variances" in result.output
 
 
+@pytest.mark.parametrize("extra", [[], ["--effect-size", "0.4"]])
+def test_proportions_p1_alone_is_refused_exit_1(extra):
+    result = CliRunner().invoke(
+        main,
+        ["power", "proportions", "--alpha", "0.05", "--power", "0.8", "--p1", "0.5", *extra],
+    )
+    assert result.exit_code == 1
+    assert "p1" in result.output
+
+
 def test_out_writes_the_same_bytes_as_json(tmp_path):
     args = ["power", "t-ind", "--alpha", "0.05", "--power", "0.8", "--effect-size", "0.5"]
     stdout = CliRunner().invoke(main, [*args, "--json"]).output

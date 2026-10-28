@@ -306,8 +306,9 @@ def solve(
         pair = p1 is not None and p2 is not None
         if pair and effect_size is not None:
             raise PowerError("give --effect-size or both --p1 and --p2, not both")
-        if (p1 is None) != (p2 is None) and effect_size is None:
-            raise PowerError("proportions need both --p1 and --p2 (or --effect-size)")
+        if (p1 is None) != (p2 is None):
+            # A lone p1 or p2 is never stored: it would make recompute() fail.
+            raise PowerError("proportions need both --p1 and --p2 (or --effect-size alone)")
         if pair:
             for name, p in (("p1", p1), ("p2", p2)):
                 if not 0 < p < 1:
@@ -480,9 +481,22 @@ def _solve_result(family, mode, o, target, n, events, effect_size, r, hazard_rat
 
 
 def recompute(doc: dict[str, Any]) -> dict[str, Any]:
-    """Re-solve a stored document from its inputs (used by design check, M-D1 t3)."""
-    family = doc["family"]
-    inp = dict(doc["inputs"])
+    """Re-solve a stored document from its inputs (used by design check, M-D1 t3).
+
+    Fails closed: a malformed document, an input set that does not solve, or a
+    stored ``solve`` the inputs do not imply raises PowerError. The caller
+    compares the returned ``result`` with the stored one.
+    """
+    if not isinstance(doc, dict):
+        raise PowerError("power document must be a mapping")
+    family = doc.get("family")
+    if not isinstance(family, str) or family not in FAMILIES:
+        raise PowerError(f"power document has an unknown family {family!r}")
+    inp = doc.get("inputs")
+    if not isinstance(inp, dict):
+        raise PowerError("power document needs an inputs mapping")
+    if "result" in doc and not isinstance(doc["result"], dict):
+        raise PowerError("power document result must be a mapping")
     kwargs: dict[str, Any] = {
         "alpha": inp.get("alpha", 0.05),
         "alternative": inp.get("alternative", "two-sided"),
@@ -493,7 +507,18 @@ def recompute(doc: dict[str, Any]) -> dict[str, Any]:
             kwargs[key] = inp[key]
     if "p1" in inp and "p2" in inp:
         kwargs.pop("effect_size", None)  # derived from p1 and p2
-    return solve(family, **kwargs)
+    try:
+        fresh = solve(family, **kwargs)
+    except PowerUsageError as exc:
+        raise PowerError(f"power document inputs do not solve: {exc}") from None
+    except TypeError as exc:
+        raise PowerError(f"power document inputs are malformed: {exc}") from None
+    if "solve" in doc and doc["solve"] != fresh["solve"]:
+        raise PowerError(
+            f"stored solve {doc['solve']!r} does not match the solve "
+            f"{fresh['solve']!r} implied by its inputs"
+        )
+    return fresh
 
 
 def render_json(doc: dict[str, Any]) -> str:

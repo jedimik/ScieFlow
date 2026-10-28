@@ -229,6 +229,48 @@ def test_recompute_detects_a_changed_required_count():
     assert fresh["result"] != stored["result"]
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        dict(alpha=0.05, power=0.8, p1=0.5, effect_size=0.4),
+        dict(alpha=0.05, power=0.8, p2=0.6, effect_size=0.4),
+        dict(alpha=0.05, power=0.8, p1=0.5),
+        dict(alpha=0.05, power=0.8, p2=0.6),
+    ],
+)
+def test_proportions_one_of_p1_p2_is_refused_even_with_effect_size(kwargs):
+    # A lone p1 or p2 must never be stored (it would make recompute fail).
+    with pytest.raises(P.PowerError, match="both --p1 and --p2"):
+        P.solve("proportions", **kwargs)
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        [],
+        {},
+        {"family": "nope", "inputs": {}},
+        {"family": "t-ind"},
+        {"family": "t-ind", "inputs": []},
+        {"family": "t-ind", "inputs": {"alpha": 0.05, "power": 0.8, "effect_size": 0.5},
+         "result": []},
+        {"family": "t-ind", "inputs": {"alpha": 0.05, "effect_size": 0.5}},  # two unknown
+        {"family": "t-ind", "inputs": {"alpha": [0.05], "power": 0.8, "effect_size": 0.5}},
+    ],
+)
+def test_recompute_refuses_a_malformed_document_with_power_error(doc):
+    with pytest.raises(P.PowerError):
+        P.recompute(doc)
+
+
+def test_recompute_refuses_a_stored_solve_the_inputs_do_not_imply():
+    doc = P.solve("t-ind", alpha=0.05, power=0.8, effect_size=0.5)
+    stored = json.loads(json.dumps(doc))
+    stored["solve"] = "power"
+    with pytest.raises(P.PowerError, match="solve"):
+        P.recompute(stored)
+
+
 def test_power_module_imports_scipy_lazily():
     code = "import sys, scieflow.experiments.power; print('scipy' in sys.modules)"
     out = subprocess.run(
