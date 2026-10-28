@@ -307,6 +307,89 @@ def test_an_edit_to_the_locked_power_file_or_a_deleted_design_is_modified(lproj,
     assert lock.state(lproj, lws).status == "modified"
 
 
+# --- review r1 fixes (M-D1 t4): removed ledger lines, symlinked copies, stale copy folders --------
+
+def test_a_removed_last_record_is_detected(lproj, lws):
+    locked(lproj, lws)
+    edit_design(lws, lambda d: d.update(notes="Synthetic changed note."))
+    gate = lock.amend(lproj, lws, "one", "reason")
+    service.answer_gate(lproj, "r1", gate["id"], "approve")
+    assert lock.verify_ledger(lws) is None
+    write_ledger(lws, ledger_records(lws)[:-1])
+    assert lock.verify_ledger(lws) is not None
+    assert lock.state(lproj, lws).status == "ledger-invalid"
+
+
+def test_a_removed_only_record_is_detected(lproj, lws):
+    locked(lproj, lws)
+    write_ledger(lws, [])
+    assert lock.verify_ledger(lws) is not None
+    assert lock.state(lproj, lws).status == "ledger-invalid"
+
+
+def test_an_emptied_ledger_is_invalid_and_cannot_be_locked_again(lproj, lws):
+    locked(lproj, lws)
+    (lws / "design" / "lock.jsonl").write_text("")
+    assert lock.verify_ledger(lws) is not None
+    assert lock.state(lproj, lws).status == "ledger-invalid"
+    with pytest.raises(lock.LockError, match="does not verify"):
+        lock.lock(lproj, lws)
+
+
+def test_a_deleted_ledger_is_invalid_while_its_approved_gate_remains(lproj, lws):
+    locked(lproj, lws)
+    (lws / "design" / "lock.jsonl").unlink()
+    assert lock.verify_ledger(lws) is not None
+    assert lock.state(lproj, lws).status == "ledger-invalid"
+
+
+def test_a_symlinked_locked_folder_is_refused_at_approval(lproj, lws, lroot):
+    outside = lroot / "outside"
+    outside.mkdir()
+    (lws / "design" / "locked").symlink_to(outside, target_is_directory=True)
+    gate = lock.lock(lproj, lws)
+    with pytest.raises(service.ServiceError, match="symlink"):
+        service.answer_gate(lproj, "r1", gate["id"], "approve")
+    assert read_gate(lws, gate["id"])["state"] == "open"
+    assert list(outside.iterdir()) == []
+    assert not (lws / "design" / "lock.jsonl").exists()
+
+
+def test_a_symlinked_locked_folder_after_a_lock_is_ledger_invalid(lproj, lws, lroot):
+    locked(lproj, lws)
+    real = lws / "design" / "locked"
+    moved = lroot / "moved"
+    real.rename(moved)
+    real.symlink_to(moved, target_is_directory=True)
+    assert lock.verify_ledger(lws) is not None
+    assert lock.state(lproj, lws).status == "ledger-invalid"
+
+
+def test_a_stale_copy_folder_is_replaced_not_reused(lproj, lws):
+    edit_design(lws, lambda d: d.update(
+        sample_size={"method": "fixed", "n": 60, "rationale": "Synthetic fixed size."}))
+    stale = lws / "design" / "locked" / "v1"
+    stale.mkdir(parents=True)
+    (stale / "power.json").write_text(json.dumps({"stale": True}))
+    (stale / "leftover.txt").write_text("left by an interrupted approval")
+    gate = lock.lock(lproj, lws)
+    service.answer_gate(lproj, "r1", gate["id"], "approve")
+    assert sorted(p.name for p in stale.iterdir()) == ["design.yml"]
+    assert lock.verify_ledger(lws) is None
+    assert lock.state(lproj, lws).status == "locked"
+
+
+def test_an_approval_retried_after_a_partial_copy_still_completes(lproj, lws):
+    gate = lock.lock(lproj, lws)
+    copy = lws / "design" / "locked" / "v1"
+    copy.mkdir(parents=True)
+    (copy / "design.yml").write_bytes((lws / "design" / "design.yml").read_bytes())
+    (copy / "power.json").write_bytes((lws / "design" / "power" / "rct-ttest.json").read_bytes())
+    service.answer_gate(lproj, "r1", gate["id"], "approve")
+    assert len(ledger_records(lws)) == 1
+    assert lock.verify_ledger(lws) is None
+
+
 # --- CLI ------------------------------------------------------------------------------------
 
 @pytest.fixture
