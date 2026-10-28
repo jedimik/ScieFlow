@@ -163,6 +163,18 @@ def test_broken_ledger_refuses_with_design_ledger_invalid(droot, ws):
     assert not (ws / "experiments").exists()
 
 
+def test_human_locked_design_with_its_directory_removed_is_still_refused(droot, ws):
+    # Finding 1 (M-D1 t5 review r1): deleting design/ after a human lock must not open the guard.
+    write_design(ws, "rct.yml")
+    lock_as_human(droot, ws)
+    shutil.rmtree(ws / "design")
+    result = invoke(droot, ws, "sweep")
+    assert result.exit_code == 1, result.output
+    assert "design-ledger-invalid" in result.output
+    assert not (ws / "experiments").exists()
+    assert refusals(ws)[0]["data"]["rule"] == "design-ledger-invalid"
+
+
 def test_unreadable_design_refuses_with_design_invalid(droot, ws):
     (ws / "design").mkdir(parents=True)
     (ws / "design" / "design.yml").write_text("title: [unclosed\n")
@@ -223,3 +235,81 @@ def test_campaign_outside_any_run_is_unaffected(droot):
         "--pipelines-dir", str(droot / "pipelines")])
     assert result.exit_code == 0, result.output
     assert (droot / "exp").exists()
+
+
+# --- M-D1 t5 review r1, finding 2: the rows of plan 5.6 that shipped untested ----------------------
+
+def test_broken_ledger_refuses_a_computational_design_too(droot, ws):
+    write_design(ws, "computational.yml")
+    lock_as_human(droot, ws)
+    (ws / "design" / "lock.jsonl").write_text("not json\n")
+    result = invoke(droot, ws, "sweep")
+    assert result.exit_code == 1, result.output
+    assert "design-ledger-invalid" in result.output
+    assert not (ws / "experiments").exists()
+    assert refusals(ws)[0]["data"]["rule"] == "design-ledger-invalid"
+
+
+def test_draft_with_check_errors_refuses_a_non_computational_design(droot, ws):
+    write_design(ws, "rct.yml", lambda doc: doc.__setitem__("question", "TODO"))
+    result = invoke(droot, ws, "sweep")
+    assert result.exit_code == 1, result.output
+    assert "design-invalid" in result.output and "scieflow design check" in result.output
+    assert not (ws / "experiments").exists()
+    assert refusals(ws)[0]["data"]["rule"] == "design-invalid"
+
+
+def test_draft_with_check_errors_only_warns_for_a_computational_design(droot, ws):
+    write_design(ws, "computational.yml", lambda doc: doc.__setitem__("question", "TODO"))
+    result = invoke(droot, ws, "sweep")
+    assert result.exit_code == 0, result.output
+    assert "warning: design:" in result.output and "design-invalid" in result.output
+    assert [w["data"]["rule"] for w in warnings(ws)] == ["design-invalid"]
+    assert refusals(ws) == []
+
+
+def test_single_run_unlocked_computational_design_warns_and_runs(droot, ws):
+    write_design(ws, "computational.yml")
+    result = invoke(droot, ws, "run")
+    assert result.exit_code == 0, result.output
+    assert "warning: design:" in result.output and "design-unlocked" in result.output
+    assert [w["data"]["rule"] for w in warnings(ws)] == ["design-unlocked"]
+    assert refusals(ws) == []
+
+
+def test_single_run_unlocked_non_computational_design_is_refused(droot, ws):
+    write_design(ws, "rct.yml")
+    result = invoke(droot, ws, "run")
+    assert result.exit_code == 1, result.output
+    assert "design-unlocked" in result.output
+    assert not (ws / "experiments").exists()
+    assert refusals(ws)[0]["data"]["rule"] == "design-unlocked"
+
+
+def test_single_run_locked_then_edited_design_is_refused(droot, ws):
+    write_design(ws, "rct.yml")
+    lock_as_human(droot, ws)
+    doc = yaml.safe_load((ws / "design" / "design.yml").read_text(encoding="utf-8"))
+    doc["question"] = "Edited after the lock."
+    (ws / "design" / "design.yml").write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+    result = invoke(droot, ws, "run")
+    assert result.exit_code == 1, result.output
+    assert "design-modified" in result.output
+    assert not (ws / "experiments").exists()
+    assert refusals(ws)[0]["data"]["rule"] == "design-modified"
+
+
+def test_refusal_event_carries_exactly_reason_rule_and_campaign(droot, ws):
+    set_design(ws, rct_with_outcomes("ssim"))
+    lock_as_human(droot, ws)
+    assert invoke(droot, ws, "sweep").exit_code == 1
+    assert [e["data"] for e in refusals(ws)] == [
+        {"reason": "design", "rule": "out-of-sap", "campaign": "gain-sweep"}]
+
+
+def test_warning_event_carries_exactly_rule_and_campaign(droot, ws):
+    write_design(ws, "computational.yml")
+    assert invoke(droot, ws, "sweep").exit_code == 0
+    assert [e["data"] for e in warnings(ws)] == [
+        {"rule": "design-unlocked", "campaign": "gain-sweep"}]
+
