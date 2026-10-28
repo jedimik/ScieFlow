@@ -180,3 +180,42 @@ def test_replay_creates_the_snapshot_folder_so_it_can_be_protected(project):
     assert cli("r", "replay", "--reason", "x").exit_code == 0
     assert (ws / "snapshots" / "literature").is_dir()
     assert not (ws / "snapshots" / "literature").is_symlink()
+
+
+# 7. a linked snapshot folder is reported as corrupt, not a traceback (plan-review F3)
+def test_show_with_a_linked_snapshot_folder_reports_it_and_exits_1(project, tmp_path):
+    _, ws = project
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    os.symlink(target, ws / "snapshots")
+    res = cli("r")
+    assert res.exit_code == 1
+    assert isinstance(res.exception, SystemExit), repr(res.exception)
+    assert "symbolic link" in res.output
+
+
+def test_show_json_with_a_linked_snapshot_folder_keeps_the_state(project, tmp_path):
+    import json
+
+    _, ws = project
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    os.symlink(target, ws / "snapshots")
+    res = cli("r", "--json")
+    assert res.exit_code == 1
+    assert isinstance(res.exception, SystemExit), repr(res.exception)
+    doc = json.loads(res.stdout)
+    assert doc["mode"] == "live" and doc["origin"] == "default" and doc["snapshots"] is None
+
+
+# 8. a snapshot path that is a file refuses before network.yml is written (plan-review F3)
+@pytest.mark.parametrize("args", [("replay", "--reason", "x"), ("offline", "--as-agent")])
+def test_a_no_egress_mode_refuses_a_snapshot_file_and_writes_nothing(project, args):
+    _, ws = project
+    (ws / "snapshots").write_text("not a folder\n", encoding="utf-8")
+    res = cli("r", *args)
+    assert res.exit_code == 1, res.output
+    assert "snapshots is not a folder" in res.output
+    assert not (ws / "network.yml").exists()
+    assert network_events(ws) == []
+    assert (ws / "snapshots").read_text(encoding="utf-8") == "not a folder\n"

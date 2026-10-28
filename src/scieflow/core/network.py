@@ -150,7 +150,12 @@ def base(ws) -> tuple[str, str]:
         return value, "file"
     if state == "invalid":
         return "offline", "invalid"
-    if levels.run_level(ws) == "L2":
+    return default(ws)
+
+
+def default(ws) -> tuple[str, str]:
+    """(mode, origin) of a run with no network.yml: an L2 run replays (M-C1-D6), any other is live."""
+    if levels.run_level(Path(ws)) == "L2":
         return "replay", "l2-default"
     return "live", "default"
 

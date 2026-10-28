@@ -153,3 +153,53 @@ def test_a_symbolic_link_snapshot_is_reported_as_corrupt(project, tmp_path):
     res = cli("verify", "src")
     assert res.exit_code == 1
     assert "symbolic link" in res.output
+
+
+def test_list_with_a_linked_snapshot_folder_exits_1_without_a_traceback(project, tmp_path):
+    _, src, _ = project
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    os.symlink(target, src / "snapshots")
+    res = cli("list", "src")
+    assert res.exit_code == 1
+    assert isinstance(res.exception, SystemExit), repr(res.exception)
+    assert "symbolic link" in res.output
+
+
+# --- --json on verify and copy (plan 5.5, 5.12; plan-review F4) ---------------------------------
+
+def test_verify_json_reports_the_verified_count_and_no_problems(project):
+    _, src, _ = project
+    snap(src)
+    snap(src, key=OTHER_KEY)
+    res = cli("verify", "src", "--json")
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout) == {"verified": 2, "problems": []}
+
+
+def test_verify_json_names_a_tampered_file_and_exits_1(project):
+    _, src, _ = project
+    snap(src)
+    snap(src, key=OTHER_KEY)
+    path = snapshots.path(src, "search-openalex", OTHER_KEY)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["response_body"]["results"][0]["title"] = "tampered"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    res = cli("verify", "src", "--json")
+    assert res.exit_code == 1
+    doc = json.loads(res.stdout)
+    assert doc["verified"] == 1 and len(doc["problems"]) == 1
+    assert f"snapshots/literature/search-openalex/{OTHER_KEY}.json" in doc["problems"][0]
+    assert "tampered" not in res.stdout
+
+
+def test_copy_json_reports_the_copied_and_skipped_counts(project):
+    _, src, dst = project
+    snap(src)
+    snap(src, key=OTHER_KEY)
+    there = snapshots.path(dst, "search-openalex", QUERY_KEY)
+    there.parent.mkdir(parents=True, exist_ok=True)
+    there.write_bytes(snapshots.path(src, "search-openalex", QUERY_KEY).read_bytes())
+    res = cli("copy", "src", "dst", "--json")
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout) == {"copied": 1, "skipped": 1}

@@ -5,6 +5,7 @@ entry point, so `scieflow research <cmd> --help` shows that command's options.
 """
 
 import importlib
+import os
 
 import click
 
@@ -66,6 +67,23 @@ def _no_dispatch(what: str) -> None:
         raise click.ClickException(f"refused: {what} is not allowed inside a dispatch")
 
 
+def _snapshot_folder(ws) -> None:
+    """A replaying run needs its snapshots/literature folder before its mode is written, so the
+    sandbox can protect it (M-C1 5.8). A linked snapshots/ is left as it is. A file in its place,
+    or a folder that cannot be made, refuses here, so nothing is changed."""
+    snaps = ws / "snapshots"
+    if snaps.is_symlink():
+        return
+    if os.path.lexists(snaps) and not snaps.is_dir():
+        raise click.ClickException("snapshots is not a folder; move it aside first "
+                                   "(nothing was changed)")
+    try:
+        (snaps / "literature").mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise click.ClickException(f"cannot create snapshots/literature "
+                                   f"({exc.strerror or 'OS error'}); nothing was changed") from exc
+
+
 @research.command("network")
 @click.argument("slug")
 @click.argument("mode", required=False, type=click.Choice(NETWORK_MODES))
@@ -87,14 +105,22 @@ def network_cmd(slug, mode, reason, as_agent, clear, as_json):
     ws = _run_dir(slug)
     if mode is None and not clear:
         doc = network.describe(ws)
-        doc["snapshots"] = sum(row["count"] for row in _snapshots().summary(ws).values())
+        snaps = _snapshots()
+        try:
+            doc["snapshots"] = sum(row["count"] for row in snaps.summary(ws).values())
+            problem = None
+        except snaps.SnapshotCorrupt as exc:
+            doc["snapshots"], problem = None, str(exc)
         if as_json:
             click.echo(json.dumps(doc, indent=2, ensure_ascii=False))
-            return
-        click.echo(f"{slug}: {doc['mode']} ({doc['origin']})")
-        if doc["origin"] == "file":
-            click.echo(f"  set by {doc['set_by']} at {doc['set_at']}: {doc['reason']}")
-        click.echo(f"  recorded snapshots: {doc['snapshots']}")
+        else:
+            click.echo(f"{slug}: {doc['mode']} ({doc['origin']})")
+            if doc["origin"] == "file":
+                click.echo(f"  set by {doc['set_by']} at {doc['set_at']}: {doc['reason']}")
+            shown = doc["snapshots"] if problem is None else "unreadable"
+            click.echo(f"  recorded snapshots: {shown}")
+        if problem is not None:
+            raise click.ClickException(problem)
         return
 
     _no_dispatch("changing the network mode")
@@ -109,6 +135,8 @@ def network_cmd(slug, mode, reason, as_agent, clear, as_json):
     if (clear or loosening) and not reason.strip():
         what = "clearing the network file" if clear else f"moving to {mode}"
         raise click.ClickException(f"{what} needs --reason")
+    if (network.default(ws)[0] if clear else mode) in ("replay", "offline"):
+        _snapshot_folder(ws)   # before the file: a refusal here leaves network.yml unchanged
     try:
         if clear:
             network.clear(ws)
@@ -117,8 +145,6 @@ def network_cmd(slug, mode, reason, as_agent, clear, as_json):
     except network.NetworkWriteError as exc:
         raise click.ClickException(str(exc)) from exc
     new, _ = network.base(ws)
-    if new in ("replay", "offline") and not (ws / "snapshots").is_symlink():
-        (ws / "snapshots" / "literature").mkdir(parents=True, exist_ok=True)
     events.emit(ws, "network.set", actor=actor, mode=new, previous=previous, reason=reason)
     click.echo(f"{slug}: {new} (was {previous})")
 
@@ -141,7 +167,11 @@ def snapshots_list_cmd(slug, as_json):
     """Count and size of the recorded answers, per provider."""
     import json
 
-    rows = _snapshots().summary(_run_dir(slug))
+    snaps = _snapshots()
+    try:
+        rows = snaps.summary(_run_dir(slug))
+    except snaps.SnapshotCorrupt as exc:
+        raise click.ClickException(str(exc)) from exc
     if as_json:
         click.echo(json.dumps(rows, indent=2))
         return
@@ -153,27 +183,39 @@ def snapshots_list_cmd(slug, as_json):
 
 @snapshots_group.command("verify")
 @click.argument("slug")
-def snapshots_verify_cmd(slug):
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def snapshots_verify_cmd(slug, as_json):
     """Check every recorded answer (shape, key, request, body hash); exit 1 naming each bad file."""
+    import json
+
     snaps = _snapshots()
     ws = _run_dir(slug)
     try:
         problems = snaps.verify_tree(ws)
+        verified = len(snaps.files(ws)) - len(problems)
     except snaps.SnapshotCorrupt as exc:
-        raise click.ClickException(str(exc)) from exc
-    if problems:
+        if not as_json:
+            raise click.ClickException(str(exc)) from exc
+        problems, verified = [str(exc)], 0
+    if as_json:
+        click.echo(json.dumps({"verified": verified, "problems": problems}, indent=2,
+                              ensure_ascii=False))
+    elif problems:
         for line in problems:
             click.echo(line, err=True)
+    else:
+        click.echo(f"verified {verified} recorded answer(s)")
+    if problems:
         raise click.ClickException(f"{len(problems)} snapshot problem(s)")
-    total = sum(row["count"] for row in snaps.summary(ws).values())
-    click.echo(f"verified {total} recorded answer(s)")
 
 
 @snapshots_group.command("copy")
 @click.argument("source")
 @click.argument("target")
-def snapshots_copy_cmd(source, target):
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def snapshots_copy_cmd(source, target, as_json):
     """Copy the recorded answers of SOURCE into TARGET. Refused from an L2 run (exit 3)."""
+    import json
     import sys
 
     from scieflow.core import events
@@ -191,7 +233,11 @@ def snapshots_copy_cmd(source, target):
     except snaps.SnapshotCopyError as exc:
         raise click.ClickException(str(exc)) from exc
     events.emit(dst, "literature.snapshot", action="copied", count=copied, **{"from": source})
-    click.echo(f"copied {copied} answer(s) from {source} to {target} ({skipped} already there)")
+    if as_json:
+        click.echo(json.dumps({"copied": copied, "skipped": skipped}, indent=2))
+    else:
+        click.echo(f"copied {copied} answer(s) from {source} to {target} "
+                   f"({skipped} already there)")
 
 
 @research.group()
