@@ -18,8 +18,8 @@ All examples assume you are at the repo root and use `uv run scieflow …`.
 | `124` | the agent process was killed for running past its timeout, with partial output kept | `scieflow agent run`, and any job `jobs.wait` times out on |
 | `2` | `gate wait --timeout` expired without an answer | `scieflow gate wait` |
 | `1` | any other refusal (bad slug, unmet precondition, validation problem) | Click's default for a raised `ClickException`, e.g. `run advance` past `iterations`, `run mark` with a bad phase/state |
-| `3` | a literature refusal: the query failed the leak check, a source is switched off, or a data-protection rule refused the request (for an L2 run, an unlisted service or a copy of snapshots out of the run) | `scieflow research search` and `search all` (a refused or switched-off source); `scieflow research snapshots copy` (L2 source). See [Literature kernel](research/literature-kernel.md) |
-| `6` | a no-egress literature run (`replay` or `offline`) has no recorded answer for the request; nothing was sent | `scieflow research search` and `search all`; see [Literature kernel](research/literature-kernel.md#network-modes) |
+| `3` | a literature refusal: the query failed the leak check, a source is switched off, a corrupt or forged snapshot was read in a `replay` or `offline` run, or a data-protection rule refused the request (for an L2 run, an unlisted service or a copy of snapshots out of the run) | `scieflow research search`; `search all` exits `3` when no source answered and some source was refused or switched off (the full rule is in [Literature kernel](research/literature-kernel.md#searching-every-source-at-once)); `scieflow research snapshots copy` (L2 source) |
+| `6` | a no-egress literature run (`replay` or `offline`) has no recorded answer for the request; nothing was sent. `search all` exits `6` only when no source answered and every source asked is a snapshot miss | `scieflow research search` and `search all`; see [Literature kernel](research/literature-kernel.md#network-modes) |
 
 ## `scieflow data`
 

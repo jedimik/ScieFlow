@@ -20,13 +20,16 @@ that order) and prints one JSON object:
 
 - the answers are merged with the vendored dedupe and ranked with the vendored rank
   (see [Credits](#credits));
-- the output names each source's status (answered, refused, switched off, snapshot
-  miss, failed) and never repeats the query;
+- the output names each source's status and never repeats the query. The status is
+  one of `ok` (answered), `refused`, `off` (switched off), `offline-miss` (a snapshot
+  miss in a no-egress run) or `failed`;
 - each source is isolated: a refusal or a failure ends that source only.
 
 Options: `--sources LIST` (a comma-separated subset), `--limit N` (records asked of
-each source), `--from-year YEAR`, `--top N`. One source at a time is still available
-as `scieflow research search openalex|arxiv|europepmc|crossref`.
+each source), `--from-year YEAR`, `--top N`, `--workspace SLUG`, `--network MODE`. One source at a time is
+still available as `scieflow research search openalex|arxiv|europepmc|crossref`.
+
+`search all` exits `0` when any source answered; it exits `6` only when no source answered and every source asked is a snapshot miss, `3` when no source answered and some source was refused or switched off, and `1` otherwise.
 
 Before any source is asked, the query is repaired and then checked once. Repair
 removes control characters and backslashes, drops unbalanced brackets and an unpaired
@@ -41,13 +44,15 @@ chosen:
 
 | Mode | Requests sent | Answers kept | On a request with no recorded answer |
 |---|---|---|---|
-| `live` | yes, after the data-protection check | no | the request is made |
+| `live` | yes, after the data-protection check | no snapshot | the request is made |
 | `record` | yes, after the data-protection check | yes, as snapshots in the run | the request is made, and its answer is recorded |
 | `replay` | no | read only | exit `6`: nothing was sent |
 | `offline` | no | read only, then the Gateway cache | exit `6`: nothing was sent |
 
 `live` and `record` are the egress modes; `replay` and `offline` never open a
-connection. Where the mode comes from, in order:
+connection. The mode applies to a request made for a run: with `--workspace SLUG`, or from inside a dispatch, where the run is the dispatched one. Without either, the search is unscoped: it is `live`, and `--network replay`, `--network offline` or `--network record` there exits `1`.
+
+Where the mode comes from, in order:
 
 1. `workspace/<run>/network.yml`, when it is present and valid. An invalid file (an
    unknown key, a wrong type, unreadable YAML, a symbolic link) fails closed to
@@ -91,11 +96,11 @@ uv run scieflow research snapshots verify <slug> [--json]    # shape, key, reque
 uv run scieflow research snapshots copy <source> <target> [--json]
 ```
 
-`verify` reports a corrupt snapshot by its relative path, never its body. `copy`
+`verify` reports a corrupt snapshot by its relative path, never its body. A corrupt or forged snapshot read by a `replay` or `offline` run is a refusal (exit `3`): nothing is sent, and `snapshots verify` finds it beforehand. `copy`
 moves recorded answers between runs and is refused from an L2 run (exit `3`), because
-the snapshots of an L2 run hold its queries. In `replay` and `offline` runs the
-`snapshots/` folder is read-only to every dispatched agent; a dispatch in an egress
-mode may still write to it.
+the snapshots of an L2 run hold its queries. In a dispatch the run's `network.yml`, when it exists, is read-only to the agent. In `replay`
+and `offline` runs the `snapshots/` folder is read-only too; a dispatch in an egress mode may
+still write to it.
 
 ## Inbound sanitiser
 
@@ -121,9 +126,9 @@ run.
 
 | Code | Meaning | Where |
 |---|---|---|
-| `0` | a source answered, or the network or snapshot command succeeded | `research search`, `search all`, `research network`, `research snapshots` |
-| `1` | a failure, a refused write, an invalid input or a corrupt snapshot | all of the above |
-| `3` | a refusal: a leak-check refusal, a switched-off source, or a data-protection refusal (L2 run, unlisted service, copy from L2) | `research search`, `search all`, `research snapshots copy` |
+| `0` | a source answered (`search all`: at least one source), or the network or snapshot command succeeded | `research search`, `search all`, `research network`, `research snapshots` |
+| `1` | a failure: a source failed, a refused write, an invalid input (such as `--network replay` with no run), or a corrupt snapshot read by a `snapshots` command | `research search`, `search all`, `research network`, `research snapshots` |
+| `3` | a refusal: a leak-check refusal, a switched-off source, a corrupt or forged snapshot read by a `replay` or `offline` run, or a data-protection refusal (L2 run, unlisted service, copy from L2) | `research search`, `search all`, `research snapshots copy` |
 | `6` | a no-egress run has no recorded answer for the request; nothing was sent | `research search`, `search all` (`replay`, `offline`) |
 
 ## Limits

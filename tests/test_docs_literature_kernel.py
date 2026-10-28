@@ -9,6 +9,7 @@ import click
 
 from scieflow.core import network
 from scieflow.research.cli import research
+from scieflow.research.search import fanout, registry
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs" / "research" / "literature-kernel.md"
@@ -125,3 +126,86 @@ def test_the_lit_review_phase_2_uses_search_all_and_keeps_selection():
     assert "scieflow research search all" in text
     assert "Merge and deduplicate" not in text, "the manual merge/dedupe step is still in phase 2"
     assert "Select the papers that best answer" in text
+
+
+# --- M-C1 t6 fix: review r1 findings 1-4 and non-blocking notes N1-N3 -------------------------
+
+EXIT_RULE = ("`search all` exits `0` when any source answered; it exits `6` only when no source "
+             "answered and every source asked is a snapshot miss, `3` when no source answered and "
+             "some source was refused or switched off, and `1` otherwise.")
+MODE_SCOPE = ("The mode applies to a request made for a run: with `--workspace SLUG`, or from inside "
+              "a dispatch, where the run is the dispatched one. Without either, the search is unscoped")
+CORRUPT = ("A corrupt or forged snapshot read by a `replay` or `offline` run is a refusal "
+           "(exit `3`): nothing is sent")
+
+
+def test_the_documented_exit_codes_are_the_code_constants():
+    assert registry.EXIT_REFUSED == 3 and registry.EXIT_MISS == 6 and registry.EXIT_FAILED == 1
+    assert fanout.EXIT_OK == 0 and fanout.EXIT_FAILED == 1
+    assert fanout.EXIT_REFUSED == 3 and fanout.EXIT_MISS == 6
+
+
+def test_search_all_exit_rule_matches_the_code():
+    ok = {"source": "openalex", "status": "ok", "count": 1}
+    refused = {"source": "crossref", "status": "refused", "count": 0}
+    miss = {"source": "arxiv", "status": "offline-miss", "count": 0}
+    failed = {"source": "europepmc", "status": "failed", "count": 0}
+    assert fanout.exit_code([ok, refused]) == 0
+    assert fanout.exit_code([miss, miss]) == 6
+    assert fanout.exit_code([miss, refused]) == 3
+    assert fanout.exit_code([miss, failed]) == 1
+
+
+def test_the_page_states_the_search_all_exit_rule():
+    assert EXIT_RULE in _doc(), "literature-kernel.md does not state the search all exit rule"
+
+
+def test_the_cli_reference_states_the_search_all_exit_rule_on_rows_3_and_6():
+    rows = [line for line in (ROOT / "docs" / "cli.md").read_text(encoding="utf-8").splitlines()
+            if line.startswith("| `")]
+    for code in ("3", "6"):
+        row = next(r for r in rows if r.split("|")[1].strip() == f"`{code}`" and "research search" in r)
+        assert "no source answered" in row, f"docs/cli.md row {code} omits the search all rule"
+
+
+def test_the_page_lists_the_literal_status_values():
+    text = _doc()
+    for value in ("ok", "refused", "off", "offline-miss", "failed"):
+        assert f"`{value}`" in text, f"literature-kernel.md does not list the status `{value}`"
+
+
+def test_the_search_all_options_name_workspace_and_network():
+    text = _doc()
+    assert "Options: " in text, "no Options paragraph for search all"
+    start = text.index("Options: ")
+    options = text[start:text.index("One source at a time", start)]
+    assert "--workspace SLUG" in options and "--network MODE" in options
+
+
+def test_the_page_says_how_a_search_is_tied_to_a_run():
+    text = _doc()
+    assert MODE_SCOPE in text, "the page does not say how a search is tied to a run"
+    assert "`--network replay`" in text or "`--network offline`" in text
+
+
+def test_the_discovery_providers_page_says_how_a_search_is_tied_to_a_run():
+    text = (ROOT / "docs" / "research" / "discovery-providers.md").read_text(encoding="utf-8")
+    assert "`--workspace SLUG`" in text and "unscoped" in text
+
+
+def test_the_page_says_a_corrupt_snapshot_is_a_refusal_in_no_egress_runs():
+    assert CORRUPT in _doc(), "the corrupt-snapshot refusal is not documented"
+
+
+def test_the_live_row_says_no_snapshot_not_no_cache():
+    row = next(line for line in _doc().splitlines() if line.startswith("| `live`"))
+    assert "no snapshot" in row
+
+
+def test_the_page_says_network_yml_is_read_only_to_dispatches():
+    assert "`network.yml`, when it exists, is read-only to the agent" in _doc()
+
+
+def test_the_data_protection_page_names_the_l2_providers_refusal():
+    text = (ROOT / "docs" / "data-protection.md").read_text(encoding="utf-8")
+    assert "`l2_providers`" in text and "exit 3" in text
