@@ -38,6 +38,9 @@ for _name, _summary in [
 ]:
     _forward(_name, f"scieflow.research.search.{_name}", _summary, search)
 
+_forward("all", "scieflow.research.search.fanout",
+         "Search every enabled source at once: merged, deduplicated and ranked.", search)
+
 _forward("validate", "scieflow.research.validate",
          "Validate a JSON artifact against a research schema.", research)
 _forward("check-citations", "scieflow.research.citations",

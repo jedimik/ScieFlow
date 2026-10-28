@@ -33,14 +33,19 @@ def _count(body) -> int:
     return len(results or [])
 
 
-def _search(gw, args) -> list:
-    query = registry.check_query(args.query)            # refused here, before any request
+def search(gw, checked, *, limit: int = 25, from_year: int | None = None) -> list:
+    """The Europe PMC records for a checked query (`registry.check_query`)."""
     data = gw.get_json(PROVIDER, "search", API,
-                       composed={"query": registry.europepmc_query(query, args.from_year)},
-                       fixed={"format": "json", "pageSize": args.limit, "resultType": "core"},
+                       composed={"query": registry.europepmc_query(checked, from_year)},
+                       fixed={"format": "json", "pageSize": limit, "resultType": "core"},
                        count=_count, validate=registry.expect_object)
     results = (data.get("resultList") or {}).get("result", [])
     return [norm(r) for r in results]
+
+
+def _search(gw, args) -> list:
+    return search(gw, registry.check_query(args.query), limit=args.limit,   # refused before any request
+                  from_year=args.from_year)
 
 
 def main(argv=None) -> None:

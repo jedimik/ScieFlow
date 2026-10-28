@@ -48,14 +48,19 @@ def _validate(body) -> None:
         raise http.HTTPFailure("Crossref response has an unexpected shape", "MALFORMED")
 
 
-def _search(gw, args) -> list:
-    query = registry.check_query(args.query)            # refused here, before any request
-    fixed: dict = {"rows": args.limit}
-    if args.from_year:
-        fixed["filter"] = f"from-pub-date:{args.from_year}-01-01"
-    data = gw.get_json(PROVIDER, "search", API, checked={"query": query}, fixed=fixed,
+def search(gw, checked, *, limit: int = 25, from_year: int | None = None) -> list:
+    """The Crossref records for a checked query (`registry.check_query`)."""
+    fixed: dict = {"rows": limit}
+    if from_year:
+        fixed["filter"] = f"from-pub-date:{from_year}-01-01"
+    data = gw.get_json(PROVIDER, "search", API, checked={"query": checked}, fixed=fixed,
                        count=_count, validate=_validate)
     return [norm(i) for i in data["message"].get("items", [])]
+
+
+def _search(gw, args) -> list:
+    return search(gw, registry.check_query(args.query), limit=args.limit,   # refused before any request
+                  from_year=args.from_year)
 
 
 def main(argv=None) -> None:
