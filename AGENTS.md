@@ -215,6 +215,17 @@ when to stop.
     data scan` (undeclared data that looks like patient data) go to the
     user with a proposed declaration; they are never silenced.
 
+19. **Study design** (`docs/experiments/design.md`). A run that holds
+    `design/design.yml` is bound by it once a human answers its
+    `design-lock` gate (`uv run scieflow design lock <slug>`): campaigns
+    whose metrics are not outcomes of the locked analysis plan are refused,
+    and so is every campaign while the file differs from its lock. Change a
+    locked design only through `uv run scieflow design amend <slug>
+    --summary … --rationale …` (a new human-only gate); never edit
+    `design/lock.jsonl` or `design/locked/`, and never answer a
+    `design-lock` gate yourself. Sample sizes come from `uv run scieflow
+    experiment power`, never from your own arithmetic.
+
 ## Skills (read the relevant one before acting)
 
 | Task | Skill file |
