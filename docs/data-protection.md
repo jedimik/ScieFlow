@@ -211,6 +211,12 @@ ScieFlow applies. ScieFlow does not send telemetry.
 | Chat backup (`scieflow chats push`) | agent chat stores | when you push | you run it; `config/chats.yml` | not refused by M-B (M-B-D13). Chat history can quote L2 content. |
 | News (`scieflow news run`) | web-research prompts built from the topics in `config/news.yml`, sent to the news agent | when you run it | you run it | not refused by M-B (M-B-D13). Its prompts come from the topic list, not from run files. |
 
+Literature requests also follow the run's network mode ([Literature kernel](research/literature-kernel.md#network-modes)).
+With no `network.yml`, an L2 run may query only the services in its `l2_providers`;
+any other service is replayed from recorded answers only, so a request with no
+recorded answer is refused (exit 3) and nothing is sent. A `replay` or `offline`
+run's `snapshots/` folder is read-only to dispatched agents.
+
 A sandboxed agent's network is open (see [What this does not do](#what-this-does-not-do)).
 An agent can reach a service ScieFlow does not check, in which case the egress
 table above does not apply to that traffic.
