@@ -354,3 +354,50 @@ def test_the_output_never_carries_the_query(project, fast, capsys):
     _, payload, out, err = run([QUERY], capsys)
     assert QUERY not in out and QUERY not in err
     assert "query" not in payload
+
+
+# --- 7. review fixes (M-C1 t4 review r1): rank uses both source ranks; replay of a recording ---
+
+
+@responses.activate
+def test_a_record_two_sources_confirm_outranks_the_same_record_from_one(project, fast, capsys,
+                                                                       monkeypatch, tmp_path):
+    # openalex ranks the shared DOI third (behind two others); the scores are min-max normalised
+    # per result set, so the position is the observable effect of the second source's rank.
+    shared = oa("Shared rank study", "10.5555/shared")
+    openalex_answer = {"json": {"results": [oa("Other openalex A", "10.5555/a"),
+                                            oa("Other openalex B", "10.5555/b"), shared]}}
+    crossref_alone = {"json": {"message": {"items": []}}}
+    crossref_confirms = {"json": {"message": {"items": [cr("Shared rank study",
+                                                          "10.5555/shared")]}}}
+
+    serve(openalex=openalex_answer, crossref=crossref_alone)
+    _, one, _, _ = run([QUERY], capsys)
+    # A fresh cache for the second run: the Gateway would otherwise replay run one's empty crossref.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-second-run"))
+    responses.reset()
+    serve(openalex=openalex_answer, crossref=crossref_confirms)
+    _, two, _, _ = run([QUERY], capsys)
+
+    def position(payload):
+        return [r["title"] for r in payload["records"]].index("Shared rank study")
+
+    merged = next(r for r in two["records"] if r["title"] == "Shared rank study")
+    assert merged["signals"]["kernel"]["sources"] == ["openalex", "crossref"]
+    assert position(two) == 0
+    assert position(one) > 0
+
+
+@responses.activate
+def test_a_recorded_search_replays_byte_identical_with_zero_transport_calls(project, fast,
+                                                                           capsys):
+    serve()
+    code, _, recorded, _ = run([QUERY, "--workspace", "demo", "--network", "record"], capsys)
+    assert code == 0
+    responses.reset()                 # no registrations left: any transport call is unmatched
+    responses.calls.reset()
+    for mode in ("replay", "offline"):
+        code, _, out, _ = run([QUERY, "--workspace", "demo", "--network", mode], capsys)
+        assert code == 0
+        assert out == recorded
+    assert len(responses.calls) == 0
