@@ -20,6 +20,7 @@ from collections import defaultdict
 from scieflow._vendor.researcher_core.dedupe import dedupe
 from scieflow._vendor.researcher_core.rank import rank_records
 from scieflow.core import network
+from scieflow.core import sanitize
 from scieflow.integrations.scite.policy import PolicyError
 from scieflow.research.lib import http, kernel
 from scieflow.research.search import arxiv, crossref, europepmc, openalex, registry
@@ -126,7 +127,9 @@ def main(argv=None) -> None:
                            from_year=args.from_year, top=args.top),
         network_mode=args.network,
     )
-    sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    # Sanitised on the way out only (M-C1 5.9); the verdicts above were computed on the raw values.
+    sys.stdout.write(json.dumps(sanitize.sanitize_json_strings(payload), indent=2,
+                                ensure_ascii=False) + "\n")
     code = exit_code(payload["sources"])
     if code:
         sys.exit(code)

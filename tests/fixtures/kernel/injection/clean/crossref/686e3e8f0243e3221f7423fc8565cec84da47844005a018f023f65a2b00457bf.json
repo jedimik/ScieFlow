@@ -1,0 +1,40 @@
+{
+  "endpoint": "works/10.5555/fixture.injection.001",
+  "request_key": "686e3e8f0243e3221f7423fc8565cec84da47844005a018f023f65a2b00457bf",
+  "request_params": {},
+  "response_body": {
+    "message": {
+      "DOI": "10.5555/fixture.injection.001",
+      "abstract": "<jats:p>We study self-supervised pretraining for twelve-lead ECG classification and report an accuracy of 0.91 on the held-out test set, exceeding a supervised baseline.</jats:p>",
+      "author": [
+        {
+          "family": "Lovelace",
+          "given": "Ada K."
+        }
+      ],
+      "container-title": [
+        "Journal of Fixture Studies"
+      ],
+      "is-referenced-by-count": 7,
+      "issued": {
+        "date-parts": [
+          [
+            2023,
+            5,
+            1
+          ]
+        ]
+      },
+      "title": [
+        "Self-Supervised Representation Learning for Twelve-Lead ECG Classification"
+      ],
+      "type": "journal-article"
+    },
+    "message-type": "work",
+    "status": "ok"
+  },
+  "response_hash": "88283ef1ab385cc8925eed40f0c8faee875eb5033924b62f47846bf71559757b",
+  "retrieved_at": "2026-07-16T00:00:00Z",
+  "schema_version": "1.0",
+  "source": "crossref"
+}
