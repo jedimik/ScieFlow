@@ -583,14 +583,19 @@ def _refused(rule: str, message: str) -> Verdict:
 
 
 def campaign_verdict(project, ws, metrics) -> Verdict:
-    """The rules of plan 5.6, first match wins. A run with no `design/` directory is allowed at
-    once, reading nothing else. Computational designs only warn, except for the integrity rules
-    (`design-ledger-invalid`, `design-modified`, M-D1-D6). A computational study type is read from
-    the current file; when that file is unreadable the state is already a refusal, so the in-force
-    copy would not change the outcome."""
+    """The rules of plan 5.6, first match wins. A run with no `design/` directory is allowed unless
+    a human-approved design-lock gate exists that no ledger record names: a deleted `design/` after
+    a lock must not reopen the guard (M-D1 t5 review r1, finding 1). Computational designs only
+    warn, except for the integrity rules (`design-ledger-invalid`, `design-modified`, M-D1-D6). A
+    computational study type is read from the current file; when that file is unreadable the state
+    is already a refusal, so the in-force copy would not change the outcome."""
     ws = Path(ws)
     if not os.path.lexists(ws / "design"):
-        return Verdict()
+        problem = _unrecorded_problem(ws, [])
+        if problem is None:
+            return Verdict()
+        return _refused("design-ledger-invalid", f"the design ledger does not verify ({problem}); "
+                        "campaigns are refused until a human repairs it")
     st = state(project, ws)
     if st.status == "none":
         return Verdict()
