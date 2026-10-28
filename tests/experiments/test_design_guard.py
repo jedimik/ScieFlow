@@ -299,6 +299,19 @@ def test_single_run_locked_then_edited_design_is_refused(droot, ws):
     assert refusals(ws)[0]["data"]["rule"] == "design-modified"
 
 
+def test_single_run_locked_then_edited_computational_design_is_refused(droot, ws):
+    write_design(ws, "computational.yml")
+    lock_as_human(droot, ws)
+    doc = yaml.safe_load((ws / "design" / "design.yml").read_text(encoding="utf-8"))
+    doc["question"] = "Edited after the lock."
+    (ws / "design" / "design.yml").write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+    result = invoke(droot, ws, "run")
+    assert result.exit_code == 1, result.output
+    assert "design-modified" in result.output
+    assert not (ws / "experiments").exists()
+    assert refusals(ws)[0]["data"]["rule"] == "design-modified"
+
+
 def test_refusal_event_carries_exactly_reason_rule_and_campaign(droot, ws):
     set_design(ws, rct_with_outcomes("ssim"))
     lock_as_human(droot, ws)
