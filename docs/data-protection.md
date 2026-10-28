@@ -215,7 +215,8 @@ Literature requests also follow the run's network mode ([Literature kernel](rese
 With no `network.yml`, an L2 run may query only the services in its `l2_providers`;
 any other service is replayed from recorded answers only, so a request with no
 recorded answer is refused (exit 3) and nothing is sent. A `replay` or `offline`
-run's `snapshots/` folder is read-only to dispatched agents.
+run's `snapshots/` folder is read-only to dispatched agents once it exists. A run that replays
+without that folder yet can have one created by a dispatch; see [Limits](research/literature-kernel.md#limits).
 
 A sandboxed agent's network is open (see [What this does not do](#what-this-does-not-do)).
 An agent can reach a service ScieFlow does not check, in which case the egress

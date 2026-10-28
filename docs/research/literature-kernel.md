@@ -99,7 +99,7 @@ uv run scieflow research snapshots copy <source> <target> [--json]
 `verify` reports a corrupt snapshot by its relative path, never its body. A corrupt or forged snapshot read by a `replay` or `offline` run is a refusal (exit `3`): nothing is sent, and `snapshots verify` finds it beforehand. `copy`
 moves recorded answers between runs and is refused from an L2 run (exit `3`), because
 the snapshots of an L2 run hold its queries. In a dispatch the run's `network.yml`, when it exists, is read-only to the agent. In `replay`
-and `offline` runs the `snapshots/` folder is read-only too; a dispatch in an egress mode may
+and `offline` runs the `snapshots/` folder is read-only too, once it exists (see [Limits](#limits)); a dispatch in an egress mode may
 still write to it.
 
 ## Inbound sanitiser
@@ -140,6 +140,11 @@ run.
   index has been run as part of this work.
 - A forged snapshot in a `record` run is not caught by the mode check; `verify`
   checks the file's shape and hashes, not its origin.
+- A dispatch can create a `snapshots/` folder that does not exist yet. That happens in a
+  run that replays without one (an L2 run with no `network.yml`, or a hand-written
+  `network.yml`); a snapshot planted there would then be served by replay. Running
+  `scieflow research network <slug> replay` or `offline` creates the folder first, so a
+  run set that way is protected.
 
 ## Credits
 

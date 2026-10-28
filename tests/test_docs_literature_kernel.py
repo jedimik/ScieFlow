@@ -204,8 +204,16 @@ def test_the_live_row_says_no_snapshot_not_no_cache():
 
 def test_the_page_says_network_yml_is_read_only_to_dispatches():
     assert "`network.yml`, when it exists, is read-only to the agent" in _doc()
+    assert "read-only too, once it exists" in _doc()
+
+
+def test_the_page_limits_say_a_dispatch_can_create_a_missing_snapshots_folder():
+    text = _doc()
+    assert "A dispatch can create a `snapshots/` folder that does not exist yet" in text
+    assert "creates the folder first" in text
 
 
 def test_the_data_protection_page_names_the_l2_providers_refusal():
     text = (ROOT / "docs" / "data-protection.md").read_text(encoding="utf-8")
     assert "`l2_providers`" in text and "exit 3" in text
+    assert "read-only to dispatched agents once it exists" in text
