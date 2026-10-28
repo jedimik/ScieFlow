@@ -59,14 +59,19 @@ def _count(body) -> int:
     return len(body.get("results") or []) if isinstance(body, dict) else 0
 
 
-def _search(gw, args) -> list:
-    query = registry.check_query(args.query)            # refused here, before any request
-    fixed: dict = {"per-page": min(args.limit, 200)}
-    if args.from_year:
-        fixed["filter"] = f"from_publication_date:{args.from_year}-01-01"
-    data = gw.get_json(PROVIDER, "search", API, checked={"search": query}, fixed=fixed,
+def search(gw, checked, *, limit: int = 25, from_year: int | None = None) -> list:
+    """The OpenAlex records for a checked query (`registry.check_query`)."""
+    fixed: dict = {"per-page": min(limit, 200)}
+    if from_year:
+        fixed["filter"] = f"from_publication_date:{from_year}-01-01"
+    data = gw.get_json(PROVIDER, "search", API, checked={"search": checked}, fixed=fixed,
                        count=_count, validate=registry.expect_object)
-    return [norm(w) for w in data.get("results", [])][: args.limit]
+    return [norm(w) for w in data.get("results", [])][:limit]
+
+
+def _search(gw, args) -> list:
+    return search(gw, registry.check_query(args.query), limit=args.limit,   # refused before any request
+                  from_year=args.from_year)
 
 
 def main(argv=None) -> None:
@@ -75,8 +80,9 @@ def main(argv=None) -> None:
     ap.add_argument("--limit", type=int, default=25)
     ap.add_argument("--from-year", type=int)
     registry.add_workspace_option(ap)
+    registry.add_network_option(ap)
     args = ap.parse_args(argv)
-    registry.run(args.workspace, lambda gw: _search(gw, args))
+    registry.run(args.workspace, lambda gw: _search(gw, args), network_mode=args.network)
 
 
 if __name__ == "__main__":

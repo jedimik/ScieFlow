@@ -49,16 +49,16 @@ BRIEF:
 Steps:
 1. Derive 3-6 search queries from the brief (synonyms, subtopics, method
    names).
-2. Run each query through AT LEAST TWO of:
-   `uv run scieflow research search openalex "<query>" --limit 25`
-   `uv run scieflow research search arxiv "<query>" --limit 25`
-   `uv run scieflow research search europepmc "<query>" --limit 25`
-   `uv run scieflow research search crossref "<query>" --limit 25`
+2. Run each query through every enabled source at once:
+   `uv run scieflow research search all "<query>" --limit 25`
+   It merges, deduplicates and ranks the answers and names each source's status.
    (A query refused with exit 3 "still looks like data" must be rephrased — drop
-   numbers, labels, paths and identifiers; never retry it another way.)
+   numbers, labels, paths and identifiers; never retry it another way. Exit 6
+   means the run is replaying recorded answers and none answers this query:
+   nothing was sent; report it, do not retry it another way.)
    (respect the brief's timeframe with --from-year)
-3. Merge and deduplicate by DOI/title. Select the papers that best answer
-   the brief, up to the brief's max. Prefer: directly on-topic, influential
+3. The search output is already merged and deduplicated; do not merge by hand.
+   Select the papers that best answer the brief, up to the brief's max. Prefer: directly on-topic, influential
    (citations relative to age), methodologically solid, recent.
 4. Write the output file: JSON matching src/scieflow/research/schemas/findings.schema.json —
    {"agent": "<agent>", "topic": "<topic>", "papers": [...]}. Every paper

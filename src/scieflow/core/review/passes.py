@@ -135,8 +135,8 @@ def _label(text: str) -> str:
     return re.sub(r"[\[\]\r\n]+", " ", text).strip()
 
 
-def _fenced(label: str, content: str) -> str:
-    return prompts_mod._fenced(_label(label), content)
+def _fenced(label: str, content: str, untrusted: bool = False) -> str:
+    return prompts_mod._fenced(_label(label), content, untrusted=untrusted)
 
 
 # --- assignment ---------------------------------------------------------------------------
@@ -425,7 +425,7 @@ def evidence_prompt(ws: Path, round_: int, reviewer: str, author: str, *,
         pass_a=_fenced(f"YOUR FROZEN pass A REVIEW (sha256 {digest})",
                        blind.decode("utf-8", errors="replace")),
         bundle=_fenced(f"EVIDENCE BUNDLE round {n} (review/round-{n}/evidence/bundle.json)",
-                       bundle_raw.decode("utf-8", errors="replace")),
+                       bundle_raw.decode("utf-8", errors="replace"), untrusted=True),
         instructions=_instructions(ws, root, files, bundle),
         scite_status=bundle["scite_status"])
 

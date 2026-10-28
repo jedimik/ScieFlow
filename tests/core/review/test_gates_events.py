@@ -30,6 +30,8 @@ DATA_EVENTS = (
     "data.declared", "data.level_resolved", "data.warning",
     "data.released", "data.imported", "data.ingested",
 )
+# Added by M-C1 (literature kernel), additive: the run's network mode and recorded snapshots.
+KERNEL_EVENTS = ("network.set", "literature.snapshot")
 HUMAN_KINDS = ("review-blocker", "scite-consent")
 
 # The vocabulary before ticket 04 (must survive unchanged).
@@ -155,7 +157,7 @@ def test_cli_opens_every_review_kind(tmp_path, monkeypatch):
 # -- events ----------------------------------------------------------------------
 def test_event_vocabulary_is_additive():
     assert OLD_EVENT_TYPES <= events.TYPES
-    assert events.TYPES == OLD_EVENT_TYPES | set(REVIEW_EVENTS) | set(DATA_EVENTS)
+    assert events.TYPES == OLD_EVENT_TYPES | set(REVIEW_EVENTS) | set(DATA_EVENTS) | set(KERNEL_EVENTS)
 
 
 @pytest.mark.parametrize("type_", REVIEW_EVENTS)

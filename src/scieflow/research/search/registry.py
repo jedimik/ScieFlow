@@ -16,8 +16,10 @@ import re
 import sys
 import unicodedata
 from collections.abc import Callable
-from typing import NoReturn
+from typing import Any, NoReturn
 
+from scieflow._vendor.researcher_core import query as _vquery
+from scieflow.core import network
 from scieflow.core.project import Project, ProjectError
 from scieflow.core.review.claims import LeakError, check_text
 from scieflow.integrations.scite.policy import PolicyError, exit_code
@@ -33,6 +35,7 @@ _WORD_DIGIT = re.compile(r"(?<=[^\W\d_]) \d(?= [^\W\d_])")
 
 EXIT_REFUSED = 3
 EXIT_FAILED = 1
+EXIT_MISS = 6   # M-C1: a no-egress run has no snapshot for the request; nothing was sent
 
 
 def _folded(query: str) -> str:
@@ -42,12 +45,35 @@ def _folded(query: str) -> str:
     return "".join(" " if unicodedata.category(ch) == "Cf" else ch for ch in text)
 
 
+# Control characters (C0, DEL, C1) are syntax damage in a query, never search text (M-C1 5.3).
+_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f]")
+
+
+def repair_query(query: str) -> str:
+    """The query with repairable syntax damage removed (M-C1 5.3): control characters and
+    backslashes become spaces, unbalanced brackets and an unpaired quote are dropped, and
+    whitespace is collapsed. A query needing no repair comes back unchanged, byte for byte.
+    Returns "" when nothing with a letter or digit is left to send."""
+    text = _CONTROL.sub(" ", query).replace("\\", " ")
+    text = _vquery._drop_unbalanced_brackets(text)
+    text = _vquery._drop_unpaired_quote(text)
+    if text != query:
+        text = " ".join(text.split())
+    if not any(ch.isalnum() for ch in text):
+        return ""
+    return text
+
+
 def check_query(query: str) -> providers.Checked:
-    """The query as a `Checked` value if it may leave the machine; `LeakError` otherwise."""
+    """The query as a `Checked` value if it may leave the machine; `LeakError` otherwise.
+    The query is repaired (`repair_query`) first and the leak check reads the repaired text."""
     if not isinstance(query, str):
         raise LeakError("refused: nothing left that can be sent")
-    check_text(_WORD_DIGIT.sub(" ", _WILDCARD.sub("", _folded(query))))
-    return providers._mint(providers.Checked, query)
+    repaired = repair_query(query)
+    if not repaired:
+        raise LeakError("refused: nothing left that can be sent")
+    check_text(_WORD_DIGIT.sub(" ", _WILDCARD.sub("", _folded(repaired))))
+    return providers._mint(providers.Checked, repaired)
 
 
 def _require_checked(checked) -> str:
@@ -83,15 +109,23 @@ def add_workspace_option(ap) -> None:
                          "Without it the search is recorded in the per-day ledger only.")
 
 
-def gateway(workspace: str | None, start=None) -> providers.Gateway:
+def add_network_option(ap) -> None:
+    ap.add_argument("--network", choices=network.MODES, default=None,
+                    help="This run's network mode for the search: live; record (also keep each "
+                         "answer as a snapshot in the run); replay or offline (no request is sent, "
+                         "a miss exits 6). Without it the run's own mode applies. A flag can "
+                         "tighten the mode, never loosen it.")
+
+
+def gateway(workspace: str | None, start=None, network_mode: str | None = None) -> providers.Gateway:
     project = Project.discover(start)
     policy = providers.load(project.root)
     if workspace is None:
-        return providers.Gateway.unscoped(policy)
+        return providers.Gateway.unscoped(policy, network=network_mode)
     ws = project.run_dir(workspace)
     if not ws.is_dir():
         raise ProjectError(f"no run workspace/{workspace} in this project")
-    return providers.Gateway(ws, policy)
+    return providers.Gateway(ws, policy, network=network_mode)
 
 
 def _fail(code: int, message: str) -> NoReturn:
@@ -99,18 +133,27 @@ def _fail(code: int, message: str) -> NoReturn:
     sys.exit(code)
 
 
-def run(workspace: str | None, search: Callable[[providers.Gateway], list]) -> None:
-    """Build the gateway, run `search(gw)` (which checks the query before it sends
-    anything), print the records. Refusals and failures end the process with a code."""
+def call(workspace: str | None, search: Callable[[providers.Gateway], Any],
+         network_mode: str | None = None) -> Any:
+    """Build the gateway and return `search(gw)` (which checks the query before it sends
+    anything). Refusals and failures end the process with a code."""
     try:
-        gw = gateway(workspace)
-        records = search(gw)
+        gw = gateway(workspace, network_mode=network_mode)
+        return search(gw)
     except LeakError as exc:
         _fail(EXIT_REFUSED, str(exc))  # the message already starts with "refused:"
+    except network.NetworkMiss as exc:
+        _fail(EXIT_MISS, str(exc))
     except PolicyError as exc:
         _fail(exit_code(exc), f"refused: {exc}")
     except http.HTTPFailure as exc:
         _fail(EXIT_FAILED, f"search failed: {exc.classification}")
     except (ProjectError, FileNotFoundError, ValueError) as exc:
         _fail(EXIT_FAILED, f"error: {exc}")
-    papers.emit(records)
+
+
+def run(workspace: str | None, search: Callable[[providers.Gateway], list],
+        network_mode: str | None = None) -> None:
+    """Build the gateway, run `search(gw)` (which checks the query before it sends
+    anything), print the records. Refusals and failures end the process with a code."""
+    papers.emit(call(workspace, search, network_mode=network_mode))

@@ -913,9 +913,11 @@ def execute(p: Plan, ws: Path, policy: _policy.Policy, *, ledger=None, cache=Non
     A round that ends `scite_status: quota` tells the user once per run
     (`scite.unavailable`; the MCP client already emits it for a QUOTA error, so
     this covers a spent budget)."""
+    from scieflow.core import network
     from scieflow.integrations.scite.cache import Cache
     from scieflow.integrations.scite.ledger import Ledger, default_dir
 
+    network.require_live(ws, "review-evidence")   # M-C1 5.7: refused in replay/offline, first
     ws = Path(ws)
     ledger = ledger or Ledger(ws, policy)
     cache = cache or Cache(default_dir() / "cache", policy.cache_ttl_days)
@@ -975,6 +977,7 @@ def build(project, slug: str, round_: int, *, plan_only: bool = False, environ=N
           policy: _policy.Policy | None = None, **kw) -> Outcome:
     """The `scieflow review evidence` entry point. Refuses inside a dispatch; with
     `plan_only` sends nothing and writes nothing."""
+    from scieflow.core import network
     from scieflow.core.review import settings as settings_mod
     from scieflow.integrations.scite import mcp as smcp
 
@@ -991,6 +994,7 @@ def build(project, slug: str, round_: int, *, plan_only: bool = False, environ=N
     p = plan(ws, round_, policy, slug=slug)
     if plan_only:
         return Outcome("planned", "ok", plan=p)
+    network.require_live(ws, "review-evidence")   # M-C1 5.7: before the quota, consent and freeze
     if not kw.get("backfill") and _quota_round(ws, round_):
         raise QuotaRoundError(
             f"round {round_}'s evidence stopped at the scite quota or budget: rebuilding it "

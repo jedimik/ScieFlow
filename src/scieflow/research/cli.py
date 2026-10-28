@@ -5,6 +5,7 @@ entry point, so `scieflow research <cmd> --help` shows that command's options.
 """
 
 import importlib
+import os
 
 import click
 
@@ -37,12 +38,211 @@ for _name, _summary in [
 ]:
     _forward(_name, f"scieflow.research.search.{_name}", _summary, search)
 
+_forward("all", "scieflow.research.search.fanout",
+         "Search every enabled source at once: merged, deduplicated and ranked.", search)
+
 _forward("validate", "scieflow.research.validate",
          "Validate a JSON artifact against a research schema.", research)
 _forward("check-citations", "scieflow.research.citations",
          "Check paper-draft citations against references.bib and searched DOIs.", research)
 _forward("zotero-export", "scieflow.research.zotero",
          "Export a run's papers to a Zotero collection.", research)
+
+
+# --- a run's network mode and recorded literature (M-C1 5.4, 5.5) ----------------------------
+
+NETWORK_MODES = ("live", "record", "replay", "offline")
+
+
+def _run_dir(slug: str):
+    from scieflow.core.project import Project
+
+    ws = Project.discover().run_dir(slug)
+    if not ws.is_dir():
+        raise click.ClickException(f"no run workspace/{slug} in this project")
+    return ws
+
+
+def _no_dispatch(what: str) -> None:
+    from scieflow.integrations.scite import mcp as _mcp
+
+    if _mcp.in_dispatch():
+        raise click.ClickException(f"refused: {what} is not allowed inside a dispatch")
+
+
+def _snapshot_folder(ws) -> None:
+    """A replaying run needs its snapshots/literature folder before its mode is written, so the
+    sandbox can protect it (M-C1 5.8). A linked snapshots/ is left as it is. A file in its place,
+    or a folder that cannot be made, refuses here, so nothing is changed."""
+    snaps = ws / "snapshots"
+    if snaps.is_symlink():
+        return
+    if os.path.lexists(snaps) and not snaps.is_dir():
+        raise click.ClickException("snapshots is not a folder; move it aside first "
+                                   "(nothing was changed)")
+    try:
+        (snaps / "literature").mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise click.ClickException(f"cannot create snapshots/literature "
+                                   f"({exc.strerror or 'OS error'}); nothing was changed") from exc
+
+
+@research.command("network")
+@click.argument("slug")
+@click.argument("mode", required=False, type=click.Choice(NETWORK_MODES))
+@click.option("--reason", default="", help="Why the mode changes (needed to loosen or clear).")
+@click.option("--as-agent", is_flag=True,
+              help="An agent: may only set replay or offline, never loosen.")
+@click.option("--clear", is_flag=True,
+              help="Human only: delete network.yml (the run returns to its data-level default).")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def network_cmd(slug, mode, reason, as_agent, clear, as_json):
+    """Show or set a run's network mode: live, record, replay or offline.
+
+    Replay and offline send nothing; a search with no recorded answer exits 6. Moving to live or
+    record, or clearing, needs --reason. An agent may only tighten to replay or offline."""
+    import json
+
+    from scieflow.core import events, network
+
+    ws = _run_dir(slug)
+    if mode is None and not clear:
+        doc = network.describe(ws)
+        snaps = _snapshots()
+        try:
+            doc["snapshots"] = sum(row["count"] for row in snaps.summary(ws).values())
+            problem = None
+        except snaps.SnapshotCorrupt as exc:
+            doc["snapshots"], problem = None, str(exc)
+        if as_json:
+            click.echo(json.dumps(doc, indent=2, ensure_ascii=False))
+        else:
+            click.echo(f"{slug}: {doc['mode']} ({doc['origin']})")
+            if doc["origin"] == "file":
+                click.echo(f"  set by {doc['set_by']} at {doc['set_at']}: {doc['reason']}")
+            shown = doc["snapshots"] if problem is None else "unreadable"
+            click.echo(f"  recorded snapshots: {shown}")
+        if problem is not None:
+            raise click.ClickException(problem)
+        return
+
+    _no_dispatch("changing the network mode")
+    if clear and mode:
+        raise click.ClickException("--clear takes no mode")
+    if as_agent and (clear or mode not in ("replay", "offline")):
+        raise click.ClickException("an agent may only set replay or offline, never live, record "
+                                   "or clear")
+    actor = "agent" if as_agent else "human"
+    previous, _ = network.base(ws)
+    loosening = mode in network.EGRESS and previous not in network.EGRESS
+    if (clear or loosening) and not reason.strip():
+        what = "clearing the network file" if clear else f"moving to {mode}"
+        raise click.ClickException(f"{what} needs --reason")
+    if (network.default(ws)[0] if clear else mode) in ("replay", "offline"):
+        _snapshot_folder(ws)   # before the file: a refusal here leaves network.yml unchanged
+    try:
+        if clear:
+            network.clear(ws)
+        else:
+            network.write_mode(ws, mode, actor=actor, reason=reason)
+    except network.NetworkWriteError as exc:
+        raise click.ClickException(str(exc)) from exc
+    new, _ = network.base(ws)
+    events.emit(ws, "network.set", actor=actor, mode=new, previous=previous, reason=reason)
+    click.echo(f"{slug}: {new} (was {previous})")
+
+
+def _snapshots():
+    from scieflow.research.lib import snapshots
+
+    return snapshots
+
+
+@research.group("snapshots")
+def snapshots_group():
+    """A run's recorded literature answers: list, verify, copy (coordinator only)."""
+
+
+@snapshots_group.command("list")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def snapshots_list_cmd(slug, as_json):
+    """Count and size of the recorded answers, per provider."""
+    import json
+
+    snaps = _snapshots()
+    try:
+        rows = snaps.summary(_run_dir(slug))
+    except snaps.SnapshotCorrupt as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        click.echo(f"{slug}: no recorded answers")
+    for provider, row in rows.items():
+        click.echo(f"  {provider}: {row['count']} answer(s), {row['bytes']} bytes")
+
+
+@snapshots_group.command("verify")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def snapshots_verify_cmd(slug, as_json):
+    """Check every recorded answer (shape, file name, provider, body hash); exit 1 naming each bad file.
+
+    The stored request is not re-checked here; a replay checks it when it reads the answer."""
+    import json
+
+    snaps = _snapshots()
+    ws = _run_dir(slug)
+    try:
+        problems = snaps.verify_tree(ws)
+        verified = len(snaps.files(ws)) - len(problems)
+    except snaps.SnapshotCorrupt as exc:
+        if not as_json:
+            raise click.ClickException(str(exc)) from exc
+        problems, verified = [str(exc)], 0
+    if as_json:
+        click.echo(json.dumps({"verified": verified, "problems": problems}, indent=2,
+                              ensure_ascii=False))
+    elif problems:
+        for line in problems:
+            click.echo(line, err=True)
+    else:
+        click.echo(f"verified {verified} recorded answer(s)")
+    if problems:
+        raise click.ClickException(f"{len(problems)} snapshot problem(s)")
+
+
+@snapshots_group.command("copy")
+@click.argument("source")
+@click.argument("target")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def snapshots_copy_cmd(source, target, as_json):
+    """Copy the recorded answers of SOURCE into TARGET. Refused from an L2 run (exit 3)."""
+    import json
+    import sys
+
+    from scieflow.core import events
+    from scieflow.core.data import levels
+
+    _no_dispatch("copying recorded literature")
+    snaps = _snapshots()
+    src, dst = _run_dir(source), _run_dir(target)
+    if levels.run_level(src) == "L2":
+        click.echo(f"refused: data protection: run {source} is L2; its snapshots hold its queries",
+                   err=True)
+        sys.exit(3)
+    try:
+        copied, skipped = snaps.copy_into(src, dst)
+    except snaps.SnapshotCopyError as exc:
+        raise click.ClickException(str(exc)) from exc
+    events.emit(dst, "literature.snapshot", action="copied", count=copied, **{"from": source})
+    if as_json:
+        click.echo(json.dumps({"copied": copied, "skipped": skipped}, indent=2))
+    else:
+        click.echo(f"copied {copied} answer(s) from {source} to {target} "
+                   f"({skipped} already there)")
 
 
 @research.group()

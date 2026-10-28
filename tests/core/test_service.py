@@ -1234,6 +1234,8 @@ def test_progress_adds_no_event_type():
         # Added by M-B (data protection), additive.
         "data.declared", "data.level_resolved", "data.warning",
         "data.released", "data.imported", "data.ingested",
+        # Added by M-C1 (literature kernel), additive.
+        "network.set", "literature.snapshot",
     }), "the vocabulary is closed by design; this panel needs no new type"
 
 

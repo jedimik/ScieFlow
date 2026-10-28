@@ -47,16 +47,21 @@ def _validate(text: str) -> None:
         raise http.HTTPFailure("arXiv response is not XML", "MALFORMED") from None
 
 
-def _search(gw, args) -> list:
-    query = registry.check_query(args.query)            # refused here, before any request
+def search(gw, checked, *, limit: int = 25, from_year: int | None = None) -> list:
+    """The arXiv records for a checked query (`registry.check_query`)."""
     text = gw.get_text(PROVIDER, "query", API,
-                       composed={"search_query": registry.arxiv_query(query)},
-                       fixed={"max_results": args.limit, "sortBy": "relevance"},
+                       composed={"search_query": registry.arxiv_query(checked)},
+                       fixed={"max_results": limit, "sortBy": "relevance"},
                        count=lambda t: len(_entries(t)), validate=_validate)
     records = [norm(e) for e in _entries(text)]
-    if args.from_year:
-        records = [r for r in records if r["year"] and r["year"] >= args.from_year]
+    if from_year:
+        records = [r for r in records if r["year"] and r["year"] >= from_year]
     return records
+
+
+def _search(gw, args) -> list:
+    return search(gw, registry.check_query(args.query), limit=args.limit,   # refused before any request
+                  from_year=args.from_year)
 
 
 def main(argv=None) -> None:
@@ -65,8 +70,9 @@ def main(argv=None) -> None:
     ap.add_argument("--limit", type=int, default=25)
     ap.add_argument("--from-year", type=int)
     registry.add_workspace_option(ap)
+    registry.add_network_option(ap)
     args = ap.parse_args(argv)
-    registry.run(args.workspace, lambda gw: _search(gw, args))
+    registry.run(args.workspace, lambda gw: _search(gw, args), network_mode=args.network)
 
 
 if __name__ == "__main__":

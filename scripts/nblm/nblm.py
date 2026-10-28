@@ -306,6 +306,11 @@ def main(argv=None) -> int:
                 egress.service_check(root, args.workspace, "notebooklm")
             except egress.EgressRefused as exc:
                 raise policy.PolicyError(str(exc)) from None
+            from scieflow.core import network
+            try:   # M-C1 5.7: a run that replays never sends its literature to NotebookLM
+                network.require_live(args.workspace, "notebooklm")
+            except network.NetworkRefused as exc:
+                raise policy.PolicyError(str(exc)) from None
 
         profile = policy.load_profile(root, args.profile)
         if args.cmd == "check":

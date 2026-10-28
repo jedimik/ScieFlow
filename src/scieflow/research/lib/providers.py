@@ -45,6 +45,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
@@ -249,32 +250,34 @@ class Gateway:
 
     def __init__(self, ws: Path | None, policy: ProviderPolicy, *, cache=None,
                  ledger_dir: Path | None = None, session=None, sleep=time.sleep,
-                 clock: Callable[[], float] = time.monotonic, retries: int = 3):
+                 clock: Callable[[], float] = time.monotonic, retries: int = 3,
+                 network: str | None = None):
         if ws is None:
             raise PolicyError("provider requests are made for a run (no run workspace given); "
                               "an unscoped literature search uses Gateway.unscoped")
         self._setup(Path(ws), policy, cache=cache, ledger_dir=ledger_dir, session=session,
-                    sleep=sleep, clock=clock, retries=retries)
+                    sleep=sleep, clock=clock, retries=retries, network=network)
 
     @classmethod
     def unscoped(cls, policy: ProviderPolicy, *, cache=None, ledger_dir: Path | None = None,
                  session=None, sleep=time.sleep, clock: Callable[[], float] = time.monotonic,
-                 retries: int = 3) -> "Gateway":
+                 retries: int = 3, network: str | None = None) -> "Gateway":
         """A gateway for a search that belongs to no run: rows go to the per-day ledger
         only; no run ledger and no run events."""
         gw = cls.__new__(cls)
         gw._setup(None, policy, cache=cache, ledger_dir=ledger_dir, session=session,
-                  sleep=sleep, clock=clock, retries=retries)
+                  sleep=sleep, clock=clock, retries=retries, network=network)
         return gw
 
     def _setup(self, ws: Path | None, policy: ProviderPolicy, *, cache, ledger_dir, session,
-               sleep, clock, retries) -> None:
+               sleep, clock, retries, network=None) -> None:
         from scieflow.integrations.scite import policy as scite_policy
         from scieflow.integrations.scite.cache import Cache
         from scieflow.integrations.scite.ledger import Ledger, default_dir
 
         self.ws = ws
         self.policy = policy
+        self.network = network          # the command's --network flag (None: the run's own mode)
         self.cache = cache if cache is not None else Cache(default_dir() / "cache",
                                                            policy.cache_ttl_days)
         # The scite ledger, reused: provider rows never touch the scite MCP budgets.
@@ -320,8 +323,28 @@ class Gateway:
             raise ProviderRefused(str(exc)) from None
 
     def check(self, provider: str, url: str) -> None:
-        """Raise `ProviderRefused` unless `provider` may request `url` now."""
+        """Raise `ProviderRefused` unless `provider` may request `url` now: the M-B data check,
+        then the provider policy."""
         self._data_check(provider)
+        self._policy_check(provider, url)
+
+    def _resolve(self, provider: str):
+        """The network mode of this request (M-C1 5.4): the run's file or level, then the flag."""
+        from scieflow.core import network
+
+        run, _ = self._data_scope()
+        return network.resolve(run, provider, flag=self.network)
+
+    def _guard(self, provider: str, url: str, resolved) -> None:
+        """Egress modes pass the data check and the policy; no-egress modes the policy only."""
+        from scieflow.core import network
+
+        if resolved.mode in network.EGRESS:
+            self.check(provider, url)
+        else:
+            self._policy_check(provider, url)
+
+    def _policy_check(self, provider: str, url: str) -> None:
         if not self.policy.allows(provider):
             raise ProviderRefused(self.policy.reason(provider) or f"{provider} is off")
         parts = urlsplit(url)
@@ -386,11 +409,12 @@ class Gateway:
 
         `validate(value)` raises `HTTPFailure` (MALFORMED) for a body of the wrong
         shape; such a response is ledgered as an error and never cached."""
-        self.check(provider, url)
+        resolved = self._resolve(provider)
+        self._guard(provider, url, resolved)
         params = self._params(provider, op, text=text, ids=ids, fixed=fixed,
                               checked=checked, composed=composed)
-        return self._fetch(provider, op, url, params, ttl_class=ttl_class, count=count,
-                           validate=validate, as_text=False)
+        return self._fetch(provider, op, url, params, resolved, ttl_class=ttl_class,
+                           count=count, validate=validate, as_text=False)
 
     def get_text(self, provider: str, op: str, url: str, *, count: Callable[[object], int],
                  text: Mapping | None = None, ids: Mapping | None = None,
@@ -399,25 +423,43 @@ class Gateway:
                  validate: Callable[[object], None] | None = None) -> str:
         """Like `get_json` for a non-JSON body (arXiv answers Atom XML): the same
         policy, classification, cache, ledger and failure handling; returns the text."""
-        self.check(provider, url)
+        resolved = self._resolve(provider)
+        self._guard(provider, url, resolved)
         params = self._params(provider, op, text=text, ids=ids, fixed=fixed,
                               checked=checked, composed=composed)
-        return self._fetch(provider, op, url, params, ttl_class=ttl_class, count=count,
-                           validate=validate, as_text=True)
+        return self._fetch(provider, op, url, params, resolved, ttl_class=ttl_class,
+                           count=count, validate=validate, as_text=True)
 
-    def _fetch(self, provider: str, op: str, url: str, params: dict, *, ttl_class: str,
-               count, validate, as_text: bool):
+    def _fetch(self, provider: str, op: str, url: str, params: dict, resolved, *,
+               ttl_class: str, count, validate, as_text: bool):
         from scieflow.integrations.scite.cache import normalise_params, request_key
+        from scieflow.research.lib import snapshots
 
         req = normalise_params(params)
         key = request_key(provider, op, {"url": url, **req})
-        hit = self.cache.get(key, ttl_class)
-        if isinstance(hit, dict) and "value" in hit:
-            raw = hit.get("results")
-            n = raw if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0 else 0
-            self.ledger.record(source=provider, op=op, round=None, results=n, cached=True,
-                               key=key, request=req)
-            return hit["value"]
+        run, _ = self._data_scope()
+        if resolved.mode in ("replay", "offline"):
+            # no transport branch exists in these modes: a snapshot, the cache (offline), or a miss
+            snap = snapshots.load(run, provider=provider, op=op, key=key, url=url,
+                                  request_params=req)
+            if snap is not None:
+                value = snap["response_body"]
+                if validate is not None:
+                    validate(value)
+                self.ledger.record(source=provider, op=op, round=None, results=snap["results"],
+                                   cached=True, key=key, request=req)
+                return value
+            if resolved.mode == "offline":
+                found, value = self._cached(provider, op, key, req, ttl_class)
+                if found:
+                    return value
+            raise self._miss(resolved, provider, op, key, run)
+        if resolved.mode == "live":
+            found, value = self._cached(provider, op, key, req, ttl_class)
+            if found:
+                return value
+        if resolved.mode == "record" and run is not None:
+            snapshots.ensure_writable(run, provider=provider, key=key)   # before anything is sent
         try:
             # never follow a redirect: the next host would be one nobody checked
             resp = http.send("GET", url, params=req, retries=self.retries,
@@ -442,7 +484,38 @@ class Gateway:
             self.cache.put(key, ttl_class, {"value": value, "results": n})
         except (TypeError, ValueError, OSError):
             pass
+        if resolved.mode == "record" and run is not None:
+            try:
+                rec = snapshots.write(run, provider=provider, op=op, key=key, url=url,
+                                      request_params=req, body_kind="text" if as_text else "json",
+                                      response_body=value, results=n)
+            except OSError as exc:
+                raise snapshots.write_failed(run, provider, key, exc) from None
+            events.emit(run, "literature.snapshot", action="recorded", provider=provider, op=op,
+                        key=key, response_hash=rec["response_hash"])
         return value
+
+    def _cached(self, provider: str, op: str, key: str, req: dict, ttl_class: str) -> tuple[bool, Any]:
+        """(True, value) for a cache entry, ledgered as a cache hit; (False, None) otherwise."""
+        hit = self.cache.get(key, ttl_class)
+        if isinstance(hit, dict) and "value" in hit:
+            raw = hit.get("results")
+            n = raw if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0 else 0
+            self.ledger.record(source=provider, op=op, round=None, results=n, cached=True,
+                               key=key, request=req)
+            return True, hit["value"]
+        return False, None
+
+    def _miss(self, resolved, provider: str, op: str, key: str, run):
+        """The exception for a no-egress request that nothing answers: nothing is sent (M-C1 5.6).
+        Returned, not raised, so each call site says `raise` and control cannot fall through to a
+        transport. An L2 run's unlisted service raises the M-B refusal instead of the typed miss."""
+        from scieflow.core import network
+
+        if resolved.on_miss == "m-b":
+            self._data_check(provider)
+        return network.NetworkMiss(provider, op, key, resolved.mode,
+                                   run.name if run is not None else "-")
 
     def _record(self, provider, op, results, key, req, error) -> None:
         status = "ok" if error is None else "error"

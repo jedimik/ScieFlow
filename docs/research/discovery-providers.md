@@ -46,6 +46,14 @@ ledger. The output records are unchanged.
   and `events.jsonl`. Without it the request is recorded in the per-day ledger only.
 - Exit codes: 0 success; 3 refused (leak check, policy, source switched off); 1
   failure (`HTTP_<status>`, `RATE`, `TRANSIENT`, `MALFORMED`).
+- **Network mode.** Every search command takes `--network live|record|replay|offline`,
+  and a run's own mode (`scieflow research network <slug>`) applies when the flag is
+  omitted. `replay` and `offline` send nothing and exit `6` on a request with no
+  recorded answer. A flag can tighten the mode, never loosen it. The run's mode applies to a search made
+  with `--workspace SLUG` or from a dispatch; without either the search is unscoped (`live`),
+  and a `--network` value other than `live` there exits `1`. The full rules, the
+  `search all` fan-out and the snapshot store are in
+  [Literature kernel](literature-kernel.md).
 
 ## What leaves the machine
 
