@@ -1,0 +1,29 @@
+# Synthetic diagnostic-accuracy design (test fixture). No real study, no patient data.
+version: 1
+title: "Synthetic diagnostic accuracy (fixture)"
+study_type: diagnostic-accuracy
+question: "How well does the synthetic index test detect the synthetic condition?"
+pico:
+  population: "Synthetic patients"
+  intervention: "Synthetic index test"
+  comparator: "Synthetic reference standard"
+  outcome: "Condition present"
+  timeframe: "single visit"
+variables:
+  - {id: index_score, name: "Index test score", role: index-test, type: continuous}
+  - {id: reference, name: "Reference standard result", role: reference-standard, type: binary}
+  - {id: site, name: "Site", role: stratifier, type: categorical}
+sampling: {method: consecutive, inclusion: ["Synthetic patient"], exclusion: ["Synthetic exclusion"]}
+sample_size: {method: fixed, n: 200, rationale: "Synthetic fixed size for the fixture"}
+sap:
+  estimands:
+    - {id: est_auc, outcome: accuracy_auc, population: "synthetic patients", summary_measure: "AUC"}
+  outcomes:
+    - {id: accuracy_auc, variable: index_score, priority: primary, test: roc-auc, estimand: est_auc, metric: auc}
+    - {id: sens, variable: index_score, priority: primary, test: sensitivity-specificity, metric: sensitivity}
+    - {id: exploratory_bias, variable: index_score, priority: exploratory, test: other, metric: bias}
+  missing_data: {strategy: complete-case}
+  multiplicity: {method: holm, alpha: 0.05}
+  exploratory: {split: {fraction: 0.3, seed: 7, stratify_by: [site]}, fdr: bh}
+reporting_guidelines: [stard-2015]
+data: {levels_needed: [L0]}

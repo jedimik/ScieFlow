@@ -1,29 +1,116 @@
-"""`scieflow design` (M-D1): study-design commands. Read-only in t2.
+"""`scieflow design` (M-D1): study design (design.yml), reporting checklists and power.
 
-Exit codes: 0 ok, 1 problems found or checklists cannot be loaded, 2 usage.
+t2: guidelines (read-only). t3: init, check, render, show. init and render write only inside the
+run's design/ directory; check and show are read-only. Lock and amend come in t4.
+
+Exit codes: 0 ok, 1 problems found or refused, 2 usage.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 import click
 
 from scieflow.core.config import repo_root
-from scieflow.core.design import reporting
+from scieflow.core.design import model, reporting, render, templates
+from scieflow.core.design import schema as design_schema
+from scieflow.core.design.model import Absent, Invalid, Problem, Report
+from scieflow.core.project import Project, ProjectError
 
-OK, PROBLEMS = 0, 1
+OK, REFUSED, USAGE = 0, 1, 2
+PROBLEMS = REFUSED
+
+
+def _fail(code: int, message: str) -> NoReturn:
+    click.echo(message, err=True)
+    sys.exit(code)
 
 
 def _root() -> Path:
     return repo_root()
 
 
+def _project() -> Project:
+    try:
+        return Project(_root().resolve())
+    except FileNotFoundError as exc:
+        _fail(USAGE, str(exc))
+
+
+def _run(project: Project, slug: str) -> Path:
+    try:
+        ws = project.run_dir(slug)
+    except ProjectError as exc:
+        _fail(USAGE, str(exc))
+    if not ws.is_dir():
+        _fail(USAGE, f"no run workspace/{slug}")
+    return ws
+
+
+def _study_types(project: Project) -> tuple:
+    try:
+        return design_schema.study_types(project.root)
+    except design_schema.SchemaError as exc:
+        _fail(USAGE, str(exc))
+
+
+def _write(path: Path, text: str) -> None:
+    """Write through a temporary file, never following a symlink (O_NOFOLLOW)."""
+    if path.is_symlink():
+        _fail(REFUSED, f"{path.name} is a symlink; refusing to write through it")
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+    except OSError:
+        _fail(REFUSED, f"{tmp.name} cannot be written safely (is it a symlink?)")
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    os.replace(tmp, path)
+
+
+def _emit(as_json: bool, payload: dict, lines: list) -> None:
+    if as_json:
+        click.echo(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    else:
+        for line in lines:
+            click.echo(line)
+
+
+def _loaded(ws: Path):
+    got = model.load(ws)
+    if isinstance(got, Absent):
+        _fail(USAGE, "no design/design.yml; create one with: scieflow design init <slug> --type <type>")
+    return got
+
+
+def _report(project: Project, ws: Path, got) -> Report:
+    if isinstance(got, Invalid):
+        return Report(errors=[Problem("invalid", "design", got.reason)])
+    try:
+        return model.check(project, ws, got)
+    except design_schema.SchemaError as exc:
+        _fail(USAGE, str(exc))
+
+
+def _guideline_status(project: Project, got: dict) -> dict:
+    guides = got.get("reporting_guidelines")
+    if not isinstance(guides, list):
+        return {}
+    try:
+        known = {c.id: c.verification.get("status", "unknown") for c in reporting.registry(project.root)}
+    except reporting.ReportingError:
+        return {}
+    return {g: known[g] for g in guides if isinstance(g, str) and g in known}
+
+
 @click.group("design")
 def design() -> None:
-    """Study design: reporting checklists (read-only); design.yml, power and lock to follow."""
+    """Study design: design.yml (init, check, render, show), reporting checklists, power."""
 
 
 @design.command("guidelines")
@@ -56,3 +143,91 @@ def guidelines(as_json: bool, check: bool) -> None:
     for row in rows:
         click.echo(f"{row['id']:<14} {row['name']:<14} {','.join(row['applies_to']):<22} "
                    f"{row['items']:>3} items  {row['verification']}")
+
+
+@design.command("init")
+@click.argument("slug")
+@click.option("--type", "study_type", required=True,
+              help="A study type from schemas/design.yml (rct, cohort, computational, ...).")
+@click.option("--title", default=None, help="Title (default: the run slug).")
+@click.option("--force", is_flag=True, help="Replace an existing design.yml (never when locked).")
+def init_cmd(slug: str, study_type: str, title: str | None, force: bool) -> None:
+    """Write a commented design.yml template; every TODO must be filled before check passes."""
+    project = _project()
+    ws = _run(project, slug)
+    if study_type not in _study_types(project):
+        _fail(USAGE, "unknown study type; choose one listed in schemas/design.yml enums.study_types")
+    directory = ws / model.DESIGN_DIR
+    if directory.is_symlink():
+        _fail(REFUSED, "design/ is a symlink; refusing to write")
+    ledger = directory / "lock.jsonl"
+    if ledger.exists() or ledger.is_symlink():
+        _fail(REFUSED, "design/lock.jsonl exists: the design is locked and init will not replace it")
+    target = model.design_path(ws)
+    if (target.exists() or target.is_symlink()) and not force:
+        _fail(REFUSED, "design/design.yml exists; use --force to replace it")
+    directory.mkdir(exist_ok=True)
+    _write(target, templates.template(study_type, title or slug))
+    click.echo(f"wrote design/design.yml (type {study_type}); fill every TODO, "
+               f"then run: scieflow design check {slug}")
+
+
+@design.command("check")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def check_cmd(slug: str, as_json: bool) -> None:
+    """Check design/design.yml: errors block a lock; warnings are advice."""
+    project = _project()
+    ws = _run(project, slug)
+    got = _loaded(ws)
+    report = _report(project, ws, got)
+    payload = {"slug": slug, "status": "invalid" if isinstance(got, Invalid) else "draft",
+               **report.to_dict()}
+    lines = [f"design {slug}: {len(report.errors)} error(s), {len(report.warnings)} warning(s)"]
+    lines += [f"error {problem}" for problem in report.errors]
+    lines += [f"warning {problem}" for problem in report.warnings]
+    _emit(as_json, payload, lines)
+    if report.errors:
+        sys.exit(REFUSED)
+
+
+@design.command("render")
+@click.argument("slug")
+def render_cmd(slug: str) -> None:
+    """Write design/design.md, generated from design.yml (never edit it by hand)."""
+    project = _project()
+    ws = _run(project, slug)
+    got = _loaded(ws)
+    if isinstance(got, Invalid):
+        _fail(REFUSED, f"design.yml is invalid ({got.reason}); fix it, then render")
+    report = _report(project, ws, got)
+    digest = model.content_hash(got)
+    text = render.render(got, report, digest, power=model.power_document(ws, got),
+                         guidelines=_guideline_status(project, got))
+    _write(ws / model.DESIGN_DIR / "design.md", text)
+    click.echo(f"wrote design/design.md (design sha256 {digest[:12]})")
+
+
+@design.command("show")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def show_cmd(slug: str, as_json: bool) -> None:
+    """Show the design's status, hash and SAP metric names (read-only)."""
+    project = _project()
+    ws = _run(project, slug)
+    got = model.load(ws)
+    if isinstance(got, Absent):
+        payload = {"slug": slug, "status": "none"}
+        lines = [f"run {slug}: no design (status none)"]
+    elif isinstance(got, Invalid):
+        payload = {"slug": slug, "status": "invalid", "reason": got.reason}
+        lines = [f"run {slug}: design invalid ({got.reason})"]
+    else:
+        report = _report(project, ws, got)
+        digest = model.content_hash(got)
+        payload = {"slug": slug, "status": "draft", "study_type": got.get("study_type"),
+                   "content_hash": digest, "errors": len(report.errors),
+                   "warnings": len(report.warnings), "sap_metrics": model.sap_metrics(got)}
+        lines = [f"run {slug}: draft ({got.get('study_type')}), {len(report.errors)} error(s), "
+                 f"{len(report.warnings)} warning(s), sha256 {digest[:12]}"]
+    _emit(as_json, payload, lines)

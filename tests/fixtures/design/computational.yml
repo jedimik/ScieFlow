@@ -1,0 +1,15 @@
+# Synthetic computational design (test fixture). Synthetic images only; no patient data.
+version: 1
+title: "Synthetic image pipeline (fixture)"
+study_type: computational
+question: "Does the synthetic gain change the synthetic image quality metric?"
+variables:
+  - {id: gain, name: "Gain parameter", role: predictor, type: continuous}
+  - {id: ssim, name: "Structural similarity", role: outcome, type: continuous}
+sample_size: {method: not-applicable, rationale: "Computational benchmark on synthetic images"}
+sap:
+  estimands: []
+  outcomes:
+    - {id: quality, variable: ssim, priority: primary, test: descriptive, metric: ssim}
+  multiplicity: {method: none, alpha: 0.05}
+data: {levels_needed: [L0]}

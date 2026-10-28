@@ -1,0 +1,26 @@
+# Synthetic study design (test fixture). No real study, no patient data.
+version: 1
+title: "Synthetic cohort (fixture)"
+study_type: cohort
+question: "Is the synthetic exposure associated with the synthetic event?"
+pico:
+  population: "Synthetic cohort"
+  intervention: "Synthetic exposure"
+  comparator: "No exposure"
+  outcome: "Synthetic event"
+  timeframe: "2 years"
+variables:
+  - {id: exposure, name: "Synthetic exposure", role: exposure, type: binary}
+  - {id: event, name: "Synthetic event", role: outcome, type: binary}
+  - {id: age, name: "Age", role: confounder, type: continuous, unit: "years"}
+sampling: {method: census, inclusion: ["Synthetic record"], exclusion: []}
+sample_size: {method: fixed, n: 500, rationale: "Synthetic fixed size for the fixture"}
+sap:
+  estimands:
+    - {id: est_event, outcome: event_risk, population: "synthetic cohort", summary_measure: "risk ratio"}
+  outcomes:
+    - {id: event_risk, variable: event, priority: primary, test: logistic-regression, covariates: [age], estimand: est_event, metric: event_auc}
+  missing_data: {strategy: complete-case}
+  multiplicity: {method: none, alpha: 0.05}
+reporting_guidelines: [strobe]
+data: {levels_needed: [L0, L2]}

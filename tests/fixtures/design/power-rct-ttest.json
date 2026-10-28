@@ -1,0 +1,25 @@
+{
+  "assumptions": [
+    "normally distributed outcome in each group",
+    "equal variances",
+    "independent observations"
+  ],
+  "family": "t-ind",
+  "inputs": {
+    "alpha": 0.05,
+    "alternative": "two-sided",
+    "effect_size": 0.5,
+    "power": 0.8,
+    "ratio": 1.0
+  },
+  "method": "noncentral t (statsmodels TTestIndPower semantics), scipy 1.18.1",
+  "result": {
+    "n1": 63.76561019095227,
+    "n1_required": 64,
+    "n2_required": 64,
+    "n_total_required": 128
+  },
+  "solve": "n",
+  "tool": "scieflow experiment power",
+  "version": 1
+}
