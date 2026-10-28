@@ -15,14 +15,11 @@ from pathlib import Path
 
 import yaml
 
+from scieflow.core.design import schema as design_schema
+
 INDEX = "config/reporting/index.yml"
 DIRECTORY = "config/reporting"
 SCHEMA = "schemas/reporting-checklist.yml"
-
-# Study types a checklist may apply to. Until schemas/design.yml exists (M-D1 t3), this constant
-# is the list; t3 replaces it with a read of that schema and adds a test that both agree.
-STUDY_TYPES = ("rct", "cohort", "case-control", "cross-sectional", "diagnostic-accuracy",
-               "prediction-model", "systematic-review", "animal", "economic-evaluation")
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9.-]{0,63}$")
 
@@ -127,7 +124,7 @@ def _check_item(rel: str, position: int, item, schema: dict, seen: set, problems
         problems.append(Problem(rel, "enum", f"{where}.group must be one of {enums['item_groups']}"))
 
 
-def _check_file(gid: str, rel: str, data: dict, schema: dict, problems: list):
+def _check_file(gid: str, rel: str, data: dict, schema: dict, problems: list, study_types: tuple):
     """Append every problem of one checklist file; return its Checklist when it has none."""
     before = len(problems)
     files, enums = schema["file_keys"], schema["enums"]
@@ -141,8 +138,8 @@ def _check_file(gid: str, rel: str, data: dict, schema: dict, problems: list):
             problems.append(Problem(rel, "field", f"{key} must be a non-empty string"))
     applies = data.get("applies_to")
     if not (isinstance(applies, list) and applies
-            and all(a in STUDY_TYPES for a in applies)):
-        problems.append(Problem(rel, "applies-to", f"applies_to must be a non-empty list of {STUDY_TYPES}"))
+            and all(a in study_types for a in applies)):
+        problems.append(Problem(rel, "applies-to", f"applies_to must be a non-empty list of {study_types}"))
     if data.get("granularity") not in enums["granularity"]:
         problems.append(Problem(rel, "enum", f"granularity must be one of {enums['granularity']}"))
     source = data.get("source")
@@ -193,6 +190,10 @@ def _check_file(gid: str, rel: str, data: dict, schema: dict, problems: list):
 def _scan(root: Path) -> tuple[list[Checklist], list[Problem]]:
     schema = _schema(root)
     try:
+        study_types = design_schema.study_types(root)
+    except design_schema.SchemaError as exc:
+        return [], [Problem(design_schema.SCHEMA, "schema-unreadable", str(exc))]
+    try:
         index = _load_mapping(root, INDEX, unreadable="index-unreadable", missing="index-unreadable")
     except _Bad as bad:
         return [], [Problem(INDEX, bad.rule, bad.message)]
@@ -214,7 +215,7 @@ def _scan(root: Path) -> tuple[list[Checklist], list[Problem]]:
         except _Bad as bad:
             problems.append(Problem(rel, bad.rule, bad.message))
             continue
-        checklist = _check_file(gid, rel, data, schema, problems)
+        checklist = _check_file(gid, rel, data, schema, problems, study_types)
         if checklist is not None:
             checklists.append(checklist)
     expected = {"index.yml", *(f"{gid}.yml" for gid in listed)}

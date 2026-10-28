@@ -68,6 +68,7 @@ def _write_tree(root: Path) -> None:
     (root / "config" / "reporting").mkdir(parents=True)
     (root / "schemas").mkdir()
     shutil.copy(REPO / "schemas" / "reporting-checklist.yml", root / "schemas")
+    shutil.copy(REPO / "schemas" / "design.yml", root / "schemas")  # t3: study types come from here
     guidelines = _skeleton_guidelines()
     index = f"version: 1\nguidelines: {json.dumps([g['id'] for g in guidelines])}\n"
     (root / "config" / "reporting" / "index.yml").write_text(index)
