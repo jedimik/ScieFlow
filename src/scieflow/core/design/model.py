@@ -151,7 +151,20 @@ def _idx(where: str, index: int) -> str:
     return f"{where}[{index}]"
 
 
-def _json_problems(value, where, out: list) -> None:
+def _vocabulary(schema: dict) -> frozenset:
+    """Every key name the schema defines. Any other key is free text and is never printed."""
+    specs = [schema["top_keys"], schema["sap_keys"], *schema["item_keys"].values()]
+    return frozenset(name for spec in specs for name in (*spec["required"], *spec["optional"]))
+
+
+def _key_path(where: str, key, position: int, vocab) -> str:
+    """A path segment for a mapping key: the key when the schema names it, else its position."""
+    if isinstance(key, str) and key in vocab:
+        return _at(where, key)
+    return f"{where}[key {position}]" if where else f"[key {position}]"
+
+
+def _json_problems(value, where, out: list, vocab) -> None:
     """Every value must be plain JSON (plan 5.2 `json-value`): no YAML date, NaN or inf."""
     here = where or "top level"
     if value is None or isinstance(value, (bool, int, str)):
@@ -165,28 +178,33 @@ def _json_problems(value, where, out: list) -> None:
         return
     if isinstance(value, list):
         for index, item in enumerate(value):
-            _json_problems(item, _idx(where, index), out)
+            _json_problems(item, _idx(where, index), out, vocab)
         return
     if isinstance(value, dict):
-        for key, item in value.items():
+        for position, (key, item) in enumerate(value.items(), start=1):
             if not isinstance(key, str):
                 out.append(Problem("json-value", here, "has a key that is not text"))
                 continue
-            _json_problems(item, _at(where, key), out)
+            _json_problems(item, _key_path(where, key, position, vocab), out, vocab)
         return
     out.append(Problem("json-value", here, "has a value that is not plain JSON"))
 
 
-def _todo_problems(value, where, out: list) -> None:
+def _todo_problems(value, where, out: list, vocab) -> None:
     if isinstance(value, str):
         if _is_todo(value):
             out.append(Problem("todo", where or "top level", "is still a TODO placeholder"))
     elif isinstance(value, list):
         for index, item in enumerate(value):
-            _todo_problems(item, _idx(where, index), out)
+            _todo_problems(item, _idx(where, index), out, vocab)
     elif isinstance(value, dict):
-        for key, item in value.items():
-            _todo_problems(item, _at(where, key), out)
+        for position, (key, item) in enumerate(value.items(), start=1):
+            _todo_problems(item, _key_path(where, key, position, vocab), out, vocab)
+
+
+def is_plain_json(report: Report) -> bool:
+    """False when check found a value that has no canonical JSON form (rule json-value)."""
+    return not any(problem.rule == "json-value" for problem in report.errors)
 
 
 def _enum(value, allowed, where: str, errors: list, rule: str = "enum") -> None:
@@ -283,16 +301,14 @@ def _ref(value, pool: set, where: str, errors: list, *, many: bool = False) -> N
             return
 
 
-def _split_ok(split, var_ids: set) -> bool:
+def _split_ok(split) -> bool:
+    """Fraction and seed of an exploratory split. stratify_by is checked by the `ref` rule."""
     if not isinstance(split, dict):
         return False
-    fraction, seed, stratify = split.get("fraction"), split.get("seed"), split.get("stratify_by")
+    fraction, seed = split.get("fraction"), split.get("seed")
     if not (_number(fraction) and 0 < fraction < 1):
         return False
-    if not (isinstance(seed, int) and not isinstance(seed, bool)):
-        return False
-    return isinstance(stratify, list) and all(
-        isinstance(s, str) and s in var_ids for s in stratify)
+    return isinstance(seed, int) and not isinstance(seed, bool)
 
 
 def _power_path_problem(ws: Path, rel) -> str | None:
@@ -349,12 +365,13 @@ def check(project, ws, design: dict) -> Report:
     """Every error and warning of a design (plan 5.2). Raises SchemaError only if the schema is bad."""
     schema = design_schema.load(project.root)
     enums, keys = schema["enums"], schema["item_keys"]
+    vocab = _vocabulary(schema)
     report = Report()
     errors, warnings = report.errors, report.warnings
     ws = Path(ws)
 
-    _json_problems(design, "", errors)
-    _todo_problems(design, "", errors)
+    _json_problems(design, "", errors, vocab)
+    _todo_problems(design, "", errors, vocab)
     _top_level(design, schema, errors)
     _text(design, "", ("title", "question", "notes"), errors)
 
@@ -366,7 +383,7 @@ def check(project, ws, design: dict) -> Report:
     pico = _mapping(design, "", "pico", errors)
     if pico is not None:
         _keys(pico, "pico", keys["pico"], errors)
-        _text(pico, "pico", tuple(pico), errors)
+        _text(pico, "pico", keys["pico"]["optional"], errors)
 
     variables = _items(design, "", "variables", errors, required=True)
     for where, var in variables:
@@ -559,10 +576,12 @@ def _sap(design: dict, enums: dict, keys: dict, sap_keys: dict, computational: b
         if split is not None:
             if isinstance(split, dict):
                 _keys(split, "sap.exploratory.split", keys["split"], errors, rule="exploratory")
-            split_ok = _split_ok(split, var_ids)
+                _ref(split.get("stratify_by"), var_ids, "sap.exploratory.split.stratify_by", errors,
+                     many=True)
+            split_ok = _split_ok(split)
             if not split_ok:
                 errors.append(Problem("exploratory", "sap.exploratory.split",
-                                      "needs a fraction between 0 and 1, an integer seed and stratify_by variable ids"))
+                                      "needs a fraction between 0 and 1 and an integer seed"))
         fdr_ok = exploratory.get("fdr") == "bh"
         if "fdr" in exploratory and not fdr_ok and not _is_todo(exploratory.get("fdr")):
             errors.append(Problem("exploratory", "sap.exploratory.fdr", "must be bh"))

@@ -30,6 +30,11 @@ def _as_dicts(value) -> list:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
+def _pairs(value) -> list:
+    """(key, value) pairs of a mapping sorted by key; anything that is not a mapping has none."""
+    return sorted(value.items(), key=lambda pair: str(pair[0])) if isinstance(value, dict) else []
+
+
 def _sample_size_lines(sample, power) -> list:
     if not isinstance(sample, dict):
         return ["No sample size is recorded."]
@@ -38,12 +43,13 @@ def _sample_size_lines(sample, power) -> list:
     if method == "power":
         lines.append(f"Power file: {_cell(sample.get('power_file'))}.")
         if isinstance(power, dict):
+            assumptions = power.get("assumptions") if isinstance(power.get("assumptions"), list) else []
             lines.append(f"Family: {_cell(power.get('family'))} (solved for {_cell(power.get('solve'))}).")
-            lines.append("Inputs: " + "; ".join(f"{k} = {_cell(v)}" for k, v in sorted(
-                (power.get("inputs") or {}).items())) + ".")
-            lines.append("Result: " + "; ".join(f"{k} = {_cell(v)}" for k, v in sorted(
-                (power.get("result") or {}).items())) + ".")
-            lines.append("Assumptions: " + "; ".join(_cell(a) for a in power.get("assumptions") or []) + ".")
+            lines.append("Inputs: " + "; ".join(f"{_cell(k)} = {_cell(v)}"
+                                               for k, v in _pairs(power.get("inputs"))) + ".")
+            lines.append("Result: " + "; ".join(f"{_cell(k)} = {_cell(v)}"
+                                               for k, v in _pairs(power.get("result"))) + ".")
+            lines.append("Assumptions: " + "; ".join(_cell(a) for a in assumptions) + ".")
         else:
             lines.append("The power file is not readable; see the check result.")
     elif method == "fixed":
@@ -106,7 +112,8 @@ def render(design: dict, report, digest: str, *, power=None, guidelines=None) ->
 
     pico = design.get("pico") if isinstance(design.get("pico"), dict) else {}
     question = [f"Question: {_cell(design.get('question'))}"]
-    question += [f"{key.capitalize()}: {_cell(value)}" for key, value in pico.items()]
+    question += [f"{key.capitalize()}: {_cell(value)}" for key, value in pico.items()
+                 if isinstance(key, str)]
     section("## Question and PICO", question)
 
     section("## Variables", _table(["id", "name", "role", "type", "unit"],

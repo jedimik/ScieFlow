@@ -160,6 +160,8 @@ def init_cmd(slug: str, study_type: str, title: str | None, force: bool) -> None
     directory = ws / model.DESIGN_DIR
     if directory.is_symlink():
         _fail(REFUSED, "design/ is a symlink; refusing to write")
+    if directory.exists() and not directory.is_dir():
+        _fail(REFUSED, "design is not a directory; refusing to write")
     ledger = directory / "lock.jsonl"
     if ledger.exists() or ledger.is_symlink():
         _fail(REFUSED, "design/lock.jsonl exists: the design is locked and init will not replace it")
@@ -201,6 +203,9 @@ def render_cmd(slug: str) -> None:
     if isinstance(got, Invalid):
         _fail(REFUSED, f"design.yml is invalid ({got.reason}); fix it, then render")
     report = _report(project, ws, got)
+    if not model.is_plain_json(report):
+        _fail(REFUSED, "design.yml holds a value that is not plain JSON (rule json-value); "
+                       "fix it, then render")
     digest = model.content_hash(got)
     text = render.render(got, report, digest, power=model.power_document(ws, got),
                          guidelines=_guideline_status(project, got))
@@ -216,6 +221,7 @@ def show_cmd(slug: str, as_json: bool) -> None:
     project = _project()
     ws = _run(project, slug)
     got = model.load(ws)
+    types = _study_types(project)
     if isinstance(got, Absent):
         payload = {"slug": slug, "status": "none"}
         lines = [f"run {slug}: no design (status none)"]
@@ -224,10 +230,19 @@ def show_cmd(slug: str, as_json: bool) -> None:
         lines = [f"run {slug}: design invalid ({got.reason})"]
     else:
         report = _report(project, ws, got)
-        digest = model.content_hash(got)
-        payload = {"slug": slug, "status": "draft", "study_type": got.get("study_type"),
-                   "content_hash": digest, "errors": len(report.errors),
-                   "warnings": len(report.warnings), "sap_metrics": model.sap_metrics(got)}
-        lines = [f"run {slug}: draft ({got.get('study_type')}), {len(report.errors)} error(s), "
-                 f"{len(report.warnings)} warning(s), sha256 {digest[:12]}"]
+        if not model.is_plain_json(report):
+            payload = {"slug": slug, "status": "invalid", "errors": len(report.errors),
+                       "warnings": len(report.warnings),
+                       "reason": "a value is not plain JSON (rule json-value); run design check"}
+            lines = [f"run {slug}: design invalid (a value is not plain JSON, rule json-value), "
+                     f"{len(report.errors)} error(s)"]
+        else:
+            digest = model.content_hash(got)
+            study = got.get("study_type")
+            study = study if study in types else None
+            payload = {"slug": slug, "status": "draft", "study_type": study,
+                       "content_hash": digest, "errors": len(report.errors),
+                       "warnings": len(report.warnings), "sap_metrics": model.sap_metrics(got)}
+            lines = [f"run {slug}: draft ({study or 'unknown'}), {len(report.errors)} error(s), "
+                     f"{len(report.warnings)} warning(s), sha256 {digest[:12]}"]
     _emit(as_json, payload, lines)
