@@ -5,7 +5,9 @@ from pathlib import Path
 import click
 import yaml
 
-from scieflow.core import config
+from scieflow.core import config, events
+from scieflow.core.design import lock as design_lock
+from scieflow.core.project import Project
 from scieflow.core.run import actions
 
 from .campaign import Campaign, RunSpec
@@ -75,6 +77,21 @@ def _guard(run_dir: Path | None) -> None:
         raise click.ClickException(f"{e} — run checkpointed; raise the budget to continue") from e
 
 
+def _design_guard(run_dir: Path | None, campaign: Campaign) -> None:
+    """Refuse or warn under the run's study design (M-D1 plan 5.6), before anything runs or spends."""
+    if run_dir is None:
+        return
+    verdict = design_lock.campaign_verdict(Project(run_dir.parent.parent), run_dir, campaign.metrics)
+    for w in verdict.warnings:
+        click.echo(f"warning: design: [{w.rule}] {w.message}", err=True)
+        events.emit(run_dir, "note.design_warning", "system", rule=w.rule, campaign=campaign.name)
+    if verdict.refused:
+        events.emit(run_dir, "job.refused", "system", reason="design", rule=verdict.rule,
+                    campaign=campaign.name)
+        raise click.ClickException(
+            f"[{verdict.rule}] {verdict.message} (campaign {campaign.name}; nothing was run)")
+
+
 @click.group()
 def experiment():
     """Computational experiments: campaigns, sweeps, metrics, reports."""
@@ -97,6 +114,7 @@ def run(campaign_path, params, direct, experiments_dir, pipelines_dir):
     spec = RunSpec(run_id=f"manual_{slug}", params=p)
     budget_run = _budget_run(experiments_dir)
     _guard(budget_run)
+    _design_guard(budget_run, campaign)
     run_dir = execute_run(
         campaign, stage, spec, experiments_dir,
         mode="direct" if direct else "apptainer",
@@ -120,6 +138,7 @@ def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
     stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
     budget_run = _budget_run(experiments_dir)
     _guard(budget_run)
+    _design_guard(budget_run, campaign)
     results_path = run_sweep(
         campaign, stage, experiments_dir, mode="direct" if direct else "apptainer"
     )

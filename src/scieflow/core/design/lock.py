@@ -563,3 +563,64 @@ def state(project, ws) -> State:
     else:
         out.status = "locked" if out.current_hash == last["content_hash"] else "modified"
     return out
+
+
+# --- campaign verdict (plan 5.6) -----------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Verdict:
+    """Whether a campaign may run under the run's design. `warnings` are advice (computational
+    designs only); a refusal names its rule and stops the campaign before anything runs."""
+
+    refused: bool = False
+    rule: str | None = None
+    message: str = ""
+    warnings: tuple = ()
+
+
+def _refused(rule: str, message: str) -> Verdict:
+    return Verdict(refused=True, rule=rule, message=message)
+
+
+def campaign_verdict(project, ws, metrics) -> Verdict:
+    """The rules of plan 5.6, first match wins. A run with no `design/` directory is allowed at
+    once, reading nothing else. Computational designs only warn, except for the integrity rules
+    (`design-ledger-invalid`, `design-modified`, M-D1-D6). A computational study type is read from
+    the current file; when that file is unreadable the state is already a refusal, so the in-force
+    copy would not change the outcome."""
+    ws = Path(ws)
+    if not os.path.lexists(ws / "design"):
+        return Verdict()
+    st = state(project, ws)
+    if st.status == "none":
+        return Verdict()
+    if st.status == "ledger-invalid":
+        return _refused("design-ledger-invalid", f"the design ledger does not verify ({st.problem}); "
+                        "campaigns are refused until a human repairs it")
+    if st.status == "modified":
+        return _refused("design-modified", f"design.yml differs from its lock (version {st.version}); "
+                        "amend it with `scieflow design amend` or restore it")
+    if st.status == "invalid":
+        return _refused("design-invalid", "design/design.yml cannot be read as a design; "
+                        "run `scieflow design check` to see why")
+    computational = st.study_type == "computational"
+    if st.status in ("draft", "pending"):
+        if st.report is not None and st.report.errors:
+            rule = "design-invalid"
+            message = f"design.yml has {len(st.report.errors)} error(s); run `scieflow design check`"
+        else:
+            rule = "design-unlocked"
+            message = "the design is not locked yet; lock it first: `scieflow design lock <slug>`"
+        return _advice_or_refusal(rule, message, computational)
+    missing = [m for m in metrics if m not in st.sap_metrics]
+    if missing:
+        message = (f"campaign metric(s) not named by any SAP outcome: {', '.join(missing)}; "
+                   "add them to the SAP with `scieflow design amend`")
+        return _advice_or_refusal("out-of-sap", message, computational)
+    return Verdict()
+
+
+def _advice_or_refusal(rule: str, message: str, computational: bool) -> Verdict:
+    if computational:
+        return Verdict(warnings=(model.Problem(rule, "design", message),))
+    return _refused(rule, message)
