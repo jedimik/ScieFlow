@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 import re
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -119,7 +121,7 @@ def read_ledger(ws) -> Ledger:
     if path.is_symlink():
         return Ledger((), "design/lock.jsonl is a symlink")
     if not path.exists():
-        return Ledger((), None)
+        return Ledger((), _unrecorded_problem(Path(ws), []))
     if not path.is_file():
         return Ledger((), "design/lock.jsonl is not a regular file")
     try:
@@ -135,7 +137,52 @@ def read_ledger(ws) -> Ledger:
         if not isinstance(rec, dict) or set(rec) != RECORD_KEYS:
             return Ledger(tuple(records), f"line {number} does not hold exactly the record keys")
         records.append(rec)
-    return Ledger(tuple(records), _chain_problem(Path(ws), records))
+    if not records:
+        # An existing but empty ledger lost its records: fail closed, never read it as "no lock".
+        return Ledger((), "design/lock.jsonl holds no records")
+    problem = _chain_problem(Path(ws), records) or _unrecorded_problem(Path(ws), records)
+    return Ledger(tuple(records), problem)
+
+
+def _unrecorded_problem(ws: Path, records: list) -> str | None:
+    """A design-lock gate a human approved that no ledger record names: a removed or deleted record.
+
+    The answer hook appends the record before the gate is marked answered, so an approved gate always
+    has its record; the crash window (record present, gate still open) is the reverse case.
+    """
+    named = {rec.get("gate") for rec in records}
+    directory = ws / gates.GATES_DIR
+    if directory.is_symlink() or not directory.is_dir():
+        return None
+    for path in sorted(directory.glob("*.json")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        try:
+            gate = json.loads(raw)
+        except (ValueError, RecursionError):
+            gate = None
+        if not isinstance(gate, dict):
+            if b"design-lock" in raw and path.stem not in named:
+                return f"gate file {path.name} is unreadable and may be a design-lock approval"
+            continue
+        approved = (gate.get("kind") == gates.DESIGN_LOCK_KIND and gate.get("state") == "answered"
+                    and gate.get("answer") == "approve" and gate.get("answered_by") == "human")
+        if approved and path.stem not in named:
+            return f"gate {path.stem} was approved by a human but no ledger record names it"
+    return None
+
+
+def _tree_is_plain(ws: Path) -> bool:
+    """False when design/ or design/locked is a symlink or not a directory: nothing is read or written through it."""
+    design = ws / model.DESIGN_DIR
+    locked = ws / LOCKED
+    if design.is_symlink() or not design.is_dir():
+        return False
+    return not (locked.is_symlink() or (locked.exists() and not locked.is_dir()))
 
 
 def _chain_problem(ws: Path, records: list) -> str | None:
@@ -197,7 +244,7 @@ def _gate_problem(ws: Path, rec: dict) -> str | None:
 def _copy_content(ws: Path, rel: str) -> dict | None:
     """The locked copy as the hash covers it: {design, power}; None when missing or unreadable."""
     folder = ws / rel
-    if folder.is_symlink() or not folder.is_dir():
+    if not _tree_is_plain(ws) or folder.is_symlink() or not folder.is_dir():
         return None
     design_path = folder / "design.yml"
     if design_path.is_symlink() or not design_path.is_file():
@@ -420,6 +467,8 @@ def on_answer(project, ws, gate: dict, answer: str, actor: str) -> None:
     ledger = read_ledger(ws)
     if ledger.problem:
         raise gates.GateError(f"the lock ledger does not verify ({ledger.problem}); nothing was locked")
+    if not _tree_is_plain(ws):
+        raise gates.GateError(f"{model.DESIGN_DIR}/ or {LOCKED} is a symlink or not a directory; nothing was locked")
     if not names_gate:
         raise gates.GateError(f"no pending design lock for gate {gate['id']}; reject this gate and "
                               "run `scieflow design lock` or `scieflow design amend` again")
@@ -442,13 +491,26 @@ def on_answer(project, ws, gate: dict, answer: str, actor: str) -> None:
     seq = len(records) + 1
     previous = records[-1] if records else None
     copy = ws / LOCKED / f"v{seq}"
-    if copy.is_symlink():
-        raise gates.GateError(f"{LOCKED}/v{seq} is a symlink; refusing to write the locked copy")
-    copy.mkdir(parents=True, exist_ok=True)
-    (copy / model.DESIGN_FILE).write_bytes((ws / model.DESIGN_DIR / model.DESIGN_FILE).read_bytes())
-    power = model.power_document(ws, got)
-    if power is not None:
-        (copy / "power.json").write_bytes((ws / got["sample_size"]["power_file"]).read_bytes())
+    if copy.is_symlink() or (copy.exists() and not copy.is_dir()):
+        raise gates.GateError(f"{LOCKED}/v{seq} is not a plain folder; refusing to write the locked copy")
+    # Stage the copy in a fresh folder and swap it in, so no file from an earlier attempt survives.
+    locked_dir = ws / LOCKED
+    locked_dir.mkdir(parents=True, exist_ok=True)
+    staging = locked_dir / f".v{seq}.staging"
+    if staging.is_symlink() or staging.is_file():
+        staging.unlink()
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir()
+    try:
+        (staging / model.DESIGN_FILE).write_bytes((ws / model.DESIGN_DIR / model.DESIGN_FILE).read_bytes())
+        power = model.power_document(ws, got)
+        if power is not None:
+            (staging / "power.json").write_bytes((ws / got["sample_size"]["power_file"]).read_bytes())
+        if copy.exists():
+            shutil.rmtree(copy)
+        os.replace(staging, copy)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     record = {
         "seq": seq, "kind": kind, "version": f"{seq}.0", "content_hash": digest,
         "previous_hash": previous["content_hash"] if previous else "",
