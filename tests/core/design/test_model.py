@@ -116,6 +116,11 @@ ERROR_CASES = [
     ("ref-outcome-variable", lambda d: d["sap"]["outcomes"][0].__setitem__("variable", "nope"), "ref"),
     ("ref-covariate", lambda d: d["sap"]["outcomes"][0].__setitem__("covariates", ["nope"]), "ref"),
     ("ref-estimand", lambda d: d["sap"]["outcomes"][0].__setitem__("estimand", "nope"), "ref"),
+    ("ref-randomisation-stratified", lambda d: d["randomisation"].__setitem__("stratified_by", ["nope"]), "ref"),
+    ("ref-estimand-outcome", lambda d: d["sap"]["estimands"][0].__setitem__("outcome", "nope"), "ref"),
+    ("ref-split-stratify-by", lambda d: d["sap"].__setitem__("exploratory", {"split": {"fraction": 0.3, "seed": 7, "stratify_by": ["nope"]}, "fdr": "bh"}), "ref"),
+    ("sample-size-method-outside-forms", lambda d: d.__setitem__("sample_size", {"method": "bogus"}),
+     "sample-size"),
     ("primary-missing", lambda d: d["sap"]["outcomes"][0].__setitem__("priority", "secondary"), "primary"),
     ("test-missing", lambda d: d["sap"]["outcomes"][0].pop("test"), "test"),
     ("rct-one-group", lambda d: d.__setitem__("groups", d["groups"][:1]), "rct"),
@@ -268,3 +273,63 @@ def test_reporting_reads_study_types_from_the_schema(tmp_path):
 
 def test_summary_metrics_are_the_named_outcome_metrics():
     assert model.sap_metrics(copy.deepcopy(BASE)) == ["score_mse"]
+
+
+# --- M-D1 t3 fix round: gaps of review r1 (findings 3 and 6) -------------------------------------
+
+SECRET_KEY = "Jan_Novak_720101"
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda d: d.__setitem__(SECRET_KEY, yaml.safe_load("2026-10-01")),
+    lambda d: d.__setitem__(SECRET_KEY, "TODO"),
+    lambda d: d["variables"][0].__setitem__(SECRET_KEY, yaml.safe_load("2026-10-01")),
+    lambda d: d["pico"].__setitem__(SECRET_KEY, "TODO"),
+    lambda d: d["sap"]["outcomes"][0].__setitem__(SECRET_KEY, "TODO"),
+], ids=["top-date", "top-todo", "variable-date", "pico-todo", "outcome-todo"])
+def test_unknown_key_names_never_reach_a_message(tmp_path, mutate):
+    report = _check(tmp_path, _with(mutate))
+    assert report.errors, "the mutation must be an error"
+    text = json.dumps(report.to_dict(), ensure_ascii=False) + " ".join(
+        str(p) for p in report.errors + report.warnings)
+    assert SECRET_KEY not in text
+
+
+def test_known_key_names_are_still_named_in_messages(tmp_path):
+    report = _check(tmp_path, _with(lambda d: d["variables"][0].__setitem__("role", "bogus")))
+    assert [p.where for p in report.errors if p.rule == "enum"] == ["variables[0].role"]
+
+
+def test_level_undeclared_is_silent_when_the_run_declares_an_l2_path(tmp_path):
+    ws = _ws(tmp_path)
+    (ws / "data.yml").write_text(yaml.safe_dump({"version": 1, "levels": [{
+        "path": "data/raw.csv", "level": "L2", "kind": "other",
+        "reason": "synthetic test declaration", "declared_by": "human"}]}), encoding="utf-8")
+    design = _with(lambda d: d["data"].__setitem__("levels_needed", ["L0", "L2"]))
+    report = model.check(Project(REPO), ws, design)
+    assert "level-undeclared" not in _rules(report.warnings)
+
+
+def test_power_mismatch_for_an_unknown_family(tmp_path):
+    ws = _ws(tmp_path)
+    path = ws / "design" / "power" / "rct-ttest.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["family"] = "no-such-family"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    report = model.check(Project(REPO), ws, copy.deepcopy(BASE))
+    assert "power-mismatch" in _rules(report.errors)
+
+
+def test_sample_size_refuses_a_symlinked_power_file(tmp_path):
+    ws = _ws(tmp_path)
+    (ws / "design" / "power" / "linked.json").symlink_to(ws / "design" / "power" / "rct-ttest.json")
+    design = _with(lambda d: d["sample_size"].__setitem__("power_file", "design/power/linked.json"))
+    report = model.check(Project(REPO), ws, design)
+    assert set(_rules(report.errors)) == {"sample-size"}
+
+
+RCT_FIXTURE_SHA256 = "2aca77ec6f3a00ce9a8c4d39c2e052c58f9119a28059a1fa24a2e82510e76627"
+
+
+def test_content_hash_of_the_rct_fixture_is_pinned():
+    assert model.content_hash(BASE) == RCT_FIXTURE_SHA256
