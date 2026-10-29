@@ -73,6 +73,18 @@ def test_guideline_name_is_matched_case_insensitively():
     assert not quotes.name_in_quote("strobe", "Manuscripts must follow the CONSORT 2010 guideline.")
 
 
+# M-F t2 fix (review r1, finding 7): a decimal is not its integer parts; a space group keeps its parts.
+def test_decimal_numbers_are_not_read_as_their_integer_parts():
+    assert quotes.number_tokens("up to 3.5 figures") == set()
+    assert not quotes.number_in_quote(3, "up to 3.5 figures")
+    assert not quotes.number_in_quote(5, "up to 3.5 figures")
+
+
+def test_space_grouped_numbers_keep_the_group_and_its_parts():
+    assert quotes.number_tokens("5 100 words") == {5100, 5, 100}
+    assert quotes.number_in_quote(100, "5 100 words")
+
+
 def test_latex_class_named_case_insensitively():
     assert quotes.class_in_quote("elsarticle", "Use the Elsevier elsarticle class for submission.")
     assert not quotes.class_in_quote("IEEEtran", "Use the Elsevier elsarticle class for submission.")

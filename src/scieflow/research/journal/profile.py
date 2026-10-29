@@ -238,8 +238,14 @@ def load_sources(run_dir) -> SourceSet | None:
 
 # --- paths --------------------------------------------------------------------------------------
 
+def _show(value) -> str:
+    """A profile value in a message: its repr, at most 60 characters (M-F 5.15, 5.17)."""
+    return repr(quotes.excerpt(str(value)))
+
+
 def _join(path: str, key) -> str:
-    return f"{path}.{key}" if path else str(key)
+    segment = quotes.excerpt(str(key))
+    return f"{path}.{segment}" if path else segment
 
 
 def _norm(path: str) -> str:
@@ -261,6 +267,42 @@ def get_path(data, path: str):
     return cur
 
 
+def leaf_types(schema: dict) -> dict:
+    """The type of every leaf: TYPES, plus the integer limits the schema names (M-F 5.5)."""
+    types = dict(TYPES)
+    for name in schema["blocks"][_BLOCK_LIMITS]:
+        types[f"{_BLOCK_LIMITS}.{name}"] = "int?"
+    return types
+
+
+def schema_type_gaps(schema: dict) -> list:
+    """Where schemas/journal-profile.yml and the type table disagree; [] when they agree.
+
+    A schema key with neither a type nor a block of its own, a typed path that its parent block does
+    not list, and a top-level name that is neither a block nor typed are all reported.
+    """
+    blocks = schema["blocks"]
+    top = set(schema["top_keys"]["required"]) | set(schema["top_keys"]["optional"])
+    types = leaf_types(schema)
+    gaps = []
+    for block, keys in blocks.items():
+        for key in keys:
+            path = _join(block, key)
+            if path not in types and path not in blocks:
+                gaps.append(path)
+    for path in types:
+        parent, _, name = path.rpartition(".")
+        if parent:
+            if name not in blocks.get(parent, ()):
+                gaps.append(path)
+        elif name not in top:
+            gaps.append(path)
+    for name in sorted(top):
+        if name not in blocks and name not in types:
+            gaps.append(name)
+    return gaps
+
+
 # --- validation ---------------------------------------------------------------------------------
 
 class _Validator:
@@ -272,10 +314,7 @@ class _Validator:
         self.enums = self.schema["enums"]
         self.all_optional = set(self.schema["all_optional"])
         self.problems: list[Problem] = []
-        # Limit values are integers wherever the schema lists them; the table is otherwise TYPES.
-        self.types = dict(TYPES)
-        for name in self.blocks[_BLOCK_LIMITS]:
-            self.types[f"{_BLOCK_LIMITS}.{name}"] = "int?"
+        self.types = leaf_types(self.schema)
         self.today = today
         self.run_dir = run_dir
         self.sources = load_sources(run_dir) if run_dir is not None else None
@@ -324,7 +363,7 @@ class _Validator:
                 self.add("type", path, "expected a text value from the list")
                 return False
             if value not in allowed:
-                self.add("enum", path, f"{value!r} is not one of {', '.join(map(str, allowed))}")
+                self.add("enum", path, f"{_show(value)} is not one of {', '.join(map(str, allowed))}")
                 return False
             return True
         checks = {
@@ -342,7 +381,7 @@ class _Validator:
         allowed = self.blocks[block]
         for key in value:
             if key not in allowed:
-                self.add("unknown-key", _join(path, key), f"{key!r} is not a key of this block")
+                self.add("unknown-key", _join(path, key), f"{_show(key)} is not a key of this block")
         if block not in self.all_optional:
             for key in allowed:
                 if key not in value:
@@ -364,6 +403,9 @@ class _Validator:
                     continue
                 self.walk(child_value, _join(path, child), _join(key, child))
         elif isinstance(value, list):
+            if key in self.blocks:
+                self.add("type", path, "expected a mapping")
+                return
             item_key = f"{key}.item"
             for index, item in enumerate(value):
                 if item_key in self.blocks and not isinstance(item, dict):
@@ -379,7 +421,8 @@ class _Validator:
         optional = self.schema["top_keys"]["optional"]
         for key in self.data:
             if key not in required and key not in optional:
-                self.add("unknown-key", str(key), f"{key!r} is not a top-level key of a profile")
+                self.add("unknown-key", quotes.excerpt(str(key)),
+                         f"{_show(key)} is not a top-level key of a profile")
         for key in required:
             if key not in self.data:
                 self.add("missing-key", key, f"{key!r} is required")
@@ -438,7 +481,7 @@ class _Validator:
         if isinstance(formats, list):
             for value in formats:
                 if value not in ranges["formats"]:
-                    self.add("enum", "figures.formats", f"{value!r} is not one of {', '.join(ranges['formats'])}")
+                    self.add("enum", "figures.formats", f"{_show(value)} is not one of {', '.join(ranges['formats'])}")
 
     # leaves, evidence ----------------------------------------------------------------------------
 
@@ -515,22 +558,31 @@ class _Validator:
         quoted = [e["quote"] for e in cover if isinstance(e.get("quote"), str)]
         if leaf.path == "templates.latex_class" and isinstance(leaf.value, str) and leaf.value != "other":
             if quoted and not any(quotes.class_in_quote(leaf.value, q) for q in quoted):
-                self.add("evidence-name", leaf.path, f"the LaTeX class {leaf.value!r} is not named in its quote")
+                self.add("evidence-name", leaf.path, f"the LaTeX class {_show(leaf.value)} is not named in its quote")
         if leaf.key.startswith(BY_STUDY + "."):
-            self.check_study_guidelines(leaf, leaf.key[len(BY_STUDY) + 1:], quoted)
+            self.check_study_guidelines(leaf, quoted)
 
-    def check_study_guidelines(self, leaf: _Leaf, study_key: str, quoted: list):
+    def study_types(self):
+        """Every key of reporting_guidelines.by_study_type is a study type, even with an empty list."""
         from scieflow.core.design import schema as design_schema
+        block = self.data.get("reporting_guidelines")
+        by_study = block.get("by_study_type") if isinstance(block, dict) else None
+        if not isinstance(by_study, dict):
+            return
+        studies = design_schema.study_types(self.root)
+        for key in by_study:
+            if key not in studies:
+                self.add("study-type-unknown", _join(BY_STUDY, key),
+                         f"{_show(key)} is not a study type of schemas/design.yml")
+
+    def check_study_guidelines(self, leaf: _Leaf, quoted: list):
         if not isinstance(leaf.value, list):
             return
         index = {c.id: c for c in self._checklists()}
-        studies = design_schema.study_types(self.root)
-        if study_key not in studies:
-            self.add("study-type-unknown", leaf.path, f"{study_key!r} is not a study type of schemas/design.yml")
         for position, guideline in enumerate(leaf.value):
             if guideline not in index:
                 self.add("guideline-unknown", f"{leaf.path}[{position}]",
-                         f"{guideline!r} is not in config/reporting/index.yml")
+                         f"{_show(guideline)} is not in config/reporting/index.yml")
                 continue
             word = quotes.name_first_word(index[guideline].name)
             if quoted and not any(quotes.name_in_quote(word, q) for q in quoted):
@@ -612,6 +664,7 @@ def validate(data, *, root, run_dir=None, today: dt.date | None = None) -> list[
     v.article_types()
     v.ranges()
     v.figures(root)
+    v.study_types()
     v.sources_state()
     v.evidence()
     v.conflicts()

@@ -3,6 +3,8 @@
 import datetime as dt
 import hashlib
 
+import pytest
+
 from scieflow.research.journal import profile
 
 
@@ -218,3 +220,58 @@ def test_text_hash_helper_matches_fixture_rows(synth):
     raw = (synth.run_dir / "journal" / "sources" / "s4f1c2a9e07.txt").read_bytes()
     assert hashlib.sha256(raw).hexdigest() == profile.sha256_file(
         synth.run_dir / "journal" / "sources" / "s4f1c2a9e07.txt")
+
+
+# M-F t2 fix (review r1, finding 1): a mapping block given as a list or text is a type error.
+MAPPING_BLOCKS = [
+    (("identity",), "identity"),
+    (("oa",), "oa"),
+    (("norms",), "norms"),
+    (("norms", "sample"), "norms.sample"),
+    (("norms", "references"), "norms.references"),
+    (("norms", "abstract_words"), "norms.abstract_words"),
+    (("norms", "title_words"), "norms.title_words"),
+    (("scope",), "scope"),
+    (("article_types", 0, "limits"), "article_types[0].limits"),
+    (("article_types", 0, "abstract"), "article_types[0].abstract"),
+    (("article_types", 0, "structure"), "article_types[0].structure"),
+    (("references",), "references"),
+    (("templates",), "templates"),
+    (("submission",), "submission"),
+    (("declarations",), "declarations"),
+    (("reporting_guidelines",), "reporting_guidelines"),
+    (("review",), "review"),
+    (("provenance",), "provenance"),
+]
+
+
+@pytest.mark.parametrize("value", [["a"], [1], "a"], ids=["list-of-text", "list-of-number", "text"])
+@pytest.mark.parametrize("keys, path", MAPPING_BLOCKS)
+def test_a_mapping_block_given_as_a_list_or_text_is_a_type_error(synth, profile_data, keys, path, value):
+    data = profile_data()
+    parent = data
+    for key in keys[:-1]:
+        parent = parent[key]
+    parent[keys[-1]] = value
+    assert ("type", path) in _errors(_check(synth, data))
+
+
+# M-F t2 fix (review r1, finding 3): every study type key is checked, even with an empty list.
+def test_unknown_study_type_is_refused_even_with_an_empty_list(synth, profile_data):
+    data = profile_data()
+    data["reporting_guidelines"]["by_study_type"]["martian"] = []
+    assert ("study-type-unknown", "reporting_guidelines.by_study_type.martian") in _errors(_check(synth, data))
+
+
+# M-F t2 fix (review r1, finding 6): no profile text beyond 60 characters in any message (5.15, 5.17).
+def test_echoed_profile_text_is_bounded_in_every_message(synth, profile_data):
+    data = profile_data()
+    long = "x" * 500
+    data["review"]["type"] = long
+    data["scope"][long] = "y"
+    data[long] = 1
+    data["provenance"]["bogus"] = long
+    data["reporting_guidelines"]["by_study_type"]["rct"] = [long]
+    problems = _check(synth, data)
+    assert {"enum", "unknown-key", "guideline-unknown"} <= _rules(problems)
+    assert max(len(str(p)) for p in problems) < 200

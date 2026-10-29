@@ -21,6 +21,9 @@ _NUMBER_WORDS = {
 }
 # 3000, 3,000, "3 000" (space or no-break space as the group separator); never inside a longer number.
 _DIGITS = re.compile(r"(?<!\d)(\d{1,3}(?:[, \u00a0]\d{3})+|\d+)(?!\d)")
+# 3.5 and 1,000.5 are decimals: they give no integer (review r1, finding 7).
+_DECIMAL = re.compile(r"\d+(?:[, \u00a0]\d{3})*\.\d+")
+_SPACE = re.compile(r"[ \u00a0]")
 _WORD = re.compile(r"[A-Za-z]+")
 
 
@@ -53,11 +56,15 @@ def quote_problem(quote, source_text, min_chars: int = MIN_QUOTE) -> str | None:
 
 
 def number_tokens(quote) -> set:
-    """The integer values written in a quote: digits (with separators) and words zero to twenty."""
-    text = norm(quote)
+    """The integer values written in a quote: digits with separators, the parts of a space-separated
+    group (`5 100` gives 5100, 5 and 100) and words zero to twenty. A decimal gives no integer."""
+    text = _DECIMAL.sub(" ", norm(quote))
     values = set()
     for match in _DIGITS.finditer(text):
-        values.add(int(re.sub(r"[, \u00a0]", "", match.group(1))))
+        token = match.group(1)
+        values.add(int(re.sub(r"[, \u00a0]", "", token)))
+        if _SPACE.search(token):
+            values.update(int(part) for part in _SPACE.split(token))
     for word in _WORD.findall(text):
         if word.lower() in _NUMBER_WORDS:
             values.add(_NUMBER_WORDS[word.lower()])

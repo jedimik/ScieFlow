@@ -16,10 +16,21 @@ def _schema(root):
     return yaml.safe_load((root / "schemas" / "journal-profile.yml").read_text(encoding="utf-8"))
 
 
-def test_top_keys_are_the_schema_keys(synth):
+# M-F t2 fix (review r1, finding 5): the pin compares the schema with the TYPES table, not the file with itself.
+def test_schema_and_type_table_agree(synth):
+    assert profile.schema_type_gaps(_schema(synth.root)) == []
+
+
+def test_a_schema_key_without_a_type_is_a_gap(synth):
     schema = _schema(synth.root)
-    assert list(profile.required_top_keys(synth.root)) == schema["top_keys"]["required"]
-    assert list(profile.optional_top_keys(synth.root)) == schema["top_keys"]["optional"]
+    schema["blocks"]["scope"].append("extra")
+    assert profile.schema_type_gaps(schema) == ["scope.extra"]
+
+
+def test_a_typed_path_missing_from_the_schema_is_a_gap(synth):
+    schema = _schema(synth.root)
+    schema["blocks"]["scope"].remove("text")
+    assert profile.schema_type_gaps(schema) == ["scope.text"]
 
 
 def test_every_schema_key_is_accepted_and_every_other_key_is_refused(synth, profile_data):
