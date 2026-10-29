@@ -32,6 +32,9 @@ def run_sweep(
         runs.append(
             {
                 "run_id": spec.run_id,
+                "config_id": spec.config_id,
+                "replicate": spec.replicate,
+                "seed": spec.seed,
                 "params": spec.params,
                 "mode": mode,
                 "status": config["status"],
@@ -43,15 +46,13 @@ def run_sweep(
             }
         )
     results_path = campaign_dir / "results.json"
-    results_path.write_text(
-        json.dumps(
-            {
-                "campaign": campaign.name,
-                "rank_by": campaign.rank_by,
-                "mode": mode,
-                "runs": runs,
-            },
-            indent=2,
-        )
-    )
+    doc = {
+        "campaign": campaign.name,
+        "rank_by": campaign.rank_by,
+        "mode": mode,
+        "runs": runs,
+    }
+    if campaign.replicates is not None:
+        doc["replicates"] = {"n": campaign.replicates.n, "seed": campaign.replicates.seed}
+    results_path.write_text(json.dumps(doc, indent=2))
     return results_path

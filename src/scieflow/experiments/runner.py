@@ -31,6 +31,8 @@ def build_command(
     ]
     for key in sorted(spec.params):
         inner += [f"--{key}", str(spec.params[key])]
+    if spec.seed is not None:
+        inner += ["--seed", str(spec.seed)]
     if mode == "direct":
         return [sys.executable] + inner[1:]
     if mode == "apptainer":
@@ -89,6 +91,8 @@ def execute_run(
         "status": "running",
         "started": _utcnow(),
     }
+    if spec.replicate is not None or spec.seed is not None:  # replicate or `run --seed`
+        config.update(config_id=spec.config_id, replicate=spec.replicate, seed=spec.seed)
     (run_dir / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
 
     proc = subprocess.run(command, capture_output=True, text=True)

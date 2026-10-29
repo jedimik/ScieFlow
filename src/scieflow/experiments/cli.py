@@ -8,9 +8,9 @@ import yaml
 from scieflow.core import config, events
 from scieflow.core.design import lock as design_lock
 from scieflow.core.project import Project
-from scieflow.core.run import actions
+from scieflow.core.run import actions, budget
 
-from .campaign import Campaign, RunSpec
+from .campaign import Campaign, CampaignError, RunSpec, check_replicates
 from .compare import compare_campaign
 from .envbuild import build_sif
 from .power import FAMILIES as POWER_FAMILIES
@@ -97,24 +97,65 @@ def experiment():
     """Computational experiments: campaigns, sweeps, metrics, reports."""
 
 
+def _check_stage_seed(campaign: Campaign, stage) -> None:
+    """Replicates need a seeded stage; refused before anything runs or spends (plan 5.1)."""
+    try:
+        check_replicates(campaign, stage)
+    except CampaignError as e:
+        raise click.ClickException(str(e)) from e
+
+
+def _guard_capacity(run_dir: Path | None, planned: int) -> None:
+    """Refuse a campaign whose planned runs exceed the remaining experiment_runs (plan 5.2).
+
+    No refusal (and no event) outside a run, without budget.yml, or when max_experiment_runs
+    is absent, null or 0. Refusals write no checkpoint and no run directory.
+    """
+    if run_dir is None:
+        return
+    b = budget.read_budget(run_dir)
+    if not b:
+        return
+    cap = (b.get("budgets") or {}).get("max_experiment_runs")
+    if not cap:
+        return
+    spent = (b.get("spent") or {}).get("experiment_runs") or 0
+    if spent + planned <= cap:
+        return
+    remaining = max(0, cap - spent)
+    events.emit(run_dir, "job.refused", "system", reason="budget", rule="insufficient",
+                dims=["experiment_runs"], planned=planned, remaining=remaining)
+    raise click.ClickException(
+        f"experiment_runs budget insufficient: this campaign needs {planned} runs, "
+        f"{remaining} remain — propose a smaller campaign or ask the user to raise the budget")
+
+
 @experiment.command()
 @click.option("-c", "--campaign", "campaign_path", required=True,
               type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("-p", "--param", "params", multiple=True,
               help="Override/set one parameter, e.g. -p sigma=1.5")
+@click.option("--seed", type=click.IntRange(0, 2**31 - 1), default=None,
+              help="Seed for a stage that declares accepts_seed: true.")
 @click.option("--direct", is_flag=True,
               help="Run without a container (dev/tests only).")
 @common_options
-def run(campaign_path, params, direct, experiments_dir, pipelines_dir):
+def run(campaign_path, params, seed, direct, experiments_dir, pipelines_dir):
     """Run the campaign's stage once with explicit parameters."""
     campaign = Campaign.load(campaign_path)
     stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
+    _check_stage_seed(campaign, stage)
+    if seed is not None and not stage.accepts_seed:
+        raise click.ClickException(
+            f"stage {stage.name} does not declare accepts_seed: true; --seed would have no "
+            "effect (nothing was run)")
     p = parse_params(params)
     slug = "_".join(f"{k}-{v}" for k, v in sorted(p.items())) or "default"
-    spec = RunSpec(run_id=f"manual_{slug}", params=p)
+    spec = RunSpec(run_id=f"manual_{slug}", params=p, seed=seed)
     budget_run = _budget_run(experiments_dir)
     _guard(budget_run)
     _design_guard(budget_run, campaign)
+    _guard_capacity(budget_run, 1)
     run_dir = execute_run(
         campaign, stage, spec, experiments_dir,
         mode="direct" if direct else "apptainer",
@@ -136,9 +177,11 @@ def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
     """Run every parameter combination / scenario in the campaign."""
     campaign = Campaign.load(campaign_path)
     stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
+    _check_stage_seed(campaign, stage)
     budget_run = _budget_run(experiments_dir)
     _guard(budget_run)
     _design_guard(budget_run, campaign)
+    _guard_capacity(budget_run, len(campaign.expand()))
     results_path = run_sweep(
         campaign, stage, experiments_dir, mode="direct" if direct else "apptainer"
     )
@@ -162,6 +205,12 @@ def compare(campaign_dir, include_direct):
     """Rank a campaign's runs and check validation thresholds."""
     comparison = compare_campaign(campaign_dir, include_direct=include_direct)
     click.echo(f"campaign: {comparison['campaign']}  (ranked by {comparison['rank_by']})")
+    for c in comparison.get("configs", []):
+        mean = "n/a" if c["mean"] is None else f"{c['mean']:.4f}"
+        click.echo(f"  config {c['config_id']}  mean {comparison['rank_by']}={mean}  "
+                   f"n={c['n']} failed={c['n_failed']}")
+    if "configs" in comparison:
+        click.echo(f"best config: {comparison['best_config']}")
     for entry in comparison["ranked"]:
         flag = "PASS" if entry["validation"]["passed"] else "FAIL"
         value = entry["metrics"][comparison["rank_by"]]

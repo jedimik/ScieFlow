@@ -26,6 +26,7 @@ class Stage:
     output_file: str
     environment: EnvSpec
     dir: Path
+    accepts_seed: bool = False  # stage.yaml `accepts_seed: true` lets a campaign replicate it
 
     @classmethod
     def load(cls, stage_dir: str | Path) -> "Stage":
@@ -52,6 +53,9 @@ class Stage:
         script_path = stage_dir / data["script"]
         if not script_path.exists():
             raise StageError(f"script not found: {script_path}")
+        accepts_seed = data.get("accepts_seed", False)
+        if not isinstance(accepts_seed, bool):
+            raise StageError(f"{yaml_path}: accepts_seed must be true or false")
         return cls(
             name=data["name"],
             description=data.get("description", ""),
@@ -59,6 +63,7 @@ class Stage:
             output_file=data["output_file"],
             environment=spec,
             dir=stage_dir,
+            accepts_seed=accepts_seed,
         )
 
 
