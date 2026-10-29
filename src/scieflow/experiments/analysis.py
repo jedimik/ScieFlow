@@ -174,6 +174,35 @@ def _read_yaml(path: Path):
     return data
 
 
+def _finite(value) -> bool:
+    """A finite number. An int too large for a float is not finite (review F1, plan 5.12)."""
+    try:
+        return math.isfinite(float(value))
+    except OverflowError:
+        return False
+
+
+def _check_results(results) -> None:
+    """Refuse a results.json whose shape the analysis cannot read, naming the rule (plan 5.12)."""
+    if not isinstance(results, dict):
+        raise AnalysisError("results.json: must be a JSON object")
+    runs = results.get("runs")
+    if not isinstance(runs, list):
+        raise AnalysisError("results.json: 'runs' must be a list")
+    for i, run in enumerate(runs):
+        if not isinstance(run, dict):
+            raise AnalysisError(f"results.json: runs[{i}] must be a mapping")
+        for key in ("run_id", "config_id", "status"):
+            if not isinstance(run.get(key), str):
+                raise AnalysisError(f"results.json: runs[{i}].{key} must be a string")
+        for key in ("params", "metrics"):
+            if run.get(key) is not None and not isinstance(run[key], dict):
+                raise AnalysisError(f"results.json: runs[{i}].{key} must be a mapping")
+        seed = run.get("seed")
+        if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
+            raise AnalysisError(f"results.json: runs[{i}].seed must be an integer or null")
+
+
 def _cell(runs, metric, include_direct, modes):
     """Descriptives of one configuration × metric with the excluded runs listed (plan 5.4)."""
     values, excluded = [], []
@@ -186,7 +215,7 @@ def _cell(runs, metric, include_direct, modes):
         raw = (r.get("metrics") or {}).get(metric)
         if raw is None or isinstance(raw, bool) or not _is_number(raw):
             excluded.append({"run_id": run_id, "seed": seed, "reason": "missing"})
-        elif not math.isfinite(float(raw)):
+        elif not _finite(raw):
             excluded.append({"run_id": run_id, "seed": seed, "reason": "non-finite"})
         else:
             values.append({"run_id": run_id, "seed": seed, "value": float(raw)})
@@ -270,7 +299,7 @@ def _correlation(metric, test, configs, cells, params, higher):
         key = varying[0]
         for config_id, p in configs:
             value = p.get(key)
-            if isinstance(value, bool) or not _is_number(value):
+            if isinstance(value, bool) or not _is_number(value) or not _finite(value):
                 valid = False
                 break
             for v in cells[config_id][metric]["values"]:
@@ -294,9 +323,11 @@ def analyse_campaign(campaign_dir, include_direct: bool = False) -> dict:
     results_path = campaign_dir / "results.json"
     campaign = _read_yaml(campaign_path)
     results = _read_json(results_path)
-    if not isinstance(results.get("runs"), list):
-        raise AnalysisError("results.json: 'runs' must be a list")
-    metrics = [str(m) for m in campaign.get("metrics") or []]
+    _check_results(results)
+    metrics_raw = campaign.get("metrics") or []
+    if not isinstance(metrics_raw, list) or not all(isinstance(m, str) for m in metrics_raw):
+        raise AnalysisError("campaign.yaml: 'metrics' must be a list of metric names")
+    metrics = list(metrics_raw)
     if not metrics:
         raise AnalysisError("campaign.yaml: 'metrics' is required")
     if campaign.get("pipeline_dir"):
@@ -333,7 +364,7 @@ def analyse_campaign(campaign_dir, include_direct: bool = False) -> dict:
                     if not (modes[r["run_id"]] == "direct" and not include_direct)]
         cells[config_id] = {m: _cell(runs_of, m, include_direct, modes) for m in metrics}
         config_rows.append({
-            "config_id": config_id, "params": params[config_id], "n_runs": len(included),
+            "config_id": config_id, "params": params[config_id], "n_runs": len(runs_of),
             "n_failed": sum(1 for r in included if r["status"] != "completed"),
             "n_direct_excluded": direct_excluded, "metrics": None,
         })
@@ -379,13 +410,9 @@ def analyse_campaign(campaign_dir, include_direct: bool = False) -> dict:
     families = []
     if tests:
         family = [t for t in tests if t["computed"]]
-        if spec.correction == "none":
-            for t in family:
-                t["p_adjusted"], t["reject"] = None, None
-        else:
-            for t, adjusted in zip(family, stats.adjust([t["p"] for t in family], spec.correction)):
-                t["p_adjusted"] = adjusted
-                t["reject"] = adjusted <= spec.alpha
+        for t, adjusted in zip(family, stats.adjust([t["p"] for t in family], spec.correction)):
+            t["p_adjusted"] = adjusted
+            t["reject"] = adjusted <= spec.alpha
         families = [{"name": "campaign", "correction": spec.correction, "alpha": spec.alpha,
                      "size": len(family)}]
 
