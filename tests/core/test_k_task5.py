@@ -327,7 +327,10 @@ def test_t5_actual_process_states_not_completion_states(k_conversational_project
     if state == 'failed':
         cfg['session_cmd'] = '/bin/false {prompt}'
     elif state in ('timeout', 'cancelled'):
-        cfg['session_cmd'] = "/bin/sh -c 'sleep 2' fixture {prompt}"
+        # The timeout clock starts at jobs.wait, not at launch: a child that outlives
+        # the start->wait window under host load exits 0 first and reads as 'done'.
+        # 30 s keeps that window far away; timeout/cancel kill it at once anyway.
+        cfg['session_cmd'] = "/bin/sh -c 'sleep 30' fixture {prompt}"
         if state == 'timeout':
             cfg['timeout_min'] = 0.001
     path.write_text(yaml.safe_dump(data))
