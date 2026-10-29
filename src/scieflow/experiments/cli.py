@@ -10,8 +10,15 @@ from scieflow.core.design import lock as design_lock
 from scieflow.core.project import Project
 from scieflow.core.run import actions, budget
 
-from . import manifest
-from .analysis import AnalysisError, analyse_campaign, stats_fresh, write_stats
+from . import manifest, sap
+from .analysis import (
+    Analysis,
+    AnalysisError,
+    analyse_campaign,
+    parse_analysis,
+    stats_fresh,
+    write_stats,
+)
 from .campaign import Campaign, CampaignError, RunSpec, check_replicates
 from .compare import compare_campaign
 from .envbuild import build_sif
@@ -100,6 +107,33 @@ def experiment():
     """Computational experiments: campaigns, sweeps, metrics, reports."""
 
 
+def _analysis_guard(run_dir: Path | None, campaign: Campaign) -> None:
+    """Refuse or warn when the analysis block contradicts a locked SAP (M-D2 plan 5.5).
+
+    Runs before anything runs or spends. Metrics no SAP outcome names are M-D1's rule (out-of-sap,
+    checked by _design_guard), so they are not repeated here.
+    """
+    if run_dir is None:
+        return
+    bound = sap.binding(run_dir)
+    if not bound.locked:
+        return
+    spec = parse_analysis(campaign.analysis, campaign.metrics) or Analysis()
+    found = [p for p in sap.conflicts(bound, spec, campaign.metrics) if p["rule"] != "out-of-sap"]
+    if not found:
+        return
+    if bound.computational:
+        for p in found:
+            click.echo(f"warning: design: [{p['rule']}] {p['message']}", err=True)
+            events.emit(run_dir, "note.design_warning", "system", rule=p["rule"],
+                        campaign=campaign.name)
+        return
+    events.emit(run_dir, "job.refused", "system", reason="design", rule=found[0]["rule"],
+                campaign=campaign.name, metrics=sorted({p["metric"] for p in found if p["metric"]}))
+    detail = "; ".join(f"[{p['rule']}] {p['message']}" for p in found)
+    raise click.ClickException(f"{detail} (campaign {campaign.name}; nothing was run)")
+
+
 def _check_stage_seed(campaign: Campaign, stage) -> None:
     """Replicates need a seeded stage; refused before anything runs or spends (plan 5.1)."""
     try:
@@ -158,6 +192,7 @@ def run(campaign_path, params, seed, direct, experiments_dir, pipelines_dir):
     budget_run = _budget_run(experiments_dir)
     _guard(budget_run)
     _design_guard(budget_run, campaign)
+    _analysis_guard(budget_run, campaign)
     _guard_capacity(budget_run, 1)
     mode = "direct" if direct else "apptainer"
     context = manifest.capture_context(campaign, stage, mode,
@@ -186,6 +221,7 @@ def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
     budget_run = _budget_run(experiments_dir)
     _guard(budget_run)
     _design_guard(budget_run, campaign)
+    _analysis_guard(budget_run, campaign)
     _guard_capacity(budget_run, len(campaign.expand()))
     results_path = run_sweep(
         campaign, stage, experiments_dir, mode="direct" if direct else "apptainer"

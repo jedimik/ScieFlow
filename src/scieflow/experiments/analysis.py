@@ -14,9 +14,21 @@ from pathlib import Path
 
 import yaml
 
-from . import manifest, stats, tidy
+from . import manifest, sap, stats, tidy
 from .compare import _run_mode
 from .metrics import get_metric, load_local_metrics
+
+# Families in the order they appear in stats.json (plan 5.5).
+FAMILY_ORDER = ("confirmatory", "exploratory", "campaign")
+# Design status -> the message of its design-<status> warning (plan 5.5).
+STATUS_MESSAGES = {
+    "draft": "the design is not locked yet; the analysis is not confirmatory",
+    "pending": "the design lock is awaiting its human gate; the analysis is not confirmatory",
+    "modified": "the design differs from its lock; the analysis is not confirmatory",
+    "invalid": "the design cannot be read; the analysis is not confirmatory",
+    "ledger-invalid": "the design ledger does not verify; the analysis is not confirmatory",
+    "error": "the design could not be read; campaign settings are used and no SAP is bound",
+}
 
 # Every name of the M-D1 design enumeration (schemas/design.yml enums.tests); pinned by a test.
 TESTS = frozenset({
@@ -65,6 +77,7 @@ class Analysis:
     ci: float = 0.95
     resamples: int = 9999
     seed: int = 0
+    given: frozenset = frozenset()  # the keys the block states explicitly (correction, alpha)
 
 
 def _is_number(value) -> bool:
@@ -135,7 +148,8 @@ def parse_analysis(block, metrics) -> Analysis | None:
             raise AnalysisError(f"analysis.bootstrap.seed: an integer 0..{MAX_SEED}")
 
     return Analysis(baseline=baseline, tests=tests, correction=correction, alpha=float(alpha),
-                    ci=float(ci), resamples=resamples, seed=seed)
+                    ci=float(ci), resamples=resamples, seed=seed,
+                    given=frozenset(k for k in ("correction", "alpha") if k in block))
 
 
 def resolve_baseline(spec: Analysis | None, configs) -> str | None:
@@ -337,6 +351,11 @@ def analyse_campaign(campaign_dir, include_direct: bool = False) -> dict:
     except KeyError as e:
         raise AnalysisError(f"campaign.yaml: {e.args[0]}") from e
     spec = parse_analysis(campaign.get("analysis"), metrics) or Analysis()
+    bound = sap.binding_for_campaign(campaign_dir)
+    found = sap.conflicts(bound, spec, metrics)
+    if found and not bound.computational:
+        first = found[0]
+        raise AnalysisError(f"[{first['rule']}] {first['message']}")
 
     runs = results["runs"]
     modes = {r["run_id"]: _run_mode(r, campaign_dir) for r in runs}
@@ -349,10 +368,11 @@ def analyse_campaign(campaign_dir, include_direct: bool = False) -> dict:
     baseline_id = resolve_baseline(spec, configs)
     replicated = isinstance(results.get("replicates"), dict)
 
-    for metric, test in spec.tests.items():
-        if KIND.get(test) in ("pairwise", "paired") and baseline_id is None:
+    resolved = _resolve_tests(metrics, spec, bound)
+    for metric, r in resolved.items():
+        if KIND.get(r["test"]) in ("pairwise", "paired") and baseline_id is None:
             raise AnalysisError(
-                f"no-baseline: analysis.test {test} on {metric} needs analysis.baseline")
+                f"no-baseline: analysis.test {r['test']} on {metric} needs analysis.baseline")
 
     cells: dict = {}
     config_rows = []
@@ -380,11 +400,13 @@ def analyse_campaign(campaign_dir, include_direct: bool = False) -> dict:
     tests = []
     used = set()
     for metric in metrics:
-        test = spec.tests.get(metric)
-        if test is None or test == "descriptive":
+        if metric not in resolved:
             continue
+        r = resolved[metric]
+        test = r["test"]
         kind = KIND.get(test, "unsupported")
         used.add(test)
+        first_new = len(tests)
         if kind == "unsupported":
             tests.append(_entry(metric, test, "unsupported"))
         elif kind in ("pairwise", "paired"):
@@ -406,17 +428,44 @@ def analyse_campaign(campaign_dir, include_direct: bool = False) -> dict:
                                 outcome=fn(groups)))
         else:  # correlation
             tests.append(_correlation(metric, test, configs, cells, params, higher[metric]))
-
-    families = []
-    if tests:
-        family = [t for t in tests if t["computed"]]
-        for t, adjusted in zip(family, stats.adjust([t["p"] for t in family], spec.correction)):
-            t["p_adjusted"] = adjusted
-            t["reject"] = adjusted <= spec.alpha
-        families = [{"name": "campaign", "correction": spec.correction, "alpha": spec.alpha,
-                     "size": len(family)}]
+        for t in tests[first_new:]:
+            t["source"] = r["source"]
+            t["family"] = r["family"]
+            t["confirmatory"] = r["family"] == "confirmatory"
+            if r["unplanned"]:
+                t["unplanned"] = True
 
     warnings_out = []
+    families = []
+    for name in FAMILY_ORDER:
+        group = [t for t in tests if t["family"] == name]
+        if not group:
+            continue
+        correction, alpha, unsupported = _family_setting(name, bound, spec)
+        family = [t for t in group if t["computed"]]
+        if unsupported:
+            for t in family:
+                t["p_adjusted"] = None
+                t["reject"] = None
+            warnings_out.append({"rule": "sap-correction-unsupported", "metric": None,
+                                 "message": (f"the locked SAP's multiplicity method "
+                                             f"{bound.multiplicity['method']} is not applied; "
+                                             "p-values are not adjusted")})
+        else:
+            for t, adjusted in zip(family, stats.adjust([t["p"] for t in family], correction)):
+                t["p_adjusted"] = adjusted
+                t["reject"] = adjusted <= alpha
+        families.append({"name": name, "correction": correction, "alpha": alpha,
+                         "size": len(family)})
+
+    if bound.status not in ("none", "locked"):
+        warnings_out.append({"rule": f"design-{bound.status}", "metric": None,
+                             "message": STATUS_MESSAGES.get(
+                                 bound.status, "the design is not usable; the analysis is not "
+                                 "confirmatory")})
+    for item in found:  # only computational designs reach here: a non-computational one refused
+        warnings_out.append({"rule": item["rule"], "metric": item["metric"],
+                             "message": item["message"]})
     for m in metrics:
         missing = sum(cells[c][m]["n_missing"] for c in config_ids)
         nonfinite = sum(cells[c][m]["n_nonfinite"] for c in config_ids)
@@ -444,8 +493,8 @@ def analyse_campaign(campaign_dir, include_direct: bool = False) -> dict:
             "baseline": baseline_id,
             "tests": {m: spec.tests[m] for m in metrics if m in spec.tests},
         },
-        "design": {"status": "none", "version": None, "in_force_hash": None,
-                   "study_type": None},
+        "design": {"status": bound.status, "version": bound.version,
+                   "in_force_hash": bound.in_force_hash, "study_type": bound.study_type},
         "data_level": manifest._data_level(campaign_dir),
         "metrics": {m: {"higher_is_better": higher[m]} for m in metrics},
         "configs": config_rows,
@@ -458,6 +507,44 @@ def analyse_campaign(campaign_dir, include_direct: bool = False) -> dict:
         },
         "warnings": warnings_out,
     }
+
+
+def _family_setting(name: str, bound: sap.Binding, spec: Analysis):
+    """(correction, alpha, unsupported) of one family (plan 5.5). Campaign settings when unbound."""
+    if name == "campaign" or not bound.locked:
+        return spec.correction, spec.alpha, False
+    alpha = sap.sap_alpha(bound, spec.alpha)
+    if name == "exploratory":
+        return "bh", alpha, False
+    expected = sap.expected_correction(bound)
+    if expected is None:
+        return "not-applied", alpha, True
+    return expected, alpha, False
+
+
+def _resolve_tests(metrics, spec: Analysis, bound: sap.Binding) -> dict:
+    """metric -> {test, source, family, unplanned} for every metric that gets a test (plan 5.5)."""
+    out = {}
+    for metric in metrics:
+        if bound.locked and metric in bound.outcomes:
+            named = bound.outcomes[metric]
+            test = named["test"]
+            if test is None or test == "descriptive":
+                continue
+            family = ("confirmatory" if named["priority"] in sap.CONFIRMATORY_PRIORITIES
+                      else "exploratory")
+            out[metric] = {"test": test, "source": "sap", "family": family, "unplanned": False}
+            continue
+        test = spec.tests.get(metric)
+        if test is None or test == "descriptive":
+            continue
+        if bound.locked:  # computational only: the metric is not an SAP outcome (plan 5.5)
+            out[metric] = {"test": test, "source": "campaign", "family": "exploratory",
+                           "unplanned": True}
+        else:
+            out[metric] = {"test": test, "source": "campaign", "family": "campaign",
+                           "unplanned": False}
+    return out
 
 
 def write_stats(campaign_dir, doc: dict) -> Path:
