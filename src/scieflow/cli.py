@@ -35,6 +35,12 @@ GROUPS = {
         "research",
         "Literature research: search, validation, citations, Zotero.",
     ),
+    "journal": (
+        "scieflow.research.journal.cli",
+        "journal",
+        "research",
+        "Target journals: show, list and validate journal profiles.",
+    ),
     "news": (
         "scieflow.news.cli",
         "news",
