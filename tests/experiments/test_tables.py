@@ -234,7 +234,8 @@ def _victim(tmp_path) -> Path:
     return victim
 
 
-@pytest.mark.parametrize("name", ["summary.md.tmp", "summary.md", "summary.json.tmp", "summary.tex"])
+@pytest.mark.parametrize("name", ["summary.md.tmp", "summary.md", "summary.json.tmp",
+                                  "summary.tex"])
 def test_symlinked_output_is_refused_and_nothing_is_written(tmp_path, name):
     """Finding 1: a pre-planted .tmp or final symlink must not be followed (plan 5.12)."""
     cdir = ts.campaign(tmp_path)

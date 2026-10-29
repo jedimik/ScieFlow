@@ -97,7 +97,7 @@ def _nan_in_cell(doc):
 @pytest.mark.parametrize("edit", [_drop_configs, _nan_in_cell],
                          ids=lambda f: f.__name__)
 def test_malformed_stats_add_only_the_one_line_and_the_report_is_written(tmp_path, edit):
-    """Finding 2: a hash-fresh but invalid stats.json falls back to the one-line note (plan 5.12)."""
+    """Finding 2: a hash-fresh but invalid stats.json falls back to the one-line note."""
     cdir = ts.campaign(tmp_path, mode="direct")
     doc = ts.fixed_doc()
     edit(doc)
