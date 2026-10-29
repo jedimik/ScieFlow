@@ -158,6 +158,12 @@ def recompute_metrics(run_dir: str | Path) -> dict:
         if not isinstance(doc, dict) or not isinstance(doc.get("metrics_history", []), list):
             raise ValueError(f"{manifest_path.name} is not a valid run manifest")
 
+    # Refuse a planted link at every file this recompute writes, before anything is written
+    # (M-D2 final r1 finding 1): a refused recompute leaves every file exactly as it was.
+    for target in (run_dir / "metrics.json", run_dir / manifest.MANIFEST_FILE,
+                   campaign_dir / "results.json", campaign_dir / "results.csv"):
+        manifest.refuse_unsafe_output(target)
+        manifest.refuse_unsafe_output(manifest.tmp_of(target))
     manifest.atomic_write(run_dir / "metrics.json", data)
     manifest_sha = None
     if doc is not None:

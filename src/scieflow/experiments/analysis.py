@@ -548,17 +548,28 @@ def _resolve_tests(metrics, spec: Analysis, bound: sap.Binding) -> dict:
 
 
 def write_stats(campaign_dir, doc: dict) -> Path:
-    """Write stats.json (deterministic, strict JSON) and re-write results.csv."""
+    """Write stats.json (deterministic, strict JSON) and re-write results.csv.
+
+    Both outputs and their .tmp siblings are checked before either is written (M-D2 final r1).
+    """
     campaign_dir = Path(campaign_dir)
     path = campaign_dir / "stats.json"
-    if path.is_symlink():
-        raise AnalysisError(f"{path.name}: refusing to write through a symlink")
+    csv_path = campaign_dir / "results.csv"
+    try:
+        for target in (path, csv_path):
+            manifest.refuse_unsafe_output(target)
+            manifest.refuse_unsafe_output(manifest.tmp_of(target))
+    except manifest.UnsafeOutputError as e:
+        raise AnalysisError(str(e)) from e
     try:
         data = json.dumps(doc, sort_keys=True, indent=1, allow_nan=False).encode("utf-8")
     except ValueError as e:
         raise AnalysisError("a non-finite number reached stats.json; nothing written") from e
-    manifest.atomic_write(path, data)
-    tidy.write_results_csv(campaign_dir, list(doc["metrics"]))
+    try:
+        manifest.atomic_write(path, data)
+        tidy.write_results_csv(campaign_dir, list(doc["metrics"]))
+    except manifest.UnsafeOutputError as e:
+        raise AnalysisError(str(e)) from e
     return path
 
 

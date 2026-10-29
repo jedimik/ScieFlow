@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 from pathlib import Path
 
 import yaml
@@ -212,38 +211,21 @@ def output_dir(campaign_dir, name: str) -> Path:
     return path
 
 
-def _tmp_of(path: Path) -> Path:
-    return path.with_name(path.name + ".tmp")
-
-
-def _refuse_link(path: Path) -> None:
-    if path.is_symlink():
-        raise RenderError(f"{path.name}: refusing a symlinked output")
-    if path.exists() and not path.is_file():
-        raise RenderError(f"{path.name}: not a regular file")
-
-
 def write_outputs(outputs) -> list[Path]:
     """Write every (path, bytes) pair, or none (plan 5.12 "symlinked outputs refused").
 
-    A symlink at an output or at its .tmp sibling is refused before anything is written, and the
-    .tmp file is created with O_EXCL, so a pre-planted link cannot redirect a write outside the
-    campaign folder.
+    Every output and its .tmp sibling are checked before anything is written; the write itself is
+    manifest.atomic_write, which never follows a link (M-D2 final r1 finding 1).
     """
     pairs = [(Path(path), data) for path, data in outputs]
-    for path, _ in pairs:
-        _refuse_link(path)
-        _refuse_link(_tmp_of(path))
-    for path, data in pairs:
-        _refuse_link(path)
-        tmp = _tmp_of(path)
-        _refuse_link(tmp)
-        if tmp.exists():
-            tmp.unlink()
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-        os.replace(tmp, path)
+    try:
+        for path, _ in pairs:
+            manifest.refuse_unsafe_output(path)
+            manifest.refuse_unsafe_output(manifest.tmp_of(path))
+        for path, data in pairs:
+            manifest.atomic_write(path, data)
+    except manifest.UnsafeOutputError as e:
+        raise RenderError(str(e)) from e
     return [path for path, _ in pairs]
 
 

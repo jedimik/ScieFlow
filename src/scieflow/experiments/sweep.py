@@ -18,6 +18,12 @@ def run_sweep(
     mode: str = "apptainer",
 ) -> Path:
     campaign_dir = Path(experiments_dir) / campaign.name
+    # Refuse a planted link at every file this sweep writes before anything runs (M-D2 final r1).
+    for target in (campaign_dir / "results.json", campaign_dir / "results.csv",
+                   campaign_dir / "campaign.yaml"):
+        manifest.refuse_unsafe_output(target)
+        if target.name != "campaign.yaml":
+            manifest.refuse_unsafe_output(manifest.tmp_of(target))
     campaign_dir.mkdir(parents=True, exist_ok=True)
     (campaign_dir / "campaign.yaml").write_text(
         yaml.safe_dump(

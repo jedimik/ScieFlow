@@ -216,6 +216,8 @@ def _package_block(mode: str, sif, sif_sha: str | None, campaign_dir: Path) -> d
     text = "\n".join(pk.pop("list")) + "\n"
     name = f"{sif_sha[:12]}.txt"
     folder = campaign_dir / PACKAGES_DIR
+    if folder.is_symlink():
+        raise UnsafeOutputError(f"{PACKAGES_DIR}/: refusing a symlinked folder")
     folder.mkdir(parents=True, exist_ok=True)
     atomic_write(folder / name, text.encode())
     return {"status": "captured", "source": pk["source"], "count": pk["count"],
@@ -314,10 +316,40 @@ def canonical_bytes(doc: dict) -> bytes:
     return (json.dumps(doc, sort_keys=True, indent=1) + "\n").encode()
 
 
-def atomic_write(path, data: bytes) -> None:
+class UnsafeOutputError(ValueError):
+    """A pre-planted symlink or non-file sits at an output or at its .tmp sibling (plan 5.12)."""
+
+
+def tmp_of(path) -> Path:
     path = Path(path)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes(data)
+    return path.with_name(path.name + ".tmp")
+
+
+def refuse_unsafe_output(path) -> None:
+    """Refuse a symlink, or a non-file, at an output path. Writes nothing."""
+    path = Path(path)
+    if path.is_symlink():
+        raise UnsafeOutputError(f"{path.name}: refusing a symlinked output")
+    if path.exists() and not path.is_file():
+        raise UnsafeOutputError(f"{path.name}: not a regular file")
+
+
+def atomic_write(path, data: bytes) -> None:
+    """Write data to path through path.tmp, never following a link (M-D2 final r1 finding 1).
+
+    A symlink or non-file at path or at its .tmp sibling is refused before anything is written.
+    The .tmp file is created with O_EXCL, so a link planted between the check and the create
+    makes the create fail instead of writing through it.
+    """
+    path = Path(path)
+    tmp = tmp_of(path)
+    refuse_unsafe_output(path)
+    refuse_unsafe_output(tmp)
+    if tmp.exists():
+        tmp.unlink()
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(data)
     os.replace(tmp, path)
 
 

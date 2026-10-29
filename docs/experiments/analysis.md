@@ -43,8 +43,9 @@ scieflow experiment verify workspace/<slug>/experiments/<campaign> [--json]
 ```
 
 `verify` re-checks every recorded hash. A mismatch is a **problem** and
-makes `verify` exit 1; an expected absence (for example, no package capture
-for a direct run) is a **note**. Run `verify` after every sweep.
+makes `verify` exit 1; an expected absence is a **note**: a run recorded before
+manifests existed (`legacy-run`), or a metrics recompute (`metrics-recomputed`).
+Direct runs still capture the host interpreter's packages. Run `verify` after every sweep.
 
 `scieflow experiment metrics <run-dir>` recomputes one run's metrics. The
 recompute goes through the tool: it refreshes the run's manifest,
@@ -161,7 +162,8 @@ When the run holds a locked `design/design.yml`, the locked analysis plan
 decides the tests: its outcomes, test, correction and alpha are used, and
 `analysis.test` must not set a different test for an SAP outcome. A campaign
 whose settings conflict with the SAP is refused before the sweep (`sap-…`
-rules) and again by `stats`. A design that is not locked, or differs from
+rules) and again by `stats`. For a non-computational locked design, `stats` also refuses a
+campaign metric that no SAP outcome names (`out-of-sap`). A design that is not locked, or differs from
 its lock, gives a `design-<status>` warning and the analysis is not
 confirmatory. See [Study Design and SAP](design.md).
 
