@@ -125,9 +125,46 @@ def _validate_stats(doc, metrics: list[str]) -> None:
     for i, test in enumerate(doc["tests"]):
         if not isinstance(test, dict) or any(k not in test for k in _TEST_KEYS):
             raise RenderError(f"stats.json: tests[{i}]: {', '.join(_TEST_KEYS)} are required")
+        _check_test(test, f"tests[{i}]")
     for i, family in enumerate(doc["families"]):
         if not isinstance(family, dict) or any(k not in family for k in _FAMILY_KEYS):
             raise RenderError(f"stats.json: families[{i}]: {', '.join(_FAMILY_KEYS)} are required")
+        for key in ("name", "correction"):
+            if not isinstance(family[key], str):
+                raise RenderError(f"stats.json: families[{i}].{key}: a string is required")
+        for key in ("alpha", "size"):
+            if not _number(family[key]):
+                raise RenderError(f"stats.json: families[{i}].{key}: a number is required")
+
+
+def _check_test(test: dict, where: str) -> None:
+    """Every value the tests table renders has the type it is formatted as (r2 finding 1).
+
+    A hash-fresh stats.json is still data: a wrong type is a named refusal, never a traceback.
+    Optional values (p, p_adjusted, reject, df, effect, effect sizes) may be null.
+    """
+    for key in ("id", "metric", "kind", "test", "family"):
+        if not isinstance(test[key], str):
+            raise RenderError(f"stats.json: {where}.{key}: a string is required")
+    if not isinstance(test["computed"], bool):
+        raise RenderError(f"stats.json: {where}.computed: a boolean is required")
+    for key in ("statistic", "p", "p_adjusted"):
+        if test.get(key) is not None and not _number(test[key]):
+            raise RenderError(f"stats.json: {where}.{key}: a number or null")
+    df = test.get("df")
+    if df is not None and not _number(df) and not (
+            isinstance(df, list) and all(_number(x) for x in df)):
+        raise RenderError(f"stats.json: {where}.df: a number, a list of numbers or null")
+    if test.get("reject") is not None and not isinstance(test["reject"], bool):
+        raise RenderError(f"stats.json: {where}.reject: a boolean or null")
+    effect = test.get("effect")
+    if effect is None:
+        return
+    if not isinstance(effect, dict):
+        raise RenderError(f"stats.json: {where}.effect: a mapping or null")
+    for key in ("hedges_g", "cliffs_delta"):
+        if effect.get(key) is not None and not _number(effect[key]):
+            raise RenderError(f"stats.json: {where}.effect.{key}: a number or null")
 
 
 def load_fresh_stats(campaign_dir) -> dict:
@@ -239,7 +276,11 @@ def _test_row(t: dict) -> list[str]:
     def num(value, spec: str) -> str:
         if not computed:
             return _na(reason)
-        return "—" if value is None else format(value, spec)
+        if value is None:
+            return "—"
+        if isinstance(value, list):  # one-way ANOVA: df is the (between, within) pair
+            return ", ".join(format(v, spec) for v in value)
+        return format(value, spec)
 
     def p_value(value) -> str:
         if not computed:
