@@ -177,4 +177,5 @@ scieflow experiment compare-campaigns DIR DIR [DIR...] \
 Reports the best configuration by mean for each campaign and each shared
 metric, from each campaign's fresh `stats.json`. Nothing is written unless
 `--out` is given. `--out` refuses a symlink, and an existing file unless
-`--force`. No test runs across campaigns.
+`--force`. The same campaign twice is refused: the directories must be
+distinct. No test runs across campaigns.

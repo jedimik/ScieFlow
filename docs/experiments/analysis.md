@@ -28,8 +28,7 @@ Each replicate is one run of the `experiment_runs` budget. In short:
 one replicate = one experiment run. Before any run starts, `sweep` and `run` do a budget
 pre-check of the planned runs (configurations × replicates) against the
 remaining `experiment_runs`. A campaign that does not fit is refused, and
-nothing runs or spends. A sweep records its runs in the budget as they
-execute, so the coordinator does not record them a second time.
+nothing runs or spends. A sweep records its runs in the budget after the sweep returns, so the coordinator does not record them a second time. A remote array job of N tasks counts as N runs (D21; M-D3 runs the remote jobs, this page documents the rule). Work the runner cannot see is recorded with `scieflow run spend <slug> --experiment-runs N`.
 
 ## Run manifest and `verify`
 
@@ -114,7 +113,18 @@ parameter mapping that matches exactly one configuration. Without it the
 campaign is refused (`no-baseline`).
 
 Effect sizes accompany the pairwise and paired tests: Hedges' g (Hedges &
-Olkin 1985) and Cliff's delta (Cliff 1993) where it is defined.
+Olkin 1985) and Cliff's delta (Cliff 1993) where it is defined. With
+`n_c` and `n_b` the usable values of a configuration and of the baseline:
+
+- Mean difference = mean(config) - mean(baseline).
+- Hedges' g = J * (mean difference) / pooled SD, where the pooled SD is
+  sqrt(((n_c - 1) s_c^2 + (n_b - 1) s_b^2) / (n_c + n_b - 2)) and
+  J = 1 - 3 / (4(n1 + n2) - 9) with n1 + n2 = n_c + n_b. It is not computed
+  with fewer than two values on either side or a pooled SD of zero.
+- Cliff's delta = (greater - less) / (n_c * n_b), where `greater` counts the
+  pairs with config > baseline and `less` those with config < baseline.
+- d_z = mean(paired difference) / SD(paired difference), for the paired
+  tests only, with the sample SD (denominator n - 1).
 
 Small samples limit rank tests. The exact two-sided Wilcoxon signed-rank
 p-value cannot go below 0.0625 with 5 pairs, so choose the number of
@@ -129,7 +139,13 @@ Tests are grouped into families: `confirmatory` (SAP outcomes of a locked
 design), `exploratory` (other SAP-listed outcomes, corrected with `bh`) and
 `campaign` (an unlocked campaign). `analysis.alpha` (default 0.05) sets the
 rejection threshold per family. A test whose guard fails is not computed,
-is not corrected, and is named with its reason.
+is not corrected, and is named with its reason. For a family of `m` tests
+with ascending p-values p(1) <= ... <= p(m) (`j` is the 1-based rank):
+
+- bonferroni: p_adj = min(1, m * p)
+- holm: step-down over ascending p(j): p_adj(i) = max over j <= i of min(1, (m - j + 1) * p(j))
+- hochberg: step-up over descending p(j): p_adj(i) = min over j >= i of min(1, (m - j + 1) * p(j))
+- bh: min over j >= i of min(1, (m / j) * p(j))
 
 ### Guards and warnings
 
@@ -155,10 +171,14 @@ confirmatory. See [Study Design and SAP](design.md).
 scieflow experiment tables workspace/<slug>/experiments/<campaign>
 ```
 
-Writes `tables/summary.md` and `tables/tests.md`, each with a `.tex`
-version. Tables are rendered only from a fresh `stats.json`; a value that
+Writes `tables/summary.md` and `tables/summary.tex` always, and
+`tables/tests.md` and `tables/tests.tex` only when the campaign has tests.
+Tables are rendered only from a fresh `stats.json`; a value that
 was not computed is shown as `n/c` with its reason. A stale or malformed
-`stats.json` is refused, naming the rule.
+`stats.json` is refused, naming the rule. Each table has a sidecar,
+`tables/summary.json` (and `tables/tests.json` only when the campaign has
+tests), that records the sha256 of its `.md` and `.tex` files and of the
+source `stats.json`.
 
 ## Figures
 
@@ -169,11 +189,21 @@ scieflow experiment figures workspace/<slug>/experiments/<campaign> \
 
 Writes `figures/metrics.<ext>` for each configured format and
 `figures/metrics.json`, the sidecar that records the stats sha256, the
-width and the files. The figure style is the resolved default, overridden by
-the top-level `figures:` block of a `--style-file` (the keys are in
-`schemas/figure-style.yml`). The figure shows the configurations with their
+width and the files. The figure style is the resolved default, overridden by the top-level
+`figures:` block of a `--style-file` (the schema is `schemas/figure-style.yml`).
+The keys, their defaults and their ranges; an unknown key, an out-of-range
+value or a symlinked file is refused, naming the key:
+
+- `single_column_mm`: default 89 mm, range 30 to 200 mm.
+- `double_column_mm`: default 183 mm, range 60 to 300 mm.
+- `font_pt`: default 8 pt, range 5 to 14 pt.
+- `dpi`: default 300, range 72 to 1200.
+- `formats`: default `[png, svg]`, a non-empty list without repeats of png, svg or pdf.
+
+The figure shows the configurations with their
 confidence intervals per metric. Like the tables, it renders from a fresh
-`stats.json` only.
+`stats.json` only. Figure bytes are reproducible for the same matplotlib
+build (see residual R6).
 
 ## Comparing campaigns
 
@@ -189,7 +219,9 @@ design status and the sha256 of its `stats.json`. Ties go to the lower
 configuration id. A campaign whose configurations have no values for a
 metric is reported with `reason: no-values`; it is not an error. Every
 input needs a fresh `stats.json`. Nothing is written unless `--out` is
-given; `--out` refuses a symlink and an existing file unless `--force`.
+given; `--out` refuses a symlink (also a symlinked `PATH.tmp`), and an existing
+file unless `--force`. The directories must be distinct: the same campaign
+twice is refused.
 
 No test runs across campaigns: their inputs and stages differ, and the
 document says so.
@@ -209,6 +241,30 @@ No regression, mixed-effects or survival models; no one-sided tests; no
 test across campaigns; no discovery/confirmation split of data rows; no
 dataset package builder, Pareto fronts or remote campaigns; no journal
 profile.
+
+## Residuals and limits
+
+These limits are stated, not hidden.
+
+- R1 Reference values are pinned to scipy 1.18.1 on the development host. A
+  different scipy may move the last digits or the BCa interval; re-pinning is a
+  reviewed change. `stats` refuses a scipy older than 1.15 with a clear message.
+- R2 File-based integrity. `verify` detects changes relative to `results.json`.
+  An agent that rewrites outputs, manifests and `results.json` coherently is not
+  caught. A recompute through `scieflow experiment metrics` is such a rewrite by
+  design; it is recorded in `metrics_history` and the `metrics-recomputed` note,
+  not prevented.
+- R3 Package lists are what `pip` reports. Conda-only or system packages inside
+  a container are not listed; a container without pip yields `not-captured`.
+- R4 Small-n tests. With few replicates, rank tests cannot reach small p-values.
+  The tool reports this; it does not choose n for you (`scieflow experiment power`
+  does).
+- R5 Unsupported SAP tests. Model-based tests are `not-computed` until a later
+  milestone adds a dependency (M-D2-D1).
+- R6 Figure determinism is per environment. Byte equality holds for the same
+  matplotlib and freetype build; the hashes in the sidecar make a change visible.
+- R7 Guard reach. The analysis guard applies only when `--experiments-dir` lies
+  inside a run.
 
 ## References
 
