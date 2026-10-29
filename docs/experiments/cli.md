@@ -16,11 +16,12 @@ Generates `env/<s>.def` from the stage's environment spec and builds
 ## scieflow experiment run
 
 ```bash
-scieflow experiment run -c <campaign.yaml> -p sigma=1.5 [-p k=v ...] [--direct]
+scieflow experiment run -c <campaign.yaml> -p sigma=1.5 [-p k=v ...] [--seed N] [--direct]
 ```
 
-One run with explicit parameters (run id `manual_<slug>`). `--direct`
-bypasses the container — development and tests only.
+One run with explicit parameters (run id `manual_<slug>`). `--seed N` sets
+the seed of a seeded stage (`accepts_seed: true`). `--direct` bypasses the
+container — development and tests only.
 
 ## scieflow experiment sweep
 
@@ -30,6 +31,11 @@ scieflow experiment sweep -c <campaign.yaml> [--direct]
 
 Runs every grid combination / scenario, records each run, writes
 `experiments/<name>/results.json`. Failed runs are recorded, not fatal.
+
+With `replicates:` in the campaign, each configuration runs `n` times with
+its seeds; run ids are `<config>_r<k>`, and each run records its replicate
+and seed. The budget pre-check counts configurations × replicates and refuses
+before any run starts. The sweep records its runs in the budget.
 
 ## scieflow experiment metrics
 
@@ -115,3 +121,60 @@ refused, never reported as a power. Reference values and cross-checks are in
 `--force`, and a symlink is never written.
 
     uv run scieflow experiment power t-ind --alpha 0.05 --power 0.8 --effect-size 0.5
+
+## scieflow experiment stats
+
+```bash
+scieflow experiment stats workspace/<slug>/experiments/<campaign> [--include-direct] [--json]
+```
+
+Computes descriptives, confidence intervals, the campaign's tests, effect
+sizes and corrected p-values, and writes `stats.json` (and re-writes
+`results.csv`). Development (`--direct`) runs are excluded unless
+`--include-direct` is given. `--json` prints the document. A refusal names
+its rule (for example `no-baseline`, `sap-…`) and writes nothing. See
+[Analysis and Statistics](analysis.md).
+
+## scieflow experiment verify
+
+```bash
+scieflow experiment verify workspace/<slug>/experiments/<campaign> [--json]
+```
+
+Re-checks every recorded hash of the campaign's runs: manifests, artifacts
+and metrics. Problems make it exit 1; notes do not. Run it after a sweep.
+A hand edit of `metrics.json` is reported as `metrics-hash`.
+
+## scieflow experiment tables
+
+```bash
+scieflow experiment tables workspace/<slug>/experiments/<campaign>
+```
+
+Writes `tables/summary.md` and `tables/tests.md` (with `.tex` versions)
+from a fresh `stats.json`. Values that were not computed are shown as
+`n/c`. A missing, stale or malformed `stats.json` is refused.
+
+## scieflow experiment figures
+
+```bash
+scieflow experiment figures workspace/<slug>/experiments/<campaign> \
+  [--metric M]... [--width single|double] [--style-file FILE]
+```
+
+Writes `figures/metrics.<ext>` and the sidecar `figures/metrics.json`, from a
+fresh `stats.json`. `--metric` limits the metrics (repeatable); `--width`
+selects the single or double column size; `--style-file` overrides the
+`figures:` block of the figure style (`schemas/figure-style.yml`).
+
+## scieflow experiment compare-campaigns
+
+```bash
+scieflow experiment compare-campaigns DIR DIR [DIR...] \
+  [--metric M]... [--json] [--out PATH [--force]]
+```
+
+Reports the best configuration by mean for each campaign and each shared
+metric, from each campaign's fresh `stats.json`. Nothing is written unless
+`--out` is given. `--out` refuses a symlink, and an existing file unless
+`--force`. No test runs across campaigns.

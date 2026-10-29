@@ -204,8 +204,8 @@ def test_a_symlinked_stats_json_is_refused(tmp_path):
 
 def test_no_shared_metric_is_refused(tmp_path):
     a = _campaign(tmp_path, "camp-a", values=BOTH, metrics=("ssim", "mse"))
-    only_mse = {c: {"mse": MSE[c]} for c in support.CONFIGS}
-    b = _campaign(tmp_path, "camp-b", values=only_mse, metrics=("mse",))
+    only_psnr = {c: {"psnr": [30.0 + k / 10 for k in range(6)]} for c in support.CONFIGS}
+    b = _campaign(tmp_path, "camp-b", values=only_psnr, metrics=("psnr",))
     result = _cli(a, b)
     assert result.exit_code == 1
     assert "no shared metric" in result.output

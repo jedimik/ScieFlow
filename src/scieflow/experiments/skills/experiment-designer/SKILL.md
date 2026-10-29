@@ -28,6 +28,8 @@ parameters, or asks "what should we try next?" after a previous campaign.
    no metrics — flag this to the user instead of inventing numbers. If the run
    has `design/design.yml`, use only metrics that SAP outcomes name
    (`uv run scieflow design show <slug> --json`, field `sap_metrics`).
+   - Run count = configurations × replicates; every replicate is one
+     `experiment_runs` budget unit (the pre-check refuses an overrun).
 5. **Write the campaign YAML** into `pipelines/<p>/campaigns/<name>.yaml`.
    Fill `notes:` with the hypothesis — future agents rely on it.
 6. **Present for approval:** the YAML, why this grid/these scenarios, what
@@ -53,5 +55,11 @@ metrics: [ssim, psnr, mse]         # required
 rank_by: ssim                      # default: first metric
 validation:
   <metric>: {min: x}               # and/or {max: x}
+replicates: 5                      # optional: n, or {n: 5, seed: 1000}; stage needs accepts_seed: true
+analysis:                          # optional; under a locked design the SAP decides the tests
+  baseline: <configuration-id>     # required for pairwise and paired tests
+  test: <test>                     # one name, or {<metric>: <test>}; never for SAP outcomes under a lock
+  correction: holm                 # none | bonferroni | holm | hochberg | bh
+  alpha: 0.05
 notes: "hypothesis and reasoning"  # required by convention
 ```
