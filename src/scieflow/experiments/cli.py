@@ -8,11 +8,24 @@ import yaml
 from scieflow.core import config, events
 from scieflow.core.design import lock as design_lock
 from scieflow.core.project import Project
-from scieflow.core.run import actions
+from scieflow.core.run import actions, budget
 
-from .campaign import Campaign, RunSpec
+from . import manifest, sap
+from .analysis import (
+    Analysis,
+    AnalysisError,
+    analyse_campaign,
+    parse_analysis,
+    stats_fresh,
+    write_stats,
+)
+from .campaign import Campaign, CampaignError, RunSpec, check_replicates
 from .compare import compare_campaign
+from .crosscompare import CrossCompareError
+from .crosscompare import compare_campaigns as compare_campaign_set
+from .crosscompare import write_comparison
 from .envbuild import build_sif
+from .figures import write_figures
 from .power import FAMILIES as POWER_FAMILIES
 from .power import PowerError, PowerUsageError, render_json, render_text
 from .power import solve as solve_power
@@ -20,7 +33,10 @@ from .report import generate_report
 from .runner import execute_run, recompute_metrics
 from .scaffold import new_pipeline, new_stage
 from .stage import Stage, find_stage
+from .stats import StatsUnavailable
+from .style import StyleError
 from .sweep import run_sweep
+from .tables import RenderError, write_tables
 
 
 def _default_pipelines_dir() -> Path:
@@ -97,27 +113,98 @@ def experiment():
     """Computational experiments: campaigns, sweeps, metrics, reports."""
 
 
+def _analysis_guard(run_dir: Path | None, campaign: Campaign) -> None:
+    """Refuse or warn when the analysis block contradicts a locked SAP (M-D2 plan 5.5).
+
+    Runs before anything runs or spends. Metrics no SAP outcome names are M-D1's rule (out-of-sap,
+    checked by _design_guard), so they are not repeated here.
+    """
+    if run_dir is None:
+        return
+    bound = sap.binding(run_dir)
+    if not bound.locked:
+        return
+    spec = parse_analysis(campaign.analysis, campaign.metrics) or Analysis()
+    found = [p for p in sap.conflicts(bound, spec, campaign.metrics) if p["rule"] != "out-of-sap"]
+    if not found:
+        return
+    if bound.computational:
+        for p in found:
+            click.echo(f"warning: design: [{p['rule']}] {p['message']}", err=True)
+            events.emit(run_dir, "note.design_warning", "system", rule=p["rule"],
+                        campaign=campaign.name)
+        return
+    events.emit(run_dir, "job.refused", "system", reason="design", rule=found[0]["rule"],
+                campaign=campaign.name, metrics=sorted({p["metric"] for p in found if p["metric"]}))
+    detail = "; ".join(f"[{p['rule']}] {p['message']}" for p in found)
+    raise click.ClickException(f"{detail} (campaign {campaign.name}; nothing was run)")
+
+
+def _check_stage_seed(campaign: Campaign, stage) -> None:
+    """Replicates need a seeded stage; refused before anything runs or spends (plan 5.1)."""
+    try:
+        check_replicates(campaign, stage)
+    except CampaignError as e:
+        raise click.ClickException(str(e)) from e
+
+
+def _guard_capacity(run_dir: Path | None, planned: int) -> None:
+    """Refuse a campaign whose planned runs exceed the remaining experiment_runs (plan 5.2).
+
+    No refusal (and no event) outside a run, without budget.yml, or when max_experiment_runs
+    is absent, null or 0. Refusals write no checkpoint and no run directory.
+    """
+    if run_dir is None:
+        return
+    b = budget.read_budget(run_dir)
+    if not b:
+        return
+    cap = (b.get("budgets") or {}).get("max_experiment_runs")
+    if not cap:
+        return
+    spent = (b.get("spent") or {}).get("experiment_runs") or 0
+    if spent + planned <= cap:
+        return
+    remaining = max(0, cap - spent)
+    events.emit(run_dir, "job.refused", "system", reason="budget", rule="insufficient",
+                dims=["experiment_runs"], planned=planned, remaining=remaining)
+    raise click.ClickException(
+        f"experiment_runs budget insufficient: this campaign needs {planned} runs, "
+        f"{remaining} remain — propose a smaller campaign or ask the user to raise the budget")
+
+
 @experiment.command()
 @click.option("-c", "--campaign", "campaign_path", required=True,
               type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("-p", "--param", "params", multiple=True,
               help="Override/set one parameter, e.g. -p sigma=1.5")
+@click.option("--seed", type=click.IntRange(0, 2**31 - 1), default=None,
+              help="Seed for a stage that declares accepts_seed: true.")
 @click.option("--direct", is_flag=True,
               help="Run without a container (dev/tests only).")
 @common_options
-def run(campaign_path, params, direct, experiments_dir, pipelines_dir):
+def run(campaign_path, params, seed, direct, experiments_dir, pipelines_dir):
     """Run the campaign's stage once with explicit parameters."""
     campaign = Campaign.load(campaign_path)
     stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
+    _check_stage_seed(campaign, stage)
+    if seed is not None and not stage.accepts_seed:
+        raise click.ClickException(
+            f"stage {stage.name} does not declare accepts_seed: true; --seed would have no "
+            "effect (nothing was run)")
     p = parse_params(params)
     slug = "_".join(f"{k}-{v}" for k, v in sorted(p.items())) or "default"
-    spec = RunSpec(run_id=f"manual_{slug}", params=p)
+    spec = RunSpec(run_id=f"manual_{slug}", params=p, seed=seed)
     budget_run = _budget_run(experiments_dir)
     _guard(budget_run)
     _design_guard(budget_run, campaign)
+    _analysis_guard(budget_run, campaign)
+    _guard_capacity(budget_run, 1)
+    mode = "direct" if direct else "apptainer"
+    context = manifest.capture_context(campaign, stage, mode,
+                                       Path(experiments_dir) / campaign.name)
     run_dir = execute_run(
-        campaign, stage, spec, experiments_dir,
-        mode="direct" if direct else "apptainer",
+        campaign, stage, spec, experiments_dir, mode=mode, context=context,
     )
     if budget_run is not None:
         actions.record_spend(budget_run, experiment_runs=1)
@@ -136,9 +223,12 @@ def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
     """Run every parameter combination / scenario in the campaign."""
     campaign = Campaign.load(campaign_path)
     stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
+    _check_stage_seed(campaign, stage)
     budget_run = _budget_run(experiments_dir)
     _guard(budget_run)
     _design_guard(budget_run, campaign)
+    _analysis_guard(budget_run, campaign)
+    _guard_capacity(budget_run, len(campaign.expand()))
     results_path = run_sweep(
         campaign, stage, experiments_dir, mode="direct" if direct else "apptainer"
     )
@@ -162,6 +252,12 @@ def compare(campaign_dir, include_direct):
     """Rank a campaign's runs and check validation thresholds."""
     comparison = compare_campaign(campaign_dir, include_direct=include_direct)
     click.echo(f"campaign: {comparison['campaign']}  (ranked by {comparison['rank_by']})")
+    for c in comparison.get("configs", []):
+        mean = "n/a" if c["mean"] is None else f"{c['mean']:.4f}"
+        click.echo(f"  config {c['config_id']}  mean {comparison['rank_by']}={mean}  "
+                   f"n={c['n']} failed={c['n_failed']}")
+    if "configs" in comparison:
+        click.echo(f"best config: {comparison['best_config']}")
     for entry in comparison["ranked"]:
         flag = "PASS" if entry["validation"]["passed"] else "FAIL"
         value = entry["metrics"][comparison["rank_by"]]
@@ -175,6 +271,15 @@ def compare(campaign_dir, include_direct):
         click.echo("note: --direct runs are for development; pass --include-direct to rank them.")
 
 
+def _analysis_note(campaign_dir: Path, kind: str, **data) -> None:
+    """A value-free note in the owning run's events, when the campaign folder lies inside a run."""
+    ws = actions.run_for_path(Path(campaign_dir))
+    if ws is None:
+        return
+    events.emit(ws, "note.experiment_analysis", "system", kind=kind,
+                campaign=Path(campaign_dir).name, **data)
+
+
 @experiment.command()
 @click.argument("run_dir",
                 type=click.Path(exists=True, file_okay=False, path_type=Path))
@@ -184,7 +289,107 @@ def metrics(run_dir):
         result = recompute_metrics(run_dir)
     except ValueError as e:
         raise click.ClickException(str(e))
+    run_dir = Path(run_dir)
+    _analysis_note(run_dir.parent.parent, "metrics-recompute", run_id=run_dir.name,
+                   sha256=manifest.file_sha256(run_dir / "metrics.json"))
     click.echo(json.dumps(result, indent=2))
+
+
+@experiment.command("verify")
+@click.option("--json", "as_json", is_flag=True,
+              help="Print the deterministic JSON document.")
+@click.argument("campaign_dir",
+                type=click.Path(exists=True, file_okay=False, path_type=Path))
+def verify_cmd(campaign_dir, as_json):
+    """Re-check every recorded hash of a campaign's runs (manifests, artifacts, metrics)."""
+    report = manifest.verify_campaign(campaign_dir)
+    doc = report.to_dict()
+    if as_json:
+        click.echo(json.dumps(doc, indent=2, sort_keys=True))
+    else:
+        for n in doc["notes"]:
+            click.echo(f"note {n['rule']} {n['run_id']} {n['path']}")
+        for p in doc["problems"]:
+            click.echo(f"problem {p['rule']} {p['run_id']} {p['path']}")
+        click.echo("ok" if report.ok else "failed")
+    _analysis_note(Path(campaign_dir), "verify", problems=len(doc["problems"]))
+    if not report.ok:
+        raise SystemExit(1)
+
+
+def _print_stats(doc: dict) -> None:
+    for row in doc["configs"]:
+        for metric, cell in row["metrics"].items():
+            mean = "n/a" if cell["mean"] is None else f"{cell['mean']:.4f}"
+            ci = ("n/a" if cell["ci"] is None else
+                  f"[{cell['ci']['low']:.4f}, {cell['ci']['high']:.4f}]")
+            click.echo(f"  config {row['config_id']}  {metric}  n={cell['n']} mean={mean} "
+                       f"ci={ci}")
+    for t in doc["tests"]:
+        if t["computed"]:
+            adjusted = "n/a" if t["p_adjusted"] is None else f"{t['p_adjusted']:.4g}"
+            state = f"p={t['p']:.4g} p_adj={adjusted} reject={t['reject']}"
+        else:
+            state = f"not computed ({t['reason']})"
+        click.echo(f"  test {t['id']}  {t['test']}  {state}")
+
+
+@experiment.command("stats")
+@click.option("--include-direct", is_flag=True,
+              help="Analyse --direct (development) runs too.")
+@click.option("--json", "as_json", is_flag=True, help="Print the stats.json document.")
+@click.argument("campaign_dir",
+                type=click.Path(exists=True, file_okay=False, path_type=Path))
+def stats_cmd(campaign_dir, include_direct, as_json):
+    """Compute descriptives and the campaign's tests into stats.json (M-D2 plan 5.4)."""
+    try:
+        doc = analyse_campaign(campaign_dir, include_direct=include_direct)
+        path = write_stats(campaign_dir, doc)
+    except (AnalysisError, StatsUnavailable) as e:
+        raise click.ClickException(str(e)) from e
+    if as_json:
+        click.echo(json.dumps(doc, sort_keys=True, indent=1, allow_nan=False))
+    else:
+        _print_stats(doc)
+    _analysis_note(Path(campaign_dir), "stats", tests=len(doc["tests"]),
+                   sha256=manifest.file_sha256(path))
+
+
+@experiment.command("tables")
+@click.argument("campaign_dir",
+                type=click.Path(exists=True, file_okay=False, path_type=Path))
+def tables_cmd(campaign_dir):
+    """Write tables/ (summary, tests; md and tex) from a fresh stats.json (M-D2 plan 5.7)."""
+    try:
+        written = write_tables(campaign_dir)
+    except RenderError as e:
+        raise click.ClickException(str(e)) from e
+    for path in written:
+        click.echo(str(path))
+    _analysis_note(Path(campaign_dir), "tables",
+                   sha256=manifest.file_sha256(Path(campaign_dir) / "tables" / "summary.md"))
+
+
+@experiment.command("figures")
+@click.option("--metric", "metrics", multiple=True,
+              help="A metric to plot (repeatable); default every campaign metric.")
+@click.option("--width", type=click.Choice(["single", "double"]), default=None,
+              help="Column width; default single for at most two panels, else double.")
+@click.option("--style-file", type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help="YAML whose figures: block overrides the sizing contract.")
+@click.argument("campaign_dir",
+                type=click.Path(exists=True, file_okay=False, path_type=Path))
+def figures_cmd(metrics, width, style_file, campaign_dir):
+    """Write figures/metrics.<ext> and its sidecar from a fresh stats.json (M-D2 plan 5.7)."""
+    try:
+        written = write_figures(campaign_dir, metrics=list(metrics) or None, width=width,
+                                style_file=style_file)
+    except (RenderError, StyleError) as e:
+        raise click.ClickException(str(e)) from e
+    for path in written:
+        click.echo(str(path))
+    _analysis_note(Path(campaign_dir), "figures",
+                   sha256=manifest.file_sha256(written[-1]))
 
 
 @experiment.command()
@@ -195,6 +400,46 @@ def metrics(run_dir):
 def report(campaign_dir, include_direct):
     """Generate report.md + QC plots for a campaign."""
     click.echo(str(generate_report(campaign_dir, include_direct=include_direct)))
+
+
+def _print_comparison(doc: dict) -> None:
+    for c in doc["campaigns"]:
+        click.echo(f"campaign: {c['campaign']}  ({c['dir']})  design={c['design_status']}")
+        for metric, row in c["metrics"].items():
+            if row["best"] is None:
+                click.echo(f"  {metric}  no values ({row['reason']})")
+                continue
+            best = row["best"]
+            direction = "higher" if row["higher_is_better"] else "lower"
+            ci = ("n/a" if best["ci"] is None else
+                  f"[{best['ci']['low']:.4f}, {best['ci']['high']:.4f}]")
+            click.echo(f"  {metric}  best {best['config_id']}  mean={best['mean']:.4f} "
+                       f"ci={ci} n={best['n']}  ({direction} is better)")
+    click.echo(f"note: {doc['note']}")
+
+
+@experiment.command("compare-campaigns")
+@click.option("--metric", "metrics", multiple=True,
+              help="Compare this metric only (repeatable; must be shared by every campaign).")
+@click.option("--json", "as_json", is_flag=True, help="Print the comparison document.")
+@click.option("--out", type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help="Write the comparison document here (atomically).")
+@click.option("--force", is_flag=True,
+              help="Replace an existing --out file. A symlink is never written.")
+@click.argument("campaign_dirs", nargs=-1, required=True,
+                type=click.Path(exists=True, file_okay=False, path_type=Path))
+def compare_campaigns_cmd(metrics, as_json, out, force, campaign_dirs):
+    """Best configuration per campaign and metric, from each fresh stats.json (plan 5.8)."""
+    try:
+        doc = compare_campaign_set(campaign_dirs, metrics=list(metrics) or None)
+        if out is not None:
+            write_comparison(out, doc, force)
+    except CrossCompareError as e:
+        raise click.ClickException(str(e)) from e
+    if as_json:
+        click.echo(json.dumps(doc, sort_keys=True, indent=1, allow_nan=False))
+    else:
+        _print_comparison(doc)
 
 
 def _write_power_out(path: Path, text: str, force: bool) -> None:

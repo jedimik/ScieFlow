@@ -25,7 +25,8 @@ The user has approved a campaign YAML. If not, stop — use
    failed run read `workspace/<slug>/experiments/<c>/runs/<id>/logs/stderr.log`. A parameter
    combination that crashes the stage is a *finding* — keep it in the report
    and note the cause; do not silently drop or retry it.
-5. Hand off to `skills/evaluator/SKILL.md`.
+5. Hand off to `skills/evaluator/SKILL.md`. Before that, run
+   `scieflow experiment verify` on the campaign folder (re-checks the recorded hashes).
 
 ## Rules
 - Recorded runs are containerized. `--direct` exists for developing a new

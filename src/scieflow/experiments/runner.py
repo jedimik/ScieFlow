@@ -9,6 +9,7 @@ from pathlib import Path
 
 import yaml
 
+from . import manifest, tidy
 from .campaign import Campaign, RunSpec
 from .metrics import compute_metrics, load_local_metrics
 from .stage import Stage, sif_path
@@ -31,6 +32,8 @@ def build_command(
     ]
     for key in sorted(spec.params):
         inner += [f"--{key}", str(spec.params[key])]
+    if spec.seed is not None:
+        inner += ["--seed", str(spec.seed)]
     if mode == "direct":
         return [sys.executable] + inner[1:]
     if mode == "apptainer":
@@ -68,6 +71,7 @@ def execute_run(
     spec: RunSpec,
     experiments_dir: str | Path,
     mode: str = "apptainer",
+    context: dict | None = None,
 ) -> Path:
     run_dir = Path(experiments_dir).resolve() / campaign.name / "runs" / spec.run_id
     artifacts = run_dir / "artifacts"
@@ -76,6 +80,8 @@ def execute_run(
     logs.mkdir(parents=True, exist_ok=True)
 
     pipeline_dir = stage.dir.parent.parent
+    if context is None:  # a sweep passes one context for all its runs (plan 5.3)
+        context = manifest.capture_context(campaign, stage, mode, run_dir.parent.parent)
     command = build_command(stage, spec, campaign.input, artifacts, mode)
     config = {
         "campaign": campaign.name,
@@ -89,6 +95,8 @@ def execute_run(
         "status": "running",
         "started": _utcnow(),
     }
+    if spec.replicate is not None or spec.seed is not None:  # replicate or `run --seed`
+        config.update(config_id=spec.config_id, replicate=spec.replicate, seed=spec.seed)
     (run_dir / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
 
     proc = subprocess.run(command, capture_output=True, text=True)
@@ -108,10 +116,25 @@ def execute_run(
         load_local_metrics(pipeline_dir / "metrics")
         metrics = compute_metrics(campaign.metrics, output_path, campaign.reference)
         (run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
+
+    doc = manifest.run_manifest(
+        run_dir, campaign_name=campaign.name, spec=spec, mode=mode, status=status,
+        returncode=proc.returncode, started=config["started"], finished=config["finished"],
+        context=context,
+    )
+    manifest.write_manifest(run_dir, doc)
     return run_dir
 
 
 def recompute_metrics(run_dir: str | Path) -> dict:
+    """Recompute a run's metrics as a recorded, coherent update (M-D2 plan 5.3).
+
+    Rewrites metrics.json, then (when present) the run's manifest (metrics_sha256 and one
+    metrics_history entry), then the campaign's results.json entry and results.csv for this run.
+    A run that is not listed in results.json changes only its own files.
+    """
+    from .sweep import update_run_entry  # sweep imports this module; import lazily
+
     run_dir = Path(run_dir)
     config = yaml.safe_load((run_dir / "config.yaml").read_text())
     if not config.get("reference"):
@@ -119,5 +142,41 @@ def recompute_metrics(run_dir: str | Path) -> dict:
     load_local_metrics(Path(config["pipeline_dir"]) / "metrics")
     output_path = run_dir / "artifacts" / config["output_file"]
     metrics = compute_metrics(config["metrics"], output_path, config["reference"])
-    (run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
+    data = json.dumps(metrics, indent=2).encode()
+
+    # Read-only checks first: a corrupt record must leave every file exactly as it was (review r1 F4).
+    campaign_dir = run_dir.parent.parent
+    if (campaign_dir / "results.json").is_file():
+        manifest.load_results(campaign_dir)  # ValueError when malformed
+    manifest_path = run_dir / manifest.MANIFEST_FILE
+    doc = None
+    if manifest_path.is_file():
+        try:
+            doc = json.loads(manifest_path.read_text())
+        except (OSError, ValueError) as e:
+            raise ValueError(f"{manifest_path.name} is not readable JSON ({type(e).__name__})") from e
+        if not isinstance(doc, dict) or not isinstance(doc.get("metrics_history", []), list):
+            raise ValueError(f"{manifest_path.name} is not a valid run manifest")
+
+    # Refuse a planted link at every file this recompute writes, before anything is written
+    # (M-D2 final r1 finding 1): a refused recompute leaves every file exactly as it was.
+    for target in (run_dir / "metrics.json", run_dir / manifest.MANIFEST_FILE,
+                   campaign_dir / "results.json", campaign_dir / "results.csv"):
+        manifest.refuse_unsafe_output(target)
+        manifest.refuse_unsafe_output(manifest.tmp_of(target))
+    manifest.atomic_write(run_dir / "metrics.json", data)
+    manifest_sha = None
+    if doc is not None:
+        new_sha = manifest.sha256_bytes(data)
+        doc.setdefault("metrics_history", []).append({
+            "previous_sha256": doc.get("metrics_sha256"),
+            "sha256": new_sha,
+            "recomputed": manifest.utc_now(),
+            "tool": "scieflow experiment metrics",
+        })
+        doc["metrics_sha256"] = new_sha
+        manifest_sha = manifest.write_manifest(run_dir, doc)
+
+    update_run_entry(campaign_dir, config.get("run_id", run_dir.name),
+                     metrics=metrics, manifest_sha256=manifest_sha)
     return metrics

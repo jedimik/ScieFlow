@@ -87,6 +87,9 @@ A refusal runs nothing and spends nothing. Report the rule id to the user.
 
 ## Afterwards
 
-- Verify the summary exists and states run counts; extract `K` = number of
-  runs and record it in the budget (`experiment_runs: +K`).
+- Verify the summary exists and states run counts. Do not record the runs in
+  the budget again: a sweep records its own runs after it returns, and the
+  coordinator's ledger reads them from there. Only work the runner cannot see
+  (remote jobs driven by the coordinator, one unit per real job/array task)
+  goes through `scieflow run spend`.
 - Retry-once rule on failure (ScieFlow AGENTS.md rule 7).

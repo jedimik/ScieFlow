@@ -9,6 +9,16 @@ description: QC methodology — compute metrics, validate results, spot suspicio
 
 1. `scieflow experiment compare workspace/<slug>/experiments/<campaign>` — ranking + validation per run (`--direct` runs are listed, not ranked).
 2. `scieflow experiment report workspace/<slug>/experiments/<campaign>` — generates `report.md` and QC plots.
+   With replicates or an `analysis` block, first run `scieflow experiment stats
+   workspace/<slug>/experiments/<campaign>` (writes `stats.json`), then
+   `scieflow experiment verify` (re-checks the recorded hashes), then
+   `scieflow experiment tables` and `scieflow experiment figures` (both render
+   only from a fresh `stats.json`).
+   Interpret `stats.json`: confidence intervals, effect sizes, adjusted
+   p-values, `not computed` reasons, and `n_missing` / `n_nonfinite` counts.
+   Quote its numbers; never compute or round a statistic yourself (AGENTS.md rule 6).
+   After `scieflow experiment metrics` re-run `scieflow experiment stats`: the old
+   `stats.json` is stale once a run's metrics change.
 3. **Look at the artifacts, not just the numbers.** Open the best run's
    output (`workspace/<slug>/experiments/<c>/runs/<id>/artifacts/`) and compare it visually
    against the input and reference. Metrics can be gamed by degenerate

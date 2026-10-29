@@ -11,6 +11,51 @@ import matplotlib.pyplot as plt  # noqa: E402
 import yaml  # noqa: E402
 
 from .compare import compare_campaign  # noqa: E402
+from .tables import (  # noqa: E402
+    NOT_COMPUTED_NOTE,
+    RenderError,
+    load_fresh_stats,
+    render_summary_md,
+    render_tests_md,
+)
+
+
+def _configuration_lines(comparison: dict, rank_by: str) -> list[str]:
+    """Replicate campaigns: one row per configuration, in the compare order (plan 5.7)."""
+    lines = [
+        "### Configurations",
+        "",
+        f"| configuration | params | n | failed | mean `{rank_by}` |",
+        "|---|---|---|---|---|",
+    ]
+    for config in comparison["configs"]:
+        params = ", ".join(f"{k}={v}" for k, v in sorted(config["params"].items()))
+        mean = "n/a" if config["mean"] is None else f"{config['mean']:.4f}"
+        lines.append(f"| {config['config_id']} | {params} | {config['n']} | "
+                     f"{config['n_failed']} | {mean} |")
+    lines.append("")
+    return lines
+
+
+def _statistics_lines(campaign_dir: Path, metric_names: list[str]) -> list[str]:
+    """The Statistics section from a fresh stats.json; otherwise one line (plan 5.7)."""
+    try:
+        doc = load_fresh_stats(campaign_dir)
+    except RenderError:
+        return ["", NOT_COMPUTED_NOTE]
+    lines = ["", "## Statistics", ""]
+    lines += render_summary_md(doc, metric_names).splitlines()
+    if doc.get("tests"):
+        lines += ["", "Tests:", ""] + render_tests_md(doc).splitlines()
+    lines.append("")
+    for family in doc.get("families", []):
+        lines.append(f"- family `{family['name']}`: correction {family['correction']}, "
+                     f"alpha {family['alpha']}, size {family['size']}")
+    lines.append(f"- design: status `{doc['design']['status']}`")
+    for rel in ("tables/summary.md", "tables/tests.md", "figures/metrics.png"):
+        if (campaign_dir / rel).is_file():
+            lines.append(f"- see `{rel}`")
+    return lines
 
 
 def _varying_params(ranked: list[dict]) -> list[str]:
@@ -90,10 +135,10 @@ def generate_report(campaign_dir: str | Path, include_direct: bool = False) -> P
     if comparison["mode_unknown"]:
         unknown = ", ".join(f"`{r}`" for r in comparison["mode_unknown"])
         lines.append(f"- runs with unknown mode (ranked as recorded): {unknown}")
+    lines += ["", "## Results", ""]
+    if comparison.get("configs") is not None:
+        lines += _configuration_lines(comparison, rank_by)
     lines += [
-        "",
-        "## Results",
-        "",
         "| run | params | " + " | ".join(metric_names) + " | validation |",
         "|---|---|" + "---|" * (len(metric_names) + 1),
     ]
@@ -116,6 +161,7 @@ def generate_report(campaign_dir: str | Path, include_direct: bool = False) -> P
     for run_id in comparison["failed"]:
         lines.append(f"| `{run_id}` | — | " + " | ".join(["—"] * len(metric_names)) + " | NOT RANKED |")
 
+    lines += _statistics_lines(campaign_dir, metric_names)
     if comparison["ranked"]:
         plot_path = _plot(campaign_dir, comparison)
         lines += ["", "## QC plot", "", f"![{rank_by}]({plot_path.relative_to(campaign_dir)})"]

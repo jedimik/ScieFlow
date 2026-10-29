@@ -1,0 +1,553 @@
+{
+ "cases": [
+  {
+   "expected": {
+    "max": 0.741,
+    "mean": 0.7195,
+    "median": 0.717,
+    "min": 0.698,
+    "n": 6,
+    "sd": 0.01635542723379614
+   },
+   "id": "describe-A",
+   "inputs": {
+    "values": [
+     0.712,
+     0.735,
+     0.698,
+     0.741,
+     0.722,
+     0.709
+    ]
+   },
+   "kind": "describe",
+   "routes": "numpy == statistics"
+  },
+  {
+   "expected": {
+    "max": 0.772,
+    "mean": 0.7595000000000001,
+    "median": 0.761,
+    "min": 0.744,
+    "n": 6,
+    "sd": 0.01052140675005012
+   },
+   "id": "describe-B",
+   "inputs": {
+    "values": [
+     0.751,
+     0.768,
+     0.744,
+     0.772,
+     0.759,
+     0.763
+    ]
+   },
+   "kind": "describe",
+   "routes": "numpy == statistics"
+  },
+  {
+   "expected": {
+    "max": 0.75,
+    "mean": 0.7210000000000001,
+    "median": 0.72,
+    "min": 0.7,
+    "n": 6,
+    "sd": 0.018286607121059954
+   },
+   "id": "describe-C",
+   "inputs": {
+    "values": [
+     0.705,
+     0.731,
+     0.716,
+     0.75,
+     0.7,
+     0.724
+    ]
+   },
+   "kind": "describe",
+   "routes": "numpy == statistics"
+  },
+  {
+   "expected": {
+    "df": 8.533228557581046,
+    "p": 0.0008252554674646799,
+    "statistic": 5.038193627589668
+   },
+   "id": "welch-B-vs-A",
+   "inputs": {
+    "baseline": [
+     0.712,
+     0.735,
+     0.698,
+     0.741,
+     0.722,
+     0.709
+    ],
+    "config": [
+     0.751,
+     0.768,
+     0.744,
+     0.772,
+     0.759,
+     0.763
+    ]
+   },
+   "kind": "welch-t-test",
+   "routes": "statistic/df by Welch-Satterthwaite formula; p = 2*t.sf(|t|, df)"
+  },
+  {
+   "expected": {
+    "df": 10.0,
+    "p": 0.0005079730931410764,
+    "statistic": 5.038193627589668
+   },
+   "id": "student-B-vs-A",
+   "inputs": {
+    "baseline": [
+     0.712,
+     0.735,
+     0.698,
+     0.741,
+     0.722,
+     0.709
+    ],
+    "config": [
+     0.751,
+     0.768,
+     0.744,
+     0.772,
+     0.759,
+     0.763
+    ]
+   },
+   "kind": "t-test-ind",
+   "routes": "statistic by pooled-variance formula"
+  },
+  {
+   "expected": {
+    "df": 5.0,
+    "p": 9.250302213157934e-05,
+    "statistic": 11.359236684941298
+   },
+   "id": "paired-t-B-vs-A",
+   "inputs": {
+    "baseline": [
+     0.712,
+     0.735,
+     0.698,
+     0.741,
+     0.722,
+     0.709
+    ],
+    "config": [
+     0.751,
+     0.768,
+     0.744,
+     0.772,
+     0.759,
+     0.763
+    ]
+   },
+   "kind": "t-test-paired",
+   "routes": "statistic = mean(d)/(sd(d)/sqrt(n))"
+  },
+  {
+   "expected": {
+    "method": "exact",
+    "p": 0.0021645021645021645,
+    "statistic": 36.0
+   },
+   "id": "mwu-B-vs-A",
+   "inputs": {
+    "baseline": [
+     0.712,
+     0.735,
+     0.698,
+     0.741,
+     0.722,
+     0.709
+    ],
+    "config": [
+     0.751,
+     0.768,
+     0.744,
+     0.772,
+     0.759,
+     0.763
+    ]
+   },
+   "kind": "mann-whitney",
+   "routes": "U by pair counting"
+  },
+  {
+   "expected": {
+    "method": "exact",
+    "p": 0.9372294372294373,
+    "statistic": 19.0
+   },
+   "id": "mwu-C-vs-A",
+   "inputs": {
+    "baseline": [
+     0.712,
+     0.735,
+     0.698,
+     0.741,
+     0.722,
+     0.709
+    ],
+    "config": [
+     0.705,
+     0.731,
+     0.716,
+     0.75,
+     0.7,
+     0.724
+    ]
+   },
+   "kind": "mann-whitney",
+   "routes": "U by pair counting"
+  },
+  {
+   "expected": {
+    "method": "exact",
+    "p": 0.84375,
+    "statistic": 9.0
+   },
+   "id": "wilcoxon-C-vs-A",
+   "inputs": {
+    "baseline": [
+     0.712,
+     0.735,
+     0.698,
+     0.741,
+     0.722,
+     0.709
+    ],
+    "config": [
+     0.705,
+     0.731,
+     0.716,
+     0.75,
+     0.7,
+     0.724
+    ]
+   },
+   "kind": "wilcoxon-signed-rank",
+   "routes": "W = min(W+, W-) from ranked |differences|"
+  },
+  {
+   "expected": {
+    "df": [
+     2,
+     15
+    ],
+    "p": 0.0005334612959740108,
+    "statistic": 12.985545888296377
+   },
+   "id": "anova-ABC",
+   "inputs": {
+    "groups": [
+     [
+      0.712,
+      0.735,
+      0.698,
+      0.741,
+      0.722,
+      0.709
+     ],
+     [
+      0.751,
+      0.768,
+      0.744,
+      0.772,
+      0.759,
+      0.763
+     ],
+     [
+      0.705,
+      0.731,
+      0.716,
+      0.75,
+      0.7,
+      0.724
+     ]
+    ]
+   },
+   "kind": "anova-oneway",
+   "routes": "F = (SSB/(k-1))/(SSW/(n-k))"
+  },
+  {
+   "expected": {
+    "df": 2,
+    "p": 0.004580418487193045,
+    "statistic": 10.771929824561411
+   },
+   "id": "kruskal-ABC",
+   "inputs": {
+    "groups": [
+     [
+      0.712,
+      0.735,
+      0.698,
+      0.741,
+      0.722,
+      0.709
+     ],
+     [
+      0.751,
+      0.768,
+      0.744,
+      0.772,
+      0.759,
+      0.763
+     ],
+     [
+      0.705,
+      0.731,
+      0.716,
+      0.75,
+      0.7,
+      0.724
+     ]
+    ]
+   },
+   "kind": "kruskal-wallis",
+   "routes": "H = 12/(n(n+1)) * sum(R_i^2/n_i) - 3(n+1)"
+  },
+  {
+   "expected": {
+    "p": 0.08890095014534788,
+    "statistic": 0.7455186253923518
+   },
+   "id": "pearson-XY",
+   "inputs": {
+    "x": [
+     0.5,
+     1.0,
+     1.5,
+     2.0,
+     2.5,
+     3.0
+    ],
+    "y": [
+     0.701,
+     0.733,
+     0.752,
+     0.749,
+     0.761,
+     0.744
+    ]
+   },
+   "kind": "pearson",
+   "routes": "r by definition"
+  },
+  {
+   "expected": {
+    "p": 0.208,
+    "statistic": 0.6
+   },
+   "id": "spearman-XY",
+   "inputs": {
+    "x": [
+     0.5,
+     1.0,
+     1.5,
+     2.0,
+     2.5,
+     3.0
+    ],
+    "y": [
+     0.701,
+     0.733,
+     0.752,
+     0.749,
+     0.761,
+     0.744
+    ]
+   },
+   "kind": "spearman",
+   "routes": "rho = 1 - 6*sum(d^2)/(n(n^2-1))"
+  },
+  {
+   "expected": {
+    "cliffs_delta": 1.0,
+    "d_z": 4.637388957601683,
+    "hedges_g": 2.685048412724633,
+    "mean_difference": 0.040000000000000036
+   },
+   "id": "effect-B-vs-A",
+   "inputs": {
+    "baseline": [
+     0.712,
+     0.735,
+     0.698,
+     0.741,
+     0.722,
+     0.709
+    ],
+    "config": [
+     0.751,
+     0.768,
+     0.744,
+     0.772,
+     0.759,
+     0.763
+    ]
+   },
+   "kind": "effect",
+   "routes": "g = J*d with J = 1-3/(4(n1+n2)-9); delta by pair counting == 2U/(n1 n2)-1; d_z = mean(d)/sd(d)"
+  },
+  {
+   "expected": {
+    "cliffs_delta": 0.05555555555555555,
+    "d_z": 0.09824718648648241,
+    "hedges_g": 0.07981453337920054,
+    "mean_difference": 0.0014999999999999458
+   },
+   "id": "effect-C-vs-A",
+   "inputs": {
+    "baseline": [
+     0.712,
+     0.735,
+     0.698,
+     0.741,
+     0.722,
+     0.709
+    ],
+    "config": [
+     0.705,
+     0.731,
+     0.716,
+     0.75,
+     0.7,
+     0.724
+    ]
+   },
+   "kind": "effect",
+   "routes": "as effect-B-vs-A"
+  },
+  {
+   "expected": {
+    "bh": [
+     0.025,
+     0.05,
+     0.049999999999999996,
+     0.025,
+     0.2
+    ],
+    "bonferroni": [
+     0.05,
+     0.2,
+     0.15,
+     0.025,
+     1.0
+    ],
+    "hochberg": [
+     0.04,
+     0.08,
+     0.08,
+     0.025,
+     0.2
+    ],
+    "holm": [
+     0.04,
+     0.09,
+     0.09,
+     0.025,
+     0.2
+    ],
+    "none": [
+     0.01,
+     0.04,
+     0.03,
+     0.005,
+     0.2
+    ]
+   },
+   "id": "correction",
+   "inputs": {
+    "alpha": 0.05,
+    "p": [
+     0.01,
+     0.04,
+     0.03,
+     0.005,
+     0.2
+    ]
+   },
+   "kind": "correction",
+   "routes": "hand step-down (Holm) / step-up (Hochberg, BH); BH equals scipy.stats.false_discovery_control"
+  },
+  {
+   "expected": {
+    "high": 0.7319999999999999,
+    "low": 0.7081200497757411
+   },
+   "id": "bootstrap-A",
+   "inputs": {
+    "confidence_level": 0.95,
+    "method": "BCa",
+    "n_resamples": 9999,
+    "seed": 0,
+    "statistic": "mean",
+    "values": [
+     0.712,
+     0.735,
+     0.698,
+     0.741,
+     0.722,
+     0.709
+    ]
+   },
+   "kind": "bootstrap",
+   "routes": "regression pin: scipy.stats.bootstrap((x,), np.mean, n_resamples=9999, confidence_level=0.95, method='BCa', rng=np.random.default_rng(seed)); no independent route"
+  },
+  {
+   "expected": {
+    "high": 0.7665000000000001,
+    "low": 0.7511666666666666
+   },
+   "id": "bootstrap-B",
+   "inputs": {
+    "confidence_level": 0.95,
+    "method": "BCa",
+    "n_resamples": 9999,
+    "seed": 0,
+    "statistic": "mean",
+    "values": [
+     0.751,
+     0.768,
+     0.744,
+     0.772,
+     0.759,
+     0.763
+    ]
+   },
+   "kind": "bootstrap",
+   "routes": "regression pin: scipy.stats.bootstrap((x,), np.mean, n_resamples=9999, confidence_level=0.95, method='BCa', rng=np.random.default_rng(seed)); no independent route"
+  }
+ ],
+ "degenerate": {
+  "expected": "ci is null with note 'degenerate', sd 0.0; two-sample tests between two constant groups are not computed",
+  "values": [
+   0.5,
+   0.5,
+   0.5,
+   0.5,
+   0.5
+  ]
+ },
+ "generated_with": {
+  "numpy": "2.5.3",
+  "python": "3.12.3",
+  "scipy": "1.18.1"
+ },
+ "purpose": "M-D2 stats reference values (reviews/m-d2-plan.md section 5.4; GAP acceptance 'stats vs scipy reference'). Synthetic data only.",
+ "tolerance": {
+  "abs": 1e-12,
+  "rel": 1e-09
+ },
+ "version": 1
+}
