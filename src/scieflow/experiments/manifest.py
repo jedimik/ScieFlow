@@ -346,9 +346,15 @@ def _item(rule: str, run_id, path: str) -> dict:
 
 
 def _is_run_id(value) -> bool:
-    """A run id names one folder under runs/: a non-empty string with no separator and not . or .."""
-    return (isinstance(value, str) and value not in ("", ".", "..")
-            and "/" not in value and "\\" not in value and "\0" not in value)
+    """A run id is a relative path under runs/ whose components are all plain names.
+
+    Run ids may contain '/' (campaign.py builds them from parameter values and scenario names), so
+    containment is enforced per component: no empty, '.' or '..' part (which also rules out an
+    absolute path), and no backslash or NUL.
+    """
+    if not isinstance(value, str) or "\\" in value or "\0" in value:
+        return False
+    return all(part not in ("", ".", "..") for part in value.split("/"))
 
 
 def _is_artifact_path(value) -> bool:

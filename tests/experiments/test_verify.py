@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from scieflow.experiments import manifest
@@ -145,11 +146,31 @@ def test_malformed_results_runs_are_results_invalid_not_a_traceback(project, run
     assert isinstance(result.exception, SystemExit)  # a handled exit, not an AttributeError
 
 
-@pytest.mark.parametrize("run_id", ["../../escape", "/tmp/elsewhere", "a/b", "..", ""])
-def test_run_id_that_is_not_one_path_component_is_results_invalid(project, run_id):
+@pytest.mark.parametrize("run_id", [
+    "../../escape", "/tmp/elsewhere", "a/../b", "a//b", "./a", "a/.", "a\\b", "a\0b", "..", "",
+])
+def test_run_id_that_escapes_or_is_not_a_plain_relative_path_is_results_invalid(project, run_id):
     camp = sweep(project)
     set_results(camp, lambda doc: doc["runs"][0].update(run_id=run_id))
     assert manifest.verify_campaign(camp).to_dict()["problems"] == RESULTS_INVALID
+
+
+def test_run_id_from_a_path_like_scenario_name_verifies(project):
+    """A scenario name with '/' gives a nested run id (campaign.py:177); verify must accept it."""
+    campaigns = project / "pipelines" / "demo" / "campaigns"
+    doc = yaml.safe_load((campaigns / "gain-sweep.yaml").read_text())
+    doc.pop("parameters")
+    doc["scenarios"] = [{"name": "models/a", "gain": 0.5}, {"name": "models/b", "gain": 1.0}]
+    (campaigns / "slash-sweep.yaml").write_text(yaml.safe_dump(doc))
+    campaign = Campaign.load(campaigns / "slash-sweep.yaml")
+    stage = find_stage(project / "pipelines", "demo", "scale")
+    camp = run_sweep(campaign, stage, project / "experiments", mode="direct").parent
+    run_ids = {e["run_id"] for e in json.loads((camp / "results.json").read_text())["runs"]}
+    assert run_ids == {"000_models/a", "001_models/b"}
+    assert (camp / "runs" / "000_models" / "a" / "manifest.json").is_file()
+    report = manifest.verify_campaign(camp)
+    assert report.ok, report.to_dict()["problems"]
+    assert cli_verify(camp).exit_code == 0
 
 
 def test_run_id_cannot_point_verify_at_a_manifest_outside_the_campaign(project):
