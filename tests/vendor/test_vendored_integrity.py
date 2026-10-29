@@ -60,6 +60,15 @@ def test_query_excerpt_is_the_pinned_upstream_lines() -> None:
     assert _sha(body.encode("utf-8")) == meta["excerpt_sha256"]
 
 
+def test_contributors_excerpt_is_the_pinned_upstream_lines() -> None:
+    meta = _pin()["files"]["contributors.py"]
+    assert meta["lines"] == [809, 1000]
+    text = (PKG / "contributors.py").read_bytes().decode("utf-8")
+    assert text.startswith(meta["header"])
+    body = text[len(meta["header"]) :]
+    assert _sha(body.encode("utf-8")) == meta["excerpt_sha256"]
+
+
 def test_only_pinned_and_authored_files_sit_in_the_package() -> None:
     found = {
         p.relative_to(PKG).as_posix()

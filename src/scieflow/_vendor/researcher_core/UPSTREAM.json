@@ -46,6 +46,36 @@
       "sha256": "85928224f4e6cdcbf9fc5ebc00f16c16ed5ab9d8ea8d37436f3760807b565423",
       "patches": []
     },
+    "contributors.py": {
+      "upstream": "core/researcher_core/export.py",
+      "upstream_sha256": "544f5cc75b1269bf0fdb59379d567894f80e27795d15716f6008b2a8137c5dd7",
+      "lines": [
+        809,
+        1000
+      ],
+      "excerpt_sha256": "4b40e691af9a30d7995949c3c309ad824b7544b6ef6fb8ee450191f82c15cf7e",
+      "header": "\"\"\"ORCID, ROR and CRediT validators: a verbatim excerpt of researcher v1.0.0 core/researcher_core/export.py,\nlines 809-1000 (MIT; see VENDORED.md). Nothing else from export.py is vendored.\"\"\"\n\nimport re\n\n\n",
+      "sha256": "df2a388579eff06e6e5726a529c311f842af01803ff662fcd485464b66e74438",
+      "patches": []
+    },
+    "latex_engine.py": {
+      "upstream": "scripts/latex_engine.py",
+      "upstream_sha256": "f1135c22666cb153496380c5096857d10092d060a9b37990adaaa6ea282607bf",
+      "sha256": "f1135c22666cb153496380c5096857d10092d060a9b37990adaaa6ea282607bf",
+      "patches": []
+    },
+    "templates/cover-letter.tex": {
+      "upstream": "templates/latex/cover-letter.tex",
+      "upstream_sha256": "6e21b6e4c2a36925dbc86557546e60185df563db4a53301a5bbd8a73184ab1b5",
+      "sha256": "6e21b6e4c2a36925dbc86557546e60185df563db4a53301a5bbd8a73184ab1b5",
+      "patches": []
+    },
+    "templates/response-to-reviewers.tex": {
+      "upstream": "templates/latex/response-to-reviewers.tex",
+      "upstream_sha256": "b6ccf83797df3f78ba459471ee948d4547ea370071eb1ac3f5fc6769150bb3e8",
+      "sha256": "b6ccf83797df3f78ba459471ee948d4547ea370071eb1ac3f5fc6769150bb3e8",
+      "patches": []
+    },
     "LICENSE": {
       "upstream": "LICENSE",
       "upstream_sha256": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
