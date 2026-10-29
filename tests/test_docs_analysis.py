@@ -148,3 +148,81 @@ def test_rule_6_is_the_approved_text_byte_for_byte_and_rule_3_is_updated():
     assert text.count(RULE6) == 1
     assert text.count(RULE3) == 1
     assert text.count("6. **Statistics come from code.**") == 1
+
+
+# --- M-D2 t6 fix (review r1 findings 3, 4, 5) ---------------------------------------------------
+
+FIGURE_KEYS = (("single_column_mm", "89", "30", "200"), ("double_column_mm", "183", "60", "300"),
+               ("font_pt", "8", "5", "14"), ("dpi", "300", "72", "1200"))
+HELP_FLAGS = {
+    "run": ("--seed",),
+    "sweep": (),
+    **SECTION_FLAGS,
+}
+
+
+def test_every_documented_flag_exists_in_the_help_of_its_command():
+    from click.testing import CliRunner
+
+    from scieflow.experiments.cli import experiment
+
+    for command, flags in HELP_FLAGS.items():
+        result = CliRunner().invoke(experiment, [command, "--help"])
+        assert result.exit_code == 0, (command, result.output)
+        for flag in flags:
+            assert flag in result.output, (command, flag)
+
+
+def test_the_budget_text_says_after_the_sweep_and_states_the_remote_array_rule():
+    text = _text(DOC)
+    assert "as they execute" not in text
+    assert "after the sweep" in text
+    assert "A remote array job of N tasks counts as N runs" in text
+    assert "scieflow run spend" in text
+
+
+def test_the_analysis_doc_gives_the_effect_size_and_correction_formulas():
+    text = _text(DOC)
+    for token in ("J = 1 - 3 / (4(n1 + n2) - 9)", "Hedges' g = J * (mean difference) / pooled SD",
+                  "Cliff's delta = (greater - less) / (n_c * n_b)",
+                  "d_z = mean(paired difference) / SD(paired difference)",
+                  "bonferroni: p_adj = min(1, m * p)",
+                  "holm: step-down over ascending p(j)", "hochberg: step-up over descending p(j)",
+                  "bh: min over j >= i of min(1, (m / j) * p(j))"):
+        assert token in text, token
+
+
+def test_the_analysis_doc_states_the_residuals_r1_to_r7():
+    text = _text(DOC)
+    assert "## Residuals and limits" in text
+    for n in range(1, 8):
+        assert f"R{n} " in text, n
+
+
+def test_the_analysis_doc_gives_the_figures_sizing_keys_with_defaults_and_ranges():
+    text = _text(DOC)
+    for key, default, low, high in FIGURE_KEYS:
+        line = next((ln for ln in text.splitlines() if f"`{key}`" in ln), "")
+        assert default in line and low in line and high in line, key
+    assert "`formats`" in text and "png, svg" in text
+
+
+def test_the_analysis_doc_names_the_sidecars_and_the_conditional_tests_table():
+    text = _text(DOC)
+    for name in ("tables/summary.json", "tables/tests.json", "figures/metrics.json"):
+        assert name in text, name
+    assert "only when the campaign has tests" in text
+
+
+def test_the_compare_section_of_the_cli_reference_states_the_distinct_rule():
+    assert "distinct" in _section(_text(CLI_DOC), "scieflow experiment compare-campaigns")
+    assert "distinct" in _text(DOC)
+
+
+def test_experiment_cycle_states_the_sweep_timing_and_the_remote_spend_rule():
+    text = _text(EXP_CYCLE)
+    assert "as they execute" not in text
+    assert "record_spend" not in text
+    assert "scieflow run spend" in text
+    assert "one unit per real job" in text
+
