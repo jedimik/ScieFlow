@@ -212,3 +212,73 @@ def test_no_shared_metric_is_refused(tmp_path):
     unshared = _cli(a, b, "--metric", "ssim")
     assert unshared.exit_code == 1
     assert "ssim" in unshared.output and "shared" in unshared.output
+
+
+# --- M-D2 t6 fix (review r1 findings 1, 2, 5) -------------------------------------------------
+
+def _tamper_stats(cdir, mutate):
+    """Rewrite stats.json after mutate(doc). The source hashes are untouched, so it stays fresh."""
+    path = cdir / "stats.json"
+    doc = json.loads(path.read_text())
+    mutate(doc)
+    path.write_text(json.dumps(doc, sort_keys=True, indent=1))
+
+
+def test_a_symlinked_tmp_beside_out_is_never_written_through(tmp_path):
+    a = _campaign(tmp_path, "camp-a", values=BOTH, metrics=("ssim", "mse"))
+    b = _campaign(tmp_path, "camp-b", values=BOTH, metrics=("ssim", "mse"))
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    out = tmp_path / "cmp.json"
+    os.symlink(victim, tmp_path / "cmp.json.tmp")
+    result = _cli(a, b, "--out", out, "--force")
+    assert result.exit_code == 1, result.output
+    assert victim.read_text() == "keep"
+    assert not out.exists()
+
+
+def test_a_hash_fresh_stats_without_include_direct_is_refused_by_name(tmp_path):
+    a = _campaign(tmp_path, "camp-a", values=BOTH, metrics=("ssim", "mse"))
+    b = _campaign(tmp_path, "camp-b", values=BOTH, metrics=("ssim", "mse"))
+    _tamper_stats(b, lambda doc: doc["settings"].pop("include_direct"))
+    result = _cli(a, b)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit), repr(result.exception)
+    assert "include_direct" in result.output and "boolean" in result.output
+
+
+def test_a_non_boolean_include_direct_is_refused_by_name(tmp_path):
+    a = _campaign(tmp_path, "camp-a", values=BOTH, metrics=("ssim", "mse"))
+    b = _campaign(tmp_path, "camp-b", values=BOTH, metrics=("ssim", "mse"))
+    _tamper_stats(b, lambda doc: doc["settings"].__setitem__("include_direct", "yes"))
+    result = _cli(a, b)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit), repr(result.exception)
+    assert "include_direct" in result.output
+
+
+def test_a_non_text_campaign_name_is_refused_by_name(tmp_path):
+    a = _campaign(tmp_path, "camp-a", values=BOTH, metrics=("ssim", "mse"))
+    b = _campaign(tmp_path, "camp-b", values=BOTH, metrics=("ssim", "mse"))
+    _tamper_stats(b, lambda doc: doc.__setitem__("campaign", 5))
+    result = _cli(a, b)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit), repr(result.exception)
+    assert "campaign" in result.output and "string" in result.output
+
+
+def test_a_metric_listed_only_in_stats_json_is_not_compared(tmp_path):
+    ssim_only = {c: {"ssim": support.SSIM[c]} for c in support.CONFIGS}
+    a = _campaign(tmp_path, "camp-a", values=BOTH, metrics=("ssim", "mse"))
+    b = _campaign(tmp_path, "camp-b", values=ssim_only, metrics=("ssim",))
+    _tamper_stats(b, lambda doc: doc["metrics"].__setitem__("mse", {}))
+    result = _cli(a, b, "--json")
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["metrics"] == ["ssim"]
+
+
+def test_the_same_campaign_twice_is_refused_as_not_two_distinct(tmp_path):
+    a = _campaign(tmp_path, "camp-a", values=BOTH, metrics=("ssim", "mse"))
+    result = _cli(a, a)
+    assert result.exit_code == 1
+    assert "distinct" in result.output
