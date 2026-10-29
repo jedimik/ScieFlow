@@ -10,6 +10,7 @@ from scieflow.core.design import lock as design_lock
 from scieflow.core.project import Project
 from scieflow.core.run import actions, budget
 
+from . import manifest
 from .campaign import Campaign, CampaignError, RunSpec, check_replicates
 from .compare import compare_campaign
 from .envbuild import build_sif
@@ -156,9 +157,11 @@ def run(campaign_path, params, seed, direct, experiments_dir, pipelines_dir):
     _guard(budget_run)
     _design_guard(budget_run, campaign)
     _guard_capacity(budget_run, 1)
+    mode = "direct" if direct else "apptainer"
+    context = manifest.capture_context(campaign, stage, mode,
+                                       Path(experiments_dir) / campaign.name)
     run_dir = execute_run(
-        campaign, stage, spec, experiments_dir,
-        mode="direct" if direct else "apptainer",
+        campaign, stage, spec, experiments_dir, mode=mode, context=context,
     )
     if budget_run is not None:
         actions.record_spend(budget_run, experiment_runs=1)
@@ -224,6 +227,15 @@ def compare(campaign_dir, include_direct):
         click.echo("note: --direct runs are for development; pass --include-direct to rank them.")
 
 
+def _analysis_note(campaign_dir: Path, kind: str, **data) -> None:
+    """A value-free note in the owning run's events, when the campaign folder lies inside a run."""
+    ws = actions.run_for_path(Path(campaign_dir))
+    if ws is None:
+        return
+    events.emit(ws, "note.experiment_analysis", "system", kind=kind,
+                campaign=Path(campaign_dir).name, **data)
+
+
 @experiment.command()
 @click.argument("run_dir",
                 type=click.Path(exists=True, file_okay=False, path_type=Path))
@@ -233,7 +245,32 @@ def metrics(run_dir):
         result = recompute_metrics(run_dir)
     except ValueError as e:
         raise click.ClickException(str(e))
+    run_dir = Path(run_dir)
+    _analysis_note(run_dir.parent.parent, "metrics-recompute", run_id=run_dir.name,
+                   sha256=manifest.file_sha256(run_dir / "metrics.json"))
     click.echo(json.dumps(result, indent=2))
+
+
+@experiment.command("verify")
+@click.option("--json", "as_json", is_flag=True,
+              help="Print the deterministic JSON document.")
+@click.argument("campaign_dir",
+                type=click.Path(exists=True, file_okay=False, path_type=Path))
+def verify_cmd(campaign_dir, as_json):
+    """Re-check every recorded hash of a campaign's runs (manifests, artifacts, metrics)."""
+    report = manifest.verify_campaign(campaign_dir)
+    doc = report.to_dict()
+    if as_json:
+        click.echo(json.dumps(doc, indent=2, sort_keys=True))
+    else:
+        for n in doc["notes"]:
+            click.echo(f"note {n['rule']} {n['run_id']} {n['path']}")
+        for p in doc["problems"]:
+            click.echo(f"problem {p['rule']} {p['run_id']} {p['path']}")
+        click.echo("ok" if report.ok else "failed")
+    _analysis_note(Path(campaign_dir), "verify", problems=len(doc["problems"]))
+    if not report.ok:
+        raise SystemExit(1)
 
 
 @experiment.command()

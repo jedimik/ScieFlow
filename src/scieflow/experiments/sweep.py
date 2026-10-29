@@ -5,6 +5,7 @@ from pathlib import Path
 
 import yaml
 
+from . import manifest, tidy
 from .campaign import Campaign
 from .runner import execute_run
 from .stage import Stage
@@ -24,9 +25,10 @@ def run_sweep(
             sort_keys=False,
         )
     )
+    context = manifest.capture_context(campaign, stage, mode, campaign_dir)
     runs = []
     for spec in campaign.expand():
-        run_dir = execute_run(campaign, stage, spec, experiments_dir, mode=mode)
+        run_dir = execute_run(campaign, stage, spec, experiments_dir, mode=mode, context=context)
         config = yaml.safe_load((run_dir / "config.yaml").read_text())
         metrics_file = run_dir / "metrics.json"
         runs.append(
@@ -43,6 +45,7 @@ def run_sweep(
                     if metrics_file.exists()
                     else {}
                 ),
+                "manifest_sha256": manifest.file_sha256(run_dir / manifest.MANIFEST_FILE),
             }
         )
     results_path = campaign_dir / "results.json"
@@ -54,5 +57,29 @@ def run_sweep(
     }
     if campaign.replicates is not None:
         doc["replicates"] = {"n": campaign.replicates.n, "seed": campaign.replicates.seed}
-    results_path.write_text(json.dumps(doc, indent=2))
+    manifest.atomic_write(results_path, json.dumps(doc, indent=2).encode())
+    tidy.write_results_csv(campaign_dir, campaign.metrics)
     return results_path
+
+
+def update_run_entry(campaign_dir: str | Path, run_id: str, *, metrics: dict,
+                     manifest_sha256: str | None = None) -> bool:
+    """Update one run's entry in the campaign's results.json, then re-write results.csv.
+
+    Every other field, run and top-level key is kept. Returns False (and writes nothing)
+    when there is no results.json or the run is not listed in it.
+    """
+    campaign_dir = Path(campaign_dir)
+    path = campaign_dir / "results.json"
+    if not path.is_file():
+        return False
+    doc = json.loads(path.read_text())
+    for entry in doc.get("runs", []):
+        if entry.get("run_id") == run_id:
+            entry["metrics"] = metrics
+            if manifest_sha256 is not None:
+                entry["manifest_sha256"] = manifest_sha256
+            manifest.atomic_write(path, json.dumps(doc, indent=2).encode())
+            tidy.write_results_csv(campaign_dir)
+            return True
+    return False
