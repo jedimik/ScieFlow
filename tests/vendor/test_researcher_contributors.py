@@ -138,3 +138,4 @@ def test_no_credit_role_uses_an_en_or_em_dash() -> None:
     # The dash characters are written as escapes here so this file itself stays dash-free.
     joined = " ".join(CREDIT_ROLES)
     assert chr(0x2013) not in joined  # en dash
+    assert chr(0x2014) not in joined  # em dash
