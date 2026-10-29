@@ -94,7 +94,15 @@ def _nan_in_cell(doc):
     doc["configs"][0]["metrics"]["ssim"]["mean"] = float("nan")
 
 
-@pytest.mark.parametrize("edit", [_drop_configs, _nan_in_cell],
+def _p_as_text(doc):
+    doc["tests"][0]["p"] = "x"
+
+
+def _effect_as_number(doc):
+    doc["tests"][0]["effect"] = 3
+
+
+@pytest.mark.parametrize("edit", [_drop_configs, _nan_in_cell, _p_as_text, _effect_as_number],
                          ids=lambda f: f.__name__)
 def test_malformed_stats_add_only_the_one_line_and_the_report_is_written(tmp_path, edit):
     """Finding 2: a hash-fresh but invalid stats.json falls back to the one-line note."""

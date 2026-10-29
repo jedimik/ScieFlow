@@ -251,6 +251,17 @@ def test_symlinked_output_is_refused_and_nothing_is_written(tmp_path, name):
     assert [p.name for p in out.iterdir()] == [name]
 
 
+def test_anova_df_pair_is_rendered_as_two_numbers(tmp_path):
+    """A valid one-way ANOVA test carries df as a (between, within) pair; it renders, not crashes."""
+    cdir = ts.campaign(tmp_path)
+    doc = ts.fixed_doc()
+    doc["tests"][0].update(kind="omnibus", test="anova-oneway", df=[2, 15])
+    ts.write_raw(cdir, doc)
+    result = _tables(cdir)
+    assert result.exit_code == 0, result.output
+    assert "2.00, 15.00" in (cdir / "tables" / "tests.md").read_text()
+
+
 def _no_group(d):
     del d["configs"]
 
@@ -280,6 +291,42 @@ def _families_not_a_list(d):
     d["families"] = "campaign"
 
 
+def _test_field(key, value):
+    def edit(d):
+        d["tests"][0][key] = value
+    edit.__name__ = f"_test_{key}_{type(value).__name__}"
+    return edit
+
+
+def _effect_field(key, value):
+    def edit(d):
+        d["tests"][0]["effect"][key] = value
+    edit.__name__ = f"_effect_{key}_{type(value).__name__}"
+    return edit
+
+
+def _effect_not_a_mapping(d):
+    d["tests"][0]["effect"] = 3
+
+
+# r2 finding 1: every value type inside tests[*] is checked before anything is rendered.
+TYPED_TEST_EDITS = [
+    (_test_field("p", "x"), "tests[0].p"),
+    (_test_field("p_adjusted", "x"), "tests[0].p_adjusted"),
+    (_test_field("statistic", "x"), "tests[0].statistic"),
+    (_test_field("df", "x"), "tests[0].df"),
+    (_test_field("df", [2, "x"]), "tests[0].df"),
+    (_test_field("p", True), "tests[0].p"),
+    (_test_field("reject", "yes"), "tests[0].reject"),
+    (_test_field("computed", "yes"), "tests[0].computed"),
+    (_test_field("metric", 3), "tests[0].metric"),
+    (_test_field("family", None), "tests[0].family"),
+    (_effect_not_a_mapping, "tests[0].effect"),
+    (_effect_field("hedges_g", "x"), "tests[0].effect.hedges_g"),
+    (_effect_field("cliffs_delta", [0.5]), "tests[0].effect.cliffs_delta"),
+]
+
+
 MALFORMED = [
     (_no_group, "stats.json: missing key 'configs'"),
     (_nan_mean, "non-finite"),
@@ -288,7 +335,7 @@ MALFORMED = [
     (_cell_missing, "configs[1].metrics.ssim"),
     (_test_without_family, "tests[0]"),
     (_families_not_a_list, "families"),
-]
+] + TYPED_TEST_EDITS
 
 
 @pytest.mark.parametrize("edit, rule", MALFORMED, ids=lambda v: getattr(v, "__name__", v))
