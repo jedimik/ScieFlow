@@ -63,7 +63,7 @@ GROUPS = {
         "scieflow.core.design.cli",
         "design",
         None,
-        "Study design: reporting checklists (read-only); design.yml, power and lock to follow.",
+        "Study design and analysis plan: check, lock, amend.",
     ),
 }
 

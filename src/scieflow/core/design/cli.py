@@ -1,7 +1,8 @@
 """`scieflow design` (M-D1): study design (design.yml), reporting checklists and power.
 
-t2: guidelines (read-only). t3: init, check, render, show. init and render write only inside the
-run's design/ directory; check and show are read-only. Lock and amend come in t4.
+Commands: guidelines (read-only); init and render (write only inside the run's design/ directory);
+check and show (read-only); lock and amend (write pending.json, the amendment diff and design.md).
+The lock ledger and locked copies change only when a human answers the design-lock gate.
 
 Exit codes: 0 ok, 1 problems found or refused, 2 usage.
 """
