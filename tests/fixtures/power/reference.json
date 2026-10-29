@@ -1,0 +1,260 @@
+{
+ "version": 1,
+ "purpose": "Reference values for scieflow experiment power (M-D1 t1). Copy to tests/fixtures/power/reference.json unchanged.",
+ "provenance": "Computed during M-D1 planning (card t_7b40c299, 2026-10-27) on this host with scipy 1.18.1 (python 3.12), implementing the statsmodels.stats.power formulas (TTestIndPower, TTestPower, NormalIndPower, FTestAnovaPower: noncentral t / normal / noncentral F, both tails for two-sided) plus Fisher-z correlation and the Schoenfeld (1983) events formula. statsmodels itself is NOT installed here, so these are NOT outputs of statsmodels; the cross_check fields name independent published integers. tests/experiments/test_power_statsmodels.py compares against real statsmodels when it is importable (skipped otherwise).",
+ "tolerance": {
+  "n": {
+   "relative": 1e-06
+  },
+  "events": {
+   "relative": 1e-06
+  },
+  "effect": {
+   "relative": 1e-06
+  },
+  "power": {
+   "absolute": 1e-08
+  }
+ },
+ "cases": [
+  {
+   "family": "t-ind",
+   "effect_size": 0.2,
+   "alpha": 0.05,
+   "power": 0.8,
+   "ratio": 1,
+   "alternative": "two-sided",
+   "solve": "n",
+   "expected": 393.40569501974153,
+   "id": "t-ind-00",
+   "cross_check": "Cohen (1988) Table 2.4.1: n = 393 per group (d = 0.2, two-sided alpha 0.05, power 0.80)"
+  },
+  {
+   "family": "t-ind",
+   "effect_size": 0.5,
+   "alpha": 0.05,
+   "power": 0.8,
+   "ratio": 1,
+   "alternative": "two-sided",
+   "solve": "n",
+   "expected": 63.76561019095245,
+   "id": "t-ind-01",
+   "cross_check": "Cohen (1988) Table 2.4.1: n = 64 per group; commonly quoted statsmodels TTestIndPower output 63.7656"
+  },
+  {
+   "family": "t-ind",
+   "effect_size": 0.8,
+   "alpha": 0.05,
+   "power": 0.8,
+   "ratio": 1,
+   "alternative": "two-sided",
+   "solve": "n",
+   "expected": 25.52457183577174,
+   "id": "t-ind-02",
+   "cross_check": "Cohen (1988) Table 2.4.1: n = 26 per group"
+  },
+  {
+   "family": "t-ind",
+   "effect_size": 0.5,
+   "alpha": 0.05,
+   "power": 0.9,
+   "ratio": 2,
+   "alternative": "two-sided",
+   "solve": "n",
+   "expected": 63.691614055051666,
+   "id": "t-ind-03"
+  },
+  {
+   "family": "t-ind",
+   "effect_size": 0.5,
+   "alpha": 0.05,
+   "power": 0.8,
+   "ratio": 1,
+   "alternative": "larger",
+   "solve": "n",
+   "expected": 50.150783386861136,
+   "id": "t-ind-04"
+  },
+  {
+   "family": "t-ind",
+   "effect_size": 0.5,
+   "alpha": 0.05,
+   "n": 64,
+   "ratio": 1,
+   "alternative": "two-sided",
+   "solve": "power",
+   "expected": 0.8014595579222543,
+   "id": "t-ind-05"
+  },
+  {
+   "family": "t-ind",
+   "alpha": 0.05,
+   "power": 0.8,
+   "n": 30,
+   "ratio": 1,
+   "alternative": "two-sided",
+   "solve": "effect",
+   "expected": 0.7356210695976346,
+   "id": "t-ind-06"
+  },
+  {
+   "family": "t-paired",
+   "effect_size": 0.5,
+   "alpha": 0.05,
+   "power": 0.8,
+   "alternative": "two-sided",
+   "solve": "n",
+   "expected": 33.36712895333085,
+   "id": "t-paired-07",
+   "cross_check": "commonly quoted statsmodels TTestPower output 33.3671"
+  },
+  {
+   "family": "t-one",
+   "effect_size": 0.3,
+   "alpha": 0.05,
+   "power": 0.9,
+   "alternative": "larger",
+   "solve": "n",
+   "expected": 96.52287351459178,
+   "id": "t-one-08"
+  },
+  {
+   "family": "t-one",
+   "effect_size": 0.3,
+   "alpha": 0.05,
+   "n": 50,
+   "alternative": "two-sided",
+   "solve": "power",
+   "expected": 0.5476570389705147,
+   "id": "t-one-09"
+  },
+  {
+   "family": "anova",
+   "effect_size": 0.25,
+   "groups": 3,
+   "alpha": 0.05,
+   "power": 0.8,
+   "solve": "n",
+   "expected": 157.18979240097602,
+   "id": "anova-10",
+   "cross_check": "G*Power 3 one-way ANOVA example: total N = 159 (53 per group) for f = 0.25, 3 groups"
+  },
+  {
+   "family": "anova",
+   "effect_size": 0.25,
+   "groups": 4,
+   "alpha": 0.05,
+   "power": 0.8,
+   "solve": "n",
+   "expected": 178.3970972243995,
+   "id": "anova-11"
+  },
+  {
+   "family": "anova",
+   "effect_size": 0.25,
+   "groups": 3,
+   "alpha": 0.05,
+   "n": 90,
+   "solve": "power",
+   "expected": 0.5396133415765976,
+   "id": "anova-12"
+  },
+  {
+   "family": "anova",
+   "groups": 3,
+   "alpha": 0.05,
+   "power": 0.8,
+   "n": 60,
+   "solve": "effect",
+   "expected": 0.4114918047828208,
+   "id": "anova-13"
+  },
+  {
+   "family": "proportions",
+   "p1": 0.65,
+   "p2": 0.45,
+   "effect_size_derived": 0.40486007517695755,
+   "alpha": 0.05,
+   "power": 0.8,
+   "ratio": 1,
+   "alternative": "two-sided",
+   "solve": "n",
+   "expected": 95.7693861317346,
+   "id": "proportions-14"
+  },
+  {
+   "family": "proportions",
+   "effect_size": 0.3,
+   "alpha": 0.05,
+   "n": 100,
+   "ratio": 1,
+   "alternative": "two-sided",
+   "solve": "power",
+   "expected": 0.5641160254310036,
+   "id": "proportions-15"
+  },
+  {
+   "family": "correlation",
+   "r": 0.3,
+   "alpha": 0.05,
+   "power": 0.8,
+   "alternative": "two-sided",
+   "solve": "n",
+   "expected": 84.92761044203613,
+   "id": "correlation-16",
+   "cross_check": "Cohen (1988) Table 3.4.1: n = 85 for r = 0.30"
+  },
+  {
+   "family": "correlation",
+   "r": 0.3,
+   "alpha": 0.05,
+   "n": 50,
+   "alternative": "two-sided",
+   "solve": "power",
+   "expected": 0.56436763896354,
+   "id": "correlation-17"
+  },
+  {
+   "family": "survival",
+   "hazard_ratio": 0.7,
+   "allocation": 0.5,
+   "alpha": 0.05,
+   "power": 0.8,
+   "solve": "events",
+   "expected": 246.78710454735858,
+   "id": "survival-18"
+  },
+  {
+   "family": "survival",
+   "hazard_ratio": 0.5,
+   "allocation": 0.5,
+   "alpha": 0.05,
+   "power": 0.8,
+   "solve": "events",
+   "expected": 65.34565925887094,
+   "id": "survival-19",
+   "cross_check": "Schoenfeld (1983) formula; about 66 events for HR 0.5, 1:1 allocation"
+  },
+  {
+   "family": "survival",
+   "hazard_ratio": 0.7,
+   "allocation": 0.5,
+   "event_probability": 0.4,
+   "alpha": 0.05,
+   "power": 0.8,
+   "solve": "n",
+   "expected": 616.9677613683964,
+   "id": "survival-20"
+  },
+  {
+   "family": "survival",
+   "hazard_ratio": 0.7,
+   "allocation": 0.5,
+   "alpha": 0.05,
+   "events": 200,
+   "solve": "power",
+   "expected": 0.7129827266282097,
+   "id": "survival-21"
+  }
+ ]
+}

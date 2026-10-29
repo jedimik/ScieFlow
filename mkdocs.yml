@@ -66,6 +66,7 @@ nav:
       - Quickstart: experiments/quickstart.md
       - Concepts: experiments/concepts.md
       - CLI Reference: experiments/cli.md
+      - Study Design and SAP: experiments/design.md
       - Agent Workflow: experiments/agent-workflow.md
       - Model Routing: experiments/model-routing.md
       - Skills Reference: experiments/skills.md

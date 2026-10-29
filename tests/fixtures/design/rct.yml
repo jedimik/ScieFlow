@@ -1,0 +1,35 @@
+# Synthetic study design (test fixture). No real study, no patient data.
+version: 1
+title: "Synthetic two-arm trial (fixture)"
+study_type: rct
+question: "Does the synthetic intervention change the synthetic score compared with control?"
+pico:
+  population: "Synthetic adults"
+  intervention: "Synthetic intervention"
+  comparator: "Control"
+  outcome: "Synthetic score at week 12"
+  timeframe: "12 weeks"
+variables:
+  - {id: arm, name: "Allocated arm", role: intervention, type: categorical}
+  - {id: score, name: "Synthetic score at week 12", role: outcome, type: continuous, unit: "points"}
+  - {id: age, name: "Age", role: covariate, type: continuous, unit: "years"}
+groups:
+  - {id: control, name: "Control", allocation: 0.5}
+  - {id: intervention, name: "Synthetic intervention", allocation: 0.5}
+timeline:
+  - {id: baseline, label: "Baseline", at: "week 0"}
+  - {id: follow_up, label: "Week 12", at: "week 12"}
+sampling: {method: consecutive, inclusion: ["Synthetic adult"], exclusion: ["Synthetic exclusion"]}
+randomisation: {method: block, unit: participant, stratified_by: [], block_size: 4}
+blinding: {participants: true, assessors: true, analysts: false}
+sample_size: {method: power, power_file: design/power/rct-ttest.json}
+sap:
+  estimands:
+    - {id: est_primary, outcome: primary_score, population: "randomised participants", summary_measure: "mean difference", intercurrent_events: "treatment discontinuation: treatment policy"}
+  outcomes:
+    - {id: primary_score, variable: score, priority: primary, test: t-test-ind, covariates: [age], estimand: est_primary, metric: score_mse}
+  missing_data: {strategy: multiple-imputation, details: "Synthetic details"}
+  multiplicity: {method: none, alpha: 0.05}
+reporting_guidelines: [consort-2010]
+data: {levels_needed: [L0, L1]}
+notes: "Synthetic fixture."

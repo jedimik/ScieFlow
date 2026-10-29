@@ -1,0 +1,49 @@
+# Transcribed from reviews/m-d1-reporting-skeletons.yml (M-D1 t2). Every item is a skeleton
+# entry: nothing is verified until a human checks this file against source.doi and records it.
+version: 1
+id: "strobe"
+name: "STROBE"
+version_label: "2007"
+applies_to: ["cohort", "case-control", "cross-sectional"]
+granularity: "full"
+source: {citation: "von Elm E, Altman DG, Egger M, et al. The Strengthening the Reporting of Observational Studies in Epidemiology (STROBE) statement. Lancet 2007;370:1453-1457.", doi: "10.1016/S0140-6736(07)61602-X"}
+verification:
+  status: "unverified"
+  note: "Item ids and labels were written offline from knowledge (M-D1 planning). Check them against the official checklist (source.doi) before relying on them."
+  verified_by: null
+  verified_at: null
+items:
+  - {id: "1a", topic: "Design named in title or abstract", sections: ["title", "abstract"], evidence: "statement"}
+  - {id: "1b", topic: "Informative balanced abstract", sections: ["abstract"], evidence: "statement"}
+  - {id: "2", topic: "Background and rationale", sections: ["introduction"], evidence: "statement"}
+  - {id: "3", topic: "Objectives and hypotheses", sections: ["introduction"], evidence: "statement"}
+  - {id: "4", topic: "Study design", sections: ["methods"], evidence: "statement"}
+  - {id: "5", topic: "Setting, locations, dates", sections: ["methods"], evidence: "statement"}
+  - {id: "6a", topic: "Eligibility and selection", sections: ["methods"], evidence: "statement"}
+  - {id: "6b", topic: "Matching criteria", sections: ["methods"], evidence: "statement"}
+  - {id: "7", topic: "Variables defined", sections: ["methods"], evidence: "statement"}
+  - {id: "8", topic: "Data sources and measurement", sections: ["methods"], evidence: "statement"}
+  - {id: "9", topic: "Efforts to address bias", sections: ["methods"], evidence: "statement"}
+  - {id: "10", topic: "Study size", sections: ["methods"], evidence: "number"}
+  - {id: "11", topic: "Quantitative variables handling", sections: ["methods"], evidence: "statement"}
+  - {id: "12a", topic: "Statistical methods and confounding", sections: ["methods"], evidence: "statement"}
+  - {id: "12b", topic: "Subgroups and interactions", sections: ["methods"], evidence: "statement"}
+  - {id: "12c", topic: "Missing data", sections: ["methods"], evidence: "statement"}
+  - {id: "12d", topic: "Follow-up, matching or sampling", sections: ["methods"], evidence: "statement"}
+  - {id: "12e", topic: "Sensitivity analyses", sections: ["methods"], evidence: "statement"}
+  - {id: "13a", topic: "Numbers at each stage", sections: ["results"], evidence: "number"}
+  - {id: "13b", topic: "Reasons for non-participation", sections: ["results"], evidence: "statement"}
+  - {id: "13c", topic: "Flow diagram", sections: ["results"], evidence: "diagram"}
+  - {id: "14a", topic: "Participant characteristics", sections: ["results"], evidence: "table"}
+  - {id: "14b", topic: "Missing data per variable", sections: ["results"], evidence: "number"}
+  - {id: "14c", topic: "Follow-up time", sections: ["results"], evidence: "number"}
+  - {id: "15", topic: "Outcome data", sections: ["results"], evidence: "number"}
+  - {id: "16a", topic: "Unadjusted and adjusted estimates", sections: ["results"], evidence: "number"}
+  - {id: "16b", topic: "Category boundaries", sections: ["results"], evidence: "statement"}
+  - {id: "16c", topic: "Absolute risk translation", sections: ["results"], evidence: "number"}
+  - {id: "17", topic: "Other analyses", sections: ["results"], evidence: "number"}
+  - {id: "18", topic: "Key results", sections: ["discussion"], evidence: "statement"}
+  - {id: "19", topic: "Limitations", sections: ["discussion"], evidence: "statement"}
+  - {id: "20", topic: "Interpretation", sections: ["discussion"], evidence: "statement"}
+  - {id: "21", topic: "Generalisability", sections: ["discussion"], evidence: "statement"}
+  - {id: "22", topic: "Funding", sections: ["other"], evidence: "statement"}

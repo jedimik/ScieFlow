@@ -73,3 +73,45 @@ scieflow experiment new stage <name> --pipeline <p>
 ```
 
 Scaffolds a working pipeline/stage (passthrough script) to edit.
+
+## scieflow experiment power
+
+```bash
+scieflow experiment power <family> [--alpha 0.05] [--power 0.8] [--n N]
+    [--effect-size D] [--alternative two-sided|larger] [--json] [--out FILE] [--force]
+```
+
+Sample size, power or effect size for a planned study. Statistics only: it reads
+no data. Give every input you know and leave **exactly one** unknown; the
+unknown is solved, and the assumptions and method are printed with the result.
+Two or zero unknowns is a usage error (exit 2); a refused or unsafe input is
+exit 1 and names the input.
+
+Families and their effect input:
+
+| Family | Effect input | Unknown `--n` means |
+|---|---|---|
+| `t-ind` | `--effect-size` d | first group (`--ratio` sets the second) |
+| `t-paired` | `--effect-size` d | pairs |
+| `t-one` | `--effect-size` d | subjects |
+| `anova` | `--effect-size` f, `--groups` k ≥ 2 | total subjects |
+| `proportions` | `--p1` and `--p2`, or `--effect-size` h | first group (`--ratio`) |
+| `correlation` | `--r` | pairs |
+| `survival` | `--hazard-ratio` (`--allocation`, default 0.5) | events (`--events`); with `--event-probability` the subject count |
+
+Solve modes: the sample size (`--power` and the effect given), the power
+(`--n` and the effect given), or the effect (`--n` and `--power` given; t-ind,
+t-paired, t-one, anova and proportions only). `--alternative larger` gives a
+one-sided test. `smaller` is refused: state the effect as a positive size and
+use `larger`. ANOVA and survival are two-sided only.
+
+Formulas follow the statsmodels power semantics, implemented over scipy
+(statsmodels is not a dependency). A value that cannot be computed reliably is
+refused, never reported as a power. Reference values and cross-checks are in
+`tests/fixtures/power/reference.json`.
+
+`--json` prints a deterministic document (`inputs`, `result`, `method`,
+`assumptions`). `--out FILE` writes that document; an existing file needs
+`--force`, and a symlink is never written.
+
+    uv run scieflow experiment power t-ind --alpha 0.05 --power 0.8 --effect-size 0.5

@@ -1,0 +1,49 @@
+# Transcribed from reviews/m-d1-reporting-skeletons.yml (M-D1 t2). Every item is a skeleton
+# entry: nothing is verified until a human checks this file against source.doi and records it.
+version: 1
+id: "stard-2015"
+name: "STARD 2015"
+version_label: "2015"
+applies_to: ["diagnostic-accuracy"]
+granularity: "full"
+source: {citation: "Bossuyt PM, Reitsma JB, Bruns DE, et al. STARD 2015: an updated list of essential items for reporting diagnostic accuracy studies. BMJ 2015;351:h5527.", doi: "10.1136/bmj.h5527"}
+verification:
+  status: "unverified"
+  note: "Item ids and labels were written offline from knowledge (M-D1 planning). Check them against the official checklist (source.doi) before relying on them."
+  verified_by: null
+  verified_at: null
+items:
+  - {id: "1", topic: "Identified as accuracy study", sections: ["title"], evidence: "statement"}
+  - {id: "2", topic: "Structured abstract", sections: ["abstract"], evidence: "statement"}
+  - {id: "3", topic: "Background and intended use", sections: ["introduction"], evidence: "statement"}
+  - {id: "4", topic: "Objectives and hypotheses", sections: ["introduction"], evidence: "statement"}
+  - {id: "5", topic: "Prospective or retrospective", sections: ["methods"], evidence: "statement"}
+  - {id: "6", topic: "Eligibility criteria", sections: ["methods"], evidence: "statement"}
+  - {id: "7", topic: "Basis for identifying participants", sections: ["methods"], evidence: "statement"}
+  - {id: "8", topic: "Where and when identified", sections: ["methods"], evidence: "statement"}
+  - {id: "9", topic: "Consecutive, random or convenience", sections: ["methods"], evidence: "statement"}
+  - {id: "10a", topic: "Index test details", sections: ["methods"], evidence: "statement"}
+  - {id: "10b", topic: "Reference standard details", sections: ["methods"], evidence: "statement"}
+  - {id: "11", topic: "Reference standard rationale", sections: ["methods"], evidence: "statement"}
+  - {id: "12a", topic: "Index test cut-offs", sections: ["methods"], evidence: "statement"}
+  - {id: "12b", topic: "Reference standard cut-offs", sections: ["methods"], evidence: "statement"}
+  - {id: "13a", topic: "Index test assessor blinding", sections: ["methods"], evidence: "statement"}
+  - {id: "13b", topic: "Reference assessor blinding", sections: ["methods"], evidence: "statement"}
+  - {id: "14", topic: "Accuracy estimation methods", sections: ["methods"], evidence: "statement"}
+  - {id: "15", topic: "Indeterminate results handling", sections: ["methods"], evidence: "statement"}
+  - {id: "16", topic: "Missing data handling", sections: ["methods"], evidence: "statement"}
+  - {id: "17", topic: "Variability analyses", sections: ["methods"], evidence: "statement"}
+  - {id: "18", topic: "Intended sample size", sections: ["methods"], evidence: "number"}
+  - {id: "19", topic: "Participant flow diagram", sections: ["results"], evidence: "diagram"}
+  - {id: "20", topic: "Baseline characteristics", sections: ["results"], evidence: "table"}
+  - {id: "21a", topic: "Severity distribution", sections: ["results"], evidence: "number"}
+  - {id: "21b", topic: "Alternative diagnoses distribution", sections: ["results"], evidence: "number"}
+  - {id: "22", topic: "Interval between tests", sections: ["results"], evidence: "statement"}
+  - {id: "23", topic: "Index by reference cross-tabulation", sections: ["results"], evidence: "table"}
+  - {id: "24", topic: "Accuracy estimates and precision", sections: ["results"], evidence: "number"}
+  - {id: "25", topic: "Adverse events from testing", sections: ["results"], evidence: "statement"}
+  - {id: "26", topic: "Limitations", sections: ["discussion"], evidence: "statement"}
+  - {id: "27", topic: "Implications for practice", sections: ["discussion"], evidence: "statement"}
+  - {id: "28", topic: "Registration", sections: ["other"], evidence: "registration"}
+  - {id: "29", topic: "Protocol access", sections: ["other"], evidence: "statement"}
+  - {id: "30", topic: "Funding", sections: ["other"], evidence: "statement"}

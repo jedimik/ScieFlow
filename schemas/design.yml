@@ -1,0 +1,51 @@
+# Format description for workspace/<slug>/design/design.yml (M-D1 plan section 5.1, format 1).
+# Read by scieflow.core.design (code); this is not a JSON Schema. The enumerations and key
+# lists here are the single source for model.py, render.py, templates.py and reporting.py.
+format_version: 1
+top_keys:
+  required: [version, title, study_type, question, variables, sap]
+  optional: [pico, groups, timeline, sampling, randomisation, blinding, sample_size,
+             reporting_guidelines, data, notes]
+sap_keys:
+  required: [estimands, outcomes]
+  optional: [missing_data, multiplicity, sensitivity, interim, exploratory]
+# Keys of each nested mapping. `rule` is the check rule a missing required key reports.
+item_keys:
+  pico: {required: [], optional: [population, intervention, comparator, outcome, timeframe]}
+  variable: {required: [id, name, role, type], optional: [unit, description]}
+  group: {required: [id, name], optional: [description, allocation]}
+  timeline: {required: [id, label, at], optional: []}
+  sampling: {required: [method, inclusion, exclusion], optional: [frame]}
+  randomisation: {required: [method, unit], optional: [stratified_by, block_size]}
+  blinding: {required: [], optional: [participants, assessors, analysts]}
+  sample_size_power: {required: [method, power_file], optional: []}
+  sample_size_fixed: {required: [method, n, rationale], optional: []}
+  sample_size_not_applicable: {required: [method, rationale], optional: []}
+  estimand: {required: [id, outcome, population, summary_measure], optional: [intercurrent_events]}
+  outcome: {required: [id, variable, priority, test], optional: [covariates, estimand, metric]}
+  missing_data: {required: [strategy], optional: [details]}
+  multiplicity: {required: [method, alpha], optional: []}
+  sensitivity: {required: [id, description], optional: []}
+  interim: {required: [planned], optional: [rules]}
+  exploratory: {required: [split, fdr], optional: []}
+  split: {required: [fraction, seed, stratify_by], optional: []}
+  data: {required: [levels_needed], optional: [sources]}
+  source: {required: [path, level], optional: []}
+enums:
+  study_types: [rct, cohort, case-control, cross-sectional, diagnostic-accuracy,
+                prediction-model, systematic-review, animal, economic-evaluation, computational]
+  variable_roles: [exposure, intervention, outcome, covariate, confounder, mediator,
+                   effect-modifier, stratifier, predictor, index-test, reference-standard]
+  variable_types: [continuous, binary, categorical, ordinal, count, time-to-event]
+  outcome_priorities: [primary, secondary, exploratory]
+  tests: [t-test-ind, welch-t-test, t-test-paired, t-test-one, anova-oneway, ancova, chi-square,
+          fisher-exact, mann-whitney, wilcoxon-signed-rank, kruskal-wallis, linear-regression,
+          logistic-regression, mixed-model, cox-regression, log-rank, pearson, spearman, roc-auc,
+          sensitivity-specificity, descriptive, other]
+  missing_data: [complete-case, multiple-imputation, mixed-model, inverse-probability-weighting,
+                 worst-case, not-applicable, other]
+  multiplicity: [none, bonferroni, holm, hochberg, bh-fdr, hierarchical, gatekeeping]
+  sampling: [consecutive, random, stratified-random, convenience, census, other]
+  sample_size_methods: [power, fixed, not-applicable]
+  data_levels: [L0, L1, L2]
+  fdr: [bh]

@@ -290,7 +290,7 @@ BASE_KINDS = {"campaign-approval", "outline-approval", "staffing", "question",
 
 def test_the_other_kinds_are_unchanged_and_only_the_release_kind_is_added():  # F5d
     table = yaml.safe_load((REPO / "schemas" / "gates.yml").read_text())["kinds"]
-    assert set(table) == BASE_KINDS | {"data-release"}
+    assert set(table) == BASE_KINDS | {"data-release", "design-lock"}
 
 
 def test_an_agent_actor_is_refused_by_the_release_hook_itself(proj, ws):  # F5d

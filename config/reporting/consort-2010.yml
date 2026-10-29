@@ -1,0 +1,52 @@
+# Transcribed from reviews/m-d1-reporting-skeletons.yml (M-D1 t2). Every item is a skeleton
+# entry: nothing is verified until a human checks this file against source.doi and records it.
+version: 1
+id: "consort-2010"
+name: "CONSORT 2010"
+version_label: "2010"
+applies_to: ["rct"]
+granularity: "full"
+source: {citation: "Schulz KF, Altman DG, Moher D; CONSORT Group. CONSORT 2010 Statement: updated guidelines for reporting parallel group randomised trials. BMJ 2010;340:c332.", doi: "10.1136/bmj.c332"}
+verification:
+  status: "unverified"
+  note: "Item ids and labels were written offline from knowledge (M-D1 planning). Check them against the official checklist (source.doi) before relying on them."
+  verified_by: null
+  verified_at: null
+items:
+  - {id: "1a", topic: "Title says randomised trial", sections: ["title"], evidence: "statement"}
+  - {id: "1b", topic: "Structured summary", sections: ["abstract"], evidence: "statement"}
+  - {id: "2a", topic: "Background and rationale", sections: ["introduction"], evidence: "statement"}
+  - {id: "2b", topic: "Objectives or hypotheses", sections: ["introduction"], evidence: "statement"}
+  - {id: "3a", topic: "Trial design and allocation ratio", sections: ["methods"], evidence: "statement"}
+  - {id: "3b", topic: "Method changes after start", sections: ["methods"], evidence: "statement"}
+  - {id: "4a", topic: "Eligibility criteria", sections: ["methods"], evidence: "statement"}
+  - {id: "4b", topic: "Settings and locations", sections: ["methods"], evidence: "statement"}
+  - {id: "5", topic: "Interventions per group", sections: ["methods"], evidence: "statement"}
+  - {id: "6a", topic: "Prespecified outcomes", sections: ["methods"], evidence: "statement"}
+  - {id: "6b", topic: "Outcome changes after start", sections: ["methods"], evidence: "statement"}
+  - {id: "7a", topic: "Sample size determination", sections: ["methods"], evidence: "number"}
+  - {id: "7b", topic: "Interim analyses and stopping", sections: ["methods"], evidence: "statement"}
+  - {id: "8a", topic: "Sequence generation method", sections: ["methods"], evidence: "statement"}
+  - {id: "8b", topic: "Randomisation type and restriction", sections: ["methods"], evidence: "statement"}
+  - {id: "9", topic: "Allocation concealment", sections: ["methods"], evidence: "statement"}
+  - {id: "10", topic: "Who generated, enrolled, assigned", sections: ["methods"], evidence: "statement"}
+  - {id: "11a", topic: "Blinding after assignment", sections: ["methods"], evidence: "statement"}
+  - {id: "11b", topic: "Similarity of interventions", sections: ["methods"], evidence: "statement"}
+  - {id: "12a", topic: "Statistical methods for outcomes", sections: ["methods"], evidence: "statement"}
+  - {id: "12b", topic: "Additional analyses methods", sections: ["methods"], evidence: "statement"}
+  - {id: "13a", topic: "Participant flow per group", sections: ["results"], evidence: "diagram"}
+  - {id: "13b", topic: "Losses and exclusions", sections: ["results"], evidence: "number"}
+  - {id: "14a", topic: "Recruitment and follow-up dates", sections: ["results"], evidence: "statement"}
+  - {id: "14b", topic: "Why the trial ended", sections: ["results"], evidence: "statement"}
+  - {id: "15", topic: "Baseline characteristics", sections: ["results"], evidence: "table"}
+  - {id: "16", topic: "Numbers analysed per group", sections: ["results"], evidence: "number"}
+  - {id: "17a", topic: "Outcome estimates and precision", sections: ["results"], evidence: "number"}
+  - {id: "17b", topic: "Absolute and relative effects", sections: ["results"], evidence: "number"}
+  - {id: "18", topic: "Ancillary analyses", sections: ["results"], evidence: "number"}
+  - {id: "19", topic: "Harms per group", sections: ["results"], evidence: "table"}
+  - {id: "20", topic: "Limitations", sections: ["discussion"], evidence: "statement"}
+  - {id: "21", topic: "Generalisability", sections: ["discussion"], evidence: "statement"}
+  - {id: "22", topic: "Interpretation", sections: ["discussion"], evidence: "statement"}
+  - {id: "23", topic: "Registration", sections: ["other"], evidence: "registration"}
+  - {id: "24", topic: "Protocol access", sections: ["other"], evidence: "statement"}
+  - {id: "25", topic: "Funding", sections: ["other"], evidence: "statement"}

@@ -59,6 +59,12 @@ GROUPS = {
         None,
         "Data protection: declare a run's data level, inspect it, pin safe agents.",
     ),
+    "design": (
+        "scieflow.core.design.cli",
+        "design",
+        None,
+        "Study design and analysis plan: check, lock, amend.",
+    ),
 }
 
 

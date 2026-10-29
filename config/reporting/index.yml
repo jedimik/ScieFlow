@@ -1,0 +1,4 @@
+# Transcribed from reviews/m-d1-reporting-skeletons.yml (M-D1 t2). Every item is a skeleton
+# entry: nothing is verified until a human checks this file against source.doi and records it.
+version: 1
+guidelines: ["consort-2010", "strobe", "stard-2015", "tripod-ai", "prisma-2020", "spirit-2013", "arrive-2.0", "cheers-2022"]

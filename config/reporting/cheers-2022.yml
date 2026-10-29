@@ -1,0 +1,43 @@
+# Transcribed from reviews/m-d1-reporting-skeletons.yml (M-D1 t2). Every item is a skeleton
+# entry: nothing is verified until a human checks this file against source.doi and records it.
+version: 1
+id: "cheers-2022"
+name: "CHEERS 2022"
+version_label: "2022"
+applies_to: ["economic-evaluation"]
+granularity: "full"
+source: {citation: "Husereau D, Drummond M, Augustovski F, et al. Consolidated Health Economic Evaluation Reporting Standards 2022 (CHEERS 2022) statement. BMJ 2022;376:e067975.", doi: "10.1136/bmj-2021-067975"}
+verification:
+  status: "unverified"
+  note: "Item ids and labels were written offline from knowledge (M-D1 planning). Check them against the official checklist (source.doi) before relying on them."
+  verified_by: null
+  verified_at: null
+items:
+  - {id: "1", topic: "Title", sections: ["title"], evidence: "statement"}
+  - {id: "2", topic: "Abstract", sections: ["abstract"], evidence: "statement"}
+  - {id: "3", topic: "Background and objectives", sections: ["introduction"], evidence: "statement"}
+  - {id: "4", topic: "Health economic analysis plan", sections: ["methods"], evidence: "statement"}
+  - {id: "5", topic: "Study population", sections: ["methods"], evidence: "statement"}
+  - {id: "6", topic: "Setting and location", sections: ["methods"], evidence: "statement"}
+  - {id: "7", topic: "Comparators", sections: ["methods"], evidence: "statement"}
+  - {id: "8", topic: "Perspective", sections: ["methods"], evidence: "statement"}
+  - {id: "9", topic: "Time horizon", sections: ["methods"], evidence: "statement"}
+  - {id: "10", topic: "Discount rate", sections: ["methods"], evidence: "number"}
+  - {id: "11", topic: "Selection of outcomes", sections: ["methods"], evidence: "statement"}
+  - {id: "12", topic: "Measurement of outcomes", sections: ["methods"], evidence: "statement"}
+  - {id: "13", topic: "Valuation of outcomes", sections: ["methods"], evidence: "statement"}
+  - {id: "14", topic: "Resources and costs", sections: ["methods"], evidence: "statement"}
+  - {id: "15", topic: "Currency, price date, conversion", sections: ["methods"], evidence: "statement"}
+  - {id: "16", topic: "Model rationale and description", sections: ["methods"], evidence: "statement"}
+  - {id: "17", topic: "Analytics and assumptions", sections: ["methods"], evidence: "statement"}
+  - {id: "18", topic: "Heterogeneity", sections: ["methods"], evidence: "statement"}
+  - {id: "19", topic: "Distributional effects", sections: ["methods"], evidence: "statement"}
+  - {id: "20", topic: "Uncertainty", sections: ["methods"], evidence: "statement"}
+  - {id: "21", topic: "Engagement approach", sections: ["methods"], evidence: "statement"}
+  - {id: "22", topic: "Study parameters", sections: ["results"], evidence: "table"}
+  - {id: "23", topic: "Main results", sections: ["results"], evidence: "number"}
+  - {id: "24", topic: "Effect of uncertainty", sections: ["results"], evidence: "statement"}
+  - {id: "25", topic: "Effect of engagement", sections: ["results"], evidence: "statement"}
+  - {id: "26", topic: "Findings, limitations, generalisability", sections: ["discussion"], evidence: "statement"}
+  - {id: "27", topic: "Funding", sections: ["other"], evidence: "statement"}
+  - {id: "28", topic: "Conflicts of interest", sections: ["other"], evidence: "statement"}

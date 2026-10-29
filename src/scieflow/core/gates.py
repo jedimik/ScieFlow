@@ -31,6 +31,8 @@ ADOPTED = frozenset({"adopt", "yes", "approve", "approved"})
 REVIEW_GATE_KINDS = frozenset({"review-decision", "review-blocker"})
 # A data-release answer copies (or drops) a checked file (core/data/release.py, M-B 5.8).
 DATA_RELEASE_KIND = "data-release"
+# A design lock or amendment is recorded only by a human answer (core/design/lock.py, M-D1 5.5).
+DESIGN_LOCK_KIND = "design-lock"
 
 
 class GateError(ValueError):
@@ -124,6 +126,10 @@ def answer(project: Project, ws: Path, gate_id: str, answer: str, actor: str = "
             # Only a human `release` copies a checked file out of an L2 run (M-B 5.8).
             from scieflow.core.data import release
             release.on_answer(project, ws, gate, answer, actor)
+        if gate["kind"] == DESIGN_LOCK_KIND:
+            # Only a human approval writes the design ledger (M-D1 5.5); the hook refuses others itself.
+            from scieflow.core.design import lock
+            lock.on_answer(project, ws, gate, answer, actor)
         gate.update(state="answered", answer=answer, answered=_now(), answered_by=actor,
                     rationale=rationale, note=note)
         path = _path(ws, gate_id)

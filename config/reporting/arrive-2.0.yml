@@ -1,0 +1,36 @@
+# Transcribed from reviews/m-d1-reporting-skeletons.yml (M-D1 t2). Every item is a skeleton
+# entry: nothing is verified until a human checks this file against source.doi and records it.
+version: 1
+id: "arrive-2.0"
+name: "ARRIVE 2.0"
+version_label: "2.0"
+applies_to: ["animal"]
+granularity: "full"
+source: {citation: "Percie du Sert N, Hurst V, Ahluwalia A, et al. The ARRIVE guidelines 2.0: updated guidelines for reporting animal research. PLoS Biol 2020;18(7):e3000410.", doi: "10.1371/journal.pbio.3000410"}
+verification:
+  status: "unverified"
+  note: "Item ids and labels were written offline from knowledge (M-D1 planning). Check them against the official checklist (source.doi) before relying on them."
+  verified_by: null
+  verified_at: null
+items:
+  - {id: "1", topic: "Study design", sections: ["methods"], evidence: "statement", group: "essential"}
+  - {id: "2", topic: "Sample size", sections: ["methods"], evidence: "number", group: "essential"}
+  - {id: "3", topic: "Inclusion and exclusion criteria", sections: ["methods"], evidence: "statement", group: "essential"}
+  - {id: "4", topic: "Randomisation", sections: ["methods"], evidence: "statement", group: "essential"}
+  - {id: "5", topic: "Blinding", sections: ["methods"], evidence: "statement", group: "essential"}
+  - {id: "6", topic: "Outcome measures", sections: ["methods"], evidence: "statement", group: "essential"}
+  - {id: "7", topic: "Statistical methods", sections: ["methods"], evidence: "statement", group: "essential"}
+  - {id: "8", topic: "Experimental animals", sections: ["methods"], evidence: "statement", group: "essential"}
+  - {id: "9", topic: "Experimental procedures", sections: ["methods"], evidence: "statement", group: "essential"}
+  - {id: "10", topic: "Results", sections: ["results"], evidence: "number", group: "essential"}
+  - {id: "11", topic: "Abstract", sections: ["abstract"], evidence: "statement", group: "recommended"}
+  - {id: "12", topic: "Background", sections: ["introduction"], evidence: "statement", group: "recommended"}
+  - {id: "13", topic: "Objectives", sections: ["introduction"], evidence: "statement", group: "recommended"}
+  - {id: "14", topic: "Ethical statement", sections: ["methods"], evidence: "statement", group: "recommended"}
+  - {id: "15", topic: "Housing and husbandry", sections: ["methods"], evidence: "statement", group: "recommended"}
+  - {id: "16", topic: "Animal care and monitoring", sections: ["methods"], evidence: "statement", group: "recommended"}
+  - {id: "17", topic: "Interpretation and implications", sections: ["discussion"], evidence: "statement", group: "recommended"}
+  - {id: "18", topic: "Generalisability and translation", sections: ["discussion"], evidence: "statement", group: "recommended"}
+  - {id: "19", topic: "Protocol registration", sections: ["other"], evidence: "registration", group: "recommended"}
+  - {id: "20", topic: "Data access", sections: ["other"], evidence: "statement", group: "recommended"}
+  - {id: "21", topic: "Declaration of interests", sections: ["other"], evidence: "statement", group: "recommended"}
