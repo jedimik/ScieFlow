@@ -17,7 +17,7 @@ class CampaignError(ValueError):
 # campaigns are refused until M-D3, so their keys fail loudly, not silently.
 KNOWN_KEYS = frozenset({
     "name", "pipeline", "stage", "input", "reference", "metrics", "parameters",
-    "scenarios", "validation", "rank_by", "notes", "replicates",
+    "scenarios", "validation", "rank_by", "notes", "replicates", "analysis",
     "backend", "pipeline_dir",  # pipeline_dir: written by `sweep` into campaign.yaml
 })
 REMOTE_ONLY_KEYS = ("remote", "resources")
@@ -114,6 +114,7 @@ class Campaign:
     notes: str = ""
     path: Path | None = None
     replicates: Replicates | None = None
+    analysis: dict | None = None  # validated by analysis.parse_analysis (M-D2 plan 5.4)
 
     @classmethod
     def load(cls, path: str | Path) -> "Campaign":
@@ -151,7 +152,14 @@ class Campaign:
         base = path.parent
         ref = data.get("reference")
         metrics = list(data["metrics"])
-        return cls(
+        analysis_block = data.get("analysis")
+        if analysis_block is not None:
+            from . import analysis as analysis_mod  # lazy: analysis imports manifest
+            try:
+                analysis_mod.parse_analysis(analysis_block, metrics)
+            except analysis_mod.AnalysisError as e:
+                raise CampaignError(f"{path}: {e}") from e
+        campaign = cls(
             name=data["name"],
             pipeline=data["pipeline"],
             stage=data["stage"],
@@ -165,7 +173,16 @@ class Campaign:
             notes=data.get("notes", ""),
             path=path,
             replicates=replicates,
+            analysis=analysis_block,
         )
+        if analysis_block is not None:
+            try:
+                analysis_mod.resolve_baseline(
+                    analysis_mod.parse_analysis(analysis_block, metrics),
+                    [(spec.run_id, spec.params) for spec in campaign.configurations()])
+            except analysis_mod.AnalysisError as e:
+                raise CampaignError(f"{path}: {e}") from e
+        return campaign
 
     def configurations(self) -> list[RunSpec]:
         """One spec per configuration (parameter grid or scenario), as before replicates."""
@@ -230,6 +247,8 @@ class Campaign:
         }
         if self.replicates is not None:
             data["replicates"] = {"n": self.replicates.n, "seed": self.replicates.seed}
+        if self.analysis is not None:
+            data["analysis"] = self.analysis
         return data
 
 

@@ -11,6 +11,7 @@ from scieflow.core.project import Project
 from scieflow.core.run import actions, budget
 
 from . import manifest
+from .analysis import AnalysisError, analyse_campaign, stats_fresh, write_stats
 from .campaign import Campaign, CampaignError, RunSpec, check_replicates
 from .compare import compare_campaign
 from .envbuild import build_sif
@@ -21,6 +22,7 @@ from .report import generate_report
 from .runner import execute_run, recompute_metrics
 from .scaffold import new_pipeline, new_stage
 from .stage import Stage, find_stage
+from .stats import StatsUnavailable
 from .sweep import run_sweep
 
 
@@ -271,6 +273,44 @@ def verify_cmd(campaign_dir, as_json):
     _analysis_note(Path(campaign_dir), "verify", problems=len(doc["problems"]))
     if not report.ok:
         raise SystemExit(1)
+
+
+def _print_stats(doc: dict) -> None:
+    for row in doc["configs"]:
+        for metric, cell in row["metrics"].items():
+            mean = "n/a" if cell["mean"] is None else f"{cell['mean']:.4f}"
+            ci = ("n/a" if cell["ci"] is None else
+                  f"[{cell['ci']['low']:.4f}, {cell['ci']['high']:.4f}]")
+            click.echo(f"  config {row['config_id']}  {metric}  n={cell['n']} mean={mean} "
+                       f"ci={ci}")
+    for t in doc["tests"]:
+        if t["computed"]:
+            adjusted = "n/a" if t["p_adjusted"] is None else f"{t['p_adjusted']:.4g}"
+            state = f"p={t['p']:.4g} p_adj={adjusted} reject={t['reject']}"
+        else:
+            state = f"not computed ({t['reason']})"
+        click.echo(f"  test {t['id']}  {t['test']}  {state}")
+
+
+@experiment.command("stats")
+@click.option("--include-direct", is_flag=True,
+              help="Analyse --direct (development) runs too.")
+@click.option("--json", "as_json", is_flag=True, help="Print the stats.json document.")
+@click.argument("campaign_dir",
+                type=click.Path(exists=True, file_okay=False, path_type=Path))
+def stats_cmd(campaign_dir, include_direct, as_json):
+    """Compute descriptives and the campaign's tests into stats.json (M-D2 plan 5.4)."""
+    try:
+        doc = analyse_campaign(campaign_dir, include_direct=include_direct)
+        path = write_stats(campaign_dir, doc)
+    except (AnalysisError, StatsUnavailable) as e:
+        raise click.ClickException(str(e)) from e
+    if as_json:
+        click.echo(json.dumps(doc, sort_keys=True, indent=1, allow_nan=False))
+    else:
+        _print_stats(doc)
+    _analysis_note(Path(campaign_dir), "stats", tests=len(doc["tests"]),
+                   sha256=manifest.file_sha256(path))
 
 
 @experiment.command()
