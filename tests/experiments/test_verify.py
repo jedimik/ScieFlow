@@ -2,8 +2,10 @@
 
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from scieflow.experiments import manifest
@@ -105,3 +107,74 @@ def test_pre_m_d2_campaign_is_a_legacy_note_not_a_failure(project):
     assert report.ok
     assert ("legacy-run", RUN) in {(n["rule"], n["run_id"]) for n in report.to_dict()["notes"]}
     assert cli_verify(camp).exit_code == 0
+
+
+def rewrite_manifest(camp: Path, mutate) -> None:
+    """Edit RUN's manifest the way the tool would: rewrite it and re-record its hash in results.json."""
+    run_dir = camp / "runs" / RUN
+    doc = json.loads((run_dir / "manifest.json").read_text())
+    mutate(doc)
+    sha = manifest.write_manifest(run_dir, doc)
+    results = json.loads((camp / "results.json").read_text())
+    next(e for e in results["runs"] if e["run_id"] == RUN)["manifest_sha256"] = sha
+    (camp / "results.json").write_text(json.dumps(results, indent=2))
+
+
+def set_results(camp: Path, edit) -> None:
+    results = json.loads((camp / "results.json").read_text())
+    edit(results)
+    (camp / "results.json").write_text(json.dumps(results, indent=2))
+
+
+RESULTS_INVALID = [{"rule": "results-invalid", "run_id": None, "path": "results.json"}]
+
+
+@pytest.mark.parametrize("runs", [
+    ["001_gain-1.0"],                     # strings instead of entries
+    {"001_gain-1.0": {"metrics": {}}},   # an object instead of a list
+    "001_gain-1.0",                       # a string
+    [{"run_id": 5}],                      # a non-string run id
+    [{"params": {}}],                     # an entry without a run id
+])
+def test_malformed_results_runs_are_results_invalid_not_a_traceback(project, runs):
+    camp = sweep(project)
+    set_results(camp, lambda doc: doc.update(runs=runs))
+    assert manifest.verify_campaign(camp).to_dict()["problems"] == RESULTS_INVALID
+    result = cli_verify(camp)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)  # a handled exit, not an AttributeError
+
+
+@pytest.mark.parametrize("run_id", ["../../escape", "/tmp/elsewhere", "a/b", "..", ""])
+def test_run_id_that_is_not_one_path_component_is_results_invalid(project, run_id):
+    camp = sweep(project)
+    set_results(camp, lambda doc: doc["runs"][0].update(run_id=run_id))
+    assert manifest.verify_campaign(camp).to_dict()["problems"] == RESULTS_INVALID
+
+
+def test_run_id_cannot_point_verify_at_a_manifest_outside_the_campaign(project):
+    camp = sweep(project)
+    decoy = camp.parent / "escape"  # what camp/runs/../../escape resolves to
+    decoy.mkdir()
+    shutil.copy(camp / "runs" / RUN / "manifest.json", decoy / "manifest.json")
+    set_results(camp, lambda doc: doc["runs"][0].update(
+        run_id="../../escape", manifest_sha256=manifest.file_sha256(decoy / "manifest.json")))
+    report = manifest.verify_campaign(camp)
+    assert report.to_dict()["problems"] == RESULTS_INVALID
+    assert report.to_dict()["notes"] == []
+
+
+@pytest.mark.parametrize("path", ["/etc/hostname", "../../../outside.txt", 5])
+def test_artifact_path_outside_artifacts_is_manifest_invalid(project, path):
+    camp = sweep(project)
+    entry = {"path": path, "sha256": "0" * 64, "size": 1}
+    rewrite_manifest(camp, lambda doc: doc["artifacts"].append(entry))
+    problems = manifest.verify_campaign(camp).to_dict()["problems"]
+    assert problems == [{"rule": "manifest-invalid", "run_id": RUN, "path": f"runs/{RUN}/manifest.json"}]
+
+
+def test_artifacts_that_are_not_a_list_are_manifest_invalid(project):
+    camp = sweep(project)
+    rewrite_manifest(camp, lambda doc: doc.update(artifacts=5))
+    problems = manifest.verify_campaign(camp).to_dict()["problems"]
+    assert problems == [{"rule": "manifest-invalid", "run_id": RUN, "path": f"runs/{RUN}/manifest.json"}]

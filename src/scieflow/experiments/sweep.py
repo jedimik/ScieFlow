@@ -73,9 +73,9 @@ def update_run_entry(campaign_dir: str | Path, run_id: str, *, metrics: dict,
     path = campaign_dir / "results.json"
     if not path.is_file():
         return False
-    doc = json.loads(path.read_text())
-    for entry in doc.get("runs", []):
-        if entry.get("run_id") == run_id:
+    doc = manifest.load_results(campaign_dir)  # ValueError when malformed; nothing is written
+    for entry in doc["runs"]:
+        if entry["run_id"] == run_id:
             entry["metrics"] = metrics
             if manifest_sha256 is not None:
                 entry["manifest_sha256"] = manifest_sha256

@@ -16,7 +16,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import scieflow
 
@@ -345,14 +345,47 @@ def _item(rule: str, run_id, path: str) -> dict:
     return {"rule": rule, "run_id": run_id, "path": path}
 
 
+def _is_run_id(value) -> bool:
+    """A run id names one folder under runs/: a non-empty string with no separator and not . or .."""
+    return (isinstance(value, str) and value not in ("", ".", "..")
+            and "/" not in value and "\\" not in value and "\0" not in value)
+
+
+def _is_artifact_path(value) -> bool:
+    """A manifest artifact path is a relative path that stays inside artifacts/."""
+    if not isinstance(value, str) or value in ("", ".") or "\0" in value:
+        return False
+    path = PurePosixPath(value)
+    return not path.is_absolute() and ".." not in path.parts
+
+
+def load_results(campaign_dir) -> dict:
+    """Parse the campaign's results.json; ValueError when it is missing, unreadable or malformed.
+
+    Fail-closed (plan 5.3): every run entry must be a dict whose run_id is one path component, so
+    no later read or write can be steered outside the campaign folder.
+    """
+    path = Path(campaign_dir) / "results.json"
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        raise ValueError(f"results.json is not readable JSON ({type(e).__name__})") from e
+    runs = doc.get("runs") if isinstance(doc, dict) else None
+    if not isinstance(runs, list) or not all(
+            isinstance(e, dict) and _is_run_id(e.get("run_id")) for e in runs):
+        raise ValueError("results.json: runs must be a list of run entries, each with a run_id "
+                         "that is one path component")
+    return doc
+
+
 def _verify_artifacts(run_dir: Path, rel: str, run_id: str, m: dict, report: Report) -> bool:
     art_root = run_dir / "artifacts"
-    declared = {}
-    for a in m.get("artifacts") or []:
-        if not isinstance(a, dict) or "path" not in a:
-            report.problems.append(_item("manifest-invalid", run_id, f"{rel}/manifest.json"))
-            return False
-        declared[a["path"]] = a
+    entries = m.get("artifacts") or []
+    if not isinstance(entries, list) or not all(
+            isinstance(a, dict) and _is_artifact_path(a.get("path")) for a in entries):
+        report.problems.append(_item("manifest-invalid", run_id, f"{rel}/manifest.json"))
+        return False
+    declared = {a["path"]: a for a in entries}
     for name, a in declared.items():
         p = art_root / name
         where = f"{rel}/artifacts/{name}"
@@ -378,13 +411,12 @@ def verify_campaign(campaign_dir) -> Report:
     root = Path(campaign_dir)
     report = Report()
     try:
-        doc = json.loads((root / "results.json").read_text())
-        runs = doc["runs"]
-    except (OSError, ValueError, KeyError, TypeError):
+        doc = load_results(root)
+    except ValueError:
         report.problems.append(_item("results-invalid", None, "results.json"))
         return report
-    for entry in runs:
-        run_id = str(entry.get("run_id"))
+    for entry in doc["runs"]:
+        run_id = entry["run_id"]
         rel = f"runs/{run_id}"
         run_dir = root / "runs" / run_id
         recorded = entry.get("manifest_sha256")
