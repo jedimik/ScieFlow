@@ -279,6 +279,8 @@ class _Validator:
         self.today = today
         self.run_dir = run_dir
         self.sources = load_sources(run_dir) if run_dir is not None else None
+        self.min_chars = self.schema["quote"]["min_chars"]
+        self.limit_min = self.schema["ranges"]["limits"]["min"]
         self.leaves: list[_Leaf] = []
 
     def add(self, rule, path, message, level="error"):
@@ -411,8 +413,9 @@ class _Validator:
             limits = item.get("limits")
             if isinstance(limits, dict):
                 for name, value in limits.items():
-                    if isinstance(value, int) and not isinstance(value, bool) and value < 0:
-                        self.add("range", f"article_types[{index}].limits.{name}", "a limit is 0 or more")
+                    if isinstance(value, int) and not isinstance(value, bool) and value < self.limit_min:
+                        self.add("range", f"article_types[{index}].limits.{name}",
+                                 f"a limit is {self.limit_min} or more")
 
     def ranges(self):
         prov = self.data.get("provenance")
@@ -482,7 +485,7 @@ class _Validator:
         if source in self.sources.mismatched:
             self.add("evidence-source", f"{path}.source", "the stored text does not match its recorded sha256")
             return
-        problem = quotes.quote_problem(quote, self.sources.texts[source])
+        problem = quotes.quote_problem(quote, self.sources.texts[source], self.min_chars)
         if problem:
             self.add("evidence-quote", f"{path}.quote", problem)
 

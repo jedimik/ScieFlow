@@ -11,6 +11,7 @@ import datetime as dt
 import json
 import re
 from pathlib import Path
+from typing import NoReturn
 
 import click
 import yaml
@@ -19,10 +20,9 @@ from scieflow.core.project import Project, ProjectError
 from scieflow.research.journal import profile, render
 
 OK, REFUSED, USAGE = 0, 1, 2
-_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
-def _fail(message: str, code: int = REFUSED):
+def _fail(message: str, code: int = REFUSED) -> NoReturn:
     click.echo(message, err=True)
     raise SystemExit(code)
 
@@ -36,7 +36,11 @@ def _resolve(project: Project, target: str) -> tuple[Path, str]:
     if target.endswith(".yml") or "/" in target:
         path = Path(target)
         return path, path.stem
-    if not _SLUG.match(target):
+    try:
+        pattern = re.compile(profile.load_schema(project.root)["patterns"]["slug"])
+    except profile.ProfileError as exc:
+        _fail(str(exc))
+    if not pattern.match(target):
         _fail(f"not a journal slug: {target!r}", USAGE)
     return _profiles_dir(project) / f"{target}.yml", target
 

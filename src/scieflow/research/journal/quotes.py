@@ -34,8 +34,11 @@ def excerpt(text: str) -> str:
     return text if len(text) <= EXCERPT else text[: EXCERPT - 3] + "..."
 
 
-def quote_problem(quote, source_text) -> str | None:
-    """Why `quote` is not verbatim evidence in `source_text` (None when it is)."""
+def quote_problem(quote, source_text, min_chars: int = MIN_QUOTE) -> str | None:
+    """Why `quote` is not verbatim evidence in `source_text` (None when it is).
+
+    `min_chars` comes from schemas/journal-profile.yml (quote.min_chars) when the profile is checked.
+    """
     q = norm(quote)
     if not q:
         return "the quote is empty"
@@ -43,8 +46,8 @@ def quote_problem(quote, source_text) -> str | None:
     lines = {norm(line) for line in str(source_text).splitlines() if norm(line)}
     if q not in full:
         return f"quote {excerpt(q)!r} is not verbatim in the stored source"
-    if len(q) < MIN_QUOTE and q not in lines:
-        return (f"quote {excerpt(q)!r} is shorter than {MIN_QUOTE} characters "
+    if len(q) < min_chars and q not in lines:
+        return (f"quote {excerpt(q)!r} is shorter than {min_chars} characters "
                 "and is not a whole line of the stored source")
     return None
 
