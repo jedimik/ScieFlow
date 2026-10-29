@@ -16,11 +16,16 @@ which is your working directory.
    `scieflow experiment sweep` / `scieflow experiment run`). The `--direct`
    flag is for development and tests only.
 3. **Never bypass `scieflow experiment` for run bookkeeping.** Do not
-   hand-write run directories, metrics.json, or results.json.
+   hand-write run directories, metrics.json, results.json, manifest.json,
+   results.csv, stats.json, or the generated tables and figures.
 4. **Report honestly.** Failed runs stay in the report. Do not delete or
    rerun-until-green.
 5. **Run outputs live in the run's workspace.** Always pass
    `--experiments-dir workspace/<slug>/experiments` (the command requires it).
+6. **Statistics come from code.** Means, confidence intervals, tests,
+   effect sizes and corrected p-values come from `scieflow experiment
+   stats` (`stats.json`); quote them, never compute or re-round them
+   yourself. Every replicate is one run of the `experiment_runs` budget.
 
 ## Skills (read the relevant one before acting)
 
