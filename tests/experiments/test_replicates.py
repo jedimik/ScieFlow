@@ -97,6 +97,36 @@ def test_seed_in_scenario_refused_with_replicates(tmp_path):
         Campaign.load(campaign_file(tmp_path, data))
 
 
+def test_non_mapping_scenario_with_replicates_is_a_campaign_error(tmp_path):
+    data = {k: v for k, v in with_(replicates=2).items() if k != "parameters"}
+    data["scenarios"] = [1, 2]
+    with pytest.raises(CampaignError, match="scenarios must be a list of mappings"):
+        Campaign.load(campaign_file(tmp_path, data))
+
+
+def test_string_scenario_is_refused_by_shape_not_substring_match(tmp_path):
+    data = {k: v for k, v in with_(replicates=2).items() if k != "parameters"}
+    data["scenarios"] = ["seedling"]
+    with pytest.raises(CampaignError, match="scenarios must be a list of mappings") as e:
+        Campaign.load(campaign_file(tmp_path, data))
+    assert "set by replicates" not in str(e.value)
+
+
+def test_replicates_refusal_names_the_campaign_file(tmp_path):
+    path = campaign_file(tmp_path, with_(replicates=0))
+    with pytest.raises(CampaignError) as e:
+        Campaign.load(path)
+    assert str(path.resolve()) in str(e.value)
+
+
+@pytest.mark.parametrize("parameters", [5, "seedling", ["gain"]])
+def test_non_mapping_parameters_with_replicates_is_a_campaign_error(tmp_path, parameters):
+    data = with_(replicates=2, parameters=parameters)
+    with pytest.raises(CampaignError, match="parameters must be a mapping") as e:
+        Campaign.load(campaign_file(tmp_path, data))
+    assert "set by replicates" not in str(e.value)
+
+
 def write_stage(root, name, accepts_seed_text):
     d = root / name
     d.mkdir(parents=True)

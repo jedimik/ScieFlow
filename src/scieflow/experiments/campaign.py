@@ -129,11 +129,22 @@ class Campaign:
             raise CampaignError(
                 f"{path}: define exactly one of 'parameters' or 'scenarios'"
             )
-        replicates = parse_replicates(data["replicates"]) if "replicates" in data else None
+        replicates = None
+        if "replicates" in data:
+            try:
+                replicates = parse_replicates(data["replicates"])
+            except CampaignError as e:
+                raise CampaignError(f"{path}: {e}") from e
         if replicates is not None:
-            seeded = "seed" in (data.get("parameters") or {}) or any(
-                "seed" in scenario for scenario in (data.get("scenarios") or []))
-            if seeded:
+            parameters = data.get("parameters") or {}
+            scenarios = data.get("scenarios") or []
+            if not isinstance(parameters, dict):
+                raise CampaignError(f"{path}: parameters must be a mapping when replicates is set")
+            if not isinstance(scenarios, list) or not all(
+                    isinstance(scenario, dict) for scenario in scenarios):
+                raise CampaignError(
+                    f"{path}: scenarios must be a list of mappings when replicates is set")
+            if "seed" in parameters or any("seed" in scenario for scenario in scenarios):
                 raise CampaignError(
                     f"{path}: 'seed' is set by replicates; remove it from parameters/scenarios"
                 )
