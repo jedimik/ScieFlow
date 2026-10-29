@@ -149,6 +149,9 @@ def test_ten_metrics_without_metric_option_exits_1(tmp_path):
     (cdir / "campaign.yaml").write_text(yaml.safe_dump(campaign_yaml, sort_keys=False))
     doc = ts.fixed_doc()
     doc["metrics"] = {n: {"higher_is_better": True} for n in names}
+    for config in doc["configs"]:  # a valid document: every campaign metric has a cell
+        for name in names:
+            config["metrics"][name] = copy.deepcopy(config["metrics"]["ssim"])
     ts.install_doc(cdir, doc)
     result = _figures(cdir)
     assert result.exit_code == 1
@@ -265,7 +268,8 @@ def _victim(tmp_path) -> Path:
     return victim
 
 
-@pytest.mark.parametrize("name", ["metrics.png.tmp", "metrics.png", "metrics.svg.tmp", "metrics.json"])
+@pytest.mark.parametrize("name", ["metrics.png.tmp", "metrics.png", "metrics.svg.tmp",
+                                  "metrics.json"])
 def test_symlinked_figure_output_is_refused_and_nothing_is_written(tmp_path, name):
     """Finding 1: a pre-planted .tmp or final symlink in figures/ is never followed."""
     cdir = ts.campaign(tmp_path)

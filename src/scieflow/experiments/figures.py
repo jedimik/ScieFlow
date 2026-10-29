@@ -20,7 +20,13 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 from . import manifest, style as style_mod  # noqa: E402
-from .tables import RenderError, campaign_metrics, load_fresh_stats, output_dir  # noqa: E402
+from .tables import (  # noqa: E402
+    RenderError,
+    campaign_metrics,
+    load_fresh_stats,
+    output_dir,
+    write_outputs,
+)
 
 TOOL = "scieflow experiment figures"
 VERSION = 1
@@ -131,7 +137,8 @@ def _panel(ax, doc: dict, metric: str) -> None:
         cell = c["metrics"][metric]
         x0, mean = xs[c["config_id"]], cell["mean"]
         ci = cell["ci"]
-        if ci is not None:
+        if ci is not None and ci["low"] <= mean <= ci["high"]:
+            # a CI that does not contain the mean (an inconsistent file) draws no bar: no exception
             ax.errorbar([x0], [mean], yerr=[[mean - ci["low"]], [ci["high"] - mean]],
                         fmt="o", color="tab:blue", markersize=4, capsize=2, zorder=3)
         else:
@@ -182,31 +189,29 @@ def write_figures(campaign_dir, metrics=None, width=None, style_file=None) -> li
     out = output_dir(campaign_dir, "figures")
 
     fig = build_figure(doc, selected, width_key, style)
-    written: list[Path] = []
+    outputs: list[tuple[Path, bytes]] = []
     files: dict[str, str] = {}
     try:
         with plt.rc_context(_rc(style)):
             for ext in style["formats"]:
                 buf = io.BytesIO()
                 fig.savefig(buf, format=ext, dpi=style["dpi"], metadata=METADATA[ext])
-                path = out / f"metrics.{ext}"
-                manifest.atomic_write(path, buf.getvalue())
-                files[ext] = manifest.file_sha256(path)
-                written.append(path)
+                data = buf.getvalue()
+                files[ext] = manifest.sha256_bytes(data)
+                outputs.append((out / f"metrics.{ext}", data))
     finally:
         plt.close(fig)
-    for ext in set(METADATA) - set(style["formats"]):  # formats no longer asked for
-        stale = out / f"metrics.{ext}"
-        if stale.is_symlink() or stale.exists():
-            stale.unlink()
 
     sidecar = {
         "id": "metrics", "kind": "figure", "campaign": doc["campaign"], "metrics": selected,
         "width": width_key, "files": files, "source": {"stats_sha256": stats_sha},
         "style": style, "tool": TOOL, "version": VERSION,
     }
-    path = out / "metrics.json"
-    manifest.atomic_write(path, (json.dumps(sidecar, sort_keys=True, indent=1) + "\n")
-                          .encode("utf-8"))
-    written.append(path)
+    outputs.append((out / "metrics.json",
+                    (json.dumps(sidecar, sort_keys=True, indent=1) + "\n").encode("utf-8")))
+    written = write_outputs(outputs)
+    for ext in set(METADATA) - set(style["formats"]):  # formats no longer asked for
+        stale = out / f"metrics.{ext}"
+        if stale.is_symlink() or stale.exists():
+            stale.unlink()
     return written
