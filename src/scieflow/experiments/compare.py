@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import yaml
@@ -103,7 +104,7 @@ def compare_campaign(campaign_dir: str | Path, include_direct: bool = False) -> 
             results["runs"], ranked, metric.name, metric.higher_is_better,
             ranked_ids, excluded_ids)
         comparison["best_config"] = next(
-            (c["config_id"] for c in comparison["configs"] if c["n"]), None)
+            (c["config_id"] for c in comparison["configs"] if c["mean"] is not None), None)
     (campaign_dir / "comparison.json").write_text(json.dumps(comparison, indent=2))
     return comparison
 
@@ -113,7 +114,8 @@ def _config_ranking(runs: list[dict], ranked: list[dict], metric: str,
     """Replicate campaigns: one entry per configuration, ordered by mean of the rank metric.
 
     A configuration with no ranked completed run keeps its entry (n 0, mean null) and sorts
-    last, so its failed replicates stay visible in `n_failed`.
+    last, so its failed replicates stay visible in `n_failed`. A mean that is not finite
+    (inf, -inf or nan among its runs) is written as null, sorts last and is never best.
     """
     values = {r["run_id"]: r["metrics"][metric] for r in ranked}
     by_config: dict[str, list[dict]] = {}
@@ -123,6 +125,8 @@ def _config_ranking(runs: list[dict], ranked: list[dict], metric: str,
     for config_id, members in by_config.items():
         got = [m["run_id"] for m in members if m["run_id"] in values]
         mean = sum(values[rid] for rid in got) / len(got) if got else None
+        if mean is not None and not math.isfinite(mean):
+            mean = None
         configs.append({
             "config_id": config_id,
             "params": members[0]["params"],
