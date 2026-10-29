@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 import yaml
 from click.testing import CliRunner
 
@@ -99,3 +100,26 @@ def test_validate_json_lists_problems(synth, profile_data):
 
 def test_validate_unknown_profile_exits_1(synth):
     assert _run("journal", "validate", "no-such-journal").exit_code == 1
+
+
+# M-F t2 fix (review r1, finding 2): show refuses a malformed profile with a rule line, never a traceback.
+@pytest.mark.parametrize("value", [["a"], "a", True, {"a": 1}], ids=["list", "text", "bool", "mapping"])
+@pytest.mark.parametrize("block", ["identity", "scope", "references", "templates", "submission",
+                                   "declarations", "reporting_guidelines", "review", "provenance", "article_types"])
+@pytest.mark.parametrize("mode", [[], ["--json"], ["--prompt"], ["--article-type", "research-article"]],
+                         ids=["markdown", "json", "prompt", "article-type"])
+def test_show_refuses_a_malformed_profile_without_a_traceback(synth, profile_data, block, value, mode):
+    data = profile_data()
+    data[block] = value
+    synth.write_profile(data)
+    result = _run("journal", "show", SLUG, *mode)
+    assert result.exit_code == 1, result.output
+    assert "journal validate" in result.output
+
+
+def test_show_article_type_refuses_article_types_that_are_not_a_list(synth, profile_data):
+    data = profile_data()
+    data["article_types"] = 5
+    synth.write_profile(data)
+    result = _run("journal", "show", SLUG, "--article-type", "research-article", "--json")
+    assert result.exit_code == 1

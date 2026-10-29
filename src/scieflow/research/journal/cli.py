@@ -74,6 +74,14 @@ def _problems(project: Project, data: dict, today: dt.date | None = None) -> lis
         return [profile.Problem("schema", "", str(exc))]
 
 
+def _refuse_invalid(project: Project, data: dict, target: str) -> None:
+    """`show` prints only a profile that validates; a malformed one is refused, never rendered (M-F 5.2)."""
+    errors = [p for p in _problems(project, data) if p.level == "error"]
+    if errors:
+        _fail(f"{target}: not a valid profile ({len(errors)} error(s)); "
+              f"run `scieflow journal validate {target}` for the rules")
+
+
 @click.group()
 def journal():
     """Target journals: show, list and validate journal profiles."""
@@ -85,8 +93,10 @@ def journal():
 @click.option("--json", "as_json", is_flag=True, help="Print the profile as JSON.")
 @click.option("--prompt", is_flag=True, help="Print the profile as a labelled data block for a prompt.")
 def show(target, article_type, as_json, prompt):
-    """Show a profile (TARGET: a slug or a path to a .yml profile)."""
-    data, slug = _load(Project.discover(), target)
+    """Show a profile (TARGET: a slug or a path to a .yml profile). Refuses a profile that does not validate."""
+    project = Project.discover()
+    data, slug = _load(project, target)
+    _refuse_invalid(project, data, target)
     out = data
     if article_type is not None:
         matches = [a for a in data.get("article_types") or [] if isinstance(a, dict) and a.get("id") == article_type]
