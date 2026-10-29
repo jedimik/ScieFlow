@@ -131,6 +131,20 @@ def install(cdir, edit=None, **kwargs) -> dict:
     return install_doc(cdir, doc)
 
 
+def write_raw(cdir, doc: dict) -> dict:
+    """stats.json of doc with the campaign's source hashes; NaN and Infinity are written as-is.
+
+    For malformed-input tests only: install_doc refuses non-finite numbers, this one does not.
+    """
+    cdir = Path(cdir)
+    doc["source"] = {
+        "results_sha256": manifest.file_sha256(cdir / "results.json"),
+        "campaign_sha256": manifest.file_sha256(cdir / "campaign.yaml"),
+    }
+    (cdir / "stats.json").write_text(json.dumps(doc, sort_keys=True, indent=1))
+    return doc
+
+
 def campaign(root, *, name="stat-camp", metrics=("ssim",), mode="direct", reference=True,
              replicated=True, analysis=None):
     """A synthetic sweep folder (6 replicates × 3 configurations) with the given metrics."""

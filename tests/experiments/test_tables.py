@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from scieflow.core import events
@@ -225,3 +226,79 @@ def test_tables_inside_a_run_emit_a_value_free_note(tmp_path):
     assert set(data) == {"kind", "campaign", "sha256"}
     assert data["kind"] == "tables" and data["campaign"] == "stat-camp"
     assert data["sha256"] == manifest.file_sha256(cdir / "tables" / "summary.md")
+
+
+def _victim(tmp_path) -> Path:
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me\n")
+    return victim
+
+
+@pytest.mark.parametrize("name", ["summary.md.tmp", "summary.md", "summary.json.tmp", "summary.tex"])
+def test_symlinked_output_is_refused_and_nothing_is_written(tmp_path, name):
+    """Finding 1: a pre-planted .tmp or final symlink must not be followed (plan 5.12)."""
+    cdir = ts.campaign(tmp_path)
+    ts.install(cdir)
+    victim = _victim(tmp_path)
+    out = cdir / "tables"
+    out.mkdir()
+    (out / name).symlink_to(victim)
+    result = _tables(cdir)
+    assert result.exit_code == 1, result.output
+    assert "symlink" in result.output
+    assert victim.read_text() == "keep me\n"
+    assert [p.name for p in out.iterdir()] == [name]
+
+
+def _no_group(d):
+    del d["configs"]
+
+
+def _nan_mean(d):
+    d["configs"][0]["metrics"]["ssim"]["mean"] = float("nan")
+
+
+def _inf_p(d):
+    d["tests"][0]["p"] = float("inf")
+
+
+def _ci_inverted(d):
+    ci = d["configs"][0]["metrics"]["ssim"]["ci"]
+    ci["low"], ci["high"] = ci["high"], ci["low"]
+
+
+def _cell_missing(d):
+    del d["configs"][1]["metrics"]["ssim"]
+
+
+def _test_without_family(d):
+    del d["tests"][0]["family"]
+
+
+def _families_not_a_list(d):
+    d["families"] = "campaign"
+
+
+MALFORMED = [
+    (_no_group, "stats.json: missing key 'configs'"),
+    (_nan_mean, "non-finite"),
+    (_inf_p, "non-finite"),
+    (_ci_inverted, "ci: low <= high"),
+    (_cell_missing, "configs[1].metrics.ssim"),
+    (_test_without_family, "tests[0]"),
+    (_families_not_a_list, "families"),
+]
+
+
+@pytest.mark.parametrize("edit, rule", MALFORMED, ids=lambda v: getattr(v, "__name__", v))
+def test_malformed_stats_json_exits_1_naming_the_rule(tmp_path, edit, rule):
+    """Finding 2 and 3: a hash-fresh but invalid stats.json is a refusal, not a traceback."""
+    cdir = ts.campaign(tmp_path)
+    doc = ts.fixed_doc()
+    edit(doc)
+    ts.write_raw(cdir, doc)
+    result = _tables(cdir)
+    assert result.exit_code == 1, result.output
+    assert "stats.json" in result.output and rule in result.output
+    assert isinstance(result.exception, SystemExit), repr(result.exception)
+    assert not (cdir / "tables").exists()

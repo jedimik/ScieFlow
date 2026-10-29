@@ -7,6 +7,8 @@ Synthetic data only.
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 from scieflow.experiments.report import generate_report
 
 _SUPPORT = Path(__file__).with_name("tables_support.py")
@@ -82,3 +84,25 @@ def test_replicated_report_has_a_configuration_summary_before_the_run_rows(tmp_p
     first_run_row = text.index("| `000_sigma-0.5_r0`")
     assert summary < first_run_row
     assert "| 000_sigma-0.5 |" in text[summary:first_run_row]
+
+
+def _drop_configs(doc):
+    del doc["configs"]
+
+
+def _nan_in_cell(doc):
+    doc["configs"][0]["metrics"]["ssim"]["mean"] = float("nan")
+
+
+@pytest.mark.parametrize("edit", [_drop_configs, _nan_in_cell],
+                         ids=lambda f: f.__name__)
+def test_malformed_stats_add_only_the_one_line_and_the_report_is_written(tmp_path, edit):
+    """Finding 2: a hash-fresh but invalid stats.json falls back to the one-line note (plan 5.12)."""
+    cdir = ts.campaign(tmp_path, mode="direct")
+    doc = ts.fixed_doc()
+    edit(doc)
+    ts.write_raw(cdir, doc)
+    text = _report(cdir)
+    assert NOTE in text
+    assert "## Statistics" not in text
+    assert (cdir / "report.md").is_file()

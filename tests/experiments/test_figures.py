@@ -1,14 +1,17 @@
 """M-D2 t5: figures render only from a fresh stats.json, deterministically (plan 5.7). Synthetic only."""
 
+import copy
 import importlib.util
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 from click.testing import CliRunner
 
@@ -254,3 +257,123 @@ def test_figures_inside_a_run_emit_a_value_free_note(tmp_path):
     assert set(data) == {"kind", "campaign", "sha256"}
     assert data["kind"] == "figures"
     assert data["sha256"] == manifest.file_sha256(cdir / "figures" / "metrics.json")
+
+
+def _victim(tmp_path) -> Path:
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me\n")
+    return victim
+
+
+@pytest.mark.parametrize("name", ["metrics.png.tmp", "metrics.png", "metrics.svg.tmp", "metrics.json"])
+def test_symlinked_figure_output_is_refused_and_nothing_is_written(tmp_path, name):
+    """Finding 1: a pre-planted .tmp or final symlink in figures/ is never followed."""
+    cdir = ts.campaign(tmp_path)
+    ts.install(cdir)
+    victim = _victim(tmp_path)
+    out = cdir / "figures"
+    out.mkdir()
+    (out / name).symlink_to(victim)
+    result = _figures(cdir)
+    assert result.exit_code == 1, result.output
+    assert "symlink" in result.output
+    assert victim.read_text() == "keep me\n"
+    assert [p.name for p in out.iterdir()] == [name]
+
+
+def test_inverted_ci_is_refused_with_the_rule(tmp_path):
+    """Finding 2/3: low <= high is a rule of the stats.json loader; figures refuse, naming it."""
+    cdir = ts.campaign(tmp_path)
+
+    def invert(doc):
+        ci = doc["configs"][0]["metrics"]["ssim"]["ci"]
+        ci["low"], ci["high"] = ci["high"], ci["low"]
+
+    ts.write_raw(cdir, _edited(ts.fixed_doc(), invert))
+    result = _figures(cdir)
+    assert result.exit_code == 1, result.output
+    assert "ci: low <= high" in result.output
+    assert isinstance(result.exception, SystemExit)
+    assert not (cdir / "figures").exists()
+
+
+def test_nan_in_stats_json_is_refused_and_no_figure_is_written(tmp_path):
+    cdir = ts.campaign(tmp_path)
+    doc = _edited(ts.fixed_doc(), lambda d: d["configs"][0]["metrics"]["ssim"].update(
+        mean=float("nan")))
+    ts.write_raw(cdir, doc)
+    result = _figures(cdir)
+    assert result.exit_code == 1, result.output
+    assert "non-finite" in result.output
+    assert not (cdir / "figures").exists()
+
+
+def test_ci_that_excludes_the_mean_draws_no_error_bar_and_no_exception(tmp_path):
+    """Finding 3: a CI not containing the mean must not make errorbar raise (no bar is drawn)."""
+    cdir = ts.campaign(tmp_path)
+    ts.install(cdir, lambda d: d["configs"][1]["metrics"]["ssim"].update(
+        ci={"low": 0.1, "high": 0.2, "level": 0.95, "method": "BCa", "resamples": 9999,
+            "seed": 0}))
+    result = _figures(cdir)
+    assert result.exit_code == 0, result.output
+    assert (cdir / "figures" / "metrics.png").is_file()
+
+
+def test_all_no_values_panel_is_byte_deterministic_across_processes(tmp_path):
+    """Finding 4(a): plan t5 case 3 (review F3) — the n = 0 panel is deterministic too."""
+    cdir = ts.campaign(tmp_path, reference=False)
+    ts.install(cdir, empty=True)
+    style = _style_file(tmp_path)
+    digests = []
+    for seed in (5, 6):
+        shutil.rmtree(cdir / "figures", ignore_errors=True)
+        proc = _subprocess_figures(cdir, seed, style)
+        assert proc.returncode == 0, proc.stderr
+        names = sorted(p.name for p in (cdir / "figures").iterdir())
+        digests.append({n: manifest.file_sha256(cdir / "figures" / n) for n in names})
+    assert digests[0] == digests[1]
+    assert len(digests[0]) == 4
+
+
+def _extended(count: int):
+    """A campaign and a stats.json with count metrics (ssim, psnr and copies of ssim)."""
+    names = ["ssim", "psnr"] + [f"extra{i}" for i in range(count - 2)]
+    return names
+
+
+@pytest.mark.parametrize("count", [2, 4, 5])
+def test_svg_has_one_axes_group_per_selected_panel(tmp_path, count):
+    """Finding 4(b): panel count read back from the SVG axes_ groups, incl. more than 3 metrics."""
+    names = _extended(count)
+    cdir = ts.campaign(tmp_path, metrics=("ssim", "psnr"))
+    campaign_yaml = yaml.safe_load((cdir / "campaign.yaml").read_text())
+    campaign_yaml["metrics"] = names
+    (cdir / "campaign.yaml").write_text(yaml.safe_dump(campaign_yaml, sort_keys=False))
+    doc = ts.fixed_doc(metrics=("ssim", "psnr"))
+    for name in names[2:]:
+        doc["metrics"][name] = {"higher_is_better": True}
+        for config in doc["configs"]:
+            config["metrics"][name] = copy.deepcopy(config["metrics"]["ssim"])
+    ts.install_doc(cdir, doc)
+    style = _style_file(tmp_path, formats=("svg",))
+    result = _figures(cdir, "--style-file", str(style))
+    assert result.exit_code == 0, result.output
+    svg = (cdir / "figures" / "metrics.svg").read_text()
+    assert len(re.findall(r'id="axes_\d+"', svg)) == count
+    sidecar = json.loads((cdir / "figures" / "metrics.json").read_text())
+    assert sidecar["metrics"] == names
+
+
+def test_metric_selection_is_written_in_campaign_order(tmp_path):
+    """Finding 4(b): selection order does not reorder the panels; the campaign order wins (5.7)."""
+    cdir = ts.campaign(tmp_path, metrics=("ssim", "psnr"))
+    ts.install(cdir, metrics=("ssim", "psnr"))
+    result = _figures(cdir, "--metric", "psnr", "--metric", "ssim")
+    assert result.exit_code == 0, result.output
+    sidecar = json.loads((cdir / "figures" / "metrics.json").read_text())
+    assert sidecar["metrics"] == ["ssim", "psnr"]
+
+
+def _edited(doc, edit):
+    edit(doc)
+    return doc
