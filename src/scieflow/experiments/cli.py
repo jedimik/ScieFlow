@@ -21,6 +21,9 @@ from .analysis import (
 )
 from .campaign import Campaign, CampaignError, RunSpec, check_replicates
 from .compare import compare_campaign
+from .crosscompare import CrossCompareError
+from .crosscompare import compare_campaigns as compare_campaign_set
+from .crosscompare import write_comparison
 from .envbuild import build_sif
 from .figures import write_figures
 from .power import FAMILIES as POWER_FAMILIES
@@ -397,6 +400,46 @@ def figures_cmd(metrics, width, style_file, campaign_dir):
 def report(campaign_dir, include_direct):
     """Generate report.md + QC plots for a campaign."""
     click.echo(str(generate_report(campaign_dir, include_direct=include_direct)))
+
+
+def _print_comparison(doc: dict) -> None:
+    for c in doc["campaigns"]:
+        click.echo(f"campaign: {c['campaign']}  ({c['dir']})  design={c['design_status']}")
+        for metric, row in c["metrics"].items():
+            if row["best"] is None:
+                click.echo(f"  {metric}  no values ({row['reason']})")
+                continue
+            best = row["best"]
+            direction = "higher" if row["higher_is_better"] else "lower"
+            ci = ("n/a" if best["ci"] is None else
+                  f"[{best['ci']['low']:.4f}, {best['ci']['high']:.4f}]")
+            click.echo(f"  {metric}  best {best['config_id']}  mean={best['mean']:.4f} "
+                       f"ci={ci} n={best['n']}  ({direction} is better)")
+    click.echo(f"note: {doc['note']}")
+
+
+@experiment.command("compare-campaigns")
+@click.option("--metric", "metrics", multiple=True,
+              help="Compare this metric only (repeatable; must be shared by every campaign).")
+@click.option("--json", "as_json", is_flag=True, help="Print the comparison document.")
+@click.option("--out", type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help="Write the comparison document here (atomically).")
+@click.option("--force", is_flag=True,
+              help="Replace an existing --out file. A symlink is never written.")
+@click.argument("campaign_dirs", nargs=-1, required=True,
+                type=click.Path(exists=True, file_okay=False, path_type=Path))
+def compare_campaigns_cmd(metrics, as_json, out, force, campaign_dirs):
+    """Best configuration per campaign and metric, from each fresh stats.json (plan 5.8)."""
+    try:
+        doc = compare_campaign_set(campaign_dirs, metrics=list(metrics) or None)
+        if out is not None:
+            write_comparison(out, doc, force)
+    except CrossCompareError as e:
+        raise click.ClickException(str(e)) from e
+    if as_json:
+        click.echo(json.dumps(doc, sort_keys=True, indent=1, allow_nan=False))
+    else:
+        _print_comparison(doc)
 
 
 def _write_power_out(path: Path, text: str, force: bool) -> None:
