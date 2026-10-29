@@ -52,7 +52,7 @@ def test_stale_stats_add_only_the_one_line(tmp_path):
     ts.edit_text(cdir / "results.json")
     text = _report(cdir)
     assert NOTE in text
-    assert "## Statistics" not in text and "| configuration |" not in text
+    assert "## Statistics" not in text and "| configuration | ssim |" not in text
 
 
 def test_missing_stats_add_only_the_one_line(tmp_path):

@@ -1,0 +1,12 @@
+# Figure sizing contract of the experiments module (M-D2 plan 5.7).
+#
+# src/scieflow/experiments/style.py holds the same constants; tests/experiments/test_style.py pins
+# them to this file. A `scieflow experiment figures --style-file PATH` YAML may carry a top-level
+# `figures:` mapping that overrides these keys. Unknown keys, values outside min..max (or of the
+# wrong type), and a symlinked or unreadable file are refused, naming the key.
+figures:
+  single_column_mm: {default: 89, min: 30, max: 200}
+  double_column_mm: {default: 183, min: 60, max: 300}
+  font_pt: {default: 8, min: 5, max: 14}
+  dpi: {default: 300, min: 72, max: 1200}
+  formats: {default: [png, svg], allowed: [png, svg, pdf]}

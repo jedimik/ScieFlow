@@ -22,6 +22,7 @@ from .analysis import (
 from .campaign import Campaign, CampaignError, RunSpec, check_replicates
 from .compare import compare_campaign
 from .envbuild import build_sif
+from .figures import write_figures
 from .power import FAMILIES as POWER_FAMILIES
 from .power import PowerError, PowerUsageError, render_json, render_text
 from .power import solve as solve_power
@@ -30,7 +31,9 @@ from .runner import execute_run, recompute_metrics
 from .scaffold import new_pipeline, new_stage
 from .stage import Stage, find_stage
 from .stats import StatsUnavailable
+from .style import StyleError
 from .sweep import run_sweep
+from .tables import RenderError, write_tables
 
 
 def _default_pipelines_dir() -> Path:
@@ -347,6 +350,43 @@ def stats_cmd(campaign_dir, include_direct, as_json):
         _print_stats(doc)
     _analysis_note(Path(campaign_dir), "stats", tests=len(doc["tests"]),
                    sha256=manifest.file_sha256(path))
+
+
+@experiment.command("tables")
+@click.argument("campaign_dir",
+                type=click.Path(exists=True, file_okay=False, path_type=Path))
+def tables_cmd(campaign_dir):
+    """Write tables/ (summary, tests; md and tex) from a fresh stats.json (M-D2 plan 5.7)."""
+    try:
+        written = write_tables(campaign_dir)
+    except RenderError as e:
+        raise click.ClickException(str(e)) from e
+    for path in written:
+        click.echo(str(path))
+    _analysis_note(Path(campaign_dir), "tables",
+                   sha256=manifest.file_sha256(Path(campaign_dir) / "tables" / "summary.md"))
+
+
+@experiment.command("figures")
+@click.option("--metric", "metrics", multiple=True,
+              help="A metric to plot (repeatable); default every campaign metric.")
+@click.option("--width", type=click.Choice(["single", "double"]), default=None,
+              help="Column width; default single for at most two panels, else double.")
+@click.option("--style-file", type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help="YAML whose figures: block overrides the sizing contract.")
+@click.argument("campaign_dir",
+                type=click.Path(exists=True, file_okay=False, path_type=Path))
+def figures_cmd(metrics, width, style_file, campaign_dir):
+    """Write figures/metrics.<ext> and its sidecar from a fresh stats.json (M-D2 plan 5.7)."""
+    try:
+        written = write_figures(campaign_dir, metrics=list(metrics) or None, width=width,
+                                style_file=style_file)
+    except (RenderError, StyleError) as e:
+        raise click.ClickException(str(e)) from e
+    for path in written:
+        click.echo(str(path))
+    _analysis_note(Path(campaign_dir), "figures",
+                   sha256=manifest.file_sha256(written[-1]))
 
 
 @experiment.command()
