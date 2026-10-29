@@ -37,6 +37,14 @@ def _config(doc, config_id):
     return next(c for c in doc["configs"] if c["config_id"] == config_id)
 
 
+def _assert_n_arithmetic(doc):
+    """Plan 5.4: n = n_runs - n_failed - n_direct_excluded - n_missing - n_nonfinite, per cell."""
+    for row in doc["configs"]:
+        for cell in row["metrics"].values():
+            assert cell["n"] == (row["n_runs"] - row["n_failed"] - row["n_direct_excluded"]
+                                 - cell["n_missing"] - cell["n_nonfinite"])
+
+
 # --- validation -------------------------------------------------------------------------------
 
 
@@ -139,6 +147,8 @@ def test_failed_replicate_is_counted_per_configuration_not_dropped(tmp_path):
     cell = _config(doc, "000_sigma-0.5")["metrics"]["ssim"]
     assert cell["n"] == 5
     assert _config(doc, "000_sigma-0.5")["n_failed"] == 1
+    assert _config(doc, "000_sigma-0.5")["n_runs"] == 6
+    _assert_n_arithmetic(doc)
 
 
 def test_direct_runs_are_excluded_unless_included(tmp_path):
@@ -147,13 +157,19 @@ def test_direct_runs_are_excluded_unless_included(tmp_path):
     doc = analysis.analyse_campaign(cdir)
     for config in support.CONFIGS:
         entry = _config(doc, config)
+        assert entry["n_runs"] == 6
         assert entry["metrics"]["ssim"]["n"] == 0
         assert entry["n_direct_excluded"] == 6
+    _assert_n_arithmetic(doc)
     assert all(t["computed"] is False and t["reason"] == "n<2" for t in doc["tests"])
     assert doc["settings"]["include_direct"] is False
 
     included = analysis.analyse_campaign(cdir, include_direct=True)
+    for config in support.CONFIGS:
+        entry = _config(included, config)
+        assert entry["n_runs"] == 6 and entry["n_direct_excluded"] == 0
     assert _config(included, "000_sigma-0.5")["metrics"]["ssim"]["n"] == 6
+    _assert_n_arithmetic(included)
 
 
 def test_campaign_without_reference_has_missing_values_not_a_crash(tmp_path):
@@ -187,16 +203,22 @@ def test_missing_and_non_finite_values_are_excluded_and_counted(tmp_path):
     assert paired["n"] == 5 and paired["n_unpaired"] == 1  # seed 2 is unpaired on the baseline side
     rules = {w["rule"] for w in doc["warnings"]}
     assert {"values-missing", "values-nonfinite"} <= rules
+    _assert_n_arithmetic(doc)
     text = json.dumps(doc, allow_nan=False, sort_keys=True)  # strict dump succeeds
     assert "Infinity" not in text and "NaN" not in text
 
 
-def test_correction_none_leaves_p_adjusted_and_reject_null(tmp_path):
+def test_correction_none_keeps_p_and_decides_reject_at_alpha(tmp_path):
     cdir = support.write_campaign(tmp_path, mode="direct",
                                   analysis={"baseline": support.BASELINE, "test": "welch-t-test",
                                             "correction": "none"})
     doc = analysis.analyse_campaign(cdir, include_direct=True)
-    assert all(t["p_adjusted"] is None and t["reject"] is None for t in doc["tests"])
+    computed = [t for t in doc["tests"] if t["computed"]]
+    assert len(computed) == 2
+    for t in computed:
+        assert t["p_adjusted"] == t["p"]
+        assert t["reject"] is (t["p"] <= 0.05)
+    assert doc["families"] == [{"name": "campaign", "correction": "none", "alpha": 0.05, "size": 2}]
 
 
 def test_unsupported_test_is_not_computed_with_its_reason(tmp_path):
@@ -296,6 +318,34 @@ def test_missing_results_json_names_the_file(tmp_path):
     (cdir / "campaign.yaml").write_text("name: empty\n")
     with pytest.raises(analysis.AnalysisError, match="results.json"):
         analysis.analyse_campaign(cdir)
+
+
+@pytest.mark.parametrize("label, edit", support.MALFORMED, ids=[m[0] for m in support.MALFORMED])
+def test_malformed_results_json_is_refused_naming_the_file(tmp_path, label, edit):
+    cdir = support.write_campaign(tmp_path, mode="direct")
+    support.corrupt_results(cdir, edit)
+    with pytest.raises(analysis.AnalysisError, match="results.json"):
+        analysis.analyse_campaign(cdir, include_direct=True)
+
+
+def test_metric_too_large_for_a_float_is_non_finite_not_a_crash(tmp_path):
+    cdir = support.write_campaign(tmp_path, mode="direct")
+    support.edit_results(cdir, lambda doc: support.run_of(doc, "000_sigma-0.5_r0")["metrics"]
+                         .update(ssim=10**400))
+    doc = analysis.analyse_campaign(cdir, include_direct=True)
+    cell = _config(doc, "000_sigma-0.5")["metrics"]["ssim"]
+    assert cell["n"] == 5 and cell["n_nonfinite"] == 1
+    _assert_n_arithmetic(doc)
+    json.dumps(doc, allow_nan=False)
+
+
+def test_campaign_metrics_must_be_a_list_naming_the_key(tmp_path):
+    cdir = support.write_campaign(tmp_path, mode="direct")
+    campaign = yaml.safe_load((cdir / "campaign.yaml").read_text())
+    campaign["metrics"] = "ssim"
+    (cdir / "campaign.yaml").write_text(yaml.safe_dump(campaign))
+    with pytest.raises(analysis.AnalysisError, match="campaign.yaml: 'metrics' must be a list"):
+        analysis.analyse_campaign(cdir, include_direct=True)
 
 
 def test_stats_json_and_results_csv_are_byte_identical_on_rerun(tmp_path):

@@ -83,3 +83,35 @@ def edit_results(campaign_dir, edit) -> None:
 
 def run_of(doc, run_id):
     return next(r for r in doc["runs"] if r["run_id"] == run_id)
+
+
+def corrupt_results(campaign_dir, edit) -> None:
+    """Write edit(results document) back as results.json; edit may return a new document."""
+    path = Path(campaign_dir) / "results.json"
+    path.write_text(json.dumps(edit(json.loads(path.read_text())), indent=2))
+
+
+def _set_run(key, value):
+    def edit(doc):
+        doc["runs"][0][key] = value
+        return doc
+    return edit
+
+
+def _drop_run_key(key):
+    def edit(doc):
+        del doc["runs"][0][key]
+        return doc
+    return edit
+
+
+# Malformed results.json shapes: each must be refused with results.json named and no traceback.
+MALFORMED = [
+    ("top-level list", lambda doc: [doc]),
+    ("run entry not a mapping", lambda doc: {**doc, "runs": ["000_sigma-0.5_r0"]}),
+    ("run without status", _drop_run_key("status")),
+    ("metrics not a mapping", _set_run("metrics", [0.7])),
+    ("params not a mapping", _set_run("params", ["sigma"])),
+    ("run_id not a string", _set_run("run_id", 7)),
+    ("seed not an integer", _set_run("seed", [0])),
+]
