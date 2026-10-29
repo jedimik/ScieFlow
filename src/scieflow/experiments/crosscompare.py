@@ -21,11 +21,22 @@ class CrossCompareError(ValueError):
     pass
 
 
-def _load(campaign_dir: Path) -> dict:
+def _load(campaign_dir: Path) -> tuple[dict, list[str]]:
+    """The validated stats.json and the campaign's metric names (the only metrics validated)."""
     try:
-        return tables.load_fresh_stats(campaign_dir)
+        doc = tables.load_fresh_stats(campaign_dir)
+        names = tables.campaign_metrics(campaign_dir)
     except tables.RenderError as e:
         raise CrossCompareError(f"{campaign_dir}: {e}") from e
+    if not all(isinstance(m, str) for m in names):
+        raise CrossCompareError(f"{campaign_dir}: campaign.yaml: metrics: names are required")
+    # Keys this module indexes that tables.load_fresh_stats does not check (plan 5.12, fail closed).
+    if not isinstance(doc["campaign"], str):
+        raise CrossCompareError(f"{campaign_dir}: stats.json: campaign: a string is required")
+    if not isinstance(doc["settings"].get("include_direct"), bool):
+        raise CrossCompareError(f"{campaign_dir}: stats.json: settings.include_direct: "
+                                f"a boolean is required")
+    return doc, names
 
 
 def _best(doc: dict, metric: str) -> dict:
@@ -49,11 +60,14 @@ def compare_campaigns(campaign_dirs, metrics=None) -> dict:
     dirs = [Path(d) for d in campaign_dirs]
     if len(dirs) < 2:
         raise CrossCompareError("compare-campaigns needs at least two campaign directories")
-    loaded = [(d, _load(d)) for d in dirs]
+    if len({d.resolve() for d in dirs}) < 2:
+        raise CrossCompareError(
+            "compare-campaigns needs at least two distinct campaign directories")
+    loaded = [(d, *_load(d)) for d in dirs]
 
-    shared = set(loaded[0][1]["metrics"])
-    for _, doc in loaded[1:]:
-        shared &= set(doc["metrics"])
+    shared = set(loaded[0][2])
+    for _, _, names in loaded[1:]:
+        shared &= set(names)
     if metrics:
         unshared = [m for m in metrics if m not in shared]
         if unshared:
@@ -66,7 +80,7 @@ def compare_campaigns(campaign_dirs, metrics=None) -> dict:
         chosen = sorted(shared)
 
     campaigns = []
-    for d, doc in loaded:
+    for d, doc, _ in loaded:
         per_metric = {}
         for m in chosen:
             per_metric[m] = {"higher_is_better": doc["metrics"][m]["higher_is_better"],
@@ -91,6 +105,10 @@ def write_comparison(path, doc: dict, force: bool) -> None:
         raise CrossCompareError(f"{path} exists; pass --force to replace it")
     data = (json.dumps(doc, sort_keys=True, indent=1, allow_nan=False) + "\n").encode("utf-8")
     try:
-        manifest.atomic_write(path, data)
+        # The hardened path of tables.write_outputs: refuses a symlink or non-file at the output and
+        # at its .tmp sibling, and creates the .tmp with O_EXCL (review r1 finding 1).
+        tables.write_outputs([(path, data)])
+    except tables.RenderError as e:
+        raise CrossCompareError(str(e)) from e
     except OSError as e:
         raise CrossCompareError(f"{path}: cannot write ({e.strerror})") from e
