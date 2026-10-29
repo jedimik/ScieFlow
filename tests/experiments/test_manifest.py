@@ -219,6 +219,24 @@ def test_packages_capture_failure_never_fails_a_sweep(project, monkeypatch):
     assert read_manifest(camp / "runs" / results["runs"][0]["run_id"])["packages"]["status"] == "not-captured"
 
 
+@pytest.mark.parametrize("failure", [
+    subprocess.TimeoutExpired(cmd="apptainer", timeout=120),
+    FileNotFoundError("apptainer"),
+])
+def test_package_timeout_or_missing_binary_never_fails_a_sweep(project, monkeypatch, failure):
+    S.make_sif(project)
+    fake = S.FakeApptainer(pip_exc=failure)
+    S.patch_subprocess(monkeypatch, runner, fake.run)
+    S.patch_subprocess(monkeypatch, manifest, fake.run)
+    camp = sweep_dir(project, mode="apptainer")
+    results = json.loads((camp / "results.json").read_text())
+    assert [e["status"] for e in results["runs"]] == ["completed", "completed"]
+    for entry in results["runs"]:
+        packages = read_manifest(camp / "runs" / entry["run_id"])["packages"]
+        assert packages["status"] == "not-captured"
+        assert packages["reason"]
+
+
 def test_manifest_has_no_host_user_or_environment_details(project):
     S.init_repo(project)
     camp = sweep_dir(project)

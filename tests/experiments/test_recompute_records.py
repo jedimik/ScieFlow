@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from scieflow.core import events
@@ -54,6 +55,7 @@ def test_recompute_updates_metrics_manifest_results_and_csv_together(project, mo
     run_dir = camp / "runs" / run
     other = "000_gain-0.5"
     results_before = json.loads((camp / "results.json").read_text())
+    results_bytes_before = (camp / "results.json").read_bytes()
     other_entry_before = next(e for e in results_before["runs"] if e["run_id"] == other)
     old_metrics_sha = sha((run_dir / "metrics.json").read_bytes())
     old_manifest = json.loads((run_dir / "manifest.json").read_text())
@@ -77,6 +79,7 @@ def test_recompute_updates_metrics_manifest_results_and_csv_together(project, mo
     assert m["code"] == old_manifest["code"] and m["inputs"] == old_manifest["inputs"]
 
     after = json.loads((camp / "results.json").read_text())
+    assert sha((camp / "results.json").read_bytes()) != sha(results_bytes_before)  # stats staleness key moves
     entry = next(e for e in after["runs"] if e["run_id"] == run)
     assert entry["metrics"] == NEW
     assert entry["manifest_sha256"] == sha(manifest_bytes)
@@ -156,3 +159,27 @@ def test_recompute_inside_a_run_emits_a_value_free_note(project, monkeypatch):
     assert data["campaign"] == "gain-sweep" and data["run_id"] == "001_gain-1.0"
     assert data["sha256"] == sha((run_dir / "metrics.json").read_bytes())
     assert "ssim" not in data and 0.123 not in data.values()
+
+
+@pytest.mark.parametrize("corrupt", ["manifest-json", "history-not-a-list", "results-runs-not-entries"])
+def test_corrupt_record_refuses_the_recompute_before_any_file_changes(project, monkeypatch, corrupt):
+    camp = sweep(project)
+    run_dir = camp / "runs" / "001_gain-1.0"
+    manifest_path = run_dir / "manifest.json"
+    if corrupt == "manifest-json":
+        manifest_path.write_text("{not json")
+    elif corrupt == "history-not-a-list":
+        doc = json.loads(manifest_path.read_text())
+        doc["metrics_history"] = "x"
+        manifest_path.write_text(json.dumps(doc))
+    else:
+        doc = json.loads((camp / "results.json").read_text())
+        doc["runs"] = ["x"]
+        (camp / "results.json").write_text(json.dumps(doc))
+    watched = [run_dir / "metrics.json", manifest_path, camp / "results.json"]
+    before = {p: p.read_bytes() for p in watched}
+    fake_metrics(monkeypatch)
+    result = metrics_cli(run_dir)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)  # a clean refusal, not a traceback
+    assert {p: p.read_bytes() for p in watched} == before

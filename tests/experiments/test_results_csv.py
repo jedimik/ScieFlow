@@ -89,3 +89,18 @@ def test_sweep_writes_results_csv(project):
     assert {r["metric"] for r in rows} == {"ssim", "mse"}
     assert csv_path.read_text().splitlines()[0].startswith("campaign,config_id,run_id,")
     assert json.loads(results.read_text())["campaign"] == "gain-sweep"
+
+
+def test_dict_and_list_parameters_are_compact_sorted_json(tmp_path):
+    camp = tmp_path / "nested-param"
+    camp.mkdir()
+    doc = {"campaign": "nested-param", "rank_by": "m", "mode": "direct", "runs": [{
+        "run_id": "000_a", "config_id": "000_a", "replicate": None, "seed": None,
+        "params": {"opts": {"z": 1, "a": [2, 3]}, "lst": [1, "b"]}, "mode": "direct",
+        "status": "completed", "metrics": {"m": 1.0},
+    }]}
+    (camp / "results.json").write_text(json.dumps(doc))
+    tidy.write_results_csv(camp, ["m"])
+    row = next(csv.DictReader((camp / "results.csv").open(encoding="utf-8")))
+    assert row["param.opts"] == '{"a":[2,3],"z":1}'
+    assert row["param.lst"] == '[1,"b"]'

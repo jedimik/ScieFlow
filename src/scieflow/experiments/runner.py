@@ -143,12 +143,24 @@ def recompute_metrics(run_dir: str | Path) -> dict:
     output_path = run_dir / "artifacts" / config["output_file"]
     metrics = compute_metrics(config["metrics"], output_path, config["reference"])
     data = json.dumps(metrics, indent=2).encode()
-    manifest.atomic_write(run_dir / "metrics.json", data)
 
-    manifest_sha = None
+    # Read-only checks first: a corrupt record must leave every file exactly as it was (review r1 F4).
+    campaign_dir = run_dir.parent.parent
+    if (campaign_dir / "results.json").is_file():
+        manifest.load_results(campaign_dir)  # ValueError when malformed
     manifest_path = run_dir / manifest.MANIFEST_FILE
+    doc = None
     if manifest_path.is_file():
-        doc = json.loads(manifest_path.read_text())
+        try:
+            doc = json.loads(manifest_path.read_text())
+        except (OSError, ValueError) as e:
+            raise ValueError(f"{manifest_path.name} is not readable JSON ({type(e).__name__})") from e
+        if not isinstance(doc, dict) or not isinstance(doc.get("metrics_history", []), list):
+            raise ValueError(f"{manifest_path.name} is not a valid run manifest")
+
+    manifest.atomic_write(run_dir / "metrics.json", data)
+    manifest_sha = None
+    if doc is not None:
         new_sha = manifest.sha256_bytes(data)
         doc.setdefault("metrics_history", []).append({
             "previous_sha256": doc.get("metrics_sha256"),
@@ -159,6 +171,6 @@ def recompute_metrics(run_dir: str | Path) -> dict:
         doc["metrics_sha256"] = new_sha
         manifest_sha = manifest.write_manifest(run_dir, doc)
 
-    update_run_entry(run_dir.parent.parent, config.get("run_id", run_dir.name),
+    update_run_entry(campaign_dir, config.get("run_id", run_dir.name),
                      metrics=metrics, manifest_sha256=manifest_sha)
     return metrics
