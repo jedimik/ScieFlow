@@ -1,0 +1,45 @@
+{
+  "endpoint": "esearch.fcgi",
+  "request_key": "22b8c990f621b3c6a2a254746cc8e1cf00bb5d3b4ef3ea5ca2234a86fcb17018",
+  "request_params": {
+    "db": "pubmed",
+    "retmax": 10,
+    "retmode": "json",
+    "sort": "relevance",
+    "term": "self-supervised ECG"
+  },
+  "response_body": {
+    "esearchresult": {
+      "count": "95",
+      "idlist": [
+        "34973584",
+        "36004899",
+        "40102504",
+        "41056617",
+        "39250357",
+        "37948139",
+        "40749448",
+        "39631267",
+        "41446031",
+        "41337234"
+      ],
+      "querytranslation": "\"self-supervised\"[All Fields] AND (\"electrocardiography\"[MeSH Terms] OR \"electrocardiography\"[All Fields] OR \"ecg\"[All Fields])",
+      "retmax": "10",
+      "retstart": "0",
+      "translationset": [
+        {
+          "from": "ECG",
+          "to": "\"electrocardiography\"[MeSH Terms] OR \"electrocardiography\"[All Fields] OR \"ecg\"[All Fields]"
+        }
+      ]
+    },
+    "header": {
+      "type": "esearch",
+      "version": "0.3"
+    }
+  },
+  "response_hash": "21c2d795e7c314aec06c8dc7938b34e8baff2ea30835c6d6c2ea47be0c5f0bc8",
+  "retrieved_at": "2026-07-14T12:58:13Z",
+  "schema_version": "1.0",
+  "source": "pubmed"
+}

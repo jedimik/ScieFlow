@@ -1,0 +1,181 @@
+{
+  "endpoint": "efetch.fcgi",
+  "request_key": "81f4acba69be15a8dad465c494de8814aa4cfcfc0dbf408d041f217255be0118",
+  "request_params": {
+    "db": "pubmed",
+    "id": "34265844",
+    "retmode": "xml"
+  },
+  "response_body": {
+    "articles": [
+      {
+        "abstract": "Proteins are essential to life, and understanding their structure can facilitate a mechanistic understanding of their function. Through an enormous experimental effort1-4, the structures of around 100,000 unique proteins have been determined5, but this represents a small fraction of the billions of known protein sequences6,7. Structural coverage is bottlenecked by the months to years of painstaking effort required to determine a single protein structure. Accurate computational approaches are needed to address this gap and to enable large-scale structural bioinformatics. Predicting the three-dimensional structure that a protein will adopt based solely on its amino acid sequence-the structure prediction component of the 'protein folding problem'8-has been an important open research problem for more than 50 years9. Despite recent progress10-14, existing methods fall far short of atomic accuracy, especially when no homologous structure is available. Here we provide the first computational method that can regularly predict protein structures with atomic accuracy even in cases in which no similar structure is known. We validated an entirely redesigned version of our neural network-based model, AlphaFold, in the challenging 14th Critical Assessment of protein Structure Prediction (CASP14)15, demonstrating accuracy competitive with experimental structures in a majority of cases and greatly outperforming other methods. Underpinning the latest version of AlphaFold is a novel machine learning approach that incorporates physical and biological knowledge about protein structure, leveraging multi-sequence alignments, into the design of the deep learning algorithm.",
+        "authors": [
+          {
+            "family": "Jumper",
+            "given": "John"
+          },
+          {
+            "family": "Evans",
+            "given": "Richard"
+          },
+          {
+            "family": "Pritzel",
+            "given": "Alexander"
+          },
+          {
+            "family": "Green",
+            "given": "Tim"
+          },
+          {
+            "family": "Figurnov",
+            "given": "Michael"
+          },
+          {
+            "family": "Ronneberger",
+            "given": "Olaf"
+          },
+          {
+            "family": "Tunyasuvunakool",
+            "given": "Kathryn"
+          },
+          {
+            "family": "Bates",
+            "given": "Russ"
+          },
+          {
+            "family": "Žídek",
+            "given": "Augustin"
+          },
+          {
+            "family": "Potapenko",
+            "given": "Anna"
+          },
+          {
+            "family": "Bridgland",
+            "given": "Alex"
+          },
+          {
+            "family": "Meyer",
+            "given": "Clemens"
+          },
+          {
+            "family": "Kohl",
+            "given": "Simon A A"
+          },
+          {
+            "family": "Ballard",
+            "given": "Andrew J"
+          },
+          {
+            "family": "Cowie",
+            "given": "Andrew"
+          },
+          {
+            "family": "Romera-Paredes",
+            "given": "Bernardino"
+          },
+          {
+            "family": "Nikolov",
+            "given": "Stanislav"
+          },
+          {
+            "family": "Jain",
+            "given": "Rishub"
+          },
+          {
+            "family": "Adler",
+            "given": "Jonas"
+          },
+          {
+            "family": "Back",
+            "given": "Trevor"
+          },
+          {
+            "family": "Petersen",
+            "given": "Stig"
+          },
+          {
+            "family": "Reiman",
+            "given": "David"
+          },
+          {
+            "family": "Clancy",
+            "given": "Ellen"
+          },
+          {
+            "family": "Zielinski",
+            "given": "Michal"
+          },
+          {
+            "family": "Steinegger",
+            "given": "Martin"
+          },
+          {
+            "family": "Pacholska",
+            "given": "Michalina"
+          },
+          {
+            "family": "Berghammer",
+            "given": "Tamas"
+          },
+          {
+            "family": "Bodenstein",
+            "given": "Sebastian"
+          },
+          {
+            "family": "Silver",
+            "given": "David"
+          },
+          {
+            "family": "Vinyals",
+            "given": "Oriol"
+          },
+          {
+            "family": "Senior",
+            "given": "Andrew W"
+          },
+          {
+            "family": "Kavukcuoglu",
+            "given": "Koray"
+          },
+          {
+            "family": "Kohli",
+            "given": "Pushmeet"
+          },
+          {
+            "family": "Hassabis",
+            "given": "Demis"
+          }
+        ],
+        "date_raw": "",
+        "day": null,
+        "doi": "10.1038/s41586-021-03819-2",
+        "issn": [
+          "1476-4687"
+        ],
+        "issue": "7873",
+        "journal": "Nature",
+        "journal_abbreviation": "Nature",
+        "keywords": [],
+        "language": "eng",
+        "month": 8,
+        "page": "583-589",
+        "pmcid": "PMC8371605",
+        "pmid": "34265844",
+        "publication_types": [
+          "Journal Article",
+          "Research Support, Non-U.S. Gov't"
+        ],
+        "record_type": "article",
+        "title": "Highly accurate protein structure prediction with AlphaFold.",
+        "volume": "596",
+        "year": 2021
+      }
+    ]
+  },
+  "response_hash": "4855f646d2a35df67eaaf45da44b5b5b2c947c0c72707c8d0ad89977f7ae2272",
+  "retrieved_at": "2026-07-14T12:58:16Z",
+  "schema_version": "1.0",
+  "source": "pubmed"
+}

@@ -1,0 +1,761 @@
+{
+  "endpoint": "dois",
+  "request_key": "82f62bd40ff18cf6e0b055c95454d70df4e9527a7e998e40623ed2ba13affc41",
+  "request_params": {
+    "page[size]": 5,
+    "query": "self-supervised ECG"
+  },
+  "response_body": {
+    "data": [
+      {
+        "attributes": {
+          "citationCount": 0,
+          "container": {},
+          "contentUrl": null,
+          "contributors": [],
+          "created": "2026-07-14T03:13:15Z",
+          "creators": [
+            {
+              "affiliation": [],
+              "familyName": "Feng",
+              "givenName": "Saiyang",
+              "name": "Feng, Saiyang",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Zhang",
+              "givenName": "Yuanyun",
+              "name": "Zhang, Yuanyun",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Li",
+              "givenName": "Shi",
+              "name": "Li, Shi",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            }
+          ],
+          "dates": [
+            {
+              "date": "2026-07-03T22:00:54Z",
+              "dateInformation": "v1",
+              "dateType": "Submitted"
+            },
+            {
+              "date": "2026-07-14T00:01:31Z",
+              "dateInformation": "v1",
+              "dateType": "Updated"
+            },
+            {
+              "date": "2026-07",
+              "dateInformation": "v1",
+              "dateType": "Available"
+            }
+          ],
+          "descriptions": [
+            {
+              "description": "Foundation models have recently emerged as a powerful paradigm for learning transferable representations from large scale biomedical data, yet existing approaches for physiological waveforms primarily optimize reconstruction or forecasting objectives that do not explicitly preserve clinically meaningful waveform morphology. Electrocardiograms (ECGs) and pulse oximetry (SpO2) waveforms encode rich cardiovascular and hemodynamic information through their morphological structure. In this work, we introduce MorphologyFM, a multimodal foundation model pretrained on paired ECG and SpO2 waveforms from the MIMIC critical care database using a morphology aware self supervised learning objective. MorphologyFM combines morphology guided masking, cross modal representation learning, and contrastive latent alignment to learn representations that capture clinically relevant physiological structure without requiring manual annotations. We evaluate MorphologyFM across multiple downstream prediction tasks, including arrhythmia classification, hypoxemia prediction, mortality prediction, and length of stay estimation, demonstrating consistent improvements over representative self supervised learning methods, including Masked Autoencoders (MAE), contrastive learning, Barlow Twins, and Joint Embedding Predictive Architectures (JEPA). Furthermore, we show that jointly modeling ECG and SpO2 waveforms produces more transferable representations than single modality pretraining. Our results establish waveform morphology as a powerful inductive bias for self supervised physiological representation learning and introduce MorphologyFM as a general purpose foundation model for continuous physiological monitoring.",
+              "descriptionType": "Abstract"
+            }
+          ],
+          "doi": "10.48550/arxiv.2607.09749",
+          "downloadCount": 0,
+          "formats": [],
+          "fundingReferences": [],
+          "geoLocations": [],
+          "identifiers": [
+            {
+              "identifier": "2607.09749",
+              "identifierType": "arXiv"
+            }
+          ],
+          "isActive": true,
+          "language": null,
+          "metadataVersion": 0,
+          "partCount": 0,
+          "partOfCount": 0,
+          "publicationYear": 2026,
+          "published": null,
+          "publisher": "arXiv",
+          "reason": null,
+          "referenceCount": 0,
+          "registered": "2026-07-14T03:13:15Z",
+          "relatedIdentifiers": [],
+          "relatedItems": [],
+          "rightsList": [
+            {
+              "rights": "Creative Commons Attribution 4.0 International",
+              "rightsIdentifier": "cc-by-4.0",
+              "rightsIdentifierScheme": "SPDX",
+              "rightsUri": "https://creativecommons.org/licenses/by/4.0/legalcode",
+              "schemeUri": "https://spdx.org/licenses/"
+            }
+          ],
+          "schemaVersion": "http://datacite.org/schema/kernel-4",
+          "sizes": [],
+          "source": "mds",
+          "state": "findable",
+          "subjects": [
+            {
+              "lang": "en",
+              "subject": "Signal Processing (eess.SP)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "lang": "en",
+              "subject": "Artificial Intelligence (cs.AI)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "lang": "en",
+              "subject": "Machine Learning (cs.LG)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "subject": "FOS: Electrical engineering, electronic engineering, information engineering",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            },
+            {
+              "subject": "FOS: Computer and information sciences",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            }
+          ],
+          "titles": [
+            {
+              "title": "MorphologyFM: A Foundation Model for Morphology-Aware Representation Learning from ECG and Pulse Oximetry Waveforms"
+            }
+          ],
+          "types": {
+            "bibtex": "misc",
+            "citeproc": "article",
+            "resourceType": "Article",
+            "resourceTypeGeneral": "Preprint",
+            "ris": "GEN",
+            "schemaOrg": "CreativeWork"
+          },
+          "updated": "2026-07-14T03:13:15Z",
+          "url": "https://arxiv.org/abs/2607.09749",
+          "version": "1",
+          "versionCount": 0,
+          "versionOfCount": 0,
+          "viewCount": 0
+        },
+        "id": "10.48550/arxiv.2607.09749",
+        "relationships": {
+          "client": {
+            "data": {
+              "id": "arxiv.content",
+              "type": "clients"
+            }
+          }
+        },
+        "type": "dois"
+      },
+      {
+        "attributes": {
+          "citationCount": 0,
+          "container": {},
+          "contentUrl": null,
+          "contributors": [
+            {
+              "affiliation": [
+                "UNSW Sydney",
+                "UNSW Sydney"
+              ],
+              "contributorType": "HostingInstitution",
+              "name": "UNSW Sydney",
+              "nameIdentifiers": [],
+              "nameType": "Organizational"
+            }
+          ],
+          "created": "2022-03-21T18:12:16Z",
+          "creators": [
+            {
+              "affiliation": [],
+              "familyName": "Abdul Sukor",
+              "givenName": "Jumadi",
+              "name": "Abdul Sukor, Jumadi",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            }
+          ],
+          "dates": [],
+          "descriptions": [
+            {
+              "description": "Home telecare has emerged as an alternative solution to the problem of delivering primary healthcare services to an increasingly aged population, particularly those suffering chronic disease conditions. However, there are some major challenges relating to data management and interpretation facing the home telecare paradigm that degrade its efficacy and impede its adoption; a decision support system (DSS) promises to be one of the best solutions to address these challenges. Recently, DSSs have become more widely accepted as a support tool for use with telecare systems, helping monitoring clinicians to summarise and digest what would otherwise be an unmanageable volume of data. Such systems are expected to become increasingly prominent in primary care, as telecare systems provide additional clinical measurement capabilities, supported by improving internet infrastructure and penetration throughout the world. One of the pillars of a home telecare system is the performance of unsupervised physiological self-measurement by patients in their own homes. Such measurements are prone to error and noise artifact, often due to poor measurement technique and ignorance of the measurement and transduction principles at work. These errors can degrade the quality of the recorded signals and ultimately degrade the performance of the DSS system which is aiding the clinician in their management of the patient. This thesis focuses the development of algorithms capable of automatically assessing the quality of two physiological measurements commonly acquired by a home telecare system, namely pulse oximetry and blood pressure (BP), which are both prone to artifact-related noise and interference. In developing an algorithm for automated quality assessment of pulse oximetry signals, a novel method to detect movement related noise has been developed and verified with a manually annotated gold standard (GS), performed by experts. This noise detection method relies on morphological analysis of the photoplethysmogram (PPG) signal, since there is a morphological difference between reliable PPG pulses and noisy sections of the signal in a noise contaminated PPG. Furthermore, a novel approach has been applied to develop a GS which forms the basis of the manual annotation of these noisy recordings. The developed algorithm has been tested on noise contaminated PPG signals, acquired from healthy people in a controlled laboratory environment. Statistical results from the comparison between the output from the developed algorithm and the manually annotated GS have shown that about 77% and 89% of the actual noise and good sections respectively have been correctly identified, with this agreement summarised by a mean Cohen’s Kappa coefficient,  of 0.64±0.22. The work presented relating to noise detection in the second physiological measurement, BP, assesses the quality of the BP signal and decides whether the signal is of an acceptable quality for an attempt at deriving systolic and diastolic pressures to proceed successfully. The decision is based on the distance between identified noisy sections (if any) and the determined candidate systolic and diastolic events. A novel method has been developed for identifying noisy sections and determining the reliability of Korotkoff sounds. Again, the developed algorithm is validated using a manually annotated GS. The output from the validation process verified that the developed algorithm has correctly determined whether recordings were worthy of deriving a BP estimate (for both systolic and diastolic) for 93% of all signals. When the algorithm examines the signal quality at the sample level, it correctly detected the actual noise for 81% of all noisy samples in 100 pooled signals. Consequentially, the resulting systolic and diastolic pressure estimation errors are reduced to 0.37±3.31 mmHg and 3.10±5.46 mmHg, respectively. This is in comparison to the results of an existing published algorithm by Park et al. [1] which achieves errors of 0.24±35.23 mmHg for systolic pressure and -8.34±24.96 mmHg for diastolic pressure. The data used to test the developed algorithm was recorded in a laboratory environment, of which half of the data is purposely contaminated with motion artifact. In addition to testing with the data recorded in a controlled laboratory environment, the developed algorithms for automated quality assessment for pulse oximetry and BP signals were also tested retrospectively with data acquired from a trial which recorded signals in a semi-supervised environment. The trial involved four aged subjects who performed pulse oximetry and BP measurements by themselves at their home for ten days, three times per day. Simultaneous ECG was also recorded during these measurements as a reference signal, but the ECG leads were placed with supervision. A manually annotated GS was again used as the reference against which the developed algorithms were evaluated after analysing the recordings. Assessing (1) pulse oximetry using this trial data, 95% of good sections and 67% of noisy sections were correctly detected by the developed algorithm, and a Cohen’s Kappa coefficient,  of 0.58 was obtained in 120 pooled signals. Assessing (2) BP measurement, 75% of the actual noisy sections were correctly classified in 120 pooled signals, with 97% and 91% of the signals correctly identified as worthy of attempting systolic and/or diastolic pressure estimation, respectively, with a mean error and standard deviation of 2.53±4.20 mmHg and 1.46±5.29 mmHg when compared to a manually annotated GS. Finally, the potential of the developed algorithms to improve telecare patient outcomes when incorporated in a DSS, used for patient management and health data interpretation, is investigated by incorporating the algorithms as a pre-processing block, to clean extracted signal parameters before they are input to an offline DSS software prototype under development by our research group. This DSS prototype will automatically interpret longitudinal multi-parameter telehealth records to predict incipient exacerbations in the patient’s condition. All recorded biosignal data acquired from trials of a home monitoring device for managing chronic lung disease, including pulse oximetry and BP, were stored in a database, affording the application of the signal quality algorithms proposed in this thesis on real unsupervised home telecare recordings. The efficacy of the developed algorithms when employed by the DSS is measured by comparing the performance of the DSS in obtaining accurate diagnoses of patient health statuses when the developed algorithms are deployed in the system, or not, compared to the GS reference constructed from carer journal notes and patient health information (acquired through the use of a questionnaire). The DSS’s performance (when incorporating the signal quality algorithms to clean the health parameter data (BP, heart rate (HR) and oxygen saturation (SpO2)) has increased by 43% (Moreover, the capability of the DSS of correctly identifying correctly diagnosed unstable patients has also increased by 42%. Thus, good performance of the developed algorithms was observed when tested with data acquired from three different scenarios: (1) laboratory environment; (2) semi-supervised home environment, and; (3) real unsupervised home telecare environment. These results demonstrate the feasibility, and highlight the potential benefit, of incorporating automated signal quality assessment algorithms for pulse oximetry and BP recording within a DSS for telehealth patient management.",
+              "descriptionType": "Abstract"
+            }
+          ],
+          "doi": "10.26190/unsworks/15858",
+          "downloadCount": 0,
+          "formats": [],
+          "fundingReferences": [],
+          "geoLocations": [],
+          "identifiers": [],
+          "isActive": true,
+          "language": "EN",
+          "metadataVersion": 2,
+          "partCount": 0,
+          "partOfCount": 0,
+          "publicationYear": 2012,
+          "published": null,
+          "publisher": "UNSW Sydney",
+          "reason": null,
+          "referenceCount": 0,
+          "registered": "2022-03-21T21:37:19Z",
+          "relatedIdentifiers": [],
+          "relatedItems": [],
+          "rightsList": [
+            {
+              "rightsIdentifier": "cc by-nc-nd 3.0",
+              "rightsUri": "https://creativecommons.org/licenses/by-nc-nd/3.0/au/"
+            }
+          ],
+          "schemaVersion": "http://datacite.org/schema/kernel-4",
+          "sizes": [],
+          "source": "mds",
+          "state": "findable",
+          "subjects": [
+            {
+              "subject": "Pulse oximetry"
+            },
+            {
+              "subject": "Home telecare"
+            },
+            {
+              "subject": "Blood pressure signal"
+            }
+          ],
+          "titles": [
+            {
+              "title": "Signal quality measures for pulse oximetry and blood pressure signals acquired in unsupervised home telecare environments"
+            }
+          ],
+          "types": {
+            "bibtex": "phdthesis",
+            "citeproc": "thesis",
+            "resourceType": "doctoral thesis",
+            "resourceTypeGeneral": "Dissertation",
+            "ris": "THES",
+            "schemaOrg": "Thesis"
+          },
+          "updated": "2026-07-14T02:29:52Z",
+          "url": "http://hdl.handle.net/1959.4/52296",
+          "version": null,
+          "versionCount": 0,
+          "versionOfCount": 0,
+          "viewCount": 0
+        },
+        "id": "10.26190/unsworks/15858",
+        "relationships": {
+          "client": {
+            "data": {
+              "id": "unsw.repo",
+              "type": "clients"
+            }
+          }
+        },
+        "type": "dois"
+      },
+      {
+        "attributes": {
+          "citationCount": 0,
+          "container": {
+            "identifier": "2980-9037",
+            "identifierType": "EISSN",
+            "issue": "1",
+            "title": "International Journal of Biophotonics and Biomedical Engineering (IJBBE)",
+            "type": "Series",
+            "volume": "6"
+          },
+          "contentUrl": null,
+          "contributors": [
+            {
+              "affiliation": [],
+              "contributorType": "ContactPerson",
+              "familyName": "Salimi Shahraki",
+              "givenName": "Atefeh",
+              "name": "Salimi Shahraki, Atefeh",
+              "nameIdentifiers": [
+                {
+                  "nameIdentifier": "https://orcid.org/0000-0001-7798-2928",
+                  "nameIdentifierScheme": "ORCID",
+                  "schemeUri": "https://orcid.org"
+                }
+              ],
+              "nameType": "Personal"
+            }
+          ],
+          "created": "2026-07-08T21:13:32Z",
+          "creators": [
+            {
+              "affiliation": [
+                "Department of Electrical Engineering, Isf.C., Islamic Azad University, Isfahan, Iran."
+              ],
+              "familyName": null,
+              "givenName": null,
+              "name": "Dalvandi, Sanaz",
+              "nameIdentifiers": [],
+              "nameType": null
+            },
+            {
+              "affiliation": [
+                "Department of Electrical Engineering, Laser and Biophotonics in Biotechnologies Research Center, Isf.C., Islamic Azad University, Isfahan, Iran."
+              ],
+              "familyName": "Salimi Shahraki",
+              "givenName": "Atefeh",
+              "name": "Salimi Shahraki, Atefeh",
+              "nameIdentifiers": [
+                {
+                  "nameIdentifier": "https://orcid.org/0000-0001-7798-2928",
+                  "nameIdentifierScheme": "ORCID",
+                  "schemeUri": "https://orcid.org"
+                }
+              ],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [
+                "Department of Electrical Engineering, Isf.C., Islamic Azad University, Isfahan, Iran"
+              ],
+              "familyName": null,
+              "givenName": null,
+              "name": "Azimifar, Farhad",
+              "nameIdentifiers": [],
+              "nameType": null
+            },
+            {
+              "affiliation": [
+                "Department of Electrical Engineering, Isf.C., Islamic Azad University, Isfahan, Iran."
+              ],
+              "familyName": null,
+              "givenName": null,
+              "name": "Sajadieh, Seyed Mahdi",
+              "nameIdentifiers": [],
+              "nameType": null
+            }
+          ],
+          "dates": [
+            {
+              "date": "2025-12-29",
+              "dateInformation": null,
+              "dateType": "Submitted"
+            },
+            {
+              "date": "2026-06-20",
+              "dateInformation": null,
+              "dateType": "Accepted"
+            },
+            {
+              "date": "2026-06-05",
+              "dateInformation": null,
+              "dateType": "Updated"
+            },
+            {
+              "date": "2026-06-30",
+              "dateInformation": null,
+              "dateType": "Issued"
+            }
+          ],
+          "descriptions": [
+            {
+              "description": "Given the serious risks psychological stress poses to both mental and cardiovascular health, there is a need for real-time and unobtrusive monitoring methods. We present a new deep learning framework that uses synchronized photoplethysmogram (PPG) and phonocardiogram (PCG) inputs to classify stress.  In contrast to current methods that use multimodal sensors or electrocardiography (ECG), our system uses only PCG and PPG, which are inexpensive, noninvasive, and wearable technology compatible.  The architecture incorporates a Bi-LSTM for sequential dependency modeling and a 1D U-Net encoder for multiscale temporal feature extraction.  A physiologically interpretable, self-supervised learning strategy is made possible by the automatic derivation of stress labels from PPG-based inter-beat intervals using RMSSD (root mean square of successive differences).  State-of-the-art accuracy (98.5%) and F1-scores (&gt;0.97) are demonstrated via experimental results on a public dataset, together with real-time inference capabilities (&lt;50 ms on CPU). Our approach opens the door for scalable wearable health monitoring devices by proving the feasibility of interpretable, end-to-end deep learning for stress detection using synchronized acoustic and optical cardiac inputs.",
+              "descriptionType": "Abstract",
+              "lang": null
+            }
+          ],
+          "doi": "10.57647/ijbbe.2026.0601.03",
+          "downloadCount": 0,
+          "formats": [],
+          "fundingReferences": [],
+          "geoLocations": [],
+          "identifiers": [
+            {
+              "identifier": "16-1868-18264",
+              "identifierType": "publisherId"
+            }
+          ],
+          "isActive": true,
+          "language": "en",
+          "metadataVersion": 1,
+          "partCount": 0,
+          "partOfCount": 0,
+          "publicationYear": 2026,
+          "published": null,
+          "publisher": "OICC Press (United Kingdom)",
+          "reason": null,
+          "referenceCount": 0,
+          "registered": "2026-07-08T21:13:32Z",
+          "relatedIdentifiers": [],
+          "relatedItems": [
+            {
+              "issue": "1",
+              "publicationYear": "2026",
+              "relatedItemIdentifier": {
+                "relatedItemIdentifier": "2980-9037",
+                "relatedItemIdentifierType": "EISSN"
+              },
+              "relatedItemType": "Journal",
+              "relationType": "IsPublishedIn",
+              "titles": [
+                {
+                  "title": "International Journal of Biophotonics and Biomedical Engineering (IJBBE)"
+                }
+              ],
+              "volume": "6"
+            }
+          ],
+          "rightsList": [
+            {
+              "rights": "Creative Commons Attribution 4.0 International",
+              "rightsIdentifier": "cc-by-4.0",
+              "rightsIdentifierScheme": "SPDX",
+              "rightsUri": "https://creativecommons.org/licenses/by/4.0/legalcode",
+              "schemeUri": "https://spdx.org/licenses/"
+            }
+          ],
+          "schemaVersion": "http://datacite.org/schema/kernel-4",
+          "sizes": [],
+          "source": "fabricaForm",
+          "state": "findable",
+          "subjects": [
+            {
+              "subject": "Stress detection"
+            },
+            {
+              "subject": "Deep learning"
+            },
+            {
+              "subject": "PCG"
+            },
+            {
+              "subject": "PPG"
+            },
+            {
+              "subject": "Wearable devices"
+            }
+          ],
+          "titles": [
+            {
+              "lang": "en",
+              "title": "Real-Time Stress Detection Using Combined PPG and PCG Signals with Deep Learning",
+              "titleType": null
+            }
+          ],
+          "types": {
+            "bibtex": "article",
+            "citeproc": "article-journal",
+            "resourceTypeGeneral": "JournalArticle",
+            "ris": "JOUR",
+            "schemaOrg": "ScholarlyArticle"
+          },
+          "updated": "2026-07-08T21:14:41Z",
+          "url": "https://oiccpress.com/ijbbe/article/view/18264",
+          "version": null,
+          "versionCount": 0,
+          "versionOfCount": 0,
+          "viewCount": 0
+        },
+        "id": "10.57647/ijbbe.2026.0601.03",
+        "relationships": {
+          "client": {
+            "data": {
+              "id": "qcqq.meyizt",
+              "type": "clients"
+            }
+          }
+        },
+        "type": "dois"
+      },
+      {
+        "attributes": {
+          "citationCount": 0,
+          "container": {},
+          "contentUrl": null,
+          "contributors": [],
+          "created": "2026-07-02T02:04:59Z",
+          "creators": [
+            {
+              "affiliation": [],
+              "familyName": "Kim",
+              "givenName": "Siwon",
+              "name": "Kim, Siwon",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            }
+          ],
+          "dates": [
+            {
+              "date": "2026-07-01T16:27:21Z",
+              "dateInformation": "v1",
+              "dateType": "Submitted"
+            },
+            {
+              "date": "2026-07-02T01:02:07Z",
+              "dateInformation": "v1",
+              "dateType": "Updated"
+            },
+            {
+              "date": "2026-07",
+              "dateInformation": "v1",
+              "dateType": "Available"
+            }
+          ],
+          "descriptions": [
+            {
+              "description": "Data analysis in the medical domain often encounters scenarios involving a limited target dataset and a large, unannotated dataset with a general distribution. Under such circumstances, self-supervised learning (SSL) methods are highly effective for utilizing large datasets, making them a popular choice for electrocardiogram (ECG) analysis. This work presents the Event Reconstruction Joint-Embedding Predictive Architecture (ER-JEPA), a lightweight SSL framework for multivariate time series, whose name and two-fold hierarchical structure are inspired by the diagnostic approach of cardiologists. At its core, ER-JEPA features: (1) a two-stage structure that constructs representations for each time interval and subsequently processes these representations as a univariate time series, (2) the hierarchical integration of two Joint-Embedding Predictive Architectures (JEPAs), and (3) a Vision Transformer (ViT) backbone. The structural concatenation of two JEPAs categorizes the model as a Hierarchical JEPA (H-JEPA), designed to encode multiple levels of abstract representations for enhanced prediction on complex tasks. This study reports a successful application of H-JEPA to 12-lead ECG data as a multivariate time series alongside an analysis of the sensitivity of hierarchical representation during the pretraining stage. Pretrained on approximately 180,000 10-second recordings, the model achieves state-of-the-art downstream performance on the ST-MEM benchmark, with rapid computation and minimal resource usage.",
+              "descriptionType": "Abstract"
+            },
+            {
+              "description": "25 pages, 7 figures. Code will be made publicly available soon",
+              "descriptionType": "Other"
+            }
+          ],
+          "doi": "10.48550/arxiv.2607.01145",
+          "downloadCount": 0,
+          "formats": [],
+          "fundingReferences": [],
+          "geoLocations": [],
+          "identifiers": [
+            {
+              "identifier": "2607.01145",
+              "identifierType": "arXiv"
+            }
+          ],
+          "isActive": true,
+          "language": null,
+          "metadataVersion": 0,
+          "partCount": 0,
+          "partOfCount": 0,
+          "publicationYear": 2026,
+          "published": null,
+          "publisher": "arXiv",
+          "reason": null,
+          "referenceCount": 0,
+          "registered": "2026-07-02T02:05:00Z",
+          "relatedIdentifiers": [],
+          "relatedItems": [],
+          "rightsList": [
+            {
+              "rights": "Creative Commons Attribution 4.0 International",
+              "rightsIdentifier": "cc-by-4.0",
+              "rightsIdentifierScheme": "SPDX",
+              "rightsUri": "https://creativecommons.org/licenses/by/4.0/legalcode",
+              "schemeUri": "https://spdx.org/licenses/"
+            }
+          ],
+          "schemaVersion": "http://datacite.org/schema/kernel-4",
+          "sizes": [],
+          "source": "mds",
+          "state": "findable",
+          "subjects": [
+            {
+              "lang": "en",
+              "subject": "Machine Learning (cs.LG)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "lang": "en",
+              "subject": "Signal Processing (eess.SP)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "subject": "FOS: Computer and information sciences",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            },
+            {
+              "subject": "FOS: Electrical engineering, electronic engineering, information engineering",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            }
+          ],
+          "titles": [
+            {
+              "title": "A Lightweight Self-Supervised Learning Framework for Multivariate Time Series using Hierarchical-JEPA on ECG Data"
+            }
+          ],
+          "types": {
+            "bibtex": "misc",
+            "citeproc": "article",
+            "resourceType": "Article",
+            "resourceTypeGeneral": "Preprint",
+            "ris": "GEN",
+            "schemaOrg": "CreativeWork"
+          },
+          "updated": "2026-07-02T02:05:00Z",
+          "url": "https://arxiv.org/abs/2607.01145",
+          "version": "1",
+          "versionCount": 0,
+          "versionOfCount": 0,
+          "viewCount": 0
+        },
+        "id": "10.48550/arxiv.2607.01145",
+        "relationships": {
+          "client": {
+            "data": {
+              "id": "arxiv.content",
+              "type": "clients"
+            }
+          }
+        },
+        "type": "dois"
+      },
+      {
+        "attributes": {
+          "citationCount": 0,
+          "container": {},
+          "contentUrl": null,
+          "contributors": [],
+          "created": "2026-07-02T02:01:36Z",
+          "creators": [
+            {
+              "affiliation": [],
+              "familyName": "Chemeris",
+              "givenName": "Alexander",
+              "name": "Chemeris, Alexander",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Jin",
+              "givenName": "Ming",
+              "name": "Jin, Ming",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Balestriero",
+              "givenName": "Randall",
+              "name": "Balestriero, Randall",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            }
+          ],
+          "dates": [
+            {
+              "date": "2026-07-01T13:56:21Z",
+              "dateInformation": "v1",
+              "dateType": "Submitted"
+            },
+            {
+              "date": "2026-07-02T00:52:41Z",
+              "dateInformation": "v1",
+              "dateType": "Updated"
+            },
+            {
+              "date": "2026-07",
+              "dateInformation": "v1",
+              "dateType": "Available"
+            }
+          ],
+          "descriptions": [
+            {
+              "description": "Time series are central to modern data mining applications, from industrial telemetry and server metrics to finance and physiology, yet time-series self-supervised learning often depends on view and augmentation choices that encode domain-specific invariances. We study how an SSL recipe behaves when its method-specific configuration is reused unchanged after the pretraining signal family changes, framing this as a fixed-recipe stress test rather than a comparison against optimally tuned methods. We introduce Latent Euclidean Next-Embedding Prediction Architecture (LeNEPA), a no-augmentation next-latent-token objective with a causal backbone. LeNEPA replaces the stop-gradient/EMA stabilization used by vanilla NEPA with SIGReg-based isotropy regularization and computes the predictive loss in a lightweight projected space that is discarded for evaluation. We compare LeNEPA with an ECG-tuned JEPA recipe under a fixed-horizon frozen-probe protocol on PTB-XL and Diag, a synthetic diagnostic corpus generated with Aionoscope. Both methods are retrained independently on each dataset while keeping their method-specific recipes unchanged. In this protocol, the ECG-tuned JEPA recipe is strong in-domain on PTB-XL but weaker when reused unchanged on Diag, whereas LeNEPA preserves useful frozen-probe gains on both datasets. Learning curves suggest faster early representation acquisition: LeNEPA reaches 80% of its final AUROC/AUPRC gain after 2--5k updates, compared with 5--10k updates for the faster JEPA readout. As a separate external frozen-encoder check, a CauKer-pretrained LeNEPA variant reaches 77.65% mean UCR-128 Random-Forest accuracy in a single-seed, best-checkpoint run, within 1.16 points of Mantis and within 0.24 points of MOMENT (77.89%). Overall, the results support no-augmentation latent prediction as a useful candidate recipe for low-retuning time-series SSL.",
+              "descriptionType": "Abstract"
+            },
+            {
+              "description": "9 pages, 4 figures, 6 tables; accepted by the 12th Mining and Learning from Time Series (KDD MILETS 2026); source code and artifacts: https://github.com/langotime/lenepa-milets-2026",
+              "descriptionType": "Other"
+            }
+          ],
+          "doi": "10.48550/arxiv.2607.00958",
+          "downloadCount": 0,
+          "formats": [],
+          "fundingReferences": [],
+          "geoLocations": [],
+          "identifiers": [
+            {
+              "identifier": "2607.00958",
+              "identifierType": "arXiv"
+            }
+          ],
+          "isActive": true,
+          "language": null,
+          "metadataVersion": 0,
+          "partCount": 0,
+          "partOfCount": 0,
+          "publicationYear": 2026,
+          "published": null,
+          "publisher": "arXiv",
+          "reason": null,
+          "referenceCount": 0,
+          "registered": "2026-07-02T02:01:37Z",
+          "relatedIdentifiers": [],
+          "relatedItems": [],
+          "rightsList": [
+            {
+              "rights": "Creative Commons Attribution 4.0 International",
+              "rightsIdentifier": "cc-by-4.0",
+              "rightsIdentifierScheme": "SPDX",
+              "rightsUri": "https://creativecommons.org/licenses/by/4.0/legalcode",
+              "schemeUri": "https://spdx.org/licenses/"
+            }
+          ],
+          "schemaVersion": "http://datacite.org/schema/kernel-4",
+          "sizes": [],
+          "source": "mds",
+          "state": "findable",
+          "subjects": [
+            {
+              "lang": "en",
+              "subject": "Machine Learning (cs.LG)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "subject": "FOS: Computer and information sciences",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            }
+          ],
+          "titles": [
+            {
+              "title": "LeNEPA: No-Augmentation Next-Latent Prediction for Time-Series Representation Learning"
+            }
+          ],
+          "types": {
+            "bibtex": "misc",
+            "citeproc": "article",
+            "resourceType": "Article",
+            "resourceTypeGeneral": "Preprint",
+            "ris": "GEN",
+            "schemaOrg": "CreativeWork"
+          },
+          "updated": "2026-07-02T02:01:37Z",
+          "url": "https://arxiv.org/abs/2607.00958",
+          "version": "1",
+          "versionCount": 0,
+          "versionOfCount": 0,
+          "viewCount": 0
+        },
+        "id": "10.48550/arxiv.2607.00958",
+        "relationships": {
+          "client": {
+            "data": {
+              "id": "arxiv.content",
+              "type": "clients"
+            }
+          }
+        },
+        "type": "dois"
+      }
+    ],
+    "links": {
+      "next": "https://api.datacite.org/dois?page%5Bnumber%5D=2&page%5Bsize%5D=5&query=self-supervised+ECG",
+      "self": "https://api.datacite.org/dois?query=self-supervised+ECG&page%5Bsize%5D=5"
+    },
+    "meta": {
+      "page": 1,
+      "total": 202,
+      "totalPages": 41
+    }
+  },
+  "response_hash": "ff9de0bde5c3d96fd58e4dd0b7e019bdb67be20dc20e867f326e336f6ba852a4",
+  "retrieved_at": "2026-07-14T12:55:33Z",
+  "schema_version": "1.0",
+  "source": "datacite"
+}

@@ -18,3 +18,12 @@ and the `verification-report` schema) and two excerpts (`errors.py`, the connect
 and monitor commands (M-C2 t1). Their import redirections, pins and tests are listed in
 [VENDORED.md](VENDORED.md). The transport, cache, ledger, snapshot and network-mode code is
 ScieFlow's own.
+
+Three search connectors were ported from the same researcher project (MIT License, the same
+licence text) for `scieflow research search pubmed`, `semantic-scholar` and `datacite` (M-C2 t3).
+They are reduced ports: each keeps the parsing of the fields a paper record carries (PubMed's
+esearch and efetch XML, the Semantic Scholar paper object, the DataCite JSON:API item) and the
+search field lists, and none of the upstream connector's transport, key handling or async code.
+The requests run through ScieFlow's Gateway. Source files: `researcher/core/researcher_core/
+connectors/pubmed.py`, `semantic_scholar.py` and `datacite.py`. Their Lucene escape is the
+vendored `escape_lucene` (see [VENDORED.md](VENDORED.md)).

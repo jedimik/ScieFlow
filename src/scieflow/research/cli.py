@@ -35,8 +35,13 @@ for _name, _summary in [
     ("arxiv", "Search arXiv preprints."),
     ("europepmc", "Search Europe PMC."),
     ("crossref", "Search Crossref works."),
+    ("pubmed", "Search PubMed (NCBI E-utilities)."),
+    ("datacite", "Search DataCite (datasets, software, preprints)."),
 ]:
     _forward(_name, f"scieflow.research.search.{_name}", _summary, search)
+
+_forward("semantic-scholar", "scieflow.research.search.semantic_scholar",
+         "Search Semantic Scholar papers.", search)
 
 _forward("all", "scieflow.research.search.fanout",
          "Search every enabled source at once: merged, deduplicated and ranked.", search)

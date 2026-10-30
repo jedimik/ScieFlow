@@ -1,0 +1,17 @@
+{
+  "endpoint": "paper/search",
+  "request_key": "a97002ca3cb1978c66e929b71c70fe996323be6a645f455c1b64def4fe36658d",
+  "request_params": {
+    "fields": "paperId,externalIds,url,title,venue,publicationVenue,year,publicationDate,journal,authors,citationCount,referenceCount,isOpenAccess,openAccessPdf,publicationTypes",
+    "limit": 5,
+    "query": "zzqqxx blorptron quuxfrobnicator vlimtropy"
+  },
+  "response_body": {
+    "offset": 0,
+    "total": 0
+  },
+  "response_hash": "7ac2bec2348ab628a88a919a253d4caab5e513024429f5e06e5e7eec98113551",
+  "retrieved_at": "2026-07-14T12:56:17Z",
+  "schema_version": "1.0",
+  "source": "semantic_scholar"
+}

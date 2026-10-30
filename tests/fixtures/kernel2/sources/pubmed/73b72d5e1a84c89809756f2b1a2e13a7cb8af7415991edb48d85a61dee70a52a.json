@@ -1,0 +1,486 @@
+{
+  "endpoint": "efetch.fcgi",
+  "request_key": "73b72d5e1a84c89809756f2b1a2e13a7cb8af7415991edb48d85a61dee70a52a",
+  "request_params": {
+    "db": "pubmed",
+    "id": "34973584,36004899,40102504,41056617,39250357,37948139,40749448,39631267,41446031,41337234",
+    "retmode": "xml"
+  },
+  "response_body": {
+    "articles": [
+      {
+        "abstract": "Clinical 12-lead electrocardiography (ECG) is one of the most widely encountered kinds of biosignals. Despite the increased availability of public ECG datasets, label scarcity remains a central challenge in the field. Self-supervised learning represents a promising way to alleviate this issue. This would allow to train more powerful models given the same amount of labeled data and to incorporate or improve predictions about rare diseases, for which training datasets are inherently limited. In this work, we put forward the first comprehensive assessment of self-supervised representation learning from clinical 12-lead ECG data. To this end, we adapt state-of-the-art self-supervised methods based on instance discrimination and latent forecasting to the ECG domain. In a first step, we learn contrastive representations and evaluate their quality based on linear evaluation performance on a recently established, comprehensive, clinical ECG classification task. In a second step, we analyze the impact of self-supervised pretraining on finetuned ECG classifiers as compared to purely supervised performance. For the best-performing method, an adaptation of contrastive predictive coding, we find a linear evaluation performance only 0.5% below supervised performance. For the finetuned models, we find improvements in downstream performance of roughly 1% compared to supervised performance, label efficiency, as well as robustness against physiological noise. This work clearly establishes the feasibility of extracting discriminative representations from ECG data via self-supervised learning and the numerous advantages when finetuning such representations on downstream tasks as compared to purely supervised training. As first comprehensive assessment of its kind in the ECG domain carried out exclusively on publicly available datasets, we hope to establish a first step towards reproducible progress in the rapidly evolving field of representation learning for biosignals.",
+        "authors": [
+          {
+            "family": "Mehari",
+            "given": "Temesgen"
+          },
+          {
+            "family": "Strodthoff",
+            "given": "Nils"
+          }
+        ],
+        "date_raw": "",
+        "day": null,
+        "doi": "10.1016/j.compbiomed.2021.105114",
+        "issn": [
+          "1879-0534"
+        ],
+        "issue": "",
+        "journal": "Computers in biology and medicine",
+        "journal_abbreviation": "Comput Biol Med",
+        "keywords": [
+          "Deep neural networks",
+          "Electrocardiography",
+          "Self-supervised learning",
+          "Time series analysis",
+          "Unsupervised learning"
+        ],
+        "language": "eng",
+        "month": 2,
+        "page": "105114",
+        "pmcid": "",
+        "pmid": "34973584",
+        "publication_types": [
+          "Journal Article",
+          "Research Support, Non-U.S. Gov't"
+        ],
+        "record_type": "article",
+        "title": "Self-supervised representation learning from 12-lead ECG data.",
+        "volume": "141",
+        "year": 2022
+      },
+      {
+        "abstract": "In recent literature, ECG-based stress assessment has become popular due to its proven correlation to stress and increased accessibility of ECG data through commodity hardware. However, most ECG-based stress assessment models use supervised learning, relying on manually-annotated data. Limited research is done in the area of self-supervised learning (SSL) approaches that leverage unlabelled data and none that utilize contrastive SSL. However, with the dominance of contrastive SSL in domains such as computer vision, it is essential to see if the same excellence in performance can be obtained on an ECG-based stress assessment dataset. In this paper, we propose a contrastive SSL model for stress assessment using ECG signals based on the SimCLR framework. We test our model on two ECG-based stress assessment datasets. We show that our proposed solution results in a 9% improvement in accuracy on the WESAD dataset and 3.7% on the RML dataset when compared with SOTA ECG-based SSL models for stress assessment. The development of more accurate stress assessment models, particularly those that employ non-invasive data such as ECG for assessment, leads to developments in wearable technology and the creation of better health monitoring applications in areas such as stress management and relaxation therapy.",
+        "authors": [
+          {
+            "family": "Rabbani",
+            "given": "Suha"
+          },
+          {
+            "family": "Khan",
+            "given": "Naimul"
+          }
+        ],
+        "date_raw": "",
+        "day": 8,
+        "doi": "10.3390/bioengineering9080374",
+        "issn": [
+          "2306-5354"
+        ],
+        "issue": "8",
+        "journal": "Bioengineering (Basel, Switzerland)",
+        "journal_abbreviation": "Bioengineering (Basel)",
+        "keywords": [
+          "ECG",
+          "affective computing",
+          "contrastive self-supervised learning"
+        ],
+        "language": "eng",
+        "month": 8,
+        "page": "374",
+        "pmcid": "PMC9404921",
+        "pmid": "36004899",
+        "publication_types": [
+          "Journal Article"
+        ],
+        "record_type": "article",
+        "title": "Contrastive Self-Supervised Learning for Stress Detection from ECG Data.",
+        "volume": "9",
+        "year": 2022
+      },
+      {
+        "abstract": "Existing deep learning algorithms for electrocardiogram (ECG) classification rely on supervised training approaches requiring large volumes of reliably labeled data. This limits their applicability to rare cardiac diseases like Brugada syndrome (BrS), often lacking accurately labeled ECG examples. To address labeled data constraints and the resulting limitations of supervised training approaches, we developed a novel deep learning model for BrS ECG classification using the Variance-Invariance-Covariance Regularization (VICReg) architecture for self-supervised pre-training. The VICReg model outperformed a state-of-the-art neural network in all calculated metrics, achieving an area under the receiver operating and precision-recall curves of 0.88 and 0.82, respectively. We used the VICReg model to identify missed BrS cases and hence refine the previously underestimated institutional BrS prevalence and patient outcomes. Our results provide a novel approach to rare cardiac disease identification and challenge existing BrS prevalence estimates offering a framework for other rare cardiac conditions.",
+        "authors": [
+          {
+            "family": "Ronan",
+            "given": "Robert"
+          },
+          {
+            "family": "Tarabanis",
+            "given": "Constantine"
+          },
+          {
+            "family": "Chinitz",
+            "given": "Larry"
+          },
+          {
+            "family": "Jankelson",
+            "given": "Lior"
+          }
+        ],
+        "date_raw": "",
+        "day": 19,
+        "doi": "10.1038/s41598-025-94130-x",
+        "issn": [
+          "2045-2322"
+        ],
+        "issue": "1",
+        "journal": "Scientific reports",
+        "journal_abbreviation": "Sci Rep",
+        "keywords": [
+          "Artificial intelligence-enabled electrocardiogram",
+          "Brugada syndrome",
+          "Deep learning",
+          "VICReg pre-training"
+        ],
+        "language": "eng",
+        "month": 3,
+        "page": "9396",
+        "pmcid": "PMC11920277",
+        "pmid": "40102504",
+        "publication_types": [
+          "Journal Article"
+        ],
+        "record_type": "article",
+        "title": "Self-supervised VICReg pre-training for Brugada ECG detection.",
+        "volume": "15",
+        "year": 2025
+      },
+      {
+        "abstract": "The electrocardiogram (ECG) has emerged as a primary tool in clinical practice for identifying cardiovascular diseases, owing to its low cost, simplicity, and non-invasiveness. Given the high cost associated with acquiring a substantial amount of ECG signals that require annotation by medical professionals, advanced self-supervised learning (SSL) techniques can effectively leverage abundant unlabeled data for learning, mitigating the performance impact of insufficient ECG classification labels. Contrastive learning has been successful as a self-supervised pre-training approach in image and time series domains. Inspired by this success, a novel pre-training technique, i.e., a simple multimodal self-supervised framework for ECG arrhythmia classification, is proposed in this paper by utilizing multi-modal data from ECG signals to enhance model initialization. Compared to other modalities, the expectation is that representations based on time and frequency for the same example should be brought as close together as possible. The pre-training is achieved through self-supervision by constructing time-domain contrastive learning loss and time-frequency loss, effectively learning features of ECG signals. The proposed method evaluates datasets containing both multi-lead and single-lead ECG data. Experimental results demonstrate that, by applying the pre-training method followed by fine-tuning for downstream tasks, the proposed algorithm outperforms standard contrastive learning paradigms on ACC and AUC, respectively, and even outperforms supervised learning.",
+        "authors": [
+          {
+            "family": "Hu",
+            "given": "Jianqiang"
+          },
+          {
+            "family": "Li",
+            "given": "Cheng"
+          },
+          {
+            "family": "Cao",
+            "given": "Jinde"
+          },
+          {
+            "family": "Kou",
+            "given": "Bo"
+          }
+        ],
+        "date_raw": "",
+        "day": null,
+        "doi": "10.1016/j.compbiomed.2025.111137",
+        "issn": [
+          "1879-0534"
+        ],
+        "issue": "Pt A",
+        "journal": "Computers in biology and medicine",
+        "journal_abbreviation": "Comput Biol Med",
+        "keywords": [
+          "Contrastive learning",
+          "ECG classification",
+          "Self-supervised learning",
+          "Time-frequency"
+        ],
+        "language": "eng",
+        "month": 11,
+        "page": "111137",
+        "pmcid": "",
+        "pmid": "41056617",
+        "publication_types": [
+          "Journal Article"
+        ],
+        "record_type": "article",
+        "title": "A novel multimodal self-supervised framework for ECG arrhythmia classification.",
+        "volume": "198",
+        "year": 2025
+      },
+      {
+        "abstract": "Wearable Internet of Things (IoT) devices are gaining ground for continuous physiological data acquisition and health monitoring. These physiological signals can be used for security applications to achieve continuous authentication and user convenience due to passive data acquisition. This paper investigates an electrocardiogram (ECG) based biometric user authentication system using features derived from the Convolutional Neural Network (CNN) and self-supervised contrastive learning. Contrastive learning enables us to use large unlabeled datasets to train the model and establish its generalizability. We propose approaches enabling the CNN encoder to extract appropriate features that distinguish the user from other subjects. When evaluated using the PTB ECG database with 290 subjects, the proposed technique achieved an authentication accuracy of 99.15%. To test its generalizability, we applied the model to two new datasets, the MIT-BIH Arrhythmia Database and the ECG-ID Database, achieving over 98.5% accuracy without any modifications. Furthermore, we show that repeating the authentication step three times can increase accuracy to nearly 100% for both PTBDB and ECGIDDB. This paper also presents model optimizations for embedded device deployment, which makes the system more relevant to real-world scenarios. To deploy our model in IoT edge sensors, we optimized the model complexity by applying quantization and pruning. The optimized model achieves 98.67% accuracy on PTBDB, with 0.48% accuracy loss and 62.6% CPU cycles compared to the unoptimized model. An accuracy-vs-time-complexity tradeoff analysis is performed, and results are presented for different optimization levels.",
+        "authors": [
+          {
+            "family": "Wang",
+            "given": "Guoxin"
+          },
+          {
+            "family": "Shanker",
+            "given": "Shreejith"
+          },
+          {
+            "family": "Nag",
+            "given": "Avishek"
+          },
+          {
+            "family": "Lian",
+            "given": "Yong"
+          },
+          {
+            "family": "John",
+            "given": "Deepu"
+          }
+        ],
+        "date_raw": "",
+        "day": null,
+        "doi": "10.1109/JBHI.2024.3455803",
+        "issn": [
+          "2168-2208"
+        ],
+        "issue": "11",
+        "journal": "IEEE journal of biomedical and health informatics",
+        "journal_abbreviation": "IEEE J Biomed Health Inform",
+        "keywords": [],
+        "language": "eng",
+        "month": 11,
+        "page": "6606-6618",
+        "pmcid": "",
+        "pmid": "39250357",
+        "publication_types": [
+          "Journal Article",
+          "Research Support, Non-U.S. Gov't"
+        ],
+        "record_type": "article",
+        "title": "ECG Biometric Authentication Using Self-Supervised Learning for IoT Edge Sensors.",
+        "volume": "28",
+        "year": 2024
+      },
+      {
+        "abstract": "This paper presents a systematic investigation into the effectiveness of Self-Supervised Learning (SSL) methods for Electrocardiogram (ECG) arrhythmia detection. We begin by conducting a novel analysis of the data distributions on three popular ECG-based arrhythmia datasets: PTB-XL, Chapman, and Ribeiro. To the best of our knowledge, our study is the first to quantitatively explore and characterize these distributions in the area. We then perform a comprehensive set of experiments using different augmentations and parameters to evaluate the effectiveness of various SSL methods, namely SimCRL, BYOL, and SwAV, for ECG representation learning, where we observe the best performance achieved by SwAV. Furthermore, our analysis shows that SSL methods achieve highly competitive results to those achieved by supervised state-of-the-art methods. To further assess the performance of these methods on both In-Distribution (ID) and Out-of-Distribution (OOD) ECG data, we conduct cross-dataset training and testing experiments. Our comprehensive experiments show almost identical results when comparing ID and OOD schemes, indicating that SSL techniques can learn highly effective representations that generalize well across different OOD datasets. This finding can have major implications for ECG-based arrhythmia detection. Lastly, to further analyze our results, we perform detailed per-disease studies on the performance of the SSL methods on the three datasets.",
+        "authors": [
+          {
+            "family": "Soltanieh",
+            "given": "Sahar"
+          },
+          {
+            "family": "Hashemi",
+            "given": "Javad"
+          },
+          {
+            "family": "Etemad",
+            "given": "Ali"
+          }
+        ],
+        "date_raw": "",
+        "day": null,
+        "doi": "10.1109/JBHI.2023.3331626",
+        "issn": [
+          "2168-2208"
+        ],
+        "issue": "2",
+        "journal": "IEEE journal of biomedical and health informatics",
+        "journal_abbreviation": "IEEE J Biomed Health Inform",
+        "keywords": [],
+        "language": "eng",
+        "month": 2,
+        "page": "789-800",
+        "pmcid": "",
+        "pmid": "37948139",
+        "publication_types": [
+          "Journal Article",
+          "Research Support, Non-U.S. Gov't"
+        ],
+        "record_type": "article",
+        "title": "In-Distribution and Out-of-Distribution Self-Supervised ECG Representation Learning for Arrhythmia Detection.",
+        "volume": "28",
+        "year": 2024
+      },
+      {
+        "abstract": "Accurate diagnosis of heart arrhythmias requires the interpretation of electrocardiograms (ECG), which capture the electrical activity of the heart. Automating this process through machine learning is challenging due to the need for large annotated datasets, which are difficult and costly to collect. To address this issue, transfer learning is often employed, where models are pre-trained on large datasets and fine-tuned for specific ECG classification tasks with limited labeled data. Self-supervised learning has become a widely adopted pre-training method, enabling models to learn meaningful representations from unlabeled datasets. In this work, we explore the joint-embedding predictive architecture (JEPA) for self-supervised learning from ECG data. Unlike invariance-based methods, JEPA does not rely on hand-crafted data augmentations, and unlike generative methods, it predicts latent features rather than reconstructing input data. We create a large unsupervised pre-training dataset by combining ten public ECG databases, amounting to over one million records. We pre-train Vision Transformers using JEPA on this dataset and fine-tune them on various PTB-XL benchmarks. Our results show that JEPA outperforms existing invariance-based and generative approaches, achieving an AUC of 0.945 on the PTB-XL all statements task. JEPA consistently learns the highest quality representations, as demonstrated in frozen evaluations, and proves advantageous for pre-training even in the absence of additional data.",
+        "authors": [
+          {
+            "family": "Weimann",
+            "given": "Kuba"
+          },
+          {
+            "family": "Conrad",
+            "given": "Tim O F"
+          }
+        ],
+        "date_raw": "",
+        "day": null,
+        "doi": "10.1016/j.compbiomed.2025.110809",
+        "issn": [
+          "1879-0534"
+        ],
+        "issue": "Pt B",
+        "journal": "Computers in biology and medicine",
+        "journal_abbreviation": "Comput Biol Med",
+        "keywords": [
+          "ECG classification",
+          "Joint-embedding predictive architecture",
+          "Self-supervised learning"
+        ],
+        "language": "eng",
+        "month": 9,
+        "page": "110809",
+        "pmcid": "",
+        "pmid": "40749448",
+        "publication_types": [
+          "Journal Article"
+        ],
+        "record_type": "article",
+        "title": "Self-supervised pre-training with joint-embedding predictive architecture boosts ECG classification performance.",
+        "volume": "196",
+        "year": 2025
+      },
+      {
+        "abstract": "BACKGROUND: The 12-lead electrocardiogram (ECG) is an established modality for cardiovascular assessment. While deep learning algorithms have shown promising results for analyzing ECG data, the limited availability of labeled datasets hinders broader applications. Self-supervised learning can learn meaningful representations from the unlabeled data and transfer the knowledge to downstream tasks. This study underscores the development and validation of a self-supervised learning methodology tailored to produce universal ECG representations from longitudinally collected ECG data, applicable across a spectrum of cardiovascular assessments. METHODS: We introduced a pre-trained model that utilizes contrastive self-supervised learning to universal ECG representations from 4,932,573 ECG tracing from 1,684,298 adult patients on 7 campuses of Chang Gung Memorial Hospital. We extensively evaluated the proposed model using an internal dataset collected from diverse healthcare establishments and an external public dataset encompassing varied cardiovascular conditions and sample magnitudes. RESULTS: The pre-trained model showed the equivalent performance to the conventionally trained models, which solely rely on supervised learning in both internal and external datasets, to assess atrial fibrillation, atrial flutter, premature rhythm abnormalities, first-degree atrioventricular block, and myocardial infarction. When applied to small sample sizes, it was observed that the learned ECG representations enhanced the classification models, resulting in an improvement of up to 0.3 of the area under the receiver operating characteristic (AUROC). CONCLUSIONS: The ECG representations learned from longitudinal ECG data are highly effective, particularly with small sample sizes, and further enhance the learning process and boost robustness.",
+        "authors": [
+          {
+            "family": "Liu",
+            "given": "Zhi-Yong"
+          },
+          {
+            "family": "Lin",
+            "given": "Ching-Heng"
+          },
+          {
+            "family": "Hsu",
+            "given": "Yu-Chun"
+          },
+          {
+            "family": "Chen",
+            "given": "Jung-Sheng"
+          },
+          {
+            "family": "Chang",
+            "given": "Po-Cheng"
+          },
+          {
+            "family": "Wen",
+            "given": "Ming-Shien"
+          },
+          {
+            "family": "Kuo",
+            "given": "Chang-Fu"
+          }
+        ],
+        "date_raw": "",
+        "day": null,
+        "doi": "10.1016/j.ijmedinf.2024.105742",
+        "issn": [
+          "1872-8243"
+        ],
+        "issue": "",
+        "journal": "International journal of medical informatics",
+        "journal_abbreviation": "Int J Med Inform",
+        "keywords": [
+          "Deep neural network",
+          "Electrocardiography",
+          "Self-supervised learning"
+        ],
+        "language": "eng",
+        "month": 3,
+        "page": "105742",
+        "pmcid": "",
+        "pmid": "39631267",
+        "publication_types": [
+          "Journal Article"
+        ],
+        "record_type": "article",
+        "title": "Universal representations in cardiovascular ECG assessment: A self-supervised learning approach.",
+        "volume": "195",
+        "year": 2025
+      },
+      {
+        "abstract": "BACKGROUND: The wide availability of labeled electrocardiogram (ECG) data has driven major advances in artificial intelligence (AI)-based detection of structural and functional cardiac abnormalities and thus ECG-based diagnosis. However, many critical, high value clinical diagnostic applications, such as assessing myocardial ischemia and coronary microvascular dysfunction, remain underserved due to the limited availability of labeled datasets. We developed a self-supervised ECG foundation model and demonstrate how this approach can overcome this limitation. METHODS: A modified vision transformer model was pretrained using a large database of unlabeled ECG waveforms (MIMIC-IV-ECG, N=800,035). The model was then fine-tuned using smaller databases that included high-quality labels derived from positron emission tomography (N=3,126) and clinical reports (N=13,704) for 12 clinical, demographic, and traditional ECG prediction tasks. Diagnostic accuracy and model generalizability were evaluated across five additional cohorts including the publicly available PTB-XL and UK Biobank databases and labels from cardiac magnetic resonance imaging (MRI) and single photon emission computed tomography (SPECT). RESULTS: Diagnostic performance varied across tasks with area under the receiver operating characteristic curve (AUROC) ranging from 0.763 for detection of impaired myocardial flow reserve (MFR < 2) to 0.955 for impaired left ventricular ejection fraction (LVEF < 35%). Self-supervised learning (SSL) pretraining greatly improved diagnostic accuracy in 11 of the 12 prediction tasks compared to conventional de novo supervised training. The model retained strong performance across three external and two internal cross-modality databases, with AUROC ranging from 0.771 for impaired MFR to 0.949 for impaired LVEF. CONCLUSION: This versatile ECG foundation model demonstrates that SSL pretraining enhances diagnostic accuracy and generalizability across diverse cardiac diagnostic applications. By enabling effective learning from limited labeled data, this approach supports AI development for complex but clinically critical tasks, such as detecting myocardial ischemia and coronary microvascular dysfunction, where high-quality labels are costly and scarce.",
+        "authors": [
+          {
+            "family": "Moody",
+            "given": "Jonathan B"
+          },
+          {
+            "family": "Poitrasson-Rivière",
+            "given": "Alexis"
+          },
+          {
+            "family": "Renaud",
+            "given": "Jennifer M"
+          },
+          {
+            "family": "Hagio",
+            "given": "Tomoe"
+          },
+          {
+            "family": "Alahdab",
+            "given": "Fares"
+          },
+          {
+            "family": "Al-Mallah",
+            "given": "Mouaz H"
+          },
+          {
+            "family": "Vanderver",
+            "given": "Michael D"
+          },
+          {
+            "family": "Goonewardena",
+            "given": "Sascha N"
+          },
+          {
+            "family": "Ficaro",
+            "given": "Edward P"
+          },
+          {
+            "family": "Murthy",
+            "given": "Venkatesh L"
+          }
+        ],
+        "date_raw": "",
+        "day": null,
+        "doi": "10.1056/aioa2500164",
+        "issn": [
+          "2836-9386"
+        ],
+        "issue": "12",
+        "journal": "NEJM AI",
+        "journal_abbreviation": "NEJM AI",
+        "keywords": [],
+        "language": "eng",
+        "month": 12,
+        "page": "",
+        "pmcid": "PMC12724683",
+        "pmid": "41446031",
+        "publication_types": [
+          "Journal Article"
+        ],
+        "record_type": "article",
+        "title": "A foundation transformer model with self-supervised learning for ECG-based assessment of cardiac and coronary function.",
+        "volume": "2",
+        "year": 2025
+      },
+      {
+        "abstract": "Electrocardiograms (ECG) offer a quick and noninvasive method to analyze heart disorders. However, analysis of ECGs under non-ideal or noisy situations presents challenges, even for experts. Recently, automated analysis of biosignals using machine learning has gained popularity. However, approaches require large amounts of data, and the scarcity of large public datasets can result in poor generalization and increased sensitivity to noise. This study proposes the self-supervised pre-training of a Mamba-based model to denoise ECG data, and use the resulting latent representation for downstream ECG classification tasks. Our results shows that pretraining a self-supervised Mamba-based model increases robustness to noise, increasing classification performance in noisy situations. Furthermore, we evaluate optimal noise parameters to pre-train the model, and show that the proposed approach offers better performance with reduced computational cost compared to an equivalent transformer-based approach.",
+        "authors": [
+          {
+            "family": "Parmonangan",
+            "given": "Ivan Halim"
+          },
+          {
+            "family": "Fernando",
+            "given": "Tharindu"
+          },
+          {
+            "family": "Denman",
+            "given": "Simon"
+          }
+        ],
+        "date_raw": "",
+        "day": null,
+        "doi": "10.1109/EMBC58623.2025.11253901",
+        "issn": [
+          "2694-0604"
+        ],
+        "issue": "",
+        "journal": "Annual International Conference of the IEEE Engineering in Medicine and Biology Society. IEEE Engineering in Medicine and Biology Society. Annual International Conference",
+        "journal_abbreviation": "Annu Int Conf IEEE Eng Med Biol Soc",
+        "keywords": [],
+        "language": "eng",
+        "month": 7,
+        "page": "1-7",
+        "pmcid": "",
+        "pmid": "41337234",
+        "publication_types": [
+          "Journal Article"
+        ],
+        "record_type": "article",
+        "title": "Robust ECG Classification using Mamba and Self-Supervised Representation Learning.",
+        "volume": "2025",
+        "year": 2025
+      }
+    ]
+  },
+  "response_hash": "8f9e8715ac7aa6d7472284b5dc72d8d41ed05746d9a58bb241193d8da4b498c1",
+  "retrieved_at": "2026-07-14T12:58:13Z",
+  "schema_version": "1.0",
+  "source": "pubmed"
+}

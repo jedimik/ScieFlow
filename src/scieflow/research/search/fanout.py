@@ -1,10 +1,12 @@
 """`scieflow research search all`: one query through every enabled literature source (M-C1 5.2).
 
 The query is repaired and checked once (`registry.check_query`) before any source is asked. Sources
-run one after another in the canonical order openalex, crossref, europepmc, arxiv, each through the
-same Gateway, and each is isolated: a refusal, a switched-off source, a snapshot miss or a failure
-ends that source only. The answers are merged by the vendored dedupe, ranked by the vendored rank,
-and printed as one JSON object that names every source's status and never repeats the query.
+run one after another in the canonical order (M-C2-D7: openalex, crossref, europepmc, arxiv, then
+pubmed, semantic-scholar and datacite), each through the same Gateway, and each is isolated: a refusal,
+a switched-off source, a snapshot miss or a failure ends that source only. PubMed's query is checked
+by its own rule (`registry.check_pubmed_query`) before any source is asked. The answers are merged by
+the vendored dedupe, ranked by the vendored rank, and printed as one JSON object that names every
+source's status and never repeats the query.
 
 Exit: 0 when a source answered; otherwise 6 when every non-answer is a snapshot miss; otherwise 3
 when any source is refused or switched off; otherwise 1.
@@ -23,11 +25,24 @@ from scieflow.core import network
 from scieflow.core import sanitize
 from scieflow.integrations.scite.policy import PolicyError
 from scieflow.research.lib import http, kernel
-from scieflow.research.search import arxiv, crossref, europepmc, openalex, registry
+from scieflow.research.search import arxiv, crossref, datacite, europepmc, openalex, pubmed
+from scieflow.research.search import registry, semantic_scholar
 
-ORDER = ("openalex", "crossref", "europepmc", "arxiv")
-MODULES = {"openalex": openalex, "crossref": crossref, "europepmc": europepmc, "arxiv": arxiv}
+# The canonical order of every source (M-C2-D7). The first four are M-C1's and are always asked;
+# OPT_IN sources are asked by default only when config/integrations.yml switches them on; datacite
+# is asked only when named with --sources.
+ORDER = ("openalex", "crossref", "europepmc", "arxiv", "pubmed", "semantic-scholar", "datacite")
+CORE = ORDER[:4]
+OPT_IN = ("pubmed", "semantic-scholar")
+MODULES = {"openalex": openalex, "crossref": crossref, "europepmc": europepmc, "arxiv": arxiv,
+           "pubmed": pubmed, "semantic-scholar": semantic_scholar, "datacite": datacite}
 EXIT_OK, EXIT_FAILED, EXIT_REFUSED, EXIT_MISS = 0, 1, 3, 6
+
+
+def default_sources(policy) -> tuple:
+    """The sources `search all` asks without --sources: the four M-C1 sources, plus each OPT_IN
+    source whose `search-<name>` the policy allows (M-C2-D7)."""
+    return CORE + tuple(name for name in OPT_IN if policy.allows(f"search-{name}"))
 
 
 def _status(name: str, status: str, count: int = 0, error: str | None = None) -> dict:
@@ -37,12 +52,17 @@ def _status(name: str, status: str, count: int = 0, error: str | None = None) ->
     return out
 
 
-def run_all(gw, query, *, sources=ORDER, limit: int = 25, from_year: int | None = None,
+def run_all(gw, query, *, sources=None, limit: int = 25, from_year: int | None = None,
             top: int | None = None) -> dict:
-    """The fan-out payload for one query. `sources` may list any subset in any order; the output
-    always follows the canonical order."""
+    """The fan-out payload for one query. `sources` may list any subset of ORDER in any order; the
+    output always follows the canonical order. `None` means `default_sources(gw.policy)`."""
     checked = registry.check_query(query)            # refused here, before any source is asked
-    chosen = [name for name in ORDER if name in sources]
+    wanted = default_sources(gw.policy) if sources is None else sources
+    chosen = [name for name in ORDER if name in wanted]
+    own_checked = {}
+    if "pubmed" in chosen and gw.policy.allows("search-pubmed"):
+        # PubMed's own check (M-C2-D6), also before any source is asked
+        own_checked["pubmed"] = registry.check_pubmed_query(query)
     statuses: list[dict] = []
     answers: dict[str, list] = {}
     for name in chosen:
@@ -51,7 +71,8 @@ def run_all(gw, query, *, sources=ORDER, limit: int = 25, from_year: int | None 
             statuses.append(_status(name, "off", error=gw.policy.reason(provider) or "off"))
             continue
         try:
-            found = MODULES[name].search(gw, checked, limit=limit, from_year=from_year)
+            found = MODULES[name].search(gw, own_checked.get(name, checked), limit=limit,
+                                         from_year=from_year)
         except network.NetworkMiss as exc:          # before PolicyError: NetworkMiss subclasses it
             statuses.append(_status(name, "offline-miss", error=str(exc)))
         except PolicyError as exc:
@@ -105,9 +126,11 @@ def exit_code(statuses: list[dict]) -> int:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="scieflow research search all")
     ap.add_argument("query")
-    ap.add_argument("--sources", default=",".join(ORDER), metavar="LIST",
+    ap.add_argument("--sources", default=None, metavar="LIST",
                     help="Comma-separated sources, any order (openalex, crossref, europepmc, "
-                         "arxiv). Default: all four.")
+                         "arxiv, pubmed, semantic-scholar, datacite). Default: the four M-C1 "
+                         "sources, plus pubmed and semantic-scholar when config/integrations.yml "
+                         "switches them on.")
     ap.add_argument("--limit", type=int, default=25, help="Records asked of each source.")
     ap.add_argument("--from-year", type=int)
     ap.add_argument("--top", type=int, default=None,
@@ -115,12 +138,14 @@ def main(argv=None) -> None:
     registry.add_workspace_option(ap)
     registry.add_network_option(ap)
     args = ap.parse_args(argv)
-    names = {part.strip() for part in args.sources.split(",") if part.strip()}
-    unknown = sorted(names - set(ORDER))
-    if unknown or not names:
-        ap.error(f"unknown source(s): {', '.join(unknown) or '(none given)'} "
-                 f"(one of {', '.join(ORDER)})")
-    chosen = tuple(name for name in ORDER if name in names)
+    chosen = None
+    if args.sources is not None:
+        names = {part.strip() for part in args.sources.split(",") if part.strip()}
+        unknown = sorted(names - set(ORDER))
+        if unknown or not names:
+            ap.error(f"unknown source(s): {', '.join(unknown) or '(none given)'} "
+                     f"(one of {', '.join(ORDER)})")
+        chosen = tuple(name for name in ORDER if name in names)
     payload = registry.call(
         args.workspace,
         lambda gw: run_all(gw, args.query, sources=chosen, limit=args.limit,
