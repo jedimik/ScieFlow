@@ -16,10 +16,14 @@ from typing import NoReturn
 import click
 import yaml
 
+from scieflow.core import gates, network
 from scieflow.core.project import Project, ProjectError
-from scieflow.research.journal import profile, render
+from scieflow.core.review.claims import LeakError
+from scieflow.integrations.scite import mcp as scite_mcp
+from scieflow.research.journal import facts, profile, render, sources, state
+from scieflow.research.lib import http, providers
 
-OK, REFUSED, USAGE = 0, 1, 2
+OK, REFUSED, USAGE, BOUNDARY, NO_EGRESS = 0, 1, 2, 3, 6
 
 
 def _fail(message: str, code: int = REFUSED) -> NoReturn:
@@ -164,3 +168,92 @@ def validate(target, as_json):
     if any(p.level == "error" for p in problems):
         raise SystemExit(REFUSED)
     raise SystemExit(OK)
+
+
+# --- M-F t3: research (facts, the gate, the fetch) and add-source ------------------------------
+
+
+def _run_folder(project: Project, run: str) -> Path:
+    try:
+        folder = project.run_dir(run)
+    except ProjectError as exc:
+        _fail(f"error: {exc}")
+    if not folder.is_dir():
+        _fail(f"no run {run!r} (looked for {folder})")
+    return folder
+
+
+def _exit_for(exc: BaseException) -> NoReturn:
+    """The exit codes of M-F 5.2: 1 refused, 3 a Gateway policy or leak refusal (nothing sent),
+    6 a no-egress miss (nothing sent)."""
+    if isinstance(exc, LeakError):
+        _fail(str(exc), BOUNDARY)
+    if isinstance(exc, network.NetworkMiss):
+        _fail(str(exc), NO_EGRESS)
+    if isinstance(exc, providers.PolicyError):
+        _fail(f"refused: {exc}", BOUNDARY)
+    if isinstance(exc, facts.FactsError):
+        _fail(str(exc), exc.code)
+    if isinstance(exc, http.HTTPFailure):
+        _fail(f"failed: {exc.classification}", REFUSED)
+    _fail(f"refused: {exc}", REFUSED)
+
+
+@journal.command()
+@click.argument("run")
+@click.option("--journal", "journal_name", required=True, help="The journal's name.")
+@click.option("--issn", default=None, help="The journal's ISSN (preferred: it names one source).")
+@click.option("--url", "urls", multiple=True, help="An author-guideline page (https; at most 10).")
+@click.option("--slug", default=None, help="The profile slug (default: from the name).")
+@click.option("--as-of", "as_of", default=None, help="Reference date YYYY-MM-DD (default: today, UTC).")
+@click.option("--restart", is_flag=True, help="Remove the working files first (never adopted/).")
+@click.option("--retry-failed", is_flag=True, help="Re-request only the pages that failed.")
+@click.option("--json", "as_json", is_flag=True, help="Print the result as JSON.")
+def research(run, journal_name, issn, urls, slug, as_of, restart, retry_failed, as_json):
+    """Journal facts, then the guideline pages a human approves, then the saved pages (RUN: a run)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        day = dt.date.fromisoformat(as_of) if as_of else dt.datetime.now(dt.timezone.utc).date()
+    except ValueError:
+        _fail("--as-of takes YYYY-MM-DD", USAGE)
+    try:
+        chosen = state.check_slug(slug or state.slugify(journal_name))
+        policy = providers.load(project.root)
+
+        def make_gateway(run_hosts=None):
+            return providers.Gateway(folder, policy, run_hosts=run_hosts)
+
+        result = sources.research(project, folder, journal=journal_name, slug=chosen, issn=issn,
+                                  extra_urls=list(urls), as_of=day, restart=restart,
+                                  retry_failed=retry_failed, policy=policy,
+                                  make_gateway=make_gateway)
+    except (LeakError, providers.PolicyError, network.NetworkMiss, facts.FactsError,
+            http.HTTPFailure, gates.GateError, state.StateError, ValueError) as exc:
+        _exit_for(exc)
+    if as_json:
+        click.echo(json.dumps(result.to_dict(), indent=2, ensure_ascii=False, sort_keys=True))
+    else:
+        for line in result.lines:
+            click.echo(line)
+    raise SystemExit(result.exit_code)
+
+
+@journal.command("add-source")
+@click.argument("run")
+@click.option("--file", "file_path", required=True, type=click.Path(), help="A saved page.")
+@click.option("--url", required=True, help="The https address the page came from.")
+@click.option("--note", default="", help="A short note (kept with the row).")
+def add_source(run, file_path, url, note):
+    """Add a guideline page the human saved (.html, .htm, .txt or .md; at most 5 MB)."""
+    try:
+        scite_mcp.refuse_in_dispatch()
+    except providers.PolicyError as exc:
+        _fail(f"refused: {exc}", BOUNDARY)
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        row = sources.add_source(state.journal_dir(folder), Path(file_path), url, note)
+    except (sources.SourcesError, state.StateError, ValueError) as exc:
+        _fail(str(exc), REFUSED)
+    click.echo(f"added {row['id']} from {row['host']} ({row['chars']} characters)")
