@@ -11,6 +11,7 @@ from typing import NoReturn
 import click
 
 from scieflow.core.project import Project, ProjectError
+from scieflow.research.journal import state
 from scieflow.research.manuscript import check as check_mod
 from scieflow.research.manuscript import checklist, judgement, tex
 
@@ -89,7 +90,11 @@ def checklist_prompt(run, guideline, main_file, write):
     except (tex.TexError, checklist.ChecklistError) as exc:
         _fail(str(exc))
     if write:
-        click.echo(f"prompt: {judgement.write_prompt(folder, guideline, text)}")
+        try:
+            path = judgement.write_prompt(folder, guideline, text)
+        except state.StateError as exc:
+            _fail(str(exc))
+        click.echo(f"prompt: {path}")
     else:
         click.echo(text, nl=False)
     raise SystemExit(OK)
