@@ -102,6 +102,7 @@ def build(project: Project, run: Path, *, agent: str | None, cross_check: bool) 
     else:
         facts_block = "\n[no facts.json in this run: `scieflow journal research` writes it]\n"
     out_name = output_name(agent, cross_check)
+    article_type = state.article_type_of(jdir)
     lines = [
         HEADER,
         "",
@@ -118,8 +119,15 @@ def build(project: Project, run: Path, *, agent: str | None, cross_check: bool) 
         _schema_rules(project.root),
         "## Facts (data)",
         facts_block,
-        "## Sources (data)",
     ]
+    if article_type is not None:
+        lines += [
+            "## Article type requested",
+            f"The human asked for the article type `{article_type}`. Give its limits, structure and abstract",
+            "rules first where the sources state them; the other article types stay in article_types too.",
+            "",
+        ]
+    lines.append("## Sources (data)")
     used = 0
     for row in stored.rows.values():
         sid = row["id"]

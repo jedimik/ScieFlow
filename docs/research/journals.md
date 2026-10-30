@@ -108,6 +108,9 @@ adopts a profile and never adds a page.
 
 `journal research` also accepts `--url URL` (repeatable, at most ten; https only),
 `--slug`, `--as-of YYYY-MM-DD` (the reference date; default today, UTC),
+`--article-type ID` (a lower-case id, for example `research-article`; it is recorded
+in the run's `journal/state.json` and `journal prompt` names it as the article type
+the human asked for. The profile still carries every article type the sources state),
 `--restart` (remove the working files first; never touches an adopted profile)
 and `--json`. `journal prompt` accepts `--for AGENT`, `--cross-check` and
 `--write` (without `--write` it prints the prompt). `journal adopt` accepts

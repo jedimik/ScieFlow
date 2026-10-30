@@ -30,8 +30,6 @@ MANUSCRIPT_SRC = ROOT / "src" / "scieflow" / "research" / "manuscript"
 JOURNAL_COMMANDS = ("research", "add-source", "prompt", "adopt", "show", "list", "validate", "diff", "style")
 MANUSCRIPT_COMMANDS = ("check", "checklist-prompt", "render", "build", "package", "letter")
 
-# plan 5.2 and 5.14: every flag the journal and manuscript commands take (no --article-type on research:
-# the implemented command does not take it; see the journal docs' known limits).
 JOURNAL_FLAGS = (
     "--journal", "--issn", "--url", "--as-of", "--slug", "--restart", "--retry-failed",
     "--refresh-of", "--file", "--note", "--for", "--cross-check", "--write", "--draft",

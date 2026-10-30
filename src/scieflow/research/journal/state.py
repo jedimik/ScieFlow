@@ -22,6 +22,7 @@ STATE = "state.json"
 PHASES = ("facts", "sources-manual", "gate-open", "denied", "fetched")
 WORKING = ("state.json", "facts.json", "candidates.json", "sources.json", "profile.draft.yml")
 SLUG_SHAPE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+ARTICLE_TYPE_SHAPE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")  # the schema's article_type_id pattern
 
 
 class StateError(Exception):
@@ -103,6 +104,19 @@ def read_state(folder: Path) -> dict:
 
 def write_state(folder: Path, state: dict) -> None:
     write_text(Path(folder) / STATE, json.dumps(state, indent=2, sort_keys=True) + "\n")
+
+
+def article_type_of(folder: Path) -> str | None:
+    """The article type the human asked for in `journal research --article-type` (None if none)."""
+    value = read_state(folder).get("article_type")
+    return value if isinstance(value, str) and ARTICLE_TYPE_SHAPE.match(value) else None
+
+
+def set_article_type(folder: Path, article_type: str) -> None:
+    """Record the requested article type in state.json (the caller has checked its shape)."""
+    state = read_state(folder)
+    state["article_type"] = article_type
+    write_state(folder, state)
 
 
 def remove_working(folder: Path) -> None:

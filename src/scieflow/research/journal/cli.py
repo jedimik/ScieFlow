@@ -208,12 +208,15 @@ def _exit_for(exc: BaseException) -> NoReturn:
 @click.option("--url", "urls", multiple=True, help="An author-guideline page (https; at most 10).")
 @click.option("--slug", default=None, help="The profile slug (default: from the name).")
 @click.option("--as-of", "as_of", default=None, help="Reference date YYYY-MM-DD (default: today, UTC).")
+@click.option("--article-type", "article_type", default=None,
+              help="The article type to draft (a lower-case id); a hint for the agent prompt.")
 @click.option("--restart", is_flag=True, help="Remove the working files first (never adopted/).")
 @click.option("--retry-failed", is_flag=True, help="Re-request only the pages that failed.")
 @click.option("--refresh-of", "refresh_of", default=None,
               help="Pre-fill name, ISSN-L and gateway URLs from an adopted profile (a new gate is still required).")
 @click.option("--json", "as_json", is_flag=True, help="Print the result as JSON.")
-def research(run, journal_name, issn, urls, slug, as_of, restart, retry_failed, refresh_of, as_json):
+def research(run, journal_name, issn, urls, slug, as_of, article_type, restart, retry_failed,
+             refresh_of, as_json):
     """Journal facts, then the guideline pages a human approves, then the saved pages (RUN: a run)."""
     project = Project.discover()
     folder = _run_folder(project, run)
@@ -229,6 +232,8 @@ def research(run, journal_name, issn, urls, slug, as_of, restart, retry_failed, 
         urls = tuple(dict.fromkeys([*urls, *(u for u in gateway if isinstance(u, str))]))
     if not journal_name:
         _fail("give --journal NAME, or --refresh-of SLUG for an adopted profile", USAGE)
+    if article_type is not None and not state.ARTICLE_TYPE_SHAPE.match(article_type):
+        _fail("--article-type takes a lower-case id (letters, digits and hyphens, at most 64)", USAGE)
     try:
         day = dt.date.fromisoformat(as_of) if as_of else dt.datetime.now(dt.timezone.utc).date()
     except ValueError:
@@ -247,6 +252,8 @@ def research(run, journal_name, issn, urls, slug, as_of, restart, retry_failed, 
     except (LeakError, providers.PolicyError, network.NetworkMiss, facts.FactsError,
             http.HTTPFailure, gates.GateError, state.StateError, ValueError) as exc:
         _exit_for(exc)
+    if article_type is not None:
+        state.set_article_type(state.journal_dir(folder), article_type)
     if as_json:
         click.echo(json.dumps(result.to_dict(), indent=2, ensure_ascii=False, sort_keys=True))
     else:
