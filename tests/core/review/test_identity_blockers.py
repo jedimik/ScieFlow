@@ -437,3 +437,25 @@ def test_the_refusal_verdicts_are_the_vendored_refusal_grade():
     ig = importlib.import_module("scieflow.core.review.identity_gates")
     verify = importlib.import_module("scieflow._vendor.researcher_core.verify")
     assert ig.REFUSAL_VERDICTS == verify.REFUSAL_GRADE == frozenset({"mismatch", "unresolvable"})
+
+
+# --- malformed event lines never break the identity readers (RED for the t5 clean-run fix) ----
+
+
+@pytest.mark.parametrize("line", [
+    "[1]", '"text"', "3",
+    '{"type": "review.identity_checked", "data": "x"}',
+    '{"type": "review.identity_checked", "data": {"round": "one"}}',
+    '{"type": "review.identity_overruled", "data": "x"}',
+    '{"type": "gate.opened", "data": "x", "actor": "system"}',
+])
+def test_malformed_event_lines_do_not_break_the_identity_readers(proj, capsys, gold_http, line):
+    project, ws = proj
+    write_bib(ws, MIS[1] + "\n\n" + UNR[1] + "\n")
+    vb(capsys, "demo", "--round", "1", "--json")
+    before = [(b["reason"], b["gate"] is not None) for b in service.blockers(project, "demo")]
+    with (ws / "events.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+    after = [(b["reason"], b["gate"] is not None) for b in service.blockers(project, "demo")]
+    assert before == after and len(after) == 2
+    assert merge().exit_code == 1

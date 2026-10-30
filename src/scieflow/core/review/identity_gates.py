@@ -84,27 +84,73 @@ def _verdict_counts(doc: dict) -> dict[str, int]:
     return counts
 
 
+def _events_of(ws: Path, *types: str) -> list[dict]:
+    """Event objects of the given types whose `data` is an object. Malformed lines are skipped.
+
+    Local to this module on purpose: events.read() assumes every line is an object, and the
+    readers of the review layer must tolerate a damaged events.jsonl (test_review_service).
+    """
+    out = []
+    for e in store.read_jsonl(Path(ws) / events.EVENTS_FILE):
+        if not isinstance(e, dict) or e.get("type") not in types:
+            continue
+        data = e.get("data")
+        if isinstance(data, dict):
+            out.append({**e, "data": data})
+    return out
+
+
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _items(data: dict) -> list[dict]:
+    """The well-formed refusal items of a check event: {key, verdict, doi?} with string values."""
+    raw = data.get("refusal")
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for r in raw:
+        if not (isinstance(r, dict) and isinstance(r.get("key"), str)
+                and r.get("verdict") in REFUSAL_VERDICTS):
+            continue
+        item = {"key": r["key"], "verdict": r["verdict"]}
+        if isinstance(r.get("doi"), str) and r["doi"]:
+            item["doi"] = r["doi"]
+        out.append(item)
+    return out
+
+
+def _checks(ws: Path) -> list[dict]:
+    out = []
+    for e in _events_of(ws, CHECKED):
+        data = e["data"]
+        sha = data.get("report_sha256")
+        if _is_int(data.get("round")) and isinstance(sha, str) and len(sha) >= 12:
+            out.append(data)
+    return out
+
+
 def _current(ws: Path):
     """(event data, round, 12-hex check) of the newest check in the run, or None."""
-    found = events.read(ws, types=(CHECKED,))
+    found = _checks(ws)
     if not found:
         return None
-    data = found[-1].get("data") or {}
-    return data, int(data["round"]), str(data["report_sha256"])[:12]
+    data = found[-1]
+    return data, data["round"], str(data["report_sha256"])[:12]
 
 
 def _core_opened(ws: Path) -> set[str]:
-    ids = {(e.get("data") or {}).get("gate") for e in events.read(ws, types=("gate.opened",))
-           if e.get("actor") == "system"}
+    ids = {e["data"].get("gate") for e in _events_of(ws, "gate.opened") if e.get("actor") == "system"}
     return {str(i) for i in ids if i}
 
 
 def _overruled(ws: Path, n: int) -> set[tuple[str, str]]:
     """References a human overruled in round n or an earlier one (same verdict and identity)."""
     out: set[tuple[str, str]] = set()
-    for e in events.read(ws, types=(OVERRULED,)):
-        data = e.get("data") or {}
-        if e.get("actor") != "human" or int(data.get("round", 0)) > n:
+    for e in _events_of(ws, OVERRULED):
+        data = e["data"]
+        if e.get("actor") != "human" or not _is_int(data.get("round")) or data["round"] > n:
             continue
         out.add(_ident(str(data.get("verdict") or ""), data.get("doi"), str(data.get("key") or "")))
     return out
@@ -145,8 +191,8 @@ def _pending(ws: Path):
         if p and g["id"] in core and p["round"] == n and p["check"] == check:
             open_gates[p["token"]] = g
     items = []
-    for item in data.get("refusal") or []:
-        if _ident(str(item["verdict"]), item.get("doi"), str(item["key"])) in overruled:
+    for item in _items(data):
+        if _ident(item["verdict"], item.get("doi"), item["key"]) in overruled:
             continue
         items.append((item, open_gates.get(_token(item["key"]))))
     return n, items
@@ -267,7 +313,7 @@ def on_answer(project, ws: Path, gate: dict, answer: str, actor: str, rationale:
         return                                   # `fixed` records nothing
     if not str(note or "").strip():
         raise gates.GateError("overrule needs your reason in the note (--note)")
-    item = next((r for r in cur[0].get("refusal") or [] if _token(r["key"]) == p["token"]), None)
+    item = next((r for r in _items(cur[0]) if _token(r["key"]) == p["token"]), None)
     if item is None:
         raise gates.GateError("the latest identity check does not refuse this reference")
     events.emit(ws, OVERRULED, "human", round=p["round"], key=item["key"],
