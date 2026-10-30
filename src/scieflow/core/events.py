@@ -32,6 +32,8 @@ TYPES = frozenset({
     # Draft review and scite (docs/research/review-contract.md).
     "review.assigned", "review.pass_done", "review.evidence_built",
     "review.matrix_ready", "review.decided", "review.blocker",
+    # Identity blockers (M-C2 t5, D18): a verify-bib round check and an overrule.
+    "review.identity_checked", "review.identity_overruled",
     "scite.quota_low", "scite.unavailable",
     # Data protection (docs/data-protection.md, M-B): declarations, resolved levels,
     # warnings, releases and imports, ingests (counts only, never values).

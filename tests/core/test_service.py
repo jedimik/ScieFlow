@@ -1236,6 +1236,8 @@ def test_progress_adds_no_event_type():
         "data.released", "data.imported", "data.ingested",
         # Added by M-C1 (literature kernel), additive.
         "network.set", "literature.snapshot",
+        # Added by M-C2 t5 (identity blockers), additive.
+        "review.identity_checked", "review.identity_overruled",
     }), "the vocabulary is closed by design; this panel needs no new type"
 
 
