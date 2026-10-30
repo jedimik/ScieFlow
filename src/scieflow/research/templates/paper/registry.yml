@@ -1,0 +1,8 @@
+# M-F 5.11: the paper classes `scieflow manuscript render` can write. Read only by
+# src/scieflow/research/manuscript/templates.py. Class files are never vendored here: `source`
+# says where the class comes from. tex-core ships with TeX Live; ctan is a CTAN package; publisher
+# is supplied by the journal and has to sit in the manuscript folder (M-F-D12).
+article: {source: tex-core, bibtex_style: plainnat, natbib: true, template: article/main.tex}
+elsarticle: {source: ctan, package: elsarticle, bibtex_style: elsarticle-num, natbib: true, template: elsarticle/main.tex}
+IEEEtran: {source: ctan, package: ieeetran, bibtex_style: IEEEtran, natbib: false, template: IEEEtran/main.tex}
+svjour3: {source: publisher, bibtex_style: spbasic, natbib: true, template: svjour3/main.tex}
