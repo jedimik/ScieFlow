@@ -130,13 +130,37 @@ def test_latex_runs_with_shell_escape_off(tex_env, present):
     assert call.argv[1] == "-no-shell-escape"
 
 
+def test_latexmk_runs_with_norc_so_a_manuscript_rc_file_is_never_read(tex_env):
+    fake = tex_env.install(present=STANDARD)
+    assert _run("manuscript", "build", RUN).exit_code == 0
+    call = next(c for c in fake.tex_calls() if c.name == "latexmk")
+    assert call.argv[1] == "-no-shell-escape"
+    assert "-norc" in call.argv
+
+
+def test_raw_engines_never_get_norc(tex_env):
+    fake = tex_env.install(present=("pdflatex", "kpsewhich"))
+    assert _run("manuscript", "build", RUN).exit_code == 0
+    call = next(c for c in fake.tex_calls() if c.name == "pdflatex")
+    assert "-norc" not in call.argv
+
+
+def test_the_engine_environment_variable_does_not_change_the_engine(tex_env, monkeypatch):
+    monkeypatch.setenv("LATEX_ENGINE", "pdflatex")
+    fake = tex_env.install(present=("latexmk", "pdflatex", "kpsewhich"))
+    assert _run("manuscript", "build", RUN).exit_code == 0
+    engine_calls = [c for c in fake.tex_calls() if c.name in TEX_NAMES]
+    assert engine_calls and all(c.name == "latexmk" for c in engine_calls)
+
+
 def test_the_environment_is_fixed_and_homes_stay_in_scratch(tex_env):
     fake = tex_env.install(present=STANDARD)
     assert _run("manuscript", "build", RUN).exit_code == 0
     call = next(c for c in fake.tex_calls() if c.name in TEX_NAMES)
-    assert set(call.env) == {"PATH", "LANG", "HOME", "TEXMFVAR", "shell_escape", "openout_any"}
+    assert set(call.env) == {"PATH", "LANG", "HOME", "TEXMFVAR", "shell_escape", "openout_any", "openin_any"}
     assert call.env["shell_escape"] == "f"
     assert call.env["openout_any"] == "p"
+    assert call.env["openin_any"] == "p"
     assert call.env["LANG"] == "C.UTF-8"
     scratch = tex_env.synth.run_dir / "scratch"
     assert Path(call.env["HOME"]).is_relative_to(scratch)
@@ -224,6 +248,34 @@ def test_a_symlink_in_the_tree_is_refused(tex_env):
     assert result.exit_code == 1, result.output
     assert "symbolic link" in result.output
     assert not fake.tex_calls()
+
+
+@pytest.mark.parametrize("link", ["scratch/manuscript-env", "scratch/manuscript-env/home"])
+def test_a_scratch_env_folder_that_is_a_symlink_is_refused_and_writes_nothing(tex_env, tmp_path, link):
+    fake = tex_env.install(present=STANDARD)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    run = tex_env.synth.run_dir
+    if link.endswith("/home"):
+        (run / "scratch" / "manuscript-env").mkdir(parents=True, exist_ok=True)
+    else:
+        (run / "scratch").mkdir(exist_ok=True)
+    (run / link).symlink_to(outside, target_is_directory=True)
+    result = _run("manuscript", "build", RUN)
+    assert result.exit_code == 1, result.output
+    assert "symbolic link" in result.output
+    assert list(outside.iterdir()) == []
+    assert not fake.tex_calls()
+
+
+def test_a_refused_tectonic_build_writes_nothing_into_scratch(tex_env, monkeypatch):
+    tex_env.install(present=("tectonic", "kpsewhich"))
+    monkeypatch.setattr(build._network, "replays", lambda ws: True)
+    result = _run("manuscript", "build", RUN, "--engine", "tectonic")
+    assert result.exit_code == 1, result.output
+    run = tex_env.synth.run_dir
+    assert not (run / "scratch" / "manuscript-build").exists()
+    assert not (run / "scratch" / "manuscript-env").exists()
 
 
 def test_a_failed_compile_writes_ok_false_and_prints_the_log_tail(tex_env):

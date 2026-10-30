@@ -28,6 +28,7 @@ VERSION = 1
 BUILD_DIR = "build"
 BUILD_JSON = "build.json"
 STAGE = Path("scratch") / "manuscript-build"
+ENV_DIR = Path("scratch") / "manuscript-env"
 ENGINE_CHOICES = ("latexmk", "pdflatex", "xelatex", "lualatex")
 KPSE_TIMEOUT = 30
 TAIL_LINES = 40
@@ -86,6 +87,14 @@ def _refuse_links(folder: Path) -> None:
 
 def _tree_bytes(folder: Path) -> int:
     return sum(p.stat().st_size for p in folder.rglob("*") if p.is_file())
+
+
+def _refuse_scratch_links(run: Path) -> None:
+    """Refuse a symlink (or a non-folder) at any scratch folder before anything is written (M-F 5.17)."""
+    for rel in (Path("scratch"), STAGE, ENV_DIR, ENV_DIR / "home", ENV_DIR / "texmf-var"):
+        path = run / rel
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            raise BuildError("symlink", f"{rel.as_posix()} is a symbolic link or not a folder; refused")
 
 
 def _stage(folder: Path, run: Path) -> Path:
@@ -167,6 +176,9 @@ def _compile(found, stage: Path, env: dict, timeout: int, main: str):
     """(ok, argv, returncodes, outputs): the engine's passes, ScieFlow's loop for a raw engine."""
     argv = _engine.build_commands(found, main)
     argv.insert(1, "--untrusted" if found.kind == "tectonic" else "-no-shell-escape")
+    if found.kind == "latexmk":
+        # Without -norc latexmk reads and runs a .latexmkrc (Perl) from the compile folder (M-F 5.17).
+        argv.insert(2, "-norc")
     returncodes: list = []
     outputs: list = []
 
@@ -218,11 +230,16 @@ def build_run(root, run_dir, *, engine: str | None = None, timeout: int = 600,
         raise BuildError("documentclass-missing", f"{main} has no \\documentclass")
     source_hash = tex.source_tree_hash(folder)
 
-    stage = _stage(folder, run)
-    env_root = run / "scratch" / "manuscript-env"
+    env_root = run / ENV_DIR
     env = {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8",
            "HOME": str(env_root / "home"), "TEXMFVAR": str(env_root / "texmf-var"),
-           "shell_escape": "f", "openout_any": "p"}
+           "shell_escape": "f", "openout_any": "p", "openin_any": "p"}
+    _refuse_scratch_links(run)
+    if engine == "tectonic" and (_network.replays(run) or _levels.run_level(run) == "L2"):
+        raise BuildError("tectonic-refused", "tectonic downloads packages: refused in a replay, offline or L2 run")
+    found = _resolve_engine(engine, env)
+
+    stage = _stage(folder, run)
     for key in ("HOME", "TEXMFVAR"):
         Path(env[key]).mkdir(parents=True, exist_ok=True)
 
@@ -232,10 +249,6 @@ def build_run(root, run_dir, *, engine: str | None = None, timeout: int = 600,
     if analysis.bibstyle:
         _check_asset(folder, f"{analysis.bibstyle}.bst", stage, env, notes,
                      "a bibliography style: put it in manuscript/ or install it")
-
-    if engine == "tectonic" and (_network.replays(run) or _levels.run_level(run) == "L2"):
-        raise BuildError("tectonic-refused", "tectonic downloads packages: refused in a replay, offline or L2 run")
-    found = _resolve_engine(engine, env)
 
     ok, argv, returncodes, outputs = _compile(found, stage, env, timeout, main)
     pdf = stage / f"{Path(main).stem}.pdf"

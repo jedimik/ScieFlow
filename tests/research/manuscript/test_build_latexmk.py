@@ -17,6 +17,23 @@ def _run(*args):
 
 
 @pytest.mark.skipif(shutil.which("latexmk") is None, reason="needs latexmk")
+def test_a_planted_latexmkrc_in_the_manuscript_is_not_executed(synth):
+    fresh_article(synth)
+    (synth.profiles_dir / "journal-of-synthetic-neurology.yml").unlink()
+    assert _run("manuscript", "render", RUN, "--class", "article").exit_code == 0
+    planted = 'open(F, ">PWNED_BY_LATEXMKRC"); print F "x"; close F;\n'
+    (synth.ms / ".latexmkrc").write_text(planted, encoding="utf-8")
+    (synth.ms / "latexmkrc").write_text(planted, encoding="utf-8")
+    result = _run("manuscript", "build", RUN, "--json")
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["ok"] is True
+    stage = synth.run_dir / "scratch" / "manuscript-build"
+    assert not (stage / "PWNED_BY_LATEXMKRC").exists()
+    assert not (synth.ms / "PWNED_BY_LATEXMKRC").exists()
+    assert not (synth.ms / "build" / "PWNED_BY_LATEXMKRC").exists()
+
+
+@pytest.mark.skipif(shutil.which("latexmk") is None, reason="needs latexmk")
 def test_the_article_compiles_and_the_recorded_hash_matches(synth):
     fresh_article(synth)
     (synth.profiles_dir / "journal-of-synthetic-neurology.yml").unlink()

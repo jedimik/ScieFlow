@@ -130,6 +130,35 @@ def test_metadata_sections_must_exist(synth):
     assert "section-file-missing" in result.output
 
 
+def _input_order(text: str) -> list:
+    stems = re.findall(r"\\input\{sections/([a-z0-9-]+)\}", text)
+    return [stem for stem in stems if stem != "abstract"]
+
+
+def test_the_profile_order_is_followed_not_the_imrad_order(synth):
+    sections = [
+        {"title": "Methods", "aliases": [], "required": True, "words_max": None},
+        {"title": "Introduction", "aliases": ["Background"], "required": True, "words_max": None},
+        {"title": "Results", "aliases": [], "required": True, "words_max": None},
+        {"title": "Discussion", "aliases": [], "required": True, "words_max": None},
+    ]
+    data = make_profile(sections=sections)
+    data["evidence"] = _evidence_for(data)
+    synth.write_profile(data)
+    fresh_article(synth)
+    result = _run("manuscript", "render", RUN)
+    assert result.exit_code == 0, result.output
+    assert _input_order(_main_text(synth)) == ["methods", "introduction", "results", "discussion"]
+
+
+def test_metadata_sections_order_wins_over_the_profile(synth):
+    fresh_article(synth, metadata=_meta_with("sections: [results, introduction]\n"))
+    synth.write_profile(make_profile())
+    result = _run("manuscript", "render", RUN)
+    assert result.exit_code == 0, result.output
+    assert _input_order(_main_text(synth)) == ["results", "introduction"]
+
+
 def test_a_metadata_section_stem_that_leaves_the_folder_is_refused(synth):
     fresh_article(synth, metadata=_meta_with("sections: [../secret]\n"))
     _drop_profile(synth)
