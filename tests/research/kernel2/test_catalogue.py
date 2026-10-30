@@ -96,6 +96,16 @@ def test_an_unset_contact_is_reported_as_unset(project):
     assert pol.describe()["unpaywall"]["contact"] == "unset"
 
 
+def test_the_contact_is_kept_out_of_the_policy_repr(project):
+    # a traceback or a debug print of the policy must not show the address
+    root, _ws, _home = project
+    address = _address()
+    pol = _load_cfg(root, {"providers": {"unpaywall": {"enabled": True,
+                                                       "contact_email": address}}})
+    assert pol.contact("unpaywall") == address
+    assert address not in repr(pol)
+
+
 @pytest.mark.parametrize("address", ["no-at-sign.example.org", "a@b", "a b@example.org"])
 def test_a_malformed_contact_address_is_refused_without_echoing_it(project, address):
     root, _ws, _home = project

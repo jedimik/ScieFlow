@@ -152,7 +152,7 @@ class ProviderPolicy:
     off: dict = field(default_factory=dict)         # name -> reason it is off
     cache_ttl_days: dict = field(default_factory=lambda: {"metadata": 30, "search": 7})
     path: str | None = None
-    contacts: dict = field(default_factory=dict)    # provider -> the user's contact address (M-C2)
+    contacts: dict = field(default_factory=dict, repr=False)   # provider -> contact address (M-C2)
 
     def allows(self, name: str) -> bool:
         return name in self.providers
