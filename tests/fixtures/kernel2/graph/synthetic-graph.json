@@ -1,0 +1,20 @@
+{
+  "note": "M-C2 t6 synthetic citation graph. Invented DOIs under the 10.5555 example prefix and invented titles; no real work is described. Edges are [citing, cited].",
+  "works": {
+    "10.5555/seed1": {"w": "W1", "title": "Synthetic seed one", "year": 2019},
+    "10.5555/a": {"w": "W2", "title": "Synthetic paper A", "year": 2020},
+    "10.5555/b": {"w": "W3", "title": "Synthetic paper B", "year": 2021},
+    "10.5555/c": {"w": "W4", "title": "Synthetic paper C", "year": 2021},
+    "10.5555/d": {"w": "W5", "title": "Synthetic paper D", "year": 2018}
+  },
+  "edges": [
+    ["10.5555/a", "10.5555/seed1"],
+    ["10.5555/b", "10.5555/seed1"],
+    ["10.5555/a", "10.5555/b"],
+    ["10.5555/b", "10.5555/a"],
+    ["10.5555/b", "10.5555/c"],
+    ["10.5555/c", "10.5555/a"],
+    ["10.5555/d", "10.5555/c"],
+    ["10.5555/seed1", "10.5555/d"]
+  ]
+}

@@ -36,3 +36,13 @@ connectors in `src/scieflow/research/lib/identity.py` send the request shapes of
 connectors (endpoints and parameters as recorded in its evaluation snapshots); they are
 Gateway-backed and carry no upstream transport. Source files: `researcher/core/researcher_core/
 connectors/openalex.py`, `crossref.py` and `datacite.py`.
+
+The snowball traversal of `scieflow research snowball` (M-C2 t6) re-implements the design of
+researcher's `graph.py` (MIT, the same licence text): the sources in a fixed order, depth at most two,
+and every node marked visited before it can enter the next frontier, so a citation cycle ends by
+construction. The module is `src/scieflow/research/search/snowball.py`; it sends the request shapes
+of researcher's OpenAlex, Semantic Scholar and OpenCitations connectors (`openalex.py`,
+`semantic_scholar.py`, `opencitations.py`) through ScieFlow's Gateway. The Semantic Scholar and
+OpenCitations parsers of `src/scieflow/research/lib/records.py` are reduced ports of the same
+connectors' edge handling (the citing or cited paper, and the DOI pairs of an OpenCitations edge).
+No upstream transport, key handling or async code is copied.

@@ -236,3 +236,40 @@ def datacite_record(raw: Mapping[str, Any]) -> CSLRecord:
         source="datacite",
         source_id=doi,
     )
+
+
+# --- Semantic Scholar and OpenCitations (snowball, M-C2 t6) -------------------------------------
+
+
+def _s2_int(value: Any) -> int | None:
+    return _as_int(value)
+
+
+def semantic_scholar_record(raw: Mapping[str, Any]) -> CSLRecord:
+    """One Semantic Scholar paper object (a citing or cited paper of an edge) as a CSLRecord.
+
+    Keeps the fields the snowball graph reads: DOI (from `externalIds`), the Semantic Scholar
+    paper id (the node key when there is no DOI), title, year, venue and citation count."""
+    external = _mapping(raw.get("externalIds"))
+    journal = _mapping(raw.get("journal"))
+    venue_obj = _mapping(raw.get("publicationVenue"))
+    venue = journal.get("name") or venue_obj.get("name") or raw.get("venue") or ""
+    paper_id = str(raw.get("paperId") or "")
+    return CSLRecord(
+        type="article-journal",
+        title=str(raw.get("title") or ""),
+        issued=CSLDate.from_year(_s2_int(raw.get("year"))),
+        container_title=str(venue),
+        DOI=str(external.get("DOI") or ""),
+        source="semantic-scholar",
+        source_id=paper_id,
+        s2_id=paper_id,
+        citation_count=_s2_int(raw.get("citationCount")),
+    )
+
+
+def opencitations_record(doi: str) -> CSLRecord:
+    """A DOI-only record for one OpenCitations edge end: the index holds no metadata (its answer
+    is a list of DOI pairs), so only the DOI is set. Hydration is the identity sources' job."""
+    return CSLRecord(type="article-journal", DOI=str(doi or ""), source="opencitations",
+                     source_id=str(doi or ""))
