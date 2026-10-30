@@ -114,7 +114,7 @@ agent_overrides:              # per-agent settings for this run only
   codex:
     reasoning: high           # fills {reasoning} in the cmd template
 max_papers: 30
-journal: "Nature Methods"     # paper-review + paper-draft: target journal
+journal: "Nature Methods"     # paper-review + paper-draft: target journal (see journals.md)
 scope: full                   # or: sections: [Introduction, Methods]
 max_debate_rounds: 1          # gap-discovery: shorter debate for this run
 max_gaps: 6                   # gap-discovery: per-agent caps

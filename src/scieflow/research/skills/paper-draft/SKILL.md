@@ -70,9 +70,11 @@ You are the **coordinator**. Phases run in order; each is resumable via
      `report/selected_dois.txt` into `report/` as framing input; if it has
      `report/selected_hypotheses.json` (the user's gap-discovery selection),
      copy it too and frame the draft on those hypotheses only.
-   - `journal:` — run the journal-profiling phase from
-     `src/scieflow/research/skills/paper-review/SKILL.md` (same cache in `config/journals/`),
-     copy the profile to `workspace/<slug>/journal/profile.md`.
+   - `journal:` — run the journal research flow in
+     `src/scieflow/research/skills/journal-research/SKILL.md` (adopted profiles live in
+     `config/journals/`). Read the limits with `uv run scieflow journal show <slug> --json`
+     (the outline and the section word budgets come from there); the review prompts take
+     `uv run scieflow journal show <slug> --prompt`.
    - `title`, `authors`, `language`, `target_length`,
      `auto_approve_outline` (default from `research:` in config/defaults.yml: false).
 5. References: if `report/selected_dois.txt` is missing (no `gaps_from`),
@@ -104,7 +106,7 @@ MANIFEST: <paste inputs/manifest.yml>
 PROCESSING DESCRIPTION: <paste inputs/processing.md>
 FRAMING (if gaps_from set): <paste report/gaps.md hypotheses section>
 REFERENCES AVAILABLE: <paste selected_dois.txt + bib keys from references.bib>
-<if journal set: JOURNAL PROFILE: paste journal/profile.md>
+<if journal set: JOURNAL PROFILE: paste the output of `scieflow journal show <slug> --prompt`>
 
 Write outline/outline.md: for each section (Abstract, Introduction,
 Methods, Results, Discussion) a bullet list of claims, each ending with
@@ -305,9 +307,12 @@ For round N = 1..`max_review_rounds`:
 2. Write `report/merge_log.md`: one row per section — chosen author,
    2-3 sentence rationale, unresolved review clusters (ids from the
    matrix) carried into the merged text (if any).
-3. Copy `src/scieflow/research/templates/paper/main.tex` and `src/scieflow/research/templates/paper/preamble.tex` into
-   `manuscript/`; replace `%%TITLE%%`, `%%AUTHORS%%`, `%%DATE%%` from
-   config (missing → ask the user, don't invent author lists).
+3. Write `manuscript/metadata.yml` (title, authors, declarations, keywords; missing
+   author details → ask the user, don't invent them), then render the LaTeX with
+   `uv run scieflow manuscript render <slug> [--class <class>]`. Do not copy or
+   hand-edit `main.tex`: `render` writes it from the registry templates and refuses a
+   hand-edited file (`src/scieflow/research/manuscript/`; see
+   `docs/research/manuscript.md`).
 4. Consistency pass: dispatch the agent assigned to `research.consistency` with the merged sections pasted, instructed to
    fix cross-section contradictions, duplicated content, and tone drift
    by editing `manuscript/sections/*.tex` directly — minimal diffs, and
@@ -315,11 +320,16 @@ For round N = 1..`max_review_rounds`:
 
 ## Phase 6 — verify
 
-1. Compile: `latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex`
-   in `manuscript/`. On failure: dispatch one repair round with the last
-   50 log lines pasted; second failure → mark `failed`, still deliver the
-   sources with the error summary. `latexmk` missing → skip with a warning
-   (`setup/doctor.sh` covers installation).
+1. Build: `uv run scieflow manuscript build <slug>` compiles `manuscript/main.tex` in a
+   scratch copy with shell escape off and records `manuscript/build/build.json`. On
+   failure: dispatch one repair round with the last 50 log lines pasted (the build prints
+   the last 40 lines); second failure → mark `failed`, still deliver the sources with the
+   error summary. No TeX engine → skip with a warning (`setup/doctor.sh` covers installation).
+1a. Journal check (when `journal:` is set): `uv run scieflow manuscript check <slug>`, then
+   for each reporting guideline the checklist judgement (`manuscript checklist-prompt`,
+   dispatched with `--role research.reviewer`, then `check` again). Errors go back to the
+   responsible section's agent for one fix round; the report is advisory on the checklist
+   items until a human verifies the checklist.
 2. Citations: `uv run scieflow research check-citations --workspace workspace/<slug>`
    — INVALID lines go back to the responsible section's agent for one fix
    round, then re-run until OK or mark failed.
@@ -344,6 +354,12 @@ For round N = 1..`max_review_rounds`:
    agent for one fix round, and report the rest to the user unchanged.
 
 ## Phase 7 — handoff
+
+When `journal:` is set, package the submission with `uv run scieflow manuscript package <slug>`
+(refused while a review blocker is open, or when the check or build is stale; it uploads
+nothing). Figures for the journal's sizes come from
+`uv run scieflow journal style <slug>` and
+`scieflow experiment figures <campaign> --style-file journal/figure-style.yml`.
 
 Report to the user: manuscript + PDF location, per-section merge
 decisions (`report/merge_log.md`), cross-review rounds used and final

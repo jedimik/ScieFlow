@@ -34,13 +34,22 @@ journal: "Nature Methods"     # optional target journal
 
 When `journal:` is set, a **profiling phase** runs first:
 
-1. The journal name is slugified (`Nature Methods` → `nature-methods`).
-2. If `config/journals/<slug>.md` exists, it's reused. Otherwise an agent with
-   web access researches the journal's official author guidelines and writes a
-   profile with a fixed structure: scope, article types & length limits,
-   formatting requirements, review criteria, common rejection reasons, and a
-   submission checklist — with guideline URLs cited.
-3. The profile is copied to `workspace/<slug>/journal/profile.md` for the run.
+The profile is a **structured, adopted profile** (`config/journals/<slug>.yml`)
+built by the journal research flow, not free text. Every limit, structure rule
+and reference style in it carries a verbatim quote from the journal's own
+author guidelines, which you approve before ScieFlow downloads them. The full
+flow, the commands and the rules are in [Target journals](../journals.md):
+
+1. `scieflow journal research <run> --journal "<name>"` gathers the journal's
+   facts and opens a human-only `journal-sources` gate for the guideline pages.
+2. After the human approves the gate (or saves the pages and runs
+   `scieflow journal add-source`), agents draft the profile and
+   `scieflow journal adopt <run>` adopts it.
+3. The reviewers receive the profile as a data block from
+   `scieflow journal show <slug> --prompt` instead of a free-text summary.
+
+Asking only *"how does journal X accept papers?"* runs just this phase: it
+ends with an adopted profile and `scieflow journal show <slug>`.
 
 The reviewer then adopts that journal's persona: scope fit, formatting
 compliance, and that journal's specific review standards rather than generic

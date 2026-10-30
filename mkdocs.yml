@@ -89,6 +89,8 @@ nav:
       - scite Evidence: research/scite.md
       - Discovery Providers: research/discovery-providers.md
       - Literature Kernel: research/literature-kernel.md
+      - Target Journals: research/journals.md
+      - Manuscript Check and Package: research/manuscript.md
       - Architecture: research/architecture.md
       - Publishing Docs: research/publishing.md
   - News:
