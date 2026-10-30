@@ -7,6 +7,7 @@ import yaml
 from click.testing import CliRunner
 
 from scieflow.cli import main
+from scieflow.research.journal import facts
 
 RUN = "synth-run"
 SLUG = "journal-of-synthetic-neurology"
@@ -82,3 +83,20 @@ def test_style_refuses_a_profile_without_figures(synth, profile_data):
     result = CliRunner().invoke(main, ["journal", "style", RUN])
     assert result.exit_code == 1
     assert not (synth.journal_dir / "figure-style.yml").exists()
+
+
+def test_a_draft_without_facts_blocks_shows_no_facts_or_provenance_noise(synth, profile_data):
+    """Review t4 finding 3: the diff is against the adoption candidate (facts from facts.json,
+    provenance excluded), so a normal draft that omits identity/oa/norms shows no `-` lines."""
+    _write(synth.profiles_dir / f"{SLUG}.yml", profile_data())
+    draft = profile_data()
+    for name in ("identity", "oa", "norms", "provenance"):
+        del draft[name]
+    _write(synth.journal_dir / "profile.draft.yml", draft)
+    (synth.journal_dir / "facts.json").write_text(
+        facts.dumps({"openalex": {"display_name": "Journal of Synthetic Neurology", "issn_l": "1234-5679",
+                                  "issn": ["1234-5679"]}}), encoding="utf-8")
+    result = _diff()
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == ""
+

@@ -325,23 +325,38 @@ def adopt_cmd(run, draft_path, replace, as_agent, as_json):
             click.echo(line)
 
 
+def _without_provenance(data: dict) -> dict:
+    """Provenance is written by adoption, never by the draft: it is left out of the comparison."""
+    return {key: value for key, value in data.items() if key != "provenance"}
+
+
 @journal.command("diff")
 @click.argument("slug")
 @click.argument("run")
 @click.option("--json", "as_json", is_flag=True, help="Print the differences as JSON.")
 def diff_cmd(slug, run, as_json):
-    """Field-level difference between the adopted profile SLUG and RUN's draft."""
+    """Field-level difference between the adopted profile SLUG and RUN's draft.
+
+    The draft is compared as adoption would write it: its facts blocks come from facts.json, and
+    provenance is left out on both sides (review t4 finding 3)."""
     project = Project.discover()
     folder = _run_folder(project, run)
-    adopted_path, _ = _resolve(project, slug)
+    adopted_path, name = _resolve(project, slug)
     if not adopted_path.is_file():
         _fail(f"no adopted profile {slug!r} (looked for {adopted_path})")
+    jdir = state.journal_dir(folder)
     try:
         adopted = profile.load_profile(adopted_path)
-        draft = profile.load_profile(state.journal_dir(folder) / "profile.draft.yml")
+        draft = profile.load_profile(jdir / "profile.draft.yml")
     except profile.ProfileError as exc:
         _fail(str(exc))
-    rows = diff_mod.compare(adopted, draft)
+    try:
+        facts_data = state.read_json(facts.facts_path(jdir))
+    except state.StateError as exc:
+        _fail(str(exc))
+    if isinstance(facts_data, dict):
+        draft = {**draft, **adopt_mod.facts_blocks(facts_data, name)}
+    rows = diff_mod.compare(_without_provenance(adopted), _without_provenance(draft))
     if as_json:
         click.echo(json.dumps(rows, indent=2, ensure_ascii=False, sort_keys=True, default=str))
     else:

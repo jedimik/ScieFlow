@@ -248,3 +248,35 @@ def test_json_output_names_the_hash(synth, profile_data):
     assert result.exit_code == 0, result.output
     body = json.loads(result.output)
     assert body["sha256"] == hashlib.sha256(_yml(synth).read_bytes()).hexdigest()
+
+
+def _nothing_written_at_all(synth):
+    """Review t4 finding 1: a refusal leaves no profile, no working copy and no event behind."""
+    assert not _yml(synth).exists()
+    assert not (synth.journal_dir / "adopted").exists()
+    assert not (synth.journal_dir / "profile.yml").exists()
+    assert not (synth.journal_dir / "profile.md").exists()
+    assert not [e for e in events.read(synth.run_dir) if e.get("type") == "note.journal_adopted"]
+
+
+def test_a_symlinked_profile_page_is_refused_before_any_write(synth, profile_data, tmp_path):
+    _ready(synth, profile_data)
+    real = tmp_path / "elsewhere.md"
+    real.write_text("# elsewhere\n", encoding="utf-8")
+    os.symlink(real, synth.profiles_dir / f"{SLUG}.md")
+    result = _adopt()
+    assert result.exit_code == 1, result.output
+    assert "symbolic link" in result.output
+    _nothing_written_at_all(synth)
+
+
+def test_a_draft_without_facts_blocks_adopts_with_no_facts_warning(synth, profile_data):
+    """Review t4 finding 4: a warning only when the draft supplied a facts block that differs."""
+    draft = profile_data()
+    for name in ("identity", "oa", "norms", "provenance"):
+        del draft[name]
+    _ready(synth, profile_data, draft=draft)
+    result = _adopt()
+    assert result.exit_code == 0, result.output
+    assert "facts-overridden" not in result.output
+    assert profile.load_profile(_yml(synth))["identity"]["publisher"] == "Synthetic Press"

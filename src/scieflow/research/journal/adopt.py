@@ -143,7 +143,7 @@ def adopt(project: Project, run: Path, *, draft_path: Path | None = None, replac
     candidate = copy.deepcopy(draft)
     warnings = []
     for name, block in facts_blocks(facts_data, slug).items():
-        if draft.get(name) != block:
+        if name in draft and draft[name] != block:
             warnings.append(profile.Problem("facts-overridden", name,
                                             "replaced from facts.json", "warning"))
         candidate[name] = block
@@ -161,30 +161,33 @@ def adopt(project: Project, run: Path, *, draft_path: Path | None = None, replac
     sha = hashlib.sha256(data).hexdigest()
     journals = project.root / "config" / "journals"
     target = journals / f"{slug}.yml"
-    if target.is_symlink():
-        raise AdoptError(f"refused: {target.name} is a symbolic link")
+    page = journals / f"{slug}.md"
+    # Every refusal is decided before the first write (review t4 finding 1): a symlinked target, page,
+    # journal folder or working file stops the adoption with nothing written.
+    for link in (journals, target, page, jdir, jdir / "adopted", jdir / "adopted" / f"{sha[:12]}.yml",
+                 jdir / "profile.yml", jdir / "profile.md"):
+        if link.is_symlink():
+            raise AdoptError(f"refused: {link.name} is a symbolic link")
     if target.exists():
         existing = profile.load_profile(target)
         if _comparable(existing) != _comparable(candidate) and not replace:
             raise AdoptError(f"refused: {target.name} holds a different profile; run "
                              f"`scieflow journal diff {slug} {run.name}` to see the change, "
                              "then re-run with --replace")
+    md = render.render_md(candidate, slug)
+    keep_page = page.exists() and not page.read_text(encoding="utf-8", errors="replace").startswith(
+        f"{MARKER}{slug}.yml")
+    lines = [f"Adopted {slug}: config/journals/{slug}.yml (sha256 {sha[:12]}, "
+             f"{len(rows)} source(s), adopted by {candidate['provenance']['adopted_by']})."]
 
     state.atomic_write(target, data)
     state.atomic_write(jdir / "adopted" / f"{sha[:12]}.yml", data)
     state.atomic_write(jdir / "profile.yml", data)
-    md = render.render_md(candidate, slug)
     state.write_text(jdir / "profile.md", md)
-    page = journals / f"{slug}.md"
-    lines = [f"Adopted {slug}: config/journals/{slug}.yml (sha256 {sha[:12]}, "
-             f"{len(rows)} source(s), adopted by {candidate['provenance']['adopted_by']})."]
-    if page.is_symlink():
-        raise AdoptError(f"refused: {page.name} is a symbolic link")
-    if not page.exists() or page.read_text(encoding="utf-8", errors="replace").startswith(
-            f"{MARKER}{slug}.yml"):
-        state.write_text(page, md)
-    else:
+    if keep_page:
         lines.append(f"note: kept the hand-written {page.name}; it was not overwritten.")
+    else:
+        state.write_text(page, md)
     for problem in warnings + [p for p in problems if p.level == "warning"]:
         lines.append(f"warning {problem.rule} {problem.path}: {problem.message}")
     adopted_by = candidate["provenance"]["adopted_by"]

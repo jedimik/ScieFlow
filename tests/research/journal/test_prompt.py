@@ -5,6 +5,7 @@ run with two `ok` sources; the prompt must show each one as an untrusted fence.
 """
 
 import json
+import os
 
 from click.testing import CliRunner
 
@@ -106,3 +107,24 @@ def test_no_prompt_without_an_ok_source(synth):
     result = _prompt("--write")
     assert result.exit_code == 1
     assert not (synth.run_dir / "prompts").exists()
+
+
+def test_a_symlinked_draft_is_refused_and_its_content_never_appears(synth, tmp_path):
+    """Review t4 finding 2: a draft that is a link is never read into a prompt."""
+    outside = tmp_path / "outside.yml"
+    outside.write_text("identity:\n  name: SYMLINK-LEAK-MARKER\n", encoding="utf-8")
+    os.symlink(outside, synth.journal_dir / "draft-agy.yml")
+    result = _prompt("--cross-check")
+    assert result.exit_code == 1, result.output
+    assert "draft-agy.yml" in result.output
+    assert "SYMLINK-LEAK-MARKER" not in result.output
+
+
+def test_an_oversized_draft_is_refused_and_its_content_never_appears(synth):
+    """Review t4 finding 2: a draft over the 1 MB profile bound is refused, not pasted."""
+    (synth.journal_dir / "draft-agy.yml").write_text(
+        "identity:\n  name: BIG-MARKER\n" + "x" * 1_000_001, encoding="utf-8")
+    result = _prompt("--cross-check")
+    assert result.exit_code == 1, result.output
+    assert "draft-agy.yml" in result.output
+    assert "BIG-MARKER" not in result.output

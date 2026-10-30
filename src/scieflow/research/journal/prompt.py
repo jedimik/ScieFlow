@@ -76,6 +76,19 @@ def _drafts(journal: Path) -> list[Path]:
     return sorted(p for p in journal.iterdir() if re.fullmatch(r"draft-[a-z0-9-]+\.yml", p.name))
 
 
+def _draft_text(draft: Path) -> str:
+    """A draft's text for a cross-check prompt. Only a regular file of at most 1 MB is read (the profile
+    bound, review t4 finding 2): a link, a folder or an oversized draft is refused by name, never pasted."""
+    try:
+        raw = profile._read_regular(draft, draft.name, profile.MAX_PROFILE_BYTES)
+    except profile.ProfileError as exc:
+        raise state.StateError(f"refused: {exc}") from None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise state.StateError(f"refused: {draft.name} is not UTF-8 text") from None
+
+
 def build(project: Project, run: Path, *, agent: str | None, cross_check: bool) -> tuple[str, str, str]:
     """(prompt text, output file name, prompt file name). Raises StateError when no source is ok."""
     jdir = state.journal_dir(run)
@@ -120,6 +133,6 @@ def build(project: Project, run: Path, *, agent: str | None, cross_check: bool) 
                   "Verify every value and quote of each draft below against the sources. A value that a draft",
                   "gets wrong is a conflict for you to record in your own draft, with the statement and its quote."]
         for draft in _drafts(jdir):
-            lines.append(render.fenced_block(f"DRAFT {draft.name}", draft.read_text(encoding="utf-8")))
+            lines.append(render.fenced_block(f"DRAFT {draft.name}", _draft_text(draft)))
     text = "\n".join(lines) + "\n"
     return text, out_name, f"journal-profile{agent_suffix(agent)}.md"
