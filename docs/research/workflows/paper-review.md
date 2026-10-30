@@ -43,8 +43,8 @@ flow, the commands and the rules are in [Target journals](../journals.md):
 1. `scieflow journal research <run> --journal "<name>"` gathers the journal's
    facts and opens a human-only `journal-sources` gate for the guideline pages.
 2. After the human approves the gate (or saves the pages and runs
-   `scieflow journal add-source`), agents draft the profile and
-   `scieflow journal adopt <run>` adopts it.
+   `scieflow journal add-source`), agents draft the profile and the coordinator
+   adopts it with `uv run scieflow journal adopt <run> --as-agent`.
 3. The reviewers receive the profile as a data block from
    `scieflow journal show <slug> --prompt` instead of a free-text summary.
 

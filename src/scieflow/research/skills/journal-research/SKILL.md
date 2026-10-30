@@ -73,13 +73,14 @@ reading agents with the right role, and report what they return. Full reference:
 6. Adopt the checked draft:
 
    ```bash
-   uv run scieflow journal adopt <run>
+   uv run scieflow journal adopt <run> --as-agent
    ```
 
    - Errors list `rule path` lines and nothing is written. Re-dispatch the cross-check
      with the errors appended (once), then stop and report if it still fails.
-   - `--as-agent` records the adoption as made by an agent; leave it out when the
-     user adopts it themselves. Say which you did.
+   - Keep `--as-agent` when you, the coordinator agent, run the adoption: without it
+     the record names the human as adopter (`adopted_by: human`). Leave it out only
+     when the user runs `journal adopt` themselves, and say which you did.
    - An existing profile of the same slug with other content needs `--replace`. Show
      `uv run scieflow journal diff <slug> <run>` first and get the user's go-ahead.
 7. Show the result: `uv run scieflow journal show <slug>` (or `--json`). Staleness is

@@ -209,8 +209,25 @@ def test_manuscript_doc_has_the_docx_note_and_the_residuals():
 
 def test_manuscript_doc_states_the_build_safety_rules():
     text = _text(MANUSCRIPT)
-    for phrase in ("-no-shell-escape", "scratch", "latexmk", "source tree hash", "pdf_sha256"):
+    for phrase in ("-no-shell-escape", "scratch", "latexmk", "source tree hash", "pdf_sha256",
+                   "-norc", "openin_any=p", "openout_any=p"):
         assert phrase in text, phrase
+
+
+def test_r7_does_not_claim_tex_reads_whatever_the_user_can_read():
+    """The build pins openin_any=p and -norc (build.py:180-181, 236); the docs must say so, not overstate reads."""
+    for path in (MANUSCRIPT, JOURNALS):
+        text = _text(path)
+        assert "TeX can read files the user can read" not in text, path
+        assert "TeX can read files that the user can read" not in text, path
+    assert "paranoid" in _text(MANUSCRIPT)
+
+
+def test_adopt_is_recorded_as_agent_when_the_coordinator_runs_it():
+    """Without --as-agent adopt.py records adopted_by=human (adopt.py:108,194); the coordinator is an agent."""
+    assert "journal adopt <run> --as-agent" in _text(JOURNALS)
+    assert "journal adopt <run> --as-agent" in _text(SKILLS / "journal-research" / "SKILL.md")
+    assert "journal adopt <run> --as-agent" in _text(PAPER_REVIEW_DOC)
 
 
 # --- docs/cli.md ----------------------------------------------------------------------------

@@ -224,8 +224,10 @@ The build:
    file in `manuscript/` or with `kpsewhich`.
 3. Copies the tree into `workspace/<run>/scratch/manuscript-build/`, then compiles
    there. Shell escape is off (`-no-shell-escape`; `shell_escape=f`), output
-   writes are restricted to the scratch folder (`openout_any=p`), the command
-   line is fixed (no shell), the environment is minimal, and each engine call
+   writes are restricted to the scratch folder (`openout_any=p`), reads are paranoid
+   (`openin_any=p`: dot-files and paths outside the TeX search path are refused), and
+   latexmk runs with `-norc`, so a `.latexmkrc` in the copied tree is never read. The
+   command line is fixed (no shell), the environment is minimal, and each engine call
    has the timeout. A raw engine runs the usual passes, with `biber` or `bibtex`
    when needed.
 4. On success copies `main.pdf`, `main.log` and `main.bbl` to `manuscript/build/`
@@ -234,9 +236,11 @@ The build:
    of the log and exits 1.
 
 `tectonic` downloads packages, so it is refused in an L2 run and in a run
-without egress (and when the network is replaying). Residual R7: TeX can read
-files that the user can read; the build compiles the run's own manuscript only,
-and a hostile manuscript is outside the threat model.
+without egress (and when the network is replaying). Residual R7: TeX reads are limited,
+not sealed: `openin_any=p` refuses dot-files and paths outside the TeX search path, but TeX
+can still read what that search path allows inside the scratch copy and the TeX tree. The
+build compiles the run's own manuscript only, and a hostile manuscript is outside the threat
+model.
 
 ## `scieflow manuscript package`
 
@@ -303,8 +307,8 @@ requires Word.
 - **R5. Checklists are unverified skeletons** until a human verifies them. Until
   then their findings are warnings, and every output says so.
 - **R6. DNS-based SSRF** applies to journal research only (see the journal page).
-- **R7. TeX can read files the user can read.** The build runs the run's own
-  manuscript in a scratch copy with shell escape off.
+- **R7. TeX reads are limited, not sealed.** The build runs the run's own manuscript in a
+  scratch copy with shell escape off, `openin_any=p` (paranoid reads) and `latexmk -norc`.
 - **R8. Classes not installed here.** `elsarticle`, `IEEEtran` and `svjour3` are
   not installed on the development host; only `article` is compiled for real in
   tests, and the other templates are checked textually.

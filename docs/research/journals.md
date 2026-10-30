@@ -77,8 +77,12 @@ miss (nothing was sent).
 6. **Adopt.** The coordinator adopts the checked draft:
 
     ```bash
-    uv run scieflow journal adopt <run>
+    uv run scieflow journal adopt <run> --as-agent
     ```
+
+    Keep `--as-agent` when the coordinator agent runs the command; without it the
+    record names the human as adopter. Leave it out only when the user runs
+    `journal adopt` themselves.
 
     `adopt` replaces `identity`, `oa` and `norms` with the values from
     `journal/facts.json`, runs every rule below, and writes nothing when one
@@ -244,7 +248,9 @@ A profile is stale when its oldest source is older than `max_age_days` (default
 - **R6. DNS-based SSRF.** An approved host name that resolves to a private
   address is not detected. The human approves the URL; only https on port 443 is
   allowed.
-- **R7. TeX can read files the user can read.** This applies to the manuscript
+- **R7. TeX reads are limited, not sealed.** The manuscript build pins `openin_any=p`
+  (paranoid reads) and runs in a scratch copy, but TeX can still read whatever its search
+  path allows inside that copy and the TeX tree. This applies to the manuscript
   build (see the manuscript page), not to journal research.
 - **R8. Classes not installed here.** `elsarticle`, `IEEEtran` and `svjour3` are
   not installed on the development host; only `article` is compiled in tests.
