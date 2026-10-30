@@ -27,3 +27,12 @@ search field lists, and none of the upstream connector's transport, key handling
 The requests run through ScieFlow's Gateway. Source files: `researcher/core/researcher_core/
 connectors/pubmed.py`, `semantic_scholar.py` and `datacite.py`. Their Lucene escape is the
 vendored `escape_lucene` (see [VENDORED.md](VENDORED.md)).
+
+The identity parsers of `scieflow research verify-bib` (M-C2 t4) are reduced ports of researcher's
+OpenAlex, Crossref and DataCite `to_record` functions (MIT, the same licence text). They are in
+`src/scieflow/research/lib/records.py` and keep only the fields the identity verdict reads: title,
+authors, issued year, DOI, arXiv id, CSL type and `extra.crossref_type`. The three identity
+connectors in `src/scieflow/research/lib/identity.py` send the request shapes of researcher's
+connectors (endpoints and parameters as recorded in its evaluation snapshots); they are
+Gateway-backed and carry no upstream transport. Source files: `researcher/core/researcher_core/
+connectors/openalex.py`, `crossref.py` and `datacite.py`.

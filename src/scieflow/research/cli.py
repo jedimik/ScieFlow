@@ -48,6 +48,8 @@ _forward("all", "scieflow.research.search.fanout",
 
 _forward("validate", "scieflow.research.validate",
          "Validate a JSON artifact against a research schema.", research)
+_forward("verify-bib", "scieflow.research.verify_bib",
+         "Check that each reference in a bibliography is the work it claims to be.", research)
 _forward("check-citations", "scieflow.research.citations",
          "Check paper-draft citations against references.bib and searched DOIs.", research)
 _forward("zotero-export", "scieflow.research.zotero",
