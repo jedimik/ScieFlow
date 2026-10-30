@@ -1,7 +1,8 @@
-"""M-C2 t3 (plan 5.3, Part B t3 items 3-4, 6): `scieflow research search semantic-scholar` and `datacite`.
+"""M-C2 t3 (plan 5.3, Part B t3 items 3-4, 6): `scieflow research search semantic-scholar`.
 
 Transports are faked by `responses`; the answers are converted researcher recordings. No API key is
-read or sent (Semantic Scholar is keyless here), and no e-mail address is in any fixture.
+read or sent (Semantic Scholar is keyless here), and no e-mail address is in any fixture. The DataCite
+tests live in test_search_datacite.py (review r1 F4).
 """
 
 from __future__ import annotations
@@ -12,22 +13,15 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 import responses
+import yaml
 
-from scieflow._vendor.researcher_core.query import escape_lucene
-from scieflow.core.review.claims import LeakError
-from scieflow.research.lib import providers
-from scieflow.research.search import datacite, registry
 from scieflow.research.search import semantic_scholar as s2
 
 S2_URL = r"https://api\.semanticscholar\.org/graph/v1/paper/search.*"
-DC_URL = r"https://api\.datacite\.org/dois.*"
 
 
 def calls_to(pattern: str) -> list:
     return [c for c in responses.calls if re.match(pattern, c.request.url)]
-
-
-# --- Semantic Scholar ----------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -100,78 +94,41 @@ def test_semantic_scholar_refuses_a_path_before_any_request(s2_cli):
     assert len(responses.calls) == 0
 
 
-# --- DataCite ------------------------------------------------------------------------------
-
-
-@pytest.fixture
-def dc_cli(cli_project, fast_send, cli_run):
-    def run(argv):
-        return cli_run(datacite.main, argv)
-
-    return run
-
-
-def test_the_datacite_query_escapes_then_wraps_in_code():
-    checked = registry.check_query("self-supervised ECG")
-    plain = registry.datacite_query(checked)
-    dated = registry.datacite_query(checked, 2023)
-    assert str(plain) == escape_lucene("self-supervised ECG")
-    assert str(plain) == "self\\-supervised ECG"
-    assert str(dated) == "(self\\-supervised ECG) AND publicationYear:[2023 TO *]"
-
-
-def test_datacite_reads_slashes_as_spaces_before_escaping():
-    # The leak check refuses "/" today (only letters, digits, spaces and listed punctuation pass),
-    # so the composition is defence in depth: a checked text that carries a slash still escapes as
-    # the vendored composition does.
-    checked = providers._mint(providers.Checked, "CRISPR genome/editing: review")
-    assert str(registry.datacite_query(checked)) == escape_lucene("CRISPR genome editing: review")
-
-
-def test_the_check_refuses_a_slash_before_datacite_sees_it():
-    with pytest.raises(LeakError):
-        registry.check_query("CRISPR genome/editing")
+# --- record, replay and miss (plan 5.3 item 6, review r1 F2) ------------------------------------
 
 
 @responses.activate
-def test_datacite_parses_the_recorded_search(dc_cli, answer):
-    body = answer("datacite", "82f62bd4")["response_body"]
-    responses.add(responses.GET, re.compile(DC_URL), json=body)
-    code, out, err = dc_cli(["self-supervised ECG"])
+def test_a_recorded_semantic_scholar_search_replays_byte_identical_with_zero_transport_calls(
+        s2_cli, answer):
+    responses.add(responses.GET, re.compile(S2_URL),
+                  json=answer("semantic_scholar", "a6742947")["response_body"])
+    code, recorded_out, err = s2_cli(["self-supervised ECG", "--workspace", "demo",
+                                      "--network", "record"])
     assert code == 0, err
-    records = json.loads(out)
-    assert len(records) == len(body["data"])
-    for record, item in zip(records, body["data"]):
-        attrs = item.get("attributes") or {}
-        assert record["doi"].lower() == (attrs.get("doi") or item["id"]).lower()
-        assert record["year"] == attrs.get("publicationYear")
-        assert record["source"] == "datacite"
+    responses.calls.reset()
+    for mode in ("replay", "offline"):
+        code, out, err = s2_cli(["self-supervised ECG", "--workspace", "demo", "--network", mode])
+        assert code == 0, err
+        assert out == recorded_out
+        assert len(responses.calls) == 0
 
 
 @responses.activate
-def test_datacite_from_year_is_composed_in_the_request(dc_cli, answer):
-    responses.add(responses.GET, re.compile(DC_URL),
-                  json=answer("datacite", "0528fda1")["response_body"])
-    code, _out, err = dc_cli(["self-supervised ECG", "--from-year", "2023"])
-    assert code == 0, err
-    url = calls_to(DC_URL)[0].request.url
-    assert "publicationYear" in url
-
-
-@responses.activate
-def test_datacite_failure_is_exit_one(dc_cli):
-    responses.add(responses.GET, re.compile(DC_URL), status=500)
-    code, _out, err = dc_cli(["self-supervised ECG"])
-    assert code == 1
-
-
-@responses.activate
-def test_datacite_refuses_a_patient_number_before_any_request(dc_cli):
-    code, _out, err = dc_cli(["patient 0471 records"])
-    assert code == 3
+def test_a_semantic_scholar_replay_miss_exits_six_and_sends_nothing(s2_cli):
+    code, _out, err = s2_cli(["self-supervised ECG", "--workspace", "demo", "--network", "replay"])
+    assert code == 6
     assert len(responses.calls) == 0
 
 
-def test_datacite_refusal_is_a_leak_error_in_the_query_check():
-    with pytest.raises(LeakError):
-        registry.check_query("patient 0471 records")
+# --- an L2 run refuses it before any request (plan 5.3 item 5, M-B data check) ------------------
+
+
+@responses.activate
+def test_semantic_scholar_is_refused_in_an_l2_run_and_sends_nothing(s2_cli, cli_project):
+    _root, ws = cli_project
+    (ws / "data.yml").write_text(yaml.safe_dump({
+        "version": 1, "default_level": "L2", "levels": [], "pending_releases": [],
+        "released": [], "imports": []}, sort_keys=False), encoding="utf-8")
+    code, _out, err = s2_cli(["self-supervised ECG", "--workspace", "demo"])
+    assert code == 3
+    assert len(responses.calls) == 0

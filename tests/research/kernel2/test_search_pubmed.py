@@ -13,7 +13,7 @@ import pytest
 import responses
 
 from scieflow.core.review.claims import LeakError
-from scieflow.research.lib import providers
+from scieflow.research.lib import http, providers
 from scieflow.research.search import pubmed, registry
 
 ESEARCH = r"https://eutils\.ncbi\.nlm\.nih\.gov/entrez/eutils/esearch\.fcgi.*"
@@ -204,3 +204,84 @@ def test_a_replay_miss_exits_six_and_sends_nothing(cli):
     code, _out, err = cli(["self-supervised ECG", "--workspace", "demo", "--network", "replay"])
     assert code == 6
     assert len(responses.calls) == 0
+
+
+# --- 4. the efetch parser and its malformed answers (review r1 F3) -------------------------------
+# Small synthetic XML strings: each branch of pubmed.parse_articles has one test.
+
+
+def _set(*articles: str) -> str:
+    return '<?xml version="1.0" ?><PubmedArticleSet>' + "".join(articles) + "</PubmedArticleSet>"
+
+
+def _article(pmid: str, body: str) -> str:
+    return (f"<PubmedArticle><MedlineCitation><PMID>{pmid}</PMID><Article>{body}</Article>"
+            "</MedlineCitation><PubmedData><ArticleIdList>"
+            f'<ArticleId IdType="pubmed">{pmid}</ArticleId></ArticleIdList></PubmedData>'
+            "</PubmedArticle>")
+
+
+def test_a_medline_date_gives_the_leading_year():
+    body = ("<Journal><Title>Sleep Med</Title><JournalIssue><PubDate>"
+            "<MedlineDate>2019 Dec-2020 Jan</MedlineDate></PubDate></JournalIssue></Journal>"
+            "<ArticleTitle>Synthetic title.</ArticleTitle>")
+    [article] = pubmed.parse_articles(_set(_article("1001", body)))
+    assert article["year"] == 2019
+
+
+def test_the_electronic_article_date_is_the_year_when_there_is_no_issue_date():
+    body = ("<Journal><Title>J</Title><JournalIssue/></Journal>"
+            "<ArticleTitle>Synthetic title.</ArticleTitle>"
+            "<ArticleDate><Year>2021</Year></ArticleDate>")
+    [article] = pubmed.parse_articles(_set(_article("1002", body)))
+    assert article["year"] == 2021
+
+
+def test_a_labelled_abstract_keeps_its_labels_in_order():
+    abstract = ('<Abstract><AbstractText Label="BACKGROUND">Synthetic background.</AbstractText>'
+                '<AbstractText Label="METHODS">Synthetic methods.</AbstractText></Abstract>')
+    body = ("<Journal><Title>J</Title></Journal>"
+            "<ArticleTitle>Synthetic title.</ArticleTitle>" + abstract)
+    [article] = pubmed.parse_articles(_set(_article("1003", body)))
+    assert article["abstract"] == "BACKGROUND: Synthetic background. METHODS: Synthetic methods."
+
+
+def test_a_doi_given_only_as_an_elocation_is_read():
+    body = ("<Journal><Title>J</Title></Journal><ArticleTitle>Synthetic title.</ArticleTitle>"
+            '<ELocationID EIdType="doi" ValidYN="Y">10.5555/synthetic.elocation</ELocationID>')
+    [article] = pubmed.parse_articles(_set(_article("1004", body)))
+    assert article["doi"] == "10.5555/synthetic.elocation"
+
+
+def test_inline_markup_and_a_bracketed_translation_are_flattened():
+    plain = "<Journal><Title>J</Title></Journal><ArticleTitle>Inline <i>markup</i> title.</ArticleTitle>"
+    translated = ("<Journal><Title>J</Title></Journal>"
+                  "<ArticleTitle>[A <i>translated</i> title].</ArticleTitle>")
+    first, second = pubmed.parse_articles(_set(_article("1005", plain), _article("1006", translated)))
+    assert first["title"] == "Inline markup title"
+    assert second["title"] == "A translated title"
+
+
+def test_an_empty_article_set_is_a_clean_negative():
+    assert pubmed.parse_articles('<?xml version="1.0" ?><PubmedArticleSet/>') == []
+
+
+@pytest.mark.parametrize("text", [
+    "<PubmedArticleSet><ERROR>Synthetic error</ERROR></PubmedArticleSet>",
+    "<html>not an efetch answer",
+    "not xml at all",
+])
+def test_an_error_or_unparseable_efetch_answer_is_malformed(text):
+    with pytest.raises(http.HTTPFailure) as exc:
+        pubmed.parse_articles(text)
+    assert exc.value.classification == "MALFORMED"
+
+
+@responses.activate
+def test_a_malformed_efetch_body_exits_one(cli, answer):
+    serve(answer("pubmed", "22b8c990"))
+    responses.add(responses.GET, re.compile(EFETCH),
+                  body="<PubmedArticleSet><ERROR>Synthetic error", content_type="text/xml")
+    code, _out, err = cli(["self-supervised ECG"])
+    assert code == 1
+    assert "MALFORMED" in err

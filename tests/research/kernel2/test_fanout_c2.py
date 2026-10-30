@@ -239,3 +239,40 @@ def test_an_l2_run_refuses_a_listed_pubmed_not_in_l2_providers(project, run, fas
     assert code == 3
     assert statuses(payload) == [("openalex", "refused"), ("pubmed", "refused")]
     assert urls_called(PUBMED_ESEARCH) == []
+
+
+@responses.activate
+def test_an_l2_run_refuses_a_listed_semantic_scholar_not_in_l2_providers(project, run, fast_send):
+    root, ws = project
+    write_integrations(root, {"search-semantic-scholar": {"enabled": True}})
+    (ws / "data.yml").write_text(yaml.safe_dump({
+        "version": 1, "default_level": "L2", "levels": [], "pending_releases": [],
+        "released": [], "imports": []}, sort_keys=False), encoding="utf-8")
+    serve_all(None)
+    code, payload, _out, _err = run([QUERY, "--workspace", "demo", "--sources",
+                                     "semantic-scholar,openalex"])
+    assert code == 3
+    assert statuses(payload) == [("openalex", "refused"), ("semantic-scholar", "refused")]
+    assert urls_called(S2_URL) == []
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_an_l2_run_refuses_pubmed_and_semantic_scholar_through_the_default_set(project, run,
+                                                                              fast_send):
+    # No --sources: both switched-on sources join the default set and are refused by the M-B
+    # data check before any request; the four M-C1 sources are refused the same way.
+    root, ws = project
+    write_integrations(root, {"search-pubmed": {"enabled": True},
+                              "search-semantic-scholar": {"enabled": True}})
+    (ws / "data.yml").write_text(yaml.safe_dump({
+        "version": 1, "default_level": "L2", "levels": [], "pending_releases": [],
+        "released": [], "imports": []}, sort_keys=False), encoding="utf-8")
+    serve_all(None)
+    code, payload, _out, _err = run([QUERY, "--workspace", "demo"])
+    assert code == 3
+    assert statuses(payload) == [("openalex", "refused"), ("crossref", "refused"),
+                                 ("europepmc", "refused"), ("arxiv", "refused"),
+                                 ("pubmed", "refused"), ("semantic-scholar", "refused")]
+    assert urls_called(PUBMED_ESEARCH) == [] and urls_called(S2_URL) == []
+    assert len(responses.calls) == 0
