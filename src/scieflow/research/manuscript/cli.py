@@ -14,7 +14,8 @@ from scieflow.core.project import Project, ProjectError
 from scieflow.research.journal import state
 from scieflow.research.manuscript import build as build_mod
 from scieflow.research.manuscript import check as check_mod
-from scieflow.research.manuscript import checklist, judgement, render as render_mod, templates, tex
+from scieflow.research.manuscript import checklist, judgement, letters as letters_mod
+from scieflow.research.manuscript import package as package_mod, render as render_mod, templates, tex
 
 OK, REFUSED, USAGE = 0, 1, 2
 
@@ -153,4 +154,41 @@ def build(run, engine, timeout, as_json):
         click.echo("build failed; last lines of the log:", err=True)
         click.echo(result.log_tail, err=True)
         _fail(f"build failed with engine {result.engine}")
+    raise SystemExit(OK)
+
+
+@manuscript.command()
+@click.argument("run")
+@click.option("--json", "as_json", is_flag=True, help="Print the package record as JSON.")
+def package(run, as_json):
+    """Write report/submission/ for RUN once every gate holds (M-F 5.13). Uploads nothing."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        result = package_mod.package_run(project, folder)
+    except package_mod.PackageError as exc:
+        _fail(f"package refused [{exc.rule}]: {exc.message}")
+    if as_json:
+        click.echo(json.dumps(result.to_dict(), indent=2, sort_keys=True, ensure_ascii=False))
+    else:
+        click.echo(f"package: {result.folder}")
+        for name in sorted(result.files):
+            click.echo(f"  {name}")
+    raise SystemExit(OK)
+
+
+@manuscript.command()
+@click.argument("run")
+@click.option("--kind", type=click.Choice(["cover", "response"]), required=True,
+              help="The starter letter: cover or response.")
+@click.option("--force", is_flag=True, help="Replace an existing letter.")
+def letter(run, kind, force):
+    """Write a starter cover letter or response to reviewers into manuscript/letters/ (M-F 5.13)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        path = letters_mod.write_letter(project.root, folder, kind, force=force)
+    except letters_mod.LetterError as exc:
+        _fail(f"letter refused [{exc.rule}]: {exc.message}")
+    click.echo(f"letter: {path}")
     raise SystemExit(OK)
