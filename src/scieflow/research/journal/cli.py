@@ -20,7 +20,9 @@ from scieflow.core import gates, network
 from scieflow.core.project import Project, ProjectError
 from scieflow.core.review.claims import LeakError
 from scieflow.integrations.scite import mcp as scite_mcp
-from scieflow.research.journal import facts, profile, render, sources, state
+from scieflow.research.journal import adopt as adopt_mod
+from scieflow.research.journal import diff as diff_mod
+from scieflow.research.journal import facts, profile, prompt as prompt_mod, render, sources, state
 from scieflow.research.lib import http, providers
 
 OK, REFUSED, USAGE, BOUNDARY, NO_EGRESS = 0, 1, 2, 3, 6
@@ -201,18 +203,32 @@ def _exit_for(exc: BaseException) -> NoReturn:
 
 @journal.command()
 @click.argument("run")
-@click.option("--journal", "journal_name", required=True, help="The journal's name.")
+@click.option("--journal", "journal_name", default=None, help="The journal's name.")
 @click.option("--issn", default=None, help="The journal's ISSN (preferred: it names one source).")
 @click.option("--url", "urls", multiple=True, help="An author-guideline page (https; at most 10).")
 @click.option("--slug", default=None, help="The profile slug (default: from the name).")
 @click.option("--as-of", "as_of", default=None, help="Reference date YYYY-MM-DD (default: today, UTC).")
 @click.option("--restart", is_flag=True, help="Remove the working files first (never adopted/).")
 @click.option("--retry-failed", is_flag=True, help="Re-request only the pages that failed.")
+@click.option("--refresh-of", "refresh_of", default=None,
+              help="Pre-fill name, ISSN-L and gateway URLs from an adopted profile (a new gate is still required).")
 @click.option("--json", "as_json", is_flag=True, help="Print the result as JSON.")
-def research(run, journal_name, issn, urls, slug, as_of, restart, retry_failed, as_json):
+def research(run, journal_name, issn, urls, slug, as_of, restart, retry_failed, refresh_of, as_json):
     """Journal facts, then the guideline pages a human approves, then the saved pages (RUN: a run)."""
     project = Project.discover()
     folder = _run_folder(project, run)
+    if refresh_of is not None:
+        data, refresh_slug = _load(project, refresh_of)
+        identity = data.get("identity") if isinstance(data.get("identity"), dict) else {}
+        provenance = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
+        journal_name = journal_name or identity.get("name")
+        issn = issn or identity.get("issn_l")
+        slug = slug or refresh_slug
+        gateway = [row.get("url") for row in provenance.get("sources") or []
+                   if isinstance(row, dict) and row.get("retrieved_by") == "gateway"]
+        urls = tuple(dict.fromkeys([*urls, *(u for u in gateway if isinstance(u, str))]))
+    if not journal_name:
+        _fail("give --journal NAME, or --refresh-of SLUG for an adopted profile", USAGE)
     try:
         day = dt.date.fromisoformat(as_of) if as_of else dt.datetime.now(dt.timezone.utc).date()
     except ValueError:
@@ -257,3 +273,91 @@ def add_source(run, file_path, url, note):
     except (sources.SourcesError, state.StateError, ValueError) as exc:
         _fail(str(exc), REFUSED)
     click.echo(f"added {row['id']} from {row['host']} ({row['chars']} characters)")
+
+
+# --- M-F t4: prompt, adopt, diff, style ---------------------------------------------------------
+
+
+@journal.command("prompt")
+@click.argument("run")
+@click.option("--for", "agent", default=None, help="The agent this prompt is for (a plain slug).")
+@click.option("--cross-check", "cross_check", is_flag=True,
+              help="Ask the primary agent to verify every draft-*.yml against the sources.")
+@click.option("--write", is_flag=True, help="Write the prompt to prompts/ instead of printing it.")
+def prompt_cmd(run, agent, cross_check, write):
+    """The sub-agent prompt that drafts this run's journal profile (RUN: a run)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    if agent is not None and not prompt_mod.AGENT.match(agent):
+        _fail(f"not an agent name: {agent!r} (lowercase letters, digits and hyphens)", USAGE)
+    try:
+        text, _out_name, file_name = prompt_mod.build(project, folder, agent=agent, cross_check=cross_check)
+    except (state.StateError, profile.ProfileError) as exc:
+        _fail(str(exc))
+    if write:
+        target = folder / "prompts" / file_name
+        state.write_text(target, text)
+        click.echo(f"wrote {target}")
+    else:
+        click.echo(text, nl=False)
+
+
+@journal.command("adopt")
+@click.argument("run")
+@click.option("--draft", "draft_path", type=click.Path(), default=None,
+              help="The draft to adopt (default: journal/profile.draft.yml).")
+@click.option("--replace", is_flag=True, help="Replace a different adopted profile of the same slug.")
+@click.option("--as-agent", "as_agent", is_flag=True, help="Record the adoption as made by an agent.")
+@click.option("--json", "as_json", is_flag=True, help="Print the result as JSON.")
+def adopt_cmd(run, draft_path, replace, as_agent, as_json):
+    """Validate the draft against the run's sources and adopt it (RUN: a run)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        result = adopt_mod.adopt(project, folder, draft_path=Path(draft_path) if draft_path else None,
+                                 replace=replace, as_agent=as_agent)
+    except (state.StateError, profile.ProfileError, ValueError) as exc:
+        _fail(str(exc))
+    if as_json:
+        click.echo(json.dumps(result.to_dict(), indent=2, ensure_ascii=False, sort_keys=True))
+    else:
+        for line in result.lines:
+            click.echo(line)
+
+
+@journal.command("diff")
+@click.argument("slug")
+@click.argument("run")
+@click.option("--json", "as_json", is_flag=True, help="Print the differences as JSON.")
+def diff_cmd(slug, run, as_json):
+    """Field-level difference between the adopted profile SLUG and RUN's draft."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    adopted_path, _ = _resolve(project, slug)
+    if not adopted_path.is_file():
+        _fail(f"no adopted profile {slug!r} (looked for {adopted_path})")
+    try:
+        adopted = profile.load_profile(adopted_path)
+        draft = profile.load_profile(state.journal_dir(folder) / "profile.draft.yml")
+    except profile.ProfileError as exc:
+        _fail(str(exc))
+    rows = diff_mod.compare(adopted, draft)
+    if as_json:
+        click.echo(json.dumps(rows, indent=2, ensure_ascii=False, sort_keys=True, default=str))
+    else:
+        for row in rows:
+            click.echo(diff_mod.line(row))
+    raise SystemExit(OK)
+
+
+@journal.command("style")
+@click.argument("run")
+def style_cmd(run):
+    """Write the profile's figures block as an M-D2 style file (RUN: a run)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        target = diff_mod.write_style(project, folder)
+    except (state.StateError, profile.ProfileError) as exc:
+        _fail(str(exc))
+    click.echo(f"wrote {target}")
