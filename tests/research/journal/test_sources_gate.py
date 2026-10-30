@@ -6,7 +6,9 @@ by a human only: these tests play that human through `gates.answer(..., actor="h
 
 import hashlib
 import json
+import os
 import re
+import secrets
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,7 @@ from click.testing import CliRunner
 from scieflow.cli import main
 from scieflow.core import gates, network
 from scieflow.core.project import Project
+from scieflow.research.journal import sources, state
 
 REPO = Path(__file__).resolve().parents[3]
 SOURCES = r"https://api\.openalex\.org/sources.*"
@@ -29,6 +32,7 @@ JOURNAL = "Journal of Synthetic Neurology"
 ISSN = "1234-5679"
 PAGE = ("<html><head><title>Authors</title></head><body><h1>Limits</h1>"
         "<p>Research articles may contain up to 3000 words.</p></body></html>")
+SAVED_URL = "https://saved.journal.example/authors"
 
 
 @pytest.fixture
@@ -301,8 +305,167 @@ def test_a_record_run_replays_the_same_pages_with_zero_calls(run):
 
 
 def test_the_candidate_hash_is_over_the_url_lines():
-    from scieflow.research.journal import sources
-
     urls = [HOME, GUIDE]
     assert sources.sha_of(urls) == hashlib.sha256(
         ("\n".join(urls) + "\n").encode("utf-8")).hexdigest()
+
+
+# --- M-F t3 fix (review r1): hosts, saved pages, gates, atomic writes ----------------------------
+
+
+def test_a_numeric_homepage_is_not_a_candidate_and_a_numeric_url_is_refused():
+    assert sources.candidates_for("https://0x7f.0.0.1/", [GUIDE]) == [GUIDE]
+    with pytest.raises(sources.SourcesError):
+        sources.candidates_for(None, ["https://10.1/guides"])
+
+
+def test_a_non_string_homepage_is_no_homepage():
+    assert sources.candidates_for(123, [GUIDE]) == [GUIDE]
+    assert sources.candidates_for({"href": HOME}, []) == []
+
+
+@responses.activate
+def test_a_numeric_host_url_is_refused_when_the_list_is_built_and_no_gate_opens(run):
+    root, ws = run
+    enable(root)
+    result = go("https://127.1/guides/authors")
+    assert result.exit_code == 1, result.output
+    assert gates.list_gates(ws) == []
+    assert len(responses.calls) == 0
+
+
+def saved_add(tmp_path, url=SAVED_URL, body=PAGE):
+    path = tmp_path / "guide.html"
+    path.write_text(body, encoding="utf-8")
+    return CliRunner().invoke(main, ["journal", "add-source", "demo", "--file", str(path),
+                                     "--url", url], catch_exceptions=False)
+
+
+@responses.activate
+def test_a_saved_page_survives_a_run_with_the_provider_off(run, tmp_path):
+    root, ws = run
+    mock_facts()
+    assert go(GUIDE).exit_code == 0                      # sources-manual: the journal is recorded
+    added = saved_add(tmp_path)
+    assert added.exit_code == 0, added.output
+    result = go(GUIDE, extra=["--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["counts"]["ok"] == 1
+    human = [r for r in rows(ws) if r["retrieved_by"] == "human-file"]
+    assert len(human) == 1 and human[0]["url"] == SAVED_URL and human[0]["status"] == "ok"
+    assert json.loads((ws / "journal" / "sources.json").read_text())["journal"] == JOURNAL
+
+
+@responses.activate
+def test_a_saved_page_survives_an_approved_fetch_of_other_pages(run, tmp_path):
+    root, ws = run
+    enable(root)
+    mock_facts()
+    go(GUIDE)                                            # gate open
+    assert saved_add(tmp_path).exit_code == 0
+    responses.add(responses.GET, GUIDE, body=PAGE, status=200)
+    human_answer(root, ws, "approve")
+    result = go(GUIDE)
+    assert result.exit_code == 0, result.output
+    by_url = {r["url"]: r for r in rows(ws)}
+    assert by_url[SAVED_URL]["retrieved_by"] == "human-file" and by_url[SAVED_URL]["status"] == "ok"
+    assert by_url[GUIDE]["status"] == "ok"
+    assert (ws / "journal" / "sources" / f"{by_url[SAVED_URL]['id']}.txt").exists()
+
+
+@responses.activate
+def test_a_failed_fetch_never_replaces_a_saved_page_for_the_same_url(run, tmp_path):
+    root, ws = run
+    enable(root)
+    mock_facts()
+    go(GUIDE)
+    assert saved_add(tmp_path, url=GUIDE).exit_code == 0
+    responses.add(responses.GET, GUIDE, status=404)
+    human_answer(root, ws, "approve")
+    result = go(GUIDE)
+    assert result.exit_code == 0, result.output
+    assert len([c for c in responses.calls if c.request.url == GUIDE]) == 1   # still one request
+    row = [r for r in rows(ws) if r["url"] == GUIDE][0]
+    assert row["retrieved_by"] == "human-file" and row["status"] == "ok"
+
+
+@responses.activate
+def test_a_new_list_names_the_earlier_gate_that_is_still_open(run):
+    root, ws = run
+    enable(root)
+    mock_facts()
+    go(GUIDE)
+    first = open_gates(ws)[0]["id"]
+    result = go(GUIDE, GUIDE2)
+    assert result.exit_code == 0, result.output
+    assert first in result.output and "still open" in result.output
+
+
+@pytest.mark.parametrize("change", [{"requires_human": False}, {"kind": "review-decision"}])
+@responses.activate
+def test_a_gate_that_is_not_a_human_journal_sources_gate_authorises_nothing(run, change):
+    root, ws = run
+    enable(root)
+    mock_facts()
+    go(GUIDE)
+    gate = open_gates(ws)[0]
+    gate.update(state="answered", answer="approve", answered_by="human", answered="2026-10-01")
+    gate.update(change)
+    (ws / "gates" / f"{gate['id']}.json").write_text(json.dumps(gate))
+    result = go(GUIDE)
+    assert result.exit_code == 1, result.output
+    assert len(page_calls()) == 0
+
+
+@responses.activate
+def test_retry_failed_on_a_list_nobody_approved_requests_nothing(run):
+    root, ws = run
+    enable(root)
+    mock_facts()
+    go(GUIDE)
+    result = go(GUIDE, extra=["--retry-failed"])
+    assert result.exit_code == 0, result.output
+    assert phase(ws) == "gate-open"
+    assert len(page_calls()) == 0
+
+
+@responses.activate
+def test_a_replay_miss_during_the_page_fetch_exits_6_and_sends_nothing(run):
+    root, ws = run
+    enable(root)
+    network.write_mode(ws, "record", actor="human", reason="t3 fix replay-miss test")
+    mock_facts()
+    go(GUIDE)
+    responses.add(responses.GET, GUIDE, body=PAGE, status=200)
+    human_answer(root, ws, "approve")
+    assert go(GUIDE).exit_code == 0
+    network.write_mode(ws, "replay", actor="human", reason="t3 fix replay-miss test")
+    responses.calls.reset()
+    go(GUIDE, GUIDE2)                                     # a list the record never fetched
+    human_answer(root, ws, "approve")
+    result = go(GUIDE, GUIDE2)
+    assert result.exit_code == 6, result.output
+    assert len(responses.calls) == 0
+
+
+def test_an_atomic_write_never_follows_a_symlink_at_the_old_temp_name(tmp_path):
+    folder = tmp_path / "journal"
+    folder.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep", encoding="utf-8")
+    (folder / f".state.json.{os.getpid()}.tmp").symlink_to(outside)
+    state.atomic_write(folder / "state.json", b"{}")
+    assert outside.read_text(encoding="utf-8") == "keep"
+    assert (folder / "state.json").read_bytes() == b"{}"
+
+
+def test_an_existing_temp_name_is_refused_and_nothing_outside_is_written(tmp_path, monkeypatch):
+    folder = tmp_path / "journal"
+    folder.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep", encoding="utf-8")
+    monkeypatch.setattr(secrets, "token_hex", lambda _n: "fixed")
+    (folder / ".state.json.fixed.tmp").symlink_to(outside)
+    with pytest.raises(state.StateError, match="already exists"):
+        state.atomic_write(folder / "state.json", b"{}")
+    assert outside.read_text(encoding="utf-8") == "keep"

@@ -104,6 +104,7 @@ def test_run_hosts_for_another_provider_is_a_value_error(project):
 @pytest.mark.parametrize("host", [
     "127.0.0.1", "10.0.0.5", "localhost", "x.localhost", "x.local", "x.internal",
     "guides.lan", "pages.home.arpa", "nodot", "Guides.Example.org",
+    "127.1", "0x7f.0.0.1", "0177.0.0.1", "10.1", "1.2.3",
 ])
 def test_unsafe_run_hosts_are_refused(project, host):
     root, ws = project

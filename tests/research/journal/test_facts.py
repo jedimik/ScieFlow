@@ -4,7 +4,7 @@ Every HTTP call is mocked (`responses`); the journals, works and publishers are 
 """
 
 import re
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 import responses
@@ -19,6 +19,7 @@ WORKS_URL = "https://api.openalex.org/works"
 CROSSREF_URL = "https://api.crossref.org/journals/1234-5679"
 ISSN = "1234-5679"
 AS_OF = date(2026, 10, 1)
+WINDOW_START = AS_OF - timedelta(days=730)      # M-F 5.3: the two-year works window
 
 
 @pytest.fixture
@@ -132,8 +133,8 @@ def test_norms_for_nine_works_are_exact():
         (1, 100, "one two three"), (2, 110, "one two"), (3, 120, "one"),
         (4, 130, "one two three four"), (5, 140, "one two"), (6, 150, "one"),
         (7, 160, "one two three"), (8, 170, "one two"), (9, None, "one two three four five")]]
-    norms = facts.norms(works)
-    assert norms["sample"]["n"] == 9
+    norms = facts.norms(works, WINDOW_START, AS_OF)
+    assert norms["sample"] == {"n": 9, "from_date": "2024-10-01", "to_date": "2026-10-01"}
     assert norms["references"] == {"median": 5, "p25": 3, "p75": 7}
     assert norms["abstract_words"]["median"] == 135
     assert norms["abstract_words"]["p25"] == 117.5
@@ -143,16 +144,42 @@ def test_norms_for_nine_works_are_exact():
 
 
 def test_norms_for_zero_works_are_null():
-    norms = facts.norms([])
+    norms = facts.norms([], WINDOW_START, AS_OF)
     assert norms["sample"]["n"] == 0
     assert norms["references"] == {"median": None, "p25": None, "p75": None}
     assert norms["title_words"]["median"] is None
 
 
 def test_norms_for_one_work_use_its_own_value_for_every_quartile():
-    norms = facts.norms([work(12, abstract_words=200, title="a b")])
+    norms = facts.norms([work(12, abstract_words=200, title="a b")], WINDOW_START, AS_OF)
     assert norms["references"] == {"median": 12, "p25": 12, "p75": 12}
     assert norms["abstract_words"]["median"] == 200
+
+
+@responses.activate
+def test_the_norms_sample_records_the_window_it_was_drawn_from(ws):
+    mock_sources([source()])
+    mock_works([work(r, abstract_words=50) for r in range(1, 4)])
+    mock_crossref({"title": "Journal of Synthetic Neurology", "publisher": "Synthetic Press",
+                   "ISSN": [ISSN]})
+    data = facts.collect(gateway(ws), name=None, issn=ISSN, as_of=AS_OF)
+    assert data["norms"]["sample"] == {"n": 3, "from_date": "2024-10-01", "to_date": "2026-10-01"}
+
+
+@responses.activate
+def test_a_source_row_without_a_string_id_is_malformed_and_exits_cleanly(ws):
+    row = source()
+    del row["id"]
+    mock_sources([row])
+    with pytest.raises(facts.FactsError, match="MALFORMED"):
+        facts.collect(gateway(ws), name=None, issn=ISSN, as_of=AS_OF)
+
+
+@responses.activate
+def test_a_source_row_whose_issn_is_not_a_list_is_malformed(ws):
+    mock_sources([source(issn=7)])
+    with pytest.raises(facts.FactsError, match="MALFORMED"):
+        facts.collect(gateway(ws), name=None, issn=ISSN, as_of=AS_OF)
 
 
 # --- collect: the whole facts block ----------------------------------------------------------

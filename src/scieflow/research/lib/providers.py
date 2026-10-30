@@ -256,6 +256,18 @@ _NO_RUN_HOST_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arp
 _DNS_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+")
 
 
+def is_public_dns_name(host) -> bool:
+    """A lowercase DNS name with a dot whose last label is not numeric and not a 0x form. The
+    short and hex/octal IPv4 spellings that getaddrinfo still resolves (127.1, 0x7f.0.0.1,
+    10.1) are refused like the dotted-quad literals; local suffixes are refused as well."""
+    if not isinstance(host, str) or not _DNS_NAME.fullmatch(host):
+        return False
+    if host.endswith(_NO_RUN_HOST_SUFFIXES) or _is_ip_literal(host):
+        return False
+    last = host.rsplit(".", 1)[-1]
+    return not (last.isdigit() or last.startswith("0x"))
+
+
 def _checked_run_hosts(run_hosts) -> dict:
     """`run_hosts` for providers that take their hosts from the run (M-F 5.7). Only a catalogue
     provider with `run_hosts: True` may have them; each host is a lowercase public DNS name."""
@@ -266,8 +278,7 @@ def _checked_run_hosts(run_hosts) -> dict:
                              f"not {_show(str(provider))}")
         clean = []
         for host in hosts:
-            if not isinstance(host, str) or not _DNS_NAME.fullmatch(host) \
-                    or host.endswith(_NO_RUN_HOST_SUFFIXES) or _is_ip_literal(host):
+            if not is_public_dns_name(host):
                 raise ProviderRefused(f"{provider}: host {_show(str(host))} is not an allowed "
                                       f"run host (a lowercase public DNS name with a dot)")
             clean.append(host)

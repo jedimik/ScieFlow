@@ -71,13 +71,19 @@ def candidates_for(homepage: str | None, extra: list[str]) -> list[str]:
     if len(extra) > MAX_URLS:
         raise SourcesError(f"at most {MAX_URLS} --url values are accepted")
     urls: list[str] = []
-    if homepage:
+    if isinstance(homepage, str) and homepage:
         try:
-            urls.append(https_url(homepage))
+            url = https_url(homepage)
         except SourcesError:
-            pass                                       # an http homepage is not a candidate
+            url = None                                 # an http or non-string homepage: none
+        if url and providers.is_public_dns_name(urlsplit(url).hostname):
+            urls.append(url)
     for url in extra:
-        urls.append(https_url(url))
+        where = https_url(url)
+        if not providers.is_public_dns_name(urlsplit(where).hostname):
+            raise SourcesError(f"refused: {where!r} is not a public DNS name (IP addresses, "
+                               "numeric hosts and local names are never fetched)")
+        urls.append(where)
     return list(dict.fromkeys(urls))
 
 
@@ -138,10 +144,15 @@ def decision(gate: dict, sha: str) -> str:
 
 
 def _load_rows(jdir: Path, sha: str | None) -> dict[str, dict]:
+    """The rows of the current candidate list, plus every human-saved page (kept whatever list
+    is current: a saved page is not a guideline URL of one list)."""
     data = state.read_json(jdir / SOURCES)
-    if not isinstance(data, dict) or data.get("candidates_sha256") != sha:
+    if not isinstance(data, dict):
         return {}
-    return {r["id"]: r for r in data.get("rows", []) if isinstance(r, dict) and "id" in r}
+    same_list = data.get("candidates_sha256") == sha
+    return {r["id"]: r for r in data.get("rows", [])
+            if isinstance(r, dict) and "id" in r
+            and (same_list or r.get("retrieved_by") == "human-file")}
 
 
 def _write_rows(jdir: Path, journal: str, sha: str | None, rows: list[dict]) -> None:
@@ -188,6 +199,17 @@ def _restart(jdir: Path) -> None:
     state.remove_working(jdir)
 
 
+def _still_open_line(run: Path, gate_id: str, sha12: str) -> str | None:
+    """The line naming an earlier journal-sources gate that a changed list left open."""
+    try:
+        if gates.get(run, gate_id).get("state") != "open":
+            return None
+    except gates.GateError:
+        return None
+    return (f"Earlier journal-sources gate {gate_id} (list {sha12}) is still open and no longer "
+            f"authorises a fetch: scieflow gate answer {run.name} {gate_id} deny   (to close it)")
+
+
 def research(project: Project, run: Path, *, journal: str, slug: str, issn: str | None,
              extra_urls: list[str], as_of: dt.date, restart: bool, retry_failed: bool,
              policy: providers.ProviderPolicy, make_gateway) -> Result:
@@ -224,6 +246,9 @@ def research(project: Project, run: Path, *, journal: str, slug: str, issn: str 
                 not in str(old.get("question", "")):
             raise SourcesError("candidates.json no longer matches the journal-sources gate "
                                f"{gate_id}; no page was fetched. Re-run with --restart to start over")
+    superseded = None
+    if gate_id and on_disk is not None and on_disk["sha256"] != sha:
+        superseded = (gate_id, on_disk["sha256"][:12])
     if on_disk is None or on_disk["sha256"] != sha:
         on_disk = write_candidates(jdir, journal, derived)
         gate_id = None                                        # a changed list: a new gate
@@ -240,10 +265,14 @@ def research(project: Project, run: Path, *, journal: str, slug: str, issn: str 
         gate = gates.open_gate(project, run, GATE_KIND,
                                question(journal, run.name, derived, sha),
                                options=OPTIONS, files=[f"journal/{CANDIDATES}"], actor="agent")
-        return _phase(run, jdir, journal, slug, "gate-open", st, gate_id=gate["id"], lines=[
-            f"Waiting for a human decision on {len(derived)} page(s) for {journal}.",
-            f"scieflow gate answer {run.name} {gate['id']} approve   (or: ... deny)"],
-            counts=_counts(counts_rows))
+        lines = [f"Waiting for a human decision on {len(derived)} page(s) for {journal}.",
+                 f"scieflow gate answer {run.name} {gate['id']} approve   (or: ... deny)"]
+        if superseded is not None:
+            old = _still_open_line(run, *superseded)
+            if old:
+                lines.append(old)
+        return _phase(run, jdir, journal, slug, "gate-open", st, gate_id=gate["id"], lines=lines,
+                      counts=_counts(counts_rows))
 
     gate = gates.get(run, gate_id)
     answer = decision(gate, sha)
@@ -261,13 +290,23 @@ def research(project: Project, run: Path, *, journal: str, slug: str, issn: str 
             counts=_counts(counts_rows))
 
     prev = _load_rows(jdir, sha)
+    human = {sid: r for sid, r in prev.items() if r.get("retrieved_by") == "human-file"}
     targets = [u for u in derived
                if not retry_failed or prev.get(source_id(u), {}).get("status") == "failed"]
     fetch_gw = make_gateway(run_hosts={PROVIDER: hosts_of(derived)})
     fresh = {source_id(u): fetch_one(fetch_gw, jdir, u) for u in targets}
-    rows = [fresh.get(source_id(u)) or prev.get(source_id(u))
-            for u in derived]
-    rows = [r for r in rows if r is not None]
+    rows = []
+    for url in derived:
+        sid = source_id(url)
+        got = fresh.get(sid)
+        if got is not None and (got["status"] == "ok" or sid not in human):
+            rows.append(got)
+        elif sid in human:                            # a failed fetch keeps the saved page
+            rows.append(human[sid])
+        elif prev.get(sid) is not None:
+            rows.append(prev[sid])
+    listed = {source_id(u) for u in derived}
+    rows += [r for sid, r in human.items() if sid not in listed]
     _write_rows(jdir, journal, sha, rows)
     lines = [f"Fetched {len(targets)} page(s) for {journal}."]
     for row in rows:
@@ -319,6 +358,6 @@ def add_source(jdir: Path, file_path: Path, url: str, note: str = "") -> dict:
            "chars": len(text), "note": (note or "")[:200]}
     current = state.read_json(jdir / SOURCES) or {}
     rows = [r for r in current.get("rows", []) if isinstance(r, dict) and r.get("id") != sid]
-    _write_rows(jdir, current.get("journal", ""), current.get("candidates_sha256"),
-                [*rows, row])
+    journal = current.get("journal") or state.read_state(jdir).get("journal", "")
+    _write_rows(jdir, journal, current.get("candidates_sha256"), [*rows, row])
     return row

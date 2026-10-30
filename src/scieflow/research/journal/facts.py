@@ -73,10 +73,24 @@ def _results_count(body) -> int:
 def _sources(gw, *, ids=None, checked=None, per_page: int, ttl: str) -> list[dict]:
     body = gw.get_json(PROVIDER, "journal-search" if checked else "journal-source", SOURCES_URL,
                        ids=ids, checked=checked, fixed={"per-page": per_page}, ttl_class=ttl,
-                       count=_results_count, validate=_malformed(PROVIDER, "sources"))
+                       count=_results_count, validate=_sources_shape)
     rows = [r for r in body["results"] if isinstance(r, dict)]
     gw.remember(PROVIDER, [str(r.get("id", "")).rsplit("/", 1)[-1] for r in rows])
     return rows
+
+
+def _sources_shape(body) -> None:
+    """A sources answer whose every row is an object with a string id and, when present, an ISSN
+    list of strings. Anything else is MALFORMED: a clean exit 1, never a traceback (M-F 5.3)."""
+    _malformed(PROVIDER, "sources")(body)
+    for row in body["results"]:
+        ok = isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"] != ""
+        issn = row.get("issn") if ok else None
+        if ok and issn is not None:
+            ok = isinstance(issn, list) and all(isinstance(x, str) for x in issn)
+        if not ok:
+            raise http.HTTPFailure(f"{PROVIDER} sources response has a row without a string id "
+                                   "or a bad ISSN list", "MALFORMED")
 
 
 def _source_row(row: dict) -> dict:
@@ -130,15 +144,20 @@ def select_source(gw, *, name: str | None, issn: str | None) -> dict:
                      "re-run with --issn")
 
 
+def window(as_of: date) -> tuple[date, date]:
+    """The works window of the sample: two years up to `as_of` (M-F 5.3)."""
+    return as_of - timedelta(days=WORKS_WINDOW_DAYS), as_of
+
+
 def works_sample(gw, source_id: str, as_of: date) -> list[dict]:
     """The journal's recent articles (two years to `as_of`, at most 200). The source id must be
     one OpenAlex returned in this run; any other id is refused before the request."""
     if not SOURCE_ID.match(source_id or "") or not gw.was_received(PROVIDER, source_id):
         raise ProviderRefused(f"OpenAlex did not return source {source_id!r}: the works filter "
                               "is refused before any request")
-    start = as_of - timedelta(days=WORKS_WINDOW_DAYS)
+    start, end = window(as_of)
     flt = (f"primary_location.source.id:{source_id},from_publication_date:{start.isoformat()},"
-           f"to_publication_date:{as_of.isoformat()},type:article")
+           f"to_publication_date:{end.isoformat()},type:article")
     body = gw.get_json(PROVIDER, "journal-works", WORKS_URL, ids={"filter": flt},
                        fixed={"per-page": 200, "select": WORKS_SELECT,
                               "sort": "publication_date:desc"},
@@ -162,9 +181,9 @@ def _quartiles(values: list) -> dict:
     return {"median": _num(statistics.median(values)), "p25": _num(q1), "p75": _num(q3)}
 
 
-def norms(works: list[dict]) -> dict:
+def norms(works: list[dict], start: date, end: date) -> dict:
     """Median and quartiles over the sample (n <= 200). Quartiles of one value are that value;
-    no works give nulls."""
+    no works give nulls. The window the sample was drawn from is recorded with it."""
     refs = [w["referenced_works_count"] for w in works
             if isinstance(w.get("referenced_works_count"), int)
             and not isinstance(w.get("referenced_works_count"), bool)]
@@ -176,7 +195,7 @@ def norms(works: list[dict]) -> dict:
     title_words = [len(str(w.get("display_name") or "").split()) for w in works]
     share = round(len(abstracts) / len(works), 4) if works else None
     return {
-        "sample": {"n": len(works)},
+        "sample": {"n": len(works), "from_date": start.isoformat(), "to_date": end.isoformat()},
         "references": _quartiles(refs),
         "abstract_words": {**_quartiles(abstract_words), "share_with_abstract": share},
         "title_words": {"median": _num(statistics.median(title_words)) if title_words else None},
@@ -230,7 +249,7 @@ def collect(gw, *, name: str | None, issn: str | None, as_of: date) -> dict:
                 conflicts.append({"field": field, "openalex": ours, "crossref": theirs})
     try:
         sample = works_sample(gw, source["id"], as_of)
-        block = norms(sample)
+        block = norms(sample, *window(as_of))
         status["works"] = "ok"
     except http.HTTPFailure as exc:
         block, status["works"] = None, exc.classification
