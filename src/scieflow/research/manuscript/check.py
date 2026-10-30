@@ -26,7 +26,6 @@ JSON_NAME = "manuscript-check.json"
 MD_NAME = "manuscript-check.md"
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 DEFAULT_HEADINGS = ("Background", "Objective(s)", "Methods", "Results", "Conclusion(s)")
-EXCERPT = 60
 DECLARATION_META = {
     "coi": "coi", "funding": "funding", "ethics": "ethics",
     "data-availability": "data_availability", "code-availability": "code_availability",
@@ -93,9 +92,7 @@ class Report:
         }
 
 
-def _excerpt(text) -> str:
-    text = " ".join(str(text).split())
-    return text if len(text) <= EXCERPT else text[:EXCERPT - 3] + "..."
+_excerpt = tex.excerpt
 
 
 def _profile_run_dir(root: Path, data: dict) -> Path | None:

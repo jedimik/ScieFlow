@@ -1,5 +1,6 @@
 """`manuscript check`: one case per rule of M-F 5.9 (except guideline-*, M-F t6). Synthetic data only."""
 
+import copy
 import datetime as dt
 
 import yaml
@@ -30,6 +31,23 @@ def test_the_synthetic_article_has_no_errors(synth):
     assert report.errors == []
     assert report.exit_code == 0
     assert report.article_type == "research-article"
+
+
+def test_title_in_the_preamble_counts_against_words_title(synth):
+    synth.edit("main.tex", "\\title{Gait timing in synthetic cohorts}\n", "")
+    synth.edit("main.tex", "\\documentclass[11pt]{article}\n",
+               "\\documentclass[11pt]{article}\n\\title{Gait timing in synthetic cohorts}\n")
+    synth.write_profile(_profile_data(words_title=3))
+    finding = _one(_check(synth), "title-words")
+    assert finding.limit == 3 and finding.value == 5
+
+
+def test_over_long_main_name_is_a_finding_with_short_messages(synth):
+    report = _check(synth, main="d" * 300)
+    assert report.exit_code == 1
+    finding = _one(report, "tex-path")
+    assert finding.severity == "error"
+    assert all("d" * 61 not in f.message for f in report.findings)
 
 
 def test_abstract_over_the_limit_is_flagged_with_limit_and_value(synth):
@@ -221,6 +239,55 @@ def test_metadata_identifier_problems_appear_in_the_report(synth):
     (synth.ms / "metadata.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
     finding = _one(_check(synth), "orcid-invalid")
     assert finding.where == "authors[0].orcid" and finding.severity == "error"
+
+
+def test_invalid_ror_is_a_finding(synth):
+    data = _metadata(synth)
+    data["authors"][0]["affiliations"][0]["ror"] = "https://ror.org/NOT-A-ROR"
+    _save_metadata(synth, data)
+    finding = _one(_check(synth), "ror-invalid")
+    assert finding.severity == "error" and "authors[0]" in finding.where
+
+
+def test_unknown_credit_role_is_a_finding(synth):
+    data = _metadata(synth)
+    data["authors"][0]["credit"] = ["hand-waving"]
+    _save_metadata(synth, data)
+    assert _one(_check(synth), "credit-invalid").severity == "error"
+
+
+def test_two_corresponding_authors_are_a_finding(synth):
+    data = _metadata(synth)
+    second = copy.deepcopy(data["authors"][0])
+    second["name"] = "Second Synthetic Author"
+    second.pop("orcid", None)
+    data["authors"][0]["corresponding"] = True
+    second["corresponding"] = True
+    data["authors"].append(second)
+    _save_metadata(synth, data)
+    finding = _one(_check(synth), "corresponding")
+    assert finding.severity == "error"
+
+
+def test_null_limits_are_not_checked(synth):
+    synth.set_abstract(" ".join(["word"] * 900))
+    synth.write_profile(_profile_data(**{name: None for name in _LIMIT_NAMES}))
+    limit_rules = {"abstract-words", "main-words", "section-words", "title-words", "keywords",
+                   "highlights", "figures", "tables", "display-items", "references-count"}
+    assert not limit_rules & set(_rules(_check(synth)))
+
+
+def test_guideline_ids_are_recorded_in_the_report(synth):
+    report = _check(synth, guidelines=["journal-guideline-b", "journal-guideline-a"])
+    assert report.to_dict()["guidelines"] == ["journal-guideline-a", "journal-guideline-b"]
+
+
+def _metadata(synth) -> dict:
+    return yaml.safe_load((synth.ms / "metadata.yml").read_text(encoding="utf-8"))
+
+
+def _save_metadata(synth, data: dict) -> None:
+    (synth.ms / "metadata.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
 
 
 def _profile_data(**kw):

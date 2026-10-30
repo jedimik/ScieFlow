@@ -1,6 +1,7 @@
 """The manuscript reader (M-F 5.8): tree, includes, comments, limits. Synthetic data only."""
 
 import os
+import time
 
 import pytest
 
@@ -77,3 +78,60 @@ def test_source_tree_hash_is_stable_and_ignores_build_output(synth):
     assert tex.source_tree_hash(synth.ms) == first
     (synth.ms / "methods.tex").write_text("Changed.\n", encoding="utf-8")
     assert tex.source_tree_hash(synth.ms) != first
+
+
+# --- review r1 fixes (M-F t5 fix) ---------------------------------------------------------------
+
+def test_title_before_begin_document_is_read(synth):
+    baseline = tex.analyse(tex.read_tree(synth.ms))
+    synth.edit("main.tex", "\\title{Gait timing in synthetic cohorts}\n", "")
+    synth.edit("main.tex", "\\documentclass[11pt]{article}\n",
+               "\\documentclass[11pt]{article}\n\\title{Gait timing in synthetic cohorts}\n")
+    analysis = tex.analyse(tex.read_tree(synth.ms))
+    assert analysis.title == "Gait timing in synthetic cohorts"
+    assert analysis.title_words == 5
+    assert analysis.main_words == baseline.main_words
+
+
+def test_include_expansion_is_bounded_in_size(synth):
+    names = [f"l{i:02d}" for i in range(20)]
+    for name, child in zip(names, names[1:]):
+        (synth.ms / f"{name}.tex").write_text(f"\\input{{{child}}}\n\\input{{{child}}}\n", encoding="utf-8")
+    (synth.ms / f"{names[-1]}.tex").write_text("Leaf text.\n", encoding="utf-8")
+    synth.edit("main.tex", "\\input{methods}", f"\\input{{{names[0]}}}")
+    started = time.monotonic()
+    with pytest.raises(tex.TexError) as info:
+        tex.read_tree(synth.ms)
+    assert info.value.rule == "tex-limit"
+    assert time.monotonic() - started < 1.0
+
+
+def test_file_inputted_twice_is_flattened_twice(synth):
+    synth.edit("main.tex", "\\input{methods}", "\\input{methods}\n\\input{methods}")
+    tree = tex.read_tree(synth.ms)
+    assert tree.flat_text().count("Synthetic methods text") == 2
+
+
+def test_over_long_input_name_fails_closed_with_a_short_message(synth):
+    long_name = "a" * 300
+    synth.edit("main.tex", "\\input{methods}", f"\\input{{{long_name}}}")
+    with pytest.raises(tex.TexError) as info:
+        tex.read_tree(synth.ms)
+    assert info.value.rule == "tex-path"
+    assert long_name not in str(info.value)
+    assert len(str(info.value)) < 120
+
+
+def test_missing_input_message_excerpts_the_name(synth):
+    name = "b" * 200
+    synth.edit("main.tex", "\\input{methods}", f"\\input{{{name}}}")
+    with pytest.raises(tex.TexError) as info:
+        tex.read_tree(synth.ms)
+    assert info.value.rule == "tex-missing-input"
+    assert "b" * 61 not in str(info.value)
+
+
+def test_over_long_main_name_fails_closed(synth):
+    with pytest.raises(tex.TexError) as info:
+        tex.read_tree(synth.ms, main="c" * 300)
+    assert info.value.rule == "tex-path"

@@ -19,6 +19,11 @@ from scieflow.research.citations import BIBKEY_RE, CITE_RE
 MAX_FILES = 200
 MAX_DEPTH = 20
 MAX_BYTES = 5_000_000
+# The flattened tree is bounded too: each expansion of an \\input counts its characters and lines, so a
+# small tree that inputs one file many times cannot build millions of lines (M-F review r1 R2).
+MAX_EXPANDED_CHARS = 2_000_000
+MAX_EXPANDED_LINES = 100_000
+EXCERPT = 60
 INCLUDE_RE = re.compile(r"\\(?:input|include)\s*\{([^{}]+)\}")
 BIB_YEAR_RE = re.compile(r"\b(?:year|date)\s*=\s*[{\"]?\s*(\d{4})")
 
@@ -51,6 +56,12 @@ TEX_BYPRODUCTS = (".aux", ".log", ".out", ".bbl", ".blg", ".fls", ".fdb_latexmk"
 TREE_EXCLUDED_DIRS = frozenset({"build", "drafts", "letters"})
 
 
+def excerpt(text) -> str:
+    """At most EXCERPT characters of `text` on one line: the only form in which a name enters a message (5.17)."""
+    text = " ".join(str(text).split())
+    return text if len(text) <= EXCERPT else text[:EXCERPT - 3] + "..."
+
+
 class TexError(ValueError):
     """A manuscript file cannot be read as a tree: `rule` names the refusal, `path` the file."""
 
@@ -74,6 +85,8 @@ class Tree:
     main: str
     files: dict = field(default_factory=dict)
     lines: list = field(default_factory=list)
+    expanded_chars: int = 0
+    expanded_lines: int = 0
 
     def flat_text(self) -> str:
         return "\n".join(line.text for line in self.lines)
@@ -125,31 +138,37 @@ class Analysis:
 # --- files ---------------------------------------------------------------------------------------
 
 def _inside(folder: Path, name: str) -> Path:
-    """The path of `name` under `folder`; refused when it leaves the folder or is a symlink."""
+    """The path of `name` under `folder`; refused when it leaves the folder, is a symlink or cannot be named."""
     path = folder / name
     try:
         resolved = path.resolve(strict=False)
-    except (OSError, RuntimeError) as exc:
-        raise TexError("tex-path", name, f"{name}: cannot be resolved") from exc
+        is_link = path.is_symlink()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise TexError("tex-path", name, f"{excerpt(name)}: cannot be opened") from exc
     base = folder.resolve()
     if resolved != base and base not in resolved.parents:
-        raise TexError("tex-path", name, f"{name}: lies outside the manuscript folder")
-    if path.is_symlink():
-        raise TexError("tex-path", name, f"{name}: is a symbolic link")
+        raise TexError("tex-path", name, f"{excerpt(name)}: lies outside the manuscript folder")
+    if is_link:
+        raise TexError("tex-path", name, f"{excerpt(name)}: is a symbolic link")
     return path
 
 
 def read_regular_text(folder: Path, name: str, limit: int = MAX_BYTES) -> str:
     """A regular, non-symlink file of the manuscript folder, read as UTF-8 (refused otherwise)."""
     path = _inside(folder, name)
-    if not path.is_file():
-        raise TexError("tex-missing-input", name, f"{name}: no such file")
-    if path.stat().st_size > limit:
-        raise TexError("tex-limit", name, f"{name}: larger than {limit} bytes")
+    try:
+        is_file = path.is_file()
+        size = path.stat().st_size if is_file else 0
+    except (OSError, ValueError) as exc:
+        raise TexError("tex-path", name, f"{excerpt(name)}: cannot be read") from exc
+    if not is_file:
+        raise TexError("tex-missing-input", name, f"{excerpt(name)}: no such file")
+    if size > limit:
+        raise TexError("tex-limit", name, f"{excerpt(name)}: larger than {limit} bytes")
     try:
         return path.read_bytes().decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise TexError("tex-encoding", name, f"{name}: not UTF-8") from exc
+        raise TexError("tex-encoding", name, f"{excerpt(name)}: not UTF-8") from exc
 
 
 def _tex_name(raw: str) -> str:
@@ -190,15 +209,20 @@ def read_tree(folder, main: str = "main.tex") -> Tree:
 
 def _expand(tree: Tree, name: str, depth: int, stack: list) -> None:
     if depth > MAX_DEPTH:
-        raise TexError("tex-limit", name, f"{name}: nested deeper than {MAX_DEPTH} levels")
+        raise TexError("tex-limit", name, f"{excerpt(name)}: nested deeper than {MAX_DEPTH} levels")
     if name in stack:
-        raise TexError("tex-cycle", name, f"{name}: inputs itself")
+        raise TexError("tex-cycle", name, f"{excerpt(name)}: inputs itself")
     if name not in tree.files:
         if len(tree.files) >= MAX_FILES:
-            raise TexError("tex-limit", name, f"more than {MAX_FILES} files")
+            raise TexError("tex-limit", name, f"{excerpt(name)}: more than {MAX_FILES} files")
         tree.files[name] = strip_comments(read_regular_text(tree.folder, name))
+    text = tree.files[name]
+    tree.expanded_chars += len(text)
+    tree.expanded_lines += text.count("\n") + 1
+    if tree.expanded_chars > MAX_EXPANDED_CHARS or tree.expanded_lines > MAX_EXPANDED_LINES:
+        raise TexError("tex-limit", name, f"{excerpt(name)}: the flattened manuscript is over the size limit")
     stack.append(name)
-    for lineno, raw in enumerate(tree.files[name].split("\n"), start=1):
+    for lineno, raw in enumerate(text.split("\n"), start=1):
         position = 0
         for match in INCLUDE_RE.finditer(raw):
             tree.lines.append(Line(name, lineno, raw[position:match.start()]))
@@ -347,8 +371,9 @@ def analyse(tree: Tree) -> Analysis:
     doc_class = re.search(r"\\documentclass(?:\[[^\]]*\])?\{([^{}]+)\}", flat)
     bib_style = re.search(r"\\bibliographystyle\{([^{}]+)\}", flat)
 
-    title_match = re.search(r"\\title\s*\{", preamble)
-    title = _braced(preamble, title_match.end() - 1)[0] if title_match else None
+    # \\title may sit before \\begin{document} (preamble) or inside it: the first one in the flattened text.
+    title_match = re.search(r"\\title\s*\{", flat)
+    title = _braced(flat, title_match.end() - 1)[0] if title_match else None
     body = re.sub(r"\\title\s*\{(?:[^{}]|\{[^{}]*\})*\}", " ", preamble)
     body = body.replace("\\maketitle", " ")
 
