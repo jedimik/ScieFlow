@@ -47,13 +47,56 @@ def test_only_the_listed_statuses_are_absent(make_gateway, fake_session):
     assert exc.value.classification == "HTTP_410"
 
 
-@pytest.mark.parametrize("bad", [(200,), (500,), (404, 302), (99,)])
+@pytest.mark.parametrize("bad", [(200,), (500,), (404, 302), (99,),
+                                 # transient, rate-limit and auth answers are never "no record"
+                                 (408,), (425,), (429,), (401,), (403,), (404, 429)])
 def test_absent_takes_client_errors_only(make_gateway, fake_session, bad):
     sess = fake_session(status=404)
     gw = make_gateway(sess)
     with pytest.raises(ValueError):
         gw.get_json(P, OP, URL, absent=bad)
     assert sess.calls == []
+
+
+@pytest.mark.parametrize("bad", [(408,), (429,), (403,)])
+def test_absent_refused_on_text_endpoints_too(make_gateway, fake_session, bad):
+    sess = fake_session(status=404)
+    gw = make_gateway(sess)
+    with pytest.raises(ValueError):
+        gw.get_text(P, OP, URL, count=lambda _b: 0, absent=bad)
+    assert sess.calls == []
+
+
+def test_get_text_absent_returns_none_once_then_serves_the_cache(make_gateway, fake_session):
+    sess = fake_session(status=404)
+    gw = make_gateway(sess)
+    assert gw.get_text(P, OP, URL, count=lambda _b: 0, absent=(404,)) is None
+    assert gw.get_text(P, OP, URL, count=lambda _b: 0, absent=(404,)) is None
+    assert len(sess.calls) == 1, "the second call must be a cache hit"
+    rows = [r for r in gw.ledger.rows("run") if r["source"] == P]
+    assert [(r["status"], r["results"], r["cached"]) for r in rows] == [("ok", 0, False),
+                                                                      ("ok", 0, True)]
+
+
+def test_get_text_without_absent_a_404_still_raises(make_gateway, fake_session):
+    gw = make_gateway(fake_session(status=404))
+    with pytest.raises(HTTPFailure) as exc:
+        gw.get_text(P, OP, URL, count=lambda _b: 0)
+    assert exc.value.classification == "HTTP_404"
+
+
+def test_a_recorded_text_absent_answer_replays_as_none_with_no_transport(project, make_gateway,
+                                                                         fake_session):
+    _root, ws, _home = project
+    rec = make_gateway(fake_session(status=404), network="record")
+    assert rec.get_text(P, OP, URL, count=lambda _b: 0, absent=(404,)) is None
+    snap = snapshots.load(ws, provider=P, op=OP, key=KEY, url=URL, request_params={})
+    assert snap["body_kind"] == "absent"
+
+    replay_sess = fake_session(status=200, body="<feed/>")
+    rep = make_gateway(replay_sess, network="replay")
+    assert rep.get_text(P, OP, URL, count=lambda _b: 0, absent=(404,)) is None
+    assert replay_sess.calls == []
 
 
 def test_a_recorded_absent_answer_replays_as_none_with_no_transport(project, make_gateway,

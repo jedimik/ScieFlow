@@ -533,15 +533,17 @@ class Gateway:
                  text: Mapping | None = None, ids: Mapping | None = None,
                  fixed: Mapping | None = None, checked: Mapping | None = None,
                  composed: Mapping | None = None, ttl_class: str = "search",
-                 validate: Callable[[object], None] | None = None) -> str:
+                 validate: Callable[[object], None] | None = None,
+                 absent: tuple[int, ...] = ()) -> str | None:
         """Like `get_json` for a non-JSON body (arXiv answers Atom XML): the same
-        policy, classification, cache, ledger and failure handling; returns the text."""
+        policy, classification, cache, ledger and failure handling; returns the text.
+        `absent` works as in `get_json` (M-C2 5.2): a listed status returns None."""
         resolved = self._resolve(provider)
         self._guard(provider, url, resolved)
         params = self._params(provider, op, text=text, ids=ids, fixed=fixed,
                               checked=checked, composed=composed)
         return self._fetch(provider, op, url, params, resolved, ttl_class=ttl_class,
-                           count=count, validate=validate, as_text=True)
+                           count=count, validate=validate, as_text=True, absent=absent)
 
     def _contact_params(self, provider: str, op: str, contact, resolved) -> dict:
         """The wire parameter for the contact address, checked (M-C2 5.2). Empty when none is
@@ -595,6 +597,10 @@ class Gateway:
         absent = tuple(absent)
         if any(not (400 <= code <= 499) for code in absent):
             raise ValueError(f"{provider} {op}: absent statuses must be client errors (4xx)")
+        # rate-limit, timeout, too-early and auth answers are failures, never "no record": an
+        # absent status would pass them through unretried and cache them as a negative (5.9)
+        if any(code in (401, 403, 408, 425, 429) for code in absent):
+            raise ValueError(f"{provider} {op}: absent cannot take 401, 403, 408, 425 or 429")
         req = normalise_params(params)
         key = request_key(provider, op, {"url": url, **req})
         run, _ = self._data_scope()
