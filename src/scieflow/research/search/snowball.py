@@ -199,14 +199,18 @@ class _Node:
 
 
 def _source_status(name: str, state: dict) -> dict:
+    """The worst state any of the source's expansions reached: one answered expansion never hides
+    a refused, failed or missed one (M-C2 t6 review F1; plan 5.9 on replay holes)."""
     if state["off"]:
         status = "off"
-    elif state["ok"]:
-        status = "ok"
     elif "refused" in state["seen"]:
         status = "refused"
     elif "failed" in state["seen"]:
         status = "failed"
+    elif "offline-miss" in state["seen"]:
+        status = "offline-miss"
+    elif state["ok"]:
+        status = "ok"
     else:
         status = "offline-miss"
     return {"source": name, "status": status, "count": state["count"]}
@@ -234,6 +238,9 @@ def run_snowball(gw, seeds: list, *, direction: str = "forward", depth: int = 1,
         if not frontier:
             break
         next_frontier: list = []
+        # M-C2 t6 review F2: at most len(seeds) * limit nodes are expanded per source at each level,
+        # so the frontier (shared by the sources) is capped at that many nodes.
+        frontier_cap = len(seed_keys) * limit
         for name in chosen:
             rank = ORDER.index(name)
             if not gw.policy.allows(PROVIDER[name]):
@@ -250,6 +257,8 @@ def run_snowball(gw, seeds: list, *, direction: str = "forward", depth: int = 1,
                 retrieved += len(neighbours)
                 for rec in neighbours:
                     key = identity_key(rec)
+                    if key == node.key:
+                        continue               # a self-citation is a metadata defect (review F3)
                     citing, cited = (key, node.key) if direction == "forward" else (node.key, key)
                     edge = edges.setdefault((citing, cited), {"sources": set(), "depth": level})
                     edge["sources"].add(name)
@@ -259,10 +268,14 @@ def run_snowball(gw, seeds: list, *, direction: str = "forward", depth: int = 1,
                     reports.append((rank, rec))
                     if key in visited:
                         continue
-                    visited.add(key)           # before it can enter a frontier (cycles end)
                     doi = _doi_key(rec.DOI)
-                    if doi is not None:        # a node without a DOI is listed, not expanded
-                        next_frontier.append(_Node(key, doi))
+                    if doi is None:            # a node without a DOI is listed, not expanded
+                        visited.add(key)
+                        continue
+                    if len(next_frontier) >= frontier_cap:
+                        continue               # listed, but not expanded (the cap)
+                    visited.add(key)           # before it can enter a frontier (cycles end)
+                    next_frontier.append(_Node(key, doi))
         frontier = next_frontier
 
     reports.sort(key=operator.itemgetter(0))   # canonical source order, stable
@@ -277,6 +290,8 @@ def run_snowball(gw, seeds: list, *, direction: str = "forward", depth: int = 1,
     merged_edges: dict = {}
     for (citing, cited), info in edges.items():
         pair = (key_map.get(citing, citing), key_map.get(cited, cited))
+        if pair[0] == pair[1]:
+            continue                           # two keys merged into one node: still a self-edge
         current = merged_edges.setdefault(pair, {"sources": set(), "depth": info["depth"]})
         current["sources"] |= info["sources"]
         current["depth"] = min(current["depth"], info["depth"])
@@ -291,6 +306,7 @@ def run_snowball(gw, seeds: list, *, direction: str = "forward", depth: int = 1,
         "sources": statuses,
         "nodes": nodes,
         "edges": edge_rows,
+        "dedup": [decision.to_json_dict() for decision in result.decisions],
         "counts": {"retrieved": retrieved, "nodes": len(nodes), "edges": len(edge_rows)},
     }
 
@@ -329,7 +345,8 @@ def main(argv=None) -> None:
                     help="forward: papers that cite the seeds; backward: papers they cite.")
     ap.add_argument("--depth", type=int, default=1, help="Hops: 1 (default) or 2.")
     ap.add_argument("--limit", type=int, default=DEFAULT_LIMIT,
-                    help="Neighbours asked of each source per expanded node (1-100, default 25).")
+                    help="Neighbours asked of each source per expanded node (1-100, default 25). "
+                         "Per source, at most seeds x LIMIT nodes are expanded at depth 2.")
     ap.add_argument("--sources", default=None, metavar="LIST",
                     help="Comma-separated sources, any order (openalex, semantic-scholar, "
                          "opencitations). Default: all three; semantic-scholar reports off "

@@ -365,3 +365,152 @@ def test_the_limit_bounds_the_neighbours_even_when_a_source_answers_more(cli_pro
                               "--sources", "semantic-scholar", "--limit", "2"])
     assert code == 0
     assert payload_of(out)["counts"]["retrieved"] == 2
+
+
+# --- M-C2 t6 review r1 (findings 1-5) ---------------------------------------------------------
+
+
+@responses.activate
+def test_a_failed_level_two_expansion_is_not_hidden_behind_ok(cli_project, cli_run, fast_send):
+    """F1: one answered expansion must not make the source `ok` when a later expansion failed."""
+    def answer(request):
+        if request.url.split("?")[0].endswith("/citations/" + A):
+            return 429, {}, "{}"                 # the level-2 expansion of A is rate-limited
+        return opencitations_answer(request)
+
+    responses.add_callback(responses.GET, OPENCITATIONS_RE, callback=answer)
+    code, out = run(cli_run, ["--seed", SEED1, "--depth", "2", "--direction", "forward",
+                              "--sources", "opencitations"])
+    payload = payload_of(out)
+    assert statuses(payload) == [("opencitations", "failed")]
+    assert payload["sources"][0]["count"] == 3, "what the source did answer stays visible"
+    assert code == 1
+
+
+@responses.activate
+def test_replay_with_a_recorded_and_a_missing_expansion_is_offline_miss(cli_project, cli_run,
+                                                                        fast_send):
+    """F1: a hole in the recordings is never reported as an answered source (plan 5.9)."""
+    serve()
+    argv = ["--seed", SEED1, "--direction", "forward", "--sources", "opencitations",
+            "--workspace", "demo"]
+    assert run(cli_run, argv + ["--depth", "1", "--network", "record"])[0] == 0
+    responses.calls.reset()
+    code, out = run(cli_run, argv + ["--depth", "2", "--network", "replay"])
+    assert statuses(payload_of(out)) == [("opencitations", "offline-miss")]
+    assert code == 6
+    assert len(responses.calls) == 0
+
+
+def test_the_level_two_frontier_is_capped_at_seeds_times_limit(monkeypatch):
+    """F2: per source, at most len(seeds) * limit nodes are expanded at level 2. The fake answers
+    three neighbours whatever the limit, so the cap is the only thing bounding the frontier."""
+    from types import SimpleNamespace
+
+    from scieflow.research.lib import records
+
+    expanded: list = []
+
+    def fake(gw, doi, direction, limit):
+        expanded.append(doi)
+        return [records.opencitations_record(f"10.5555/g{len(expanded)}-{i}") for i in range(3)]
+
+    monkeypatch.setitem(snowball.FETCH, "opencitations", fake)
+    gw = SimpleNamespace(policy=SimpleNamespace(allows=lambda name: True))
+    snowball.run_snowball(gw, [SEED1], direction="forward", depth=2, limit=2,
+                          sources=["opencitations"])
+    assert len(expanded) == 1 + 2, "the seed, then at most seeds x limit = 2 level-two nodes"
+
+
+@responses.activate
+def test_forward_depth_two_sends_exactly_nine_requests(cli_project, cli_run, fast_send):
+    """F5a: the request count is exact (2 OpenAlex + 1 OpenCitations for the seed; 3 + 3 for A and
+    B). An extra request at the Gateway level fails this test."""
+    serve()
+    code, _out = run(cli_run, ["--seed", SEED1, "--depth", "2", "--direction", "forward",
+                               "--sources", "openalex,opencitations"])
+    assert code == 0
+    assert len(responses.calls) == 9
+
+
+@pytest.mark.parametrize("direction", ["forward", "backward"])
+@pytest.mark.parametrize("depth", ["1", "2"])
+@pytest.mark.parametrize("seed", [A, B, C])
+@responses.activate
+def test_the_three_cycle_terminates_from_every_member(cli_project, cli_run, fast_send,
+                                                      expansions, seed, depth, direction):
+    """F5b: A->B->C->A (and the mutual A<->B pair) end from any member, either direction, depth 1
+    and 2; each node is expanded at most once per source; the seed is never a node."""
+    serve()
+    code, out = run(cli_run, ["--seed", seed, "--depth", depth, "--direction", direction,
+                              "--sources", "openalex,opencitations"])
+    assert code == 0
+    payload = payload_of(out)
+    assert seed not in [n["doi"] for n in payload["nodes"]]
+    for source in ("openalex", "opencitations"):
+        expanded = Counter(doi for name, doi, _direction in expansions if name == source)
+        assert expanded and max(expanded.values()) == 1, source
+
+
+@responses.activate
+def test_a_self_citation_edge_is_not_emitted(cli_project, cli_run, fast_send):
+    """F3: a neighbour that is the node it was found under is a metadata defect, not an edge.
+    The answer adds self-citations for the seed (level 1) and for A (level 2)."""
+    def answer(request):
+        status, headers, body = opencitations_answer(request)
+        path = request.url.split("?")[0]
+        for node in (SEED1, A):
+            if path.endswith("/citations/" + node):
+                body = json.dumps(json.loads(body) + [{"citing": node, "cited": node}])
+        return status, headers, body
+
+    responses.add_callback(responses.GET, OPENCITATIONS_RE, callback=answer)
+    code, out = run(cli_run, ["--seed", SEED1, "--depth", "2", "--direction", "forward",
+                              "--sources", "opencitations"])
+    assert code == 0
+    edges = payload_of(out)["edges"]
+    assert edges, "the real citations are still there"
+    assert all(e["citing"] != e["cited"] for e in edges)
+
+
+def test_an_edge_whose_ends_merge_into_one_node_is_dropped(monkeypatch):
+    """F3 (after canonicalisation): two keys that dedupe merges into one node must not leave a
+    self-edge. Dedupe is replaced so the merge is certain: doi:x is mapped onto doi:a."""
+    from types import SimpleNamespace
+
+    from scieflow._vendor.researcher_core.dedupe import DedupeResult, identity_key
+    from scieflow.research.lib import records
+
+    x_rec, a_rec = records.opencitations_record("10.5555/x"), records.opencitations_record(A)
+
+    def fake_fetch(gw, doi, direction, limit):
+        if doi == SEED1:
+            return [x_rec]
+        if doi == "10.5555/x":
+            return [a_rec]
+        return []
+
+    def fake_dedupe(recs):
+        return DedupeResult(records=[], decisions=[],
+                            key_map={identity_key(x_rec): identity_key(a_rec)})
+
+    monkeypatch.setitem(snowball.FETCH, "opencitations", fake_fetch)
+    monkeypatch.setattr(snowball, "dedupe", fake_dedupe)
+    gw = SimpleNamespace(policy=SimpleNamespace(allows=lambda name: True))
+    payload = snowball.run_snowball(gw, [SEED1], direction="forward", depth=2, limit=5,
+                                    sources=["opencitations"])
+    assert all(e["citing"] != e["cited"] for e in payload["edges"]), payload["edges"]
+
+
+@responses.activate
+def test_the_node_dedupe_decisions_are_in_the_output(cli_project, cli_run, fast_send):
+    """F4: the vendored dedupe decisions are part of the output (plan t6 item 3)."""
+    serve()
+    code, out = run(cli_run, ["--seed", SEED1, "--depth", "1", "--direction", "forward",
+                              "--sources", "openalex,opencitations"])
+    assert code == 0
+    decisions = payload_of(out)["dedup"]
+    merged = [d for d in decisions if f"doi:{A}" in (d["kept_key"], d["duplicate_key"])]
+    assert merged, decisions
+    assert set(merged[0]["kept_sources"]) | set(merged[0]["duplicate_sources"]) == {
+        "openalex", "opencitations"}
