@@ -12,8 +12,10 @@ file, is authoritative: its `refusal` list holds the references the check refuse
 - A gate core did not open, or one of an older check, is refused by `on_answer`; agents never
   answer (`requires_human`, enforced in core/gates.py).
 
-Messages, events and gates carry keys, DOIs and verdicts only: never a title, a query, a body or
-an e-mail address.
+Messages, events, gates and blocker entries carry a reference's key only as its safe token
+(`_token`: the bib key when it is letters, digits and `_.:/+-`, else `k-<16 hex>`), plus its DOI and
+verdict: never a raw key with spaces, line breaks or an e-mail address, a title, a query or a body.
+`identity.json` keeps the raw report (plan 5.4).
 """
 
 from __future__ import annotations
@@ -67,7 +69,7 @@ def _refusals(doc: dict) -> list[dict]:
         verdict = entry.get("verdict")
         if verdict not in REFUSAL_VERDICTS:
             continue
-        item = {"key": str(entry.get("key") or ""), "verdict": verdict}
+        item = {"key": _token(entry.get("key") or ""), "verdict": verdict}
         doi = (entry.get("reference") or {}).get("doi")
         if doi:
             item["doi"] = str(doi)
@@ -114,7 +116,7 @@ def _items(data: dict) -> list[dict]:
         if not (isinstance(r, dict) and isinstance(r.get("key"), str)
                 and r.get("verdict") in REFUSAL_VERDICTS):
             continue
-        item = {"key": r["key"], "verdict": r["verdict"]}
+        item = {"key": _token(r["key"]), "verdict": r["verdict"]}
         if isinstance(r.get("doi"), str) and r["doi"]:
             item["doi"] = r["doi"]
         out.append(item)
@@ -124,6 +126,8 @@ def _items(data: dict) -> list[dict]:
 def _checks(ws: Path) -> list[dict]:
     out = []
     for e in _events_of(ws, CHECKED):
+        if e.get("actor") != "system":          # plan 5.5: only core writes a check
+            continue
         data = e["data"]
         sha = data.get("report_sha256")
         if _is_int(data.get("round")) and isinstance(sha, str) and len(sha) >= 12:
@@ -152,7 +156,8 @@ def _overruled(ws: Path, n: int) -> set[tuple[str, str]]:
         data = e["data"]
         if e.get("actor") != "human" or not _is_int(data.get("round")) or data["round"] > n:
             continue
-        out.add(_ident(str(data.get("verdict") or ""), data.get("doi"), str(data.get("key") or "")))
+        out.add(_ident(str(data.get("verdict") or ""), data.get("doi"),
+                       _token(data.get("key") or "")))
     return out
 
 
@@ -167,8 +172,9 @@ def parse(gate: dict) -> dict | None:
 
 
 def _question(n: int, check: str, item: dict) -> str:
-    what = f"{item['key']} ({item['doi']})" if item.get("doi") else f"{item['key']} (no DOI)"
-    return (f"[identity round {n} · ref {_token(item['key'])} · check {check}] {what} blocks "
+    token = _token(item["key"])
+    what = f"{token} ({item['doi']})" if item.get("doi") else f"{token} (no DOI)"
+    return (f"[identity round {n} · ref {token} · check {check}] {what} blocks "
             f"merge: verify-bib says {item['verdict']}. Answer '{OVERRULE}' with your reason in "
             f"the note to accept the risk, or '{FIXED}' once the reference is corrected (it stops "
             "blocking when a later check no longer flags it).")

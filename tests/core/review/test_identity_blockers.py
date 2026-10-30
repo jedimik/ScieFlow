@@ -22,7 +22,7 @@ from click.testing import CliRunner
 
 from scieflow.core import events, gates
 from scieflow.core.project import Project
-from scieflow.core.review import service
+from scieflow.core.review import identity_gates, service
 from scieflow.core.review.cli import review
 from scieflow.research import verify_bib
 from scieflow.research.lib import providers
@@ -456,6 +456,66 @@ def test_malformed_event_lines_do_not_break_the_identity_readers(proj, capsys, g
     before = [(b["reason"], b["gate"] is not None) for b in service.blockers(project, "demo")]
     with (ws / "events.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(line + "\n")
+    after = [(b["reason"], b["gate"] is not None) for b in service.blockers(project, "demo")]
+    assert before == after and len(after) == 2
+    assert merge().exit_code == 1
+
+
+# --- M-C2 t5 review r1 findings F1 (raw keys) and F2 (check actor) -------------------------------
+
+RAW_KEY = "Dr Jane Doe, patient file\nmail jane.doe@example.org"
+RAW_DOI = "10.5555/identity-test-raw"
+LEAKS = ("Jane Doe", "patient file", "jane.doe@example.org")
+
+
+def raw_key_doc() -> dict:
+    return {"version": 1, "bib": "manuscript/references.bib", "bib_sha256": "0" * 64, "sources": [],
+            "report": {"entries": [{"key": RAW_KEY, "verdict": "mismatch",
+                                    "reference": {"doi": RAW_DOI}}]}}
+
+
+def test_a_raw_bib_key_reaches_no_event_gate_blocker_or_merge_check_line(proj, capsys, gold_http):
+    project, ws = proj
+    identity_gates.record(project, ws, 1, raw_key_doc())
+    token = identity_gates._token(RAW_KEY)
+    assert token.startswith("k-") and RAW_KEY not in token
+    gate = identity_open(ws)
+    assert len(gate) == 1 and token in gate[0]["question"]
+    blockers = service.blockers(project, "demo")
+    assert [b["references"][0]["key"] for b in blockers] == [token]
+    assert merge().exit_code == 1
+    for text in ((ws / "events.jsonl").read_text(encoding="utf-8"), json.dumps(gate),
+                 json.dumps(blockers), merge().output):
+        for leak in LEAKS:
+            assert leak not in text
+
+
+def test_an_overrule_of_a_raw_key_matches_across_its_token(proj, capsys, gold_http):
+    project, ws = proj
+    identity_gates.record(project, ws, 1, raw_key_doc())
+    token = identity_gates._token(RAW_KEY)
+    gates.answer(project, ws, identity_open(ws)[0]["id"], "overrule", "human", "",
+                 note="checked by hand")
+    assert service.blockers(project, "demo") == []
+    evs = overrules(ws)
+    assert len(evs) == 1 and evs[0]["data"]["key"] == token
+    text = (ws / "events.jsonl").read_text(encoding="utf-8")
+    for leak in LEAKS:
+        assert leak not in text
+
+
+@pytest.mark.parametrize("actor", ["agent", "human"])
+def test_a_check_event_not_written_by_the_system_clears_no_blocker(proj, capsys, gold_http, actor):
+    project, ws = proj
+    write_bib(ws, MIS[1] + "\n\n" + UNR[1] + "\n")
+    vb(capsys, "demo", "--round", "1", "--json")
+    before = [(b["reason"], b["gate"] is not None) for b in service.blockers(project, "demo")]
+    real = checks(ws)[-1]
+    forged = {"id": "forged-check", "ts": real.get("ts"), "run": real.get("run"), "slug": "demo",
+              "type": "review.identity_checked", "actor": actor,
+              "data": {**real["data"], "refusal": []}}
+    with (ws / "events.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(forged) + "\n")
     after = [(b["reason"], b["gate"] is not None) for b in service.blockers(project, "demo")]
     assert before == after and len(after) == 2
     assert merge().exit_code == 1
