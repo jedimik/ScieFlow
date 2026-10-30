@@ -24,4 +24,7 @@ kinds:
   data-release:        {requires_human: true,  help: "Release a checked aggregate from a run"}
   # Study design (docs/experiments/design.md, M-D1 5.5): a locked design and its amendments are human-only.
   design-lock:         {requires_human: true,  help: "Lock or amend a run's study design and analysis plan"}
+  # Journal guidelines (M-F 5.4): the human chooses which author-guideline pages a run may fetch;
+  # only that answer lets the Gateway reach their hosts.
+  journal-sources:     {requires_human: true,  help: "Fetch these author-guideline pages for a journal run"}
 states: [open, answered, withdrawn]

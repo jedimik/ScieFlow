@@ -44,6 +44,9 @@ providers:
     hosts: [api.crossref.org]
     rate_per_s: 5
 
+  # journal-guidelines:          # `scieflow journal research`: author-guideline pages of one journal (M-F)
+  #   enabled: true              # off by default; no `hosts:` key: each run's hosts come from its journal-sources gate
+
 cache_ttl_days:
   metadata: 30                    # entity lookups, whole-literature counts
   search: 7                       # relations, trial searches, topic counts
