@@ -39,7 +39,8 @@ from scieflow.integrations.scite.policy import Policy, PolicyError
 # own name as the source; only uncached `mcp` rows count against the budgets.
 PROVIDER_SOURCES = ("pubtator", "ctgov", "openalex", "europepmc",
                     "search-openalex", "search-arxiv", "search-europepmc", "search-crossref",
-                    "journal-guidelines")
+                    "journal-guidelines", "search-pubmed", "search-semantic-scholar",
+                    "search-datacite", "opencitations", "unpaywall")
 SOURCES = ("mcp", "rest", *PROVIDER_SOURCES)
 LOW_FRACTION = 0.10
 # An MCP call holds the budget lock from check to record, so concurrent runs

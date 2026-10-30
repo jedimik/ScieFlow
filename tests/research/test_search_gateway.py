@@ -189,7 +189,7 @@ def test_spaced_digit_run_is_refused_before_any_request(project, capsys):
 def test_absent_config_keeps_search_on_and_discovery_off(project):
     root, ws, home = project
     pol = providers.load(root)
-    assert set(pol.enabled_providers()) == set(PROVIDER.values())
+    assert set(pol.enabled_providers()) == set(PROVIDER.values()) | {"search-datacite", "opencitations"}
     for name in ("pubtator", "ctgov", "openalex", "europepmc"):
         assert not pol.allows(name)
         assert "config/integrations.yml" in pol.reason(name)
