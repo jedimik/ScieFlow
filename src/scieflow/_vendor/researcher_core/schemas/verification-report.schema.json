@@ -1,0 +1,408 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sokolmarek.github.io/researcher/schemas/verification-report.schema.json",
+  "title": "VerificationReport",
+  "description": "Output of `verify-bib` and `verify-ref`: the axis (a) reference-identity report (D9, D16). Each entry carries the reference-level verdict (verified, mismatch, unresolvable, inconclusive) AND the full set of per-source outcomes (confirmed, negative, source_error) that produced it. The per-source outcomes are mandatory, never summarized away: the clean-negative versus source_error distinction is what stops a downed index from being read as evidence of fabrication, and it is the only way a reader can audit why a verdict came out as it did. Only 'unresolvable' and 'mismatch' are refusal-grade; 'inconclusive' is NEVER refusal-grade. Each entry also reports the axis (b) publication status and the axis (d) accessibility of the same reference, because a reference can be perfectly verified on axis (a) and still be retracted on axis (b).",
+  "type": "object",
+  "required": ["schema_version", "protocol_version", "versions", "input", "thresholds", "entries", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "$ref": "#/$defs/versionString" },
+    "protocol_version": {
+      "description": "Version of the D9 decision rules in force for this report. Pinned so a replayed run is judged by the same rules that produced the original verdicts.",
+      "$ref": "#/$defs/versionString"
+    },
+    "versions": { "$ref": "#/$defs/versions" },
+    "run_id": {
+      "description": "Provenance run this report belongs to, joining it to provenance-event.schema.json events.",
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "description": "Caller-supplied RFC 3339 timestamp. Omitted in replay-determinism comparisons.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "input": {
+      "description": "What was verified.",
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["bib", "reference"]
+        },
+        "path": {
+          "description": "Path of the .bib file when kind is 'bib'.",
+          "type": "string"
+        },
+        "reference": {
+          "description": "The DOI or title string when kind is 'reference'.",
+          "type": "string"
+        }
+      }
+    },
+    "thresholds": { "$ref": "#/$defs/thresholds" },
+    "sources_queried": {
+      "description": "Connectors this run was configured to query, in query order.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/sourceName" }
+    },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    },
+    "summary": { "$ref": "#/$defs/summary" }
+  },
+  "$defs": {
+    "entry": {
+      "description": "One reference: its axis (a) verdict with every per-source outcome retained, plus the axis (b) status and axis (d) accessibility of the same reference.",
+      "type": "object",
+      "required": ["key", "reference", "verdict", "refusal_grade", "reason", "source_outcomes", "tally", "status", "accessibility"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "BibTeX citation key, or a stable index key for a single-reference run.",
+          "type": "string",
+          "minLength": 1
+        },
+        "reference": { "$ref": "#/$defs/referenceClaim" },
+        "verdict": { "$ref": "#/$defs/identityVerdict" },
+        "refusal_grade": {
+          "description": "True only for 'unresolvable' and 'mismatch'. Refusal-grade consumers (citation audit, compile gate, commit hook) may act ONLY when this is true. 'inconclusive' is never refusal-grade, and neither is 'verified'.",
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Human-readable justification naming the D9 precedence rule that fired.",
+          "type": "string",
+          "minLength": 1
+        },
+        "source_outcomes": {
+          "description": "One outcome per queried source. Mandatory and never elided: this is the audit trail behind the verdict, and the confirmed / negative / source_error split is what keeps a downed index from being read as fabrication evidence.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/sourceOutcome" }
+        },
+        "tally": {
+          "description": "Counts of the per-source outcomes, the direct inputs to the D9 precedence.",
+          "type": "object",
+          "required": ["confirmed", "negative", "source_error"],
+          "additionalProperties": false,
+          "properties": {
+            "confirmed": { "type": "integer", "minimum": 0 },
+            "negative": { "type": "integer", "minimum": 0 },
+            "source_error": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "best_match": {
+          "description": "The best-matching record found across sources, in CSL-JSON per record.schema.json, or null when nothing resolved. Validated in full against record.schema.json; kept open here so the two schemas cannot drift out of sync.",
+          "type": ["object", "null"]
+        },
+        "disagreements": {
+          "description": "Sources that resolved the reference but disagreed beyond thresholds while the verdict was still 'verified' on a two-confirmation majority. D9 requires that a lone bad index is logged, never allowed to force a refusal-grade verdict.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/sourceName" }
+        },
+        "status": {
+          "description": "Axis (b) publication status of this reference, reported independently of axis (a).",
+          "$ref": "#/$defs/statusBlock"
+        },
+        "accessibility": {
+          "description": "Axis (d) accessibility of this reference: what evidence depth was even possible.",
+          "$ref": "#/$defs/accessibilityBlock"
+        }
+      }
+    },
+    "referenceClaim": {
+      "description": "The reference AS CLAIMED by the bib entry or the user, before any source resolution. Kept verbatim so a mismatch can be shown as claimed versus found.",
+      "type": "object",
+      "required": ["title"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": ["string", "null"] },
+        "doi": { "type": ["string", "null"] },
+        "arxiv_id": { "type": ["string", "null"] },
+        "year": { "type": ["integer", "null"] },
+        "authors": {
+          "description": "Author surnames as claimed, in order.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "container_title": { "type": ["string", "null"] },
+        "entry_type": {
+          "description": "BibTeX entry type as written, for example 'article' or 'inproceedings'.",
+          "type": ["string", "null"]
+        },
+        "raw": {
+          "description": "The raw .bib entry text, when the input was a bib file.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "sourceOutcome": {
+      "description": "What one queried source returned. 'confirmed': the source resolved the reference and the metadata matched within thresholds. 'negative': the query succeeded and returned no match (a clean negative). 'source_error': timeout, rate limit, 5xx, or network failure, so no clean answer was obtained and a clean negative CANNOT be asserted.",
+      "type": "object",
+      "required": ["source", "outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "source": { "$ref": "#/$defs/sourceName" },
+        "outcome": { "$ref": "#/$defs/sourceOutcomeVerdict" },
+        "matched_id": {
+          "description": "Identifier of the record the source resolved to, when it resolved anything.",
+          "type": ["string", "null"]
+        },
+        "matched_record": {
+          "description": "The record the source resolved to, in CSL-JSON per record.schema.json, or null.",
+          "type": ["object", "null"]
+        },
+        "title_similarity": {
+          "description": "rapidfuzz normalized-title similarity between the claimed and the resolved title, 0.0 to 1.0.",
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "year_delta": {
+          "description": "Resolved year minus claimed year. Null when either year is unknown.",
+          "type": ["integer", "null"]
+        },
+        "surname_overlap": {
+          "description": "Whether the first-author surname overlaps between claimed and resolved.",
+          "type": ["boolean", "null"]
+        },
+        "resolved": {
+          "description": "True when the source returned a candidate record at all, independent of whether that candidate matched within thresholds. A source that resolves the identifier but disagrees beyond thresholds is outcome 'negative' with resolved true and mismatch_reasons populated; that combination is what the D9 precedence reads as evidence for 'mismatch' rather than for 'unresolvable'. A source that cleanly found nothing is outcome 'negative' with resolved false.",
+          "type": "boolean"
+        },
+        "mismatch_reasons": {
+          "description": "Which threshold checks failed for a resolving but disagreeing source.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["title_similarity", "year", "first_author_surname", "doi_mismatch", "type_mismatch"]
+          }
+        },
+        "error": {
+          "description": "Required when outcome is 'source_error', forbidden otherwise. The presence of a typed error is what marks the answer as dirty rather than clean.",
+          "$ref": "#/$defs/sourceError"
+        },
+        "response_hash": {
+          "description": "Hash of the snapshot that backs this outcome, tying it to snapshot.schema.json.",
+          "$ref": "#/$defs/contentHash"
+        },
+        "queried_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "outcome": { "const": "source_error" } },
+            "required": ["outcome"]
+          },
+          "then": { "required": ["error"] },
+          "else": { "not": { "required": ["error"] } }
+        }
+      ]
+    },
+    "sourceError": {
+      "type": "object",
+      "required": ["type", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["timeout", "rate_limit", "http_error", "network", "parse_error", "snapshot_missing", "auth_error"]
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "http_status": { "type": ["integer", "null"], "minimum": 100, "maximum": 599 }
+      }
+    },
+    "statusBlock": {
+      "description": "Axis (b) fields carried per entry. The full axis (b) report shape lives in status-report.schema.json; this is the per-entry projection of it.",
+      "type": "object",
+      "required": ["verdict"],
+      "additionalProperties": false,
+      "properties": {
+        "verdict": { "$ref": "#/$defs/statusVerdict" },
+        "checked": {
+          "description": "False when no status source could be consulted, in which case verdict defaults to 'current' only if a source cleanly reported no notices; a status that could not be checked is reported with checked false and MUST NOT be presented as a clean 'current'.",
+          "type": "boolean"
+        },
+        "notices": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/statusNotice" }
+        },
+        "sources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sourceName" }
+        }
+      }
+    },
+    "statusNotice": {
+      "type": "object",
+      "required": ["type", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "$ref": "#/$defs/noticeType" },
+        "doi": {
+          "description": "DOI of the notice itself (the retraction notice or correction), not of the retracted work.",
+          "type": ["string", "null"]
+        },
+        "label": { "type": ["string", "null"] },
+        "date": { "type": ["string", "null"] },
+        "source": { "$ref": "#/$defs/sourceName" }
+      }
+    },
+    "accessibilityBlock": {
+      "description": "Axis (d) fields carried per entry, derived from the OA cascade (Unpaywall, then arXiv, then PMC).",
+      "type": "object",
+      "required": ["verdict"],
+      "additionalProperties": false,
+      "properties": {
+        "verdict": { "$ref": "#/$defs/accessibilityVerdict" },
+        "oa_url": { "type": ["string", "null"] },
+        "content_type": {
+          "type": ["string", "null"],
+          "enum": ["pdf", "html", "xml", null]
+        },
+        "cascade": {
+          "description": "Which OA locations were tried, in order, and what each returned.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source", "hit"],
+            "additionalProperties": false,
+            "properties": {
+              "source": { "$ref": "#/$defs/sourceName" },
+              "hit": { "type": "boolean" },
+              "url": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "description": "Counts derived from entries. Every axis (a) verdict and every per-source outcome is tallied, so a reader sees at a glance how much of the report rests on dirty evidence.",
+      "type": "object",
+      "required": ["total", "identity", "source_outcomes", "status", "accessibility", "refusal_grade"],
+      "additionalProperties": false,
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "identity": {
+          "type": "object",
+          "required": ["verified", "mismatch", "unresolvable", "inconclusive"],
+          "additionalProperties": false,
+          "properties": {
+            "verified": { "type": "integer", "minimum": 0 },
+            "mismatch": { "type": "integer", "minimum": 0 },
+            "unresolvable": { "type": "integer", "minimum": 0 },
+            "inconclusive": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "source_outcomes": {
+          "type": "object",
+          "required": ["confirmed", "negative", "source_error"],
+          "additionalProperties": false,
+          "properties": {
+            "confirmed": { "type": "integer", "minimum": 0 },
+            "negative": { "type": "integer", "minimum": 0 },
+            "source_error": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "status": {
+          "type": "object",
+          "required": ["current", "corrected", "retracted", "expression-of-concern"],
+          "additionalProperties": false,
+          "properties": {
+            "current": { "type": "integer", "minimum": 0 },
+            "corrected": { "type": "integer", "minimum": 0 },
+            "retracted": { "type": "integer", "minimum": 0 },
+            "expression-of-concern": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "accessibility": {
+          "type": "object",
+          "required": ["full-text", "abstract-only", "unavailable"],
+          "additionalProperties": false,
+          "properties": {
+            "full-text": { "type": "integer", "minimum": 0 },
+            "abstract-only": { "type": "integer", "minimum": 0 },
+            "unavailable": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "refusal_grade": {
+          "description": "Number of entries a refusal-grade consumer may act on: the sum of 'unresolvable' and 'mismatch'.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "thresholds": {
+      "description": "The calibrated D9 thresholds actually used for this run (see core/CALIBRATION.md). Emitted in the report so a verdict can never be read without the rule that produced it.",
+      "type": "object",
+      "required": ["title_similarity", "year_tolerance", "require_first_author_surname", "min_confirmations"],
+      "additionalProperties": false,
+      "properties": {
+        "title_similarity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "year_tolerance": { "type": "integer", "minimum": 0 },
+        "require_first_author_surname": { "type": "boolean" },
+        "min_confirmations": {
+          "description": "Confirmations required for 'verified'. D9 sets this to 2.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "identityVerdict": {
+      "description": "Axis (a) reference-identity verdict, exactly four states per D9. 'verified': at least min_confirmations sources confirmed. 'mismatch': a source resolves the identifier but the metadata disagrees beyond thresholds. 'unresolvable': ALL queried sources returned a clean negative and none confirmed; the only refusal-grade 'likely fabricated' state. 'inconclusive': evidence too thin or too dirty to decide (exactly one confirmation, or any source_error); NEVER refusal-grade.",
+      "type": "string",
+      "enum": ["verified", "mismatch", "unresolvable", "inconclusive"]
+    },
+    "sourceOutcomeVerdict": {
+      "description": "Per-source outcome, exactly three states. A source_error must never be counted as a negative.",
+      "type": "string",
+      "enum": ["confirmed", "negative", "source_error"]
+    },
+    "statusVerdict": {
+      "description": "Axis (b) publication-status verdict, exactly four states.",
+      "type": "string",
+      "enum": ["current", "corrected", "retracted", "expression-of-concern"]
+    },
+    "noticeType": {
+      "type": "string",
+      "enum": ["retraction", "correction", "erratum", "expression-of-concern", "withdrawal", "addendum", "removal"]
+    },
+    "accessibilityVerdict": {
+      "description": "Axis (d) accessibility verdict, exactly three states.",
+      "type": "string",
+      "enum": ["full-text", "abstract-only", "unavailable"]
+    },
+    "sourceName": {
+      "description": "Connector name. Known values: openalex, crossref, datacite, semantic_scholar, arxiv, pubmed, unpaywall, opencitations.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "contentHash": {
+      "description": "SHA-256 content hash, hex encoded, optionally prefixed with 'sha256:'.",
+      "type": "string",
+      "pattern": "^(sha256:)?[0-9a-f]{64}$"
+    },
+    "versionString": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?([-+.][0-9A-Za-z.-]+)?$"
+    },
+    "versions": {
+      "description": "Component versions that determine the output, per D15. Identical snapshot plus identical configuration plus identical versions must yield byte-identical JSON.",
+      "type": "object",
+      "required": ["core", "parser"],
+      "additionalProperties": false,
+      "properties": {
+        "core": { "$ref": "#/$defs/versionString" },
+        "parser": { "$ref": "#/$defs/versionString" },
+        "model": { "type": "string" }
+      }
+    }
+  }
+}

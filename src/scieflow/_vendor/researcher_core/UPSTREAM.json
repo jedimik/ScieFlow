@@ -81,6 +81,80 @@
       "upstream_sha256": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
       "sha256": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
       "patches": []
+    },
+    "verify.py": {
+      "upstream": "core/researcher_core/verify.py",
+      "upstream_sha256": "86d61475192b15b75fad0e7a48ca61fe15559f7d28b4aa534bffcc8a000fce15",
+      "sha256": "826ffcd2bb7b8b5b4660316e52ce744e9b11c2a3f832b7cd34ee05ab5f6aa455",
+      "patches": [
+        {
+          "old": "from rapidfuzz import fuzz",
+          "new": "from ._fuzz import fuzz"
+        },
+        {
+          "old": "from . import PARSER_VERSION, __version__",
+          "new": "from ._deps import PARSER_VERSION, __version__"
+        },
+        {
+          "old": "from .connectors import BaseConnector, SourceError, create_connector",
+          "new": "from ._deps import BaseConnector, SourceError, create_connector"
+        },
+        {
+          "old": "from .snapshots import SnapshotSession",
+          "new": "from ._deps import SnapshotSession"
+        },
+        {
+          "old": "from .status import StatusEntry, check_status_async",
+          "new": "from ._deps import StatusEntry, check_status_async"
+        }
+      ]
+    },
+    "monitor.py": {
+      "upstream": "core/researcher_core/monitor.py",
+      "upstream_sha256": "a71880ef3865e55851d31640d533054137d0ebdeb0bfcdaf1722bb9b56e42239",
+      "sha256": "6bf72d14020a7b161dc6509dd8caafc27636a6a98b07e7e0fce4a3b54deff9e8",
+      "patches": [
+        {
+          "old": "from .provenance import ProvenanceEvent, RunContext, normalize_ts",
+          "new": "from ._deps import ProvenanceEvent, RunContext, normalize_ts"
+        }
+      ]
+    },
+    "bib.py": {
+      "upstream": "core/researcher_core/bib.py",
+      "upstream_sha256": "3765fc93aa3df3ff144f8636f291971718fa755596b0afdacf82e9883114cb49",
+      "sha256": "3765fc93aa3df3ff144f8636f291971718fa755596b0afdacf82e9883114cb49",
+      "patches": []
+    },
+    "schemas/verification-report.schema.json": {
+      "upstream": "core/schemas/verification-report.schema.json",
+      "upstream_sha256": "d2ed7d87fface8e1e61114de20c2f9237d7f39d8814ab467f713b953c654dd2d",
+      "sha256": "d2ed7d87fface8e1e61114de20c2f9237d7f39d8814ab467f713b953c654dd2d",
+      "patches": []
+    },
+    "errors.py": {
+      "upstream": "core/researcher_core/connectors/base.py",
+      "upstream_sha256": "505374780dc07bf538fecd95243d7804dbf6e72893cd0bba59fce743301505e8",
+      "lines": [
+        206,
+        271
+      ],
+      "excerpt_sha256": "9086484bfea71e73f7fa1868a9aaf745026e7a29aaf3f5683391c61a20fc21fa",
+      "header": "\"\"\"Connector error types: a verbatim excerpt of researcher v1.0.0 connectors/base.py,\nlines 206-271 (MIT; see VENDORED.md). Nothing else from base.py is vendored here.\"\"\"\n\nfrom __future__ import annotations\n\nfrom enum import Enum\nfrom typing import Any\n\n\n",
+      "sha256": "652683a186c36a4eb194df8bef9a04ab2560239b8724ee46d906abbd32b2b7f3",
+      "patches": []
+    },
+    "provenance_ts.py": {
+      "upstream": "core/researcher_core/provenance.py",
+      "upstream_sha256": "6c77c217333fc4eea106ae5c8edcabec975503fb214942b109539ef20c3d2002",
+      "lines": [
+        118,
+        224
+      ],
+      "excerpt_sha256": "2da36f1267df1d782b7ac3626e677335c8f96caca72726f22386aa57e95e6a5f",
+      "header": "\"\"\"Provenance normalisers: a verbatim excerpt of researcher v1.0.0 provenance.py,\nlines 118-224 (MIT; see VENDORED.md). The ledger itself is not vendored.\"\"\"\n\nfrom __future__ import annotations\n\nimport re\nfrom datetime import datetime\nfrom typing import Any\n\n\n",
+      "sha256": "03fbd217c77ed83047d2f12247c1ceab2869db62ce7d024e2bd834a099174de5",
+      "patches": []
     }
   }
 }

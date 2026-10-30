@@ -1,7 +1,9 @@
-"""Exact stand-in for rapidfuzz's fuzz.token_sort_ratio (M-C1-D2). ScieFlow-authored, not vendored.
+"""Exact stand-ins for rapidfuzz's fuzz.token_sort_ratio (M-C1-D2) and fuzz.ratio (M-C2-D1).
+ScieFlow-authored, not vendored.
 
-rapidfuzz is not a ScieFlow dependency, so the one vendored line that imports it (dedupe.py) is
-patched to import this shim. The score is rapidfuzz's: whitespace tokens are sorted and joined
+rapidfuzz is not a ScieFlow dependency, so the vendored lines that import it (dedupe.py, verify.py)
+are patched to import this shim. ``ratio`` is the same Indel similarity without the token sort.
+The score is rapidfuzz's: whitespace tokens are sorted and joined
 with one space; the longest common subsequence comes from the bit-parallel algorithm (Hyyro);
 the score is (1 - indel distance / total length) * 100, and 100.0 for two empty strings. The
 shim is checked against 300 cases recorded from rapidfuzz 3.14.6 (tests/vendor/test_fuzz_parity.py).
@@ -39,4 +41,12 @@ def token_sort_ratio(s1: str, s2: str) -> float:
     return (1.0 - distance / total) * 100.0
 
 
-fuzz = SimpleNamespace(token_sort_ratio=token_sort_ratio)
+def ratio(s1: str, s2: str) -> float:
+    total = len(s1) + len(s2)
+    if total == 0:
+        return 100.0
+    distance = total - 2 * _lcs_length(s1, s2)
+    return (1.0 - distance / total) * 100.0
+
+
+fuzz = SimpleNamespace(token_sort_ratio=token_sort_ratio, ratio=ratio)
