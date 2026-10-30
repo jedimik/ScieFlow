@@ -147,6 +147,8 @@ def _s2_neighbours(gw, doi: str, direction: str, limit: int) -> list:
         external = external if isinstance(external, Mapping) else {}
         if paper.get("paperId") or external.get("DOI"):
             out.append(records.semantic_scholar_record(paper))
+            if len(out) >= limit:          # the bound holds whatever the answer carries (5.6)
+                break
     return out
 
 

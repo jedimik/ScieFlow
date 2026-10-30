@@ -10,11 +10,13 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from pathlib import Path
 
 import pytest
 import responses
 import yaml
 
+from scieflow._vendor.researcher_core.model import is_valid_doi, normalize_doi
 from scieflow.research.search import snowball
 from tests.research.kernel2.graph_support import (
     OPENALEX_RE,
@@ -24,6 +26,7 @@ from tests.research.kernel2.graph_support import (
     openalex_answer,
 )
 
+REPO = Path(__file__).resolve().parents[3]
 SEED1 = "10.5555/seed1"
 A, B, C, D = "10.5555/a", "10.5555/b", "10.5555/c", "10.5555/d"
 
@@ -289,3 +292,76 @@ def test_semantic_scholar_citations_are_read_and_an_empty_side_is_skipped(cli_pr
     assert payload["counts"]["retrieved"] == 1
     assert payload["edges"] == [{"citing": f"doi:{A}", "cited": f"doi:{SEED1}",
                                  "sources": ["semantic-scholar"], "depth": 1}]
+
+
+# --- 8. researcher's recorded answers (converted fixtures; the request is not compared) -----------
+
+RECORDED = (
+    REPO / "tests" / "fixtures" / "kernel2" / "graph" / "recorded"
+)
+
+
+def recorded_body(name: str):
+    return json.loads((RECORDED / name).read_text(encoding="utf-8"))["body"]
+
+
+def serve_body(pattern: str, body) -> None:
+    responses.add(responses.GET, re.compile(pattern), json=body, status=200)
+
+
+@pytest.mark.parametrize("name, pattern, seed, direction, field", [
+    ("opencitations-references-peerj4375.json",
+     r"https://api\.opencitations\.net/index/v1/references/10\.7717/peerj\.4375.*",
+     "10.7717/peerj.4375", "backward", "cited"),
+    ("opencitations-citations-s11192.json",
+     r"https://api\.opencitations\.net/index/v1/citations/10\.1007/s11192-021-04026-6.*",
+     "10.1007/s11192-021-04026-6", "forward", "citing"),
+])
+@responses.activate
+def test_recorded_opencitations_answers_become_doi_only_nodes(cli_project, cli_run, fast_send,
+                                                              name, pattern, seed, direction,
+                                                              field):
+    body = recorded_body(name)
+    serve_body(pattern, body)
+    code, out = run(cli_run, ["--seed", seed, "--depth", "1", "--direction", direction,
+                              "--sources", "opencitations", "--limit", "100"])
+    assert code == 0
+    payload = payload_of(out)
+    expected = {normalize_doi(d) for edge in body for d in str(edge[field]).split()}
+    expected = {d for d in expected if is_valid_doi(d)} - {normalize_doi(seed)}
+    assert {n["doi"] for n in payload["nodes"]} == expected
+    assert all(n["title"] is None for n in payload["nodes"]), "OpenCitations carries no metadata"
+    assert payload["sources"] == [{"source": "opencitations", "status": "ok",
+                                   "count": payload["counts"]["retrieved"]}]
+
+
+@responses.activate
+def test_recorded_semantic_scholar_citations_parse_to_nodes(cli_project, cli_run, fast_send):
+    root, _ws = cli_project
+    body = recorded_body("semantic-scholar-citations-peerj4375.json")
+    serve_body(r"https://api\.semanticscholar\.org/graph/v1/paper/DOI:10\.7717/peerj\.4375/"
+               r"citations.*", body)
+    write_integrations(root, {"search-semantic-scholar": {"enabled": True}})
+    code, out = run(cli_run, ["--seed", "10.7717/peerj.4375", "--depth", "1",
+                              "--sources", "semantic-scholar", "--limit", "100"])
+    assert code == 0
+    payload = payload_of(out)
+    expected = {normalize_doi(i["citingPaper"]["externalIds"]["DOI"]) for i in body["data"]
+                if i.get("citingPaper")}
+    assert len(expected) == 5
+    assert {n["doi"] for n in payload["nodes"]} == expected
+    assert payload["counts"]["retrieved"] == 5
+
+
+@responses.activate
+def test_the_limit_bounds_the_neighbours_even_when_a_source_answers_more(cli_project, cli_run,
+                                                                         fast_send):
+    root, _ws = cli_project
+    body = recorded_body("semantic-scholar-citations-peerj4375.json")
+    serve_body(r"https://api\.semanticscholar\.org/graph/v1/paper/DOI:10\.7717/peerj\.4375/"
+               r"citations.*", body)
+    write_integrations(root, {"search-semantic-scholar": {"enabled": True}})
+    code, out = run(cli_run, ["--seed", "10.7717/peerj.4375", "--depth", "1",
+                              "--sources", "semantic-scholar", "--limit", "2"])
+    assert code == 0
+    assert payload_of(out)["counts"]["retrieved"] == 2
