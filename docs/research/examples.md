@@ -133,16 +133,18 @@ written into the workspace.
 
 **What happens:**
 
-1. **Journal profiling.** If not already cached, an agent researches the
-   journal's author guidelines and writes:
+1. **Journal profiling.** If no adopted profile exists yet, the journal research
+   flow ([Target journals](journals.md)) asks you to approve the journal's
+   author-guideline pages in a `journal-sources` gate, drafts the profile from
+   them, and adopts it as:
 
     ```text
-    config/journals/journal-of-chemical-information-and-modeling.md
+    config/journals/journal-of-chemical-information-and-modeling.yml
     ```
 
-    with scope, article types & length limits, formatting rules, review
-    criteria, and common rejection reasons. Cached profiles are reused across
-    future runs.
+    Every limit in it carries a quote from those pages. Adopted profiles are
+    reused across future runs, and the review's journal persona is read from
+    `scieflow journal show --prompt`.
 
 2. **Round loop** (reviewer ≠ submitter, so no agent grades its own edits):
 
@@ -179,11 +181,13 @@ written into the workspace.
 
 > I'm aiming for *Nature Methods* — how does it accept papers?
 
-No review loop runs. You get `config/journals/nature-methods.md`: scope,
-article types with length limits, formatting requirements, what its reviewers
-weight most, common rejection reasons, and a submission checklist — with the
-guideline URLs cited. Reused automatically if you later run a full review
-targeting that journal.
+No review loop runs. You approve the journal's guideline pages when the
+`journal-sources` gate asks (you, not an agent, answer it), and you get an
+adopted profile, `config/journals/nature-methods.yml`: identity and open-access
+facts, article types with length limits, structure, reference style, the
+reporting guideline and the declarations — each value with its quote. Inspect
+it with `scieflow journal show nature-methods`, and check a manuscript against it
+with `scieflow manuscript check`. See [Target journals](journals.md).
 
 ---
 

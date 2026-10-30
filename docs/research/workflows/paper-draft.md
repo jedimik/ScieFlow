@@ -63,9 +63,10 @@ A data package is **required** — this workflow drafts from your data, not
 from thin air. References come either from a gap-discovery run
 (`gaps_from:` in `config.yml` imports its hypotheses, gap report, and DOI
 list) or from a fresh search fan-out; either way the DOIs are exported via
-Zotero into `manuscript/references.bib`. Setting `journal:` reuses the
-paper-review journal-profile cache so the draft targets the journal's
-format from the start.
+Zotero into `manuscript/references.bib`. Setting `journal:` runs the journal
+research flow ([Target journals](../journals.md)): the adopted profile's limits
+and structure then shape the outline, and the manuscript is checked against it
+in Phase 6 and packaged in Phase 7.
 
 ## Phase 2 — Outline
 
@@ -126,6 +127,24 @@ and final recommendations, the evidence behind each section, the verify
 results and any unresolved points. The manuscript sits in
 `workspace/<slug>/manuscript/` — exactly where the
 [paper review](paper-review.md) loop expects it.
+
+## Render, check, build and package
+
+When the draft is ready to be submitted (or to be checked against a journal), the
+manuscript commands take over from the hand-written LaTeX steps above:
+
+- **Phase 5, step 3** is `uv run scieflow manuscript render <slug>`: it writes
+  `manuscript/main.tex` from `manuscript/metadata.yml`, the registry templates and the
+  section files. Write the metadata first; ScieFlow does not invent an author list.
+- **Phase 6, step 1** is `uv run scieflow manuscript build <slug>`: a build in a scratch
+  copy with shell escape off, recorded in `manuscript/build/build.json`.
+- **Phase 6, checks** are `uv run scieflow manuscript check <slug>` against the adopted
+  journal profile (`journal:`), with the reporting-checklist judgement when a guideline
+  applies. See [Target journals](../journals.md) and [Manuscript check and
+  package](../manuscript.md).
+- **Phase 7** is `uv run scieflow manuscript package <slug>`, which writes
+  `report/submission/` once the check and build hold, and refuses while a review blocker
+  is open. It uploads nothing.
 
 ## How to run it properly
 

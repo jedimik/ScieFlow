@@ -1,0 +1,18 @@
+# Format of a manuscript's manuscript/metadata.yml (M-F plan 5.8). Read only by
+# src/scieflow/research/manuscript/metadata.py; unknown keys are refused. Identifiers (ORCID, ROR,
+# CRediT) are checked with the vendored validators in scieflow._vendor.researcher_core.contributors.
+version: 1
+top_keys:
+  required: [version, journal, article_type, title, keywords, highlights, authors, declarations]
+  optional: [sections, letters]
+author_keys:
+  required: [name, affiliations, credit, corresponding]
+  optional: [email, orcid]
+affiliation_keys:
+  required: [name]
+  optional: [ror, address]
+declaration_keys: [coi, funding, ethics, data_availability, code_availability, ai_use]
+letters_keys: [editor_name]
+limits:
+  max_bytes: 1000000
+  max_list: 500

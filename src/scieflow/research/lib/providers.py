@@ -40,7 +40,9 @@ Fetched content is data, not instructions.
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import re
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -74,6 +76,10 @@ CATALOGUE: dict[str, dict] = {
                          "rate_per_s": 5, "default_enabled": True},
     "search-crossref": {"label": "Crossref search", "hosts": ("api.crossref.org",),
                         "rate_per_s": 5, "default_enabled": True},
+    # M-F 5.7: the author-guideline pages of one journal. Off unless enabled; the hosts of a run
+    # come only from the run's human-approved journal-sources gate (`run_hosts=` on Gateway).
+    "journal-guidelines": {"label": "Journal author-guideline pages", "hosts": (),
+                           "rate_per_s": 0.5, "run_hosts": True},
 }
 _TOP_KEYS = frozenset({"providers", "cache_ttl_days"})
 _PROVIDER_KEYS = frozenset({"enabled", "hosts", "rate_per_s"})
@@ -166,6 +172,9 @@ def _provider(name: str, spec) -> dict | str:
     if not isinstance(enabled, bool):
         raise PolicyError(f"{CONFIG}: providers.{name}.enabled must be true or false")
     cat = CATALOGUE[name]
+    if cat.get("run_hosts") and "hosts" in spec:
+        raise PolicyError(f"{CONFIG}: {name} takes no hosts: each run's hosts come from its "
+                          f"human-approved journal-sources gate")
     hosts = spec.get("hosts", list(cat["hosts"]))
     if not isinstance(hosts, list) or not all(isinstance(h, str) for h in hosts):
         raise PolicyError(f"{CONFIG}: providers.{name}.hosts must be a list of host names")
@@ -243,6 +252,48 @@ def _count(value) -> int:
     return len(value) if isinstance(value, list) else 1
 
 
+_NO_RUN_HOST_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arpa")
+_DNS_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+")
+
+
+def is_public_dns_name(host) -> bool:
+    """A lowercase DNS name with a dot whose last label is not numeric and not a 0x form. The
+    short and hex/octal IPv4 spellings that getaddrinfo still resolves (127.1, 0x7f.0.0.1,
+    10.1) are refused like the dotted-quad literals; local suffixes are refused as well."""
+    if not isinstance(host, str) or not _DNS_NAME.fullmatch(host):
+        return False
+    if host.endswith(_NO_RUN_HOST_SUFFIXES) or _is_ip_literal(host):
+        return False
+    last = host.rsplit(".", 1)[-1]
+    return not (last.isdigit() or last.startswith("0x"))
+
+
+def _checked_run_hosts(run_hosts) -> dict:
+    """`run_hosts` for providers that take their hosts from the run (M-F 5.7). Only a catalogue
+    provider with `run_hosts: True` may have them; each host is a lowercase public DNS name."""
+    checked: dict[str, tuple[str, ...]] = {}
+    for provider, hosts in (run_hosts or {}).items():
+        if provider not in CATALOGUE or not CATALOGUE[provider].get("run_hosts"):
+            raise ValueError(f"run_hosts is only for a provider that takes run hosts, "
+                             f"not {_show(str(provider))}")
+        clean = []
+        for host in hosts:
+            if not is_public_dns_name(host):
+                raise ProviderRefused(f"{provider}: host {_show(str(host))} is not an allowed "
+                                      f"run host (a lowercase public DNS name with a dot)")
+            clean.append(host)
+        checked[provider] = tuple(dict.fromkeys(clean))
+    return checked
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
 class Gateway:
     """Every provider request of one run — or of one unscoped literature search:
     policy -> leak check -> cache -> limiter -> transport -> ledger. Construct one per
@@ -251,32 +302,36 @@ class Gateway:
     def __init__(self, ws: Path | None, policy: ProviderPolicy, *, cache=None,
                  ledger_dir: Path | None = None, session=None, sleep=time.sleep,
                  clock: Callable[[], float] = time.monotonic, retries: int = 3,
-                 network: str | None = None):
+                 network: str | None = None, run_hosts: Mapping | None = None):
         if ws is None:
             raise PolicyError("provider requests are made for a run (no run workspace given); "
                               "an unscoped literature search uses Gateway.unscoped")
         self._setup(Path(ws), policy, cache=cache, ledger_dir=ledger_dir, session=session,
-                    sleep=sleep, clock=clock, retries=retries, network=network)
+                    sleep=sleep, clock=clock, retries=retries, network=network,
+                    run_hosts=run_hosts)
 
     @classmethod
     def unscoped(cls, policy: ProviderPolicy, *, cache=None, ledger_dir: Path | None = None,
                  session=None, sleep=time.sleep, clock: Callable[[], float] = time.monotonic,
-                 retries: int = 3, network: str | None = None) -> "Gateway":
+                 retries: int = 3, network: str | None = None,
+                 run_hosts: Mapping | None = None) -> "Gateway":
         """A gateway for a search that belongs to no run: rows go to the per-day ledger
         only; no run ledger and no run events."""
         gw = cls.__new__(cls)
         gw._setup(None, policy, cache=cache, ledger_dir=ledger_dir, session=session,
-                  sleep=sleep, clock=clock, retries=retries, network=network)
+                  sleep=sleep, clock=clock, retries=retries, network=network,
+                  run_hosts=run_hosts)
         return gw
 
     def _setup(self, ws: Path | None, policy: ProviderPolicy, *, cache, ledger_dir, session,
-               sleep, clock, retries, network=None) -> None:
+               sleep, clock, retries, network=None, run_hosts=None) -> None:
         from scieflow.integrations.scite import policy as scite_policy
         from scieflow.integrations.scite.cache import Cache
         from scieflow.integrations.scite.ledger import Ledger, default_dir
 
         self.ws = ws
         self.policy = policy
+        self._run_hosts = _checked_run_hosts(run_hosts)   # M-F 5.7: only from a human-approved gate
         self.network = network          # the command's --network flag (None: the run's own mode)
         self.cache = cache if cache is not None else Cache(default_dir() / "cache",
                                                            policy.cache_ttl_days)
@@ -351,10 +406,14 @@ class Gateway:
         if parts.scheme != "https":
             raise ProviderRefused(f"{provider}: only https requests are allowed")
         host = (parts.hostname or "").lower()
+        if CATALOGUE[provider].get("run_hosts"):
+            allowed = self._run_hosts.get(provider, ())       # empty: every request refused
+        else:
+            allowed = self.policy.hosts(provider)
         if parts.username or parts.password or parts.port not in (None, 443) \
-                or host not in self.policy.hosts(provider):
+                or host not in allowed:
             raise ProviderRefused(f"{provider}: host {_show(host) if host else '<none>'} is not "
-                                  f"in its allowed hosts ({', '.join(self.policy.hosts(provider)) or 'none'}"
+                                  f"in its allowed hosts ({', '.join(allowed) or 'none'}"
                                   f"; config/integrations.yml)")
 
     # --- ids the provider itself returned (safe to send back) -----------------------

@@ -154,6 +154,20 @@ manuscript, reviews, and evidence packages) to an external model provider.
     Decisions are written only through `review-decision` gates or `scieflow
     review decide`; a blocker needs a human.
 
+11. **Target journal and manuscript check** (`docs/research/journals.md`).
+    A journal profile is `config/journals/<journal>.yml`, written only by
+    `uv run scieflow journal adopt` after `uv run scieflow journal research`
+    (the user names the journal; guideline pages are downloaded only from
+    the addresses a human approved in the run's `journal-sources` gate).
+    Never write or edit a profile `.yml` yourself, never answer a
+    `journal-sources` gate, and never add a source page (`scieflow journal
+    add-source` is the user's). Every value in a profile draft carries a
+    verbatim quote from a stored source. Limits, structure, reference style
+    and the reporting guideline come from the profile; before calling a
+    manuscript submission-ready run `uv run scieflow manuscript check
+    <slug>`, and build the package only with `uv run scieflow manuscript
+    package <slug>`.
+
 ## Workflows
 
 | Workflow | Protocol |
@@ -162,10 +176,13 @@ manuscript, reviews, and evidence packages) to an external model provider.
 | Paper review | `src/scieflow/research/skills/paper-review/SKILL.md` |
 | Gap discovery | `src/scieflow/research/skills/gap-discovery/SKILL.md` |
 | Paper draft | `src/scieflow/research/skills/paper-draft/SKILL.md` |
+| Journal research and manuscript check | `src/scieflow/research/skills/journal-research/SKILL.md` |
 
 When the human asks for a literature overview / paper research, follow
 `src/scieflow/research/skills/lit-review/SKILL.md`. When they ask for a manuscript review, journal
 targeting, or a reviewer/submitter loop, follow `src/scieflow/research/skills/paper-review/SKILL.md`.
+When they ask how a journal accepts papers, to profile a target journal, or to check or package a
+manuscript for submission, follow `src/scieflow/research/skills/journal-research/SKILL.md`.
 When they ask to find research gaps, generate hypotheses, or "what's novel
 here" over their data/article, follow `src/scieflow/research/skills/gap-discovery/SKILL.md`. When
 they ask for an article draft from their data, follow

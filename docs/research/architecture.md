@@ -12,7 +12,7 @@ ScieFlow/
 ├── config/
 │   ├── agents.yml                         # single agent registry (models, tiers, menus)
 │   ├── defaults.yml                       # `research:` workflow defaults
-│   └── journals/                          # cached journal profiles (<slug>.md)
+│   └── journals/                          # adopted journal profiles (<slug>.yml; rendered <slug>.md)
 ├── src/scieflow/
 │   ├── core/                              # agent_run, stub_agent, config loader
 │   └── research/

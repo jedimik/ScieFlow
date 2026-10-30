@@ -1,0 +1,67 @@
+# Format of a journal profile: config/journals/<slug>.yml (M-F plan section 5.5).
+# Read by src/scieflow/research/journal/profile.py, the only reader; it fails closed.
+# The key lists, enums and integer ranges below are the single source of those values; the
+# structure, the types and the evidence rules are written in profile.py.
+#
+# Blocks: `blocks` maps a mapping's dotted path to its keys. `item` means one element of a list
+# (article_types.item is one article type). Facts blocks (identity, oa, norms) are copied from the
+# run's facts.json at adoption; sourced blocks need a verbatim quote for each non-null leaf;
+# provenance is written at adoption only.
+format_version: 1
+version: 1
+top_keys:
+  required: [version, identity, oa, norms, scope, article_types, references, templates, submission,
+             declarations, reporting_guidelines, review, evidence, conflicts, provenance]
+  optional: [figures]
+facts_blocks: [identity, oa, norms]
+sourced_blocks: [scope, article_types, references, templates, submission, declarations,
+                 reporting_guidelines, figures, review]
+blocks:
+  identity: [name, slug, issn_l, issns, publisher, homepage_url, openalex_id, crossref_title]
+  oa: [is_oa, is_in_doaj, apc_usd]
+  norms: [sample, references, abstract_words, title_words]
+  norms.sample: [n, from_date, to_date]
+  norms.references: [median, p25, p75]
+  norms.abstract_words: [median, p25, p75, share_with_abstract]
+  norms.title_words: [median]
+  scope: [text]
+  article_types.item: [id, label, limits, abstract, structure]
+  article_types.item.limits: [words_main, words_abstract, words_title, keywords_min, keywords_max,
+                              figures_max, tables_max, display_items_max, references_min,
+                              references_max, highlights_max, highlight_chars_max, pages_max]
+  article_types.item.abstract: [structured, headings]
+  article_types.item.structure: [order, sections]
+  article_types.item.structure.sections.item: [title, aliases, required, words_max]
+  references: [style_name, bibtex_style, natbib, numbering]
+  templates: [latex_class, latex_class_name, latex_options, template_url, word_first]
+  submission: [system, required_files, line_numbers, blinding]
+  submission.required_files.item: [id, label]
+  declarations: [required]
+  reporting_guidelines: [by_study_type, other]
+  figures: [single_column_mm, double_column_mm, font_pt, dpi, formats]
+  review: [type, criteria]
+  evidence.item: [field, source, quote]
+  conflicts.item: [field, chosen, reason, statements]
+  conflicts.item.statements.item: [source, quote]
+  provenance: [run, facts_sha256, sources, max_age_days, adopted_at, adopted_by, tool, format]
+  provenance.sources.item: [id, url, retrieved_at, retrieved_by, text_sha256]
+# Every key of these blocks may be absent (the rest must be present; a null value is allowed
+# wherever the type says so).
+all_optional: [article_types.item.limits]
+enums:
+  order: [strict, any]
+  blinding: [none, single, double]
+  review_type: [single-blind, double-blind, open]
+  numbering: [numeric, author-year]
+  latex_class: [article, elsarticle, IEEEtran, svjour3, other]
+  declarations: [coi, funding, ethics, data-availability, code-availability, ai-use, credit, orcid]
+  retrieved_by: [gateway, human-file]
+  adopted_by: [human, agent]
+ranges:
+  limits: {min: 0}
+  max_age_days: {min: 1, max: 3650}
+patterns:
+  article_type_id: '^[a-z0-9][a-z0-9-]{0,63}$'
+  slug: '^[a-z0-9][a-z0-9-]{0,63}$'
+quote:
+  min_chars: 20

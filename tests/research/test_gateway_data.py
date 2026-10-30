@@ -93,7 +93,9 @@ def test_gateway_check_refuses_every_catalogue_provider_for_an_l2_run(project):
     gw = providers.Gateway(ws, providers.load(root))
     for name, spec in providers.CATALOGUE.items():
         with pytest.raises(providers.ProviderRefused, match="data protection"):
-            gw.check(name, f"https://{spec['hosts'][0]}/x")
+            host = spec["hosts"][0] if spec["hosts"] else "guidelines.journal.example"  # M-F 5.7
+            gw.check(name, f"https://{host}/x")
+    assert any(spec.get("run_hosts") for spec in providers.CATALOGUE.values())  # M-F-D17
 
 
 def test_gateway_check_passes_a_listed_provider_and_refuses_the_rest(project):

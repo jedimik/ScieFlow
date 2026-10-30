@@ -58,6 +58,57 @@ uv run scieflow design amend <slug> --summary "..." --rationale "..."
 uv run scieflow design guidelines --check
 ```
 
+## `scieflow journal`
+
+Target journals: research a journal's author guidelines, approve the pages (a
+human-only gate), add saved pages, draft and adopt a profile, and read or diff
+it. Every read accepts `--json`. Exit codes: `0` ok (including "waiting for the
+gate" and "denied"), `1` refused, a validation failure or an ambiguous journal,
+`2` usage, `3` a Gateway policy or leak refusal, `6` a no-egress miss; nothing is
+sent on `3` or `6`. The flow, the profile format and the rules are in
+[Target journals](research/journals.md).
+
+```bash
+uv run scieflow journal research <run> --journal "Journal of Synthetic Neurology" --issn 1234-5679
+uv run scieflow journal add-source <run> --file guidelines.html --url https://publisher.example/authors
+uv run scieflow journal prompt <run> --for agy --write
+uv run scieflow journal prompt <run> --cross-check --write
+uv run scieflow journal adopt <run>
+uv run scieflow journal show <slug> --json
+uv run scieflow journal list
+uv run scieflow journal validate <slug>
+uv run scieflow journal diff <slug> <run>
+uv run scieflow journal style <run>
+```
+
+`add-source` and `adopt` refuse inside an agent dispatch. `style` writes
+`journal/figure-style.yml` for `scieflow experiment figures`.
+
+## `scieflow manuscript`
+
+Manuscripts: check a manuscript against its journal profile, judge the
+reporting-checklist items, render the LaTeX, build the PDF in a scratch copy,
+package the submission files and write starter letters. Nothing is uploaded.
+Exit codes: `0` ok, `1` refused or a check failed (the report is written
+anyway), `2` usage. Everything runs locally. The check rules, the word count,
+the build safety and the package refusals are in
+[Manuscript check and package](research/manuscript.md).
+
+```bash
+uv run scieflow manuscript check <run> --guideline consort-2010
+uv run scieflow manuscript checklist-prompt <run> --guideline consort-2010 --write
+uv run scieflow manuscript render <run> --class article
+uv run scieflow manuscript build <run> --engine latexmk --timeout 600
+uv run scieflow manuscript package <run>
+uv run scieflow manuscript letter <run> --kind cover
+```
+
+`checklist-prompt` is dispatched with `--role research.reviewer`. `build`
+accepts `--engine latexmk|pdflatex|xelatex|lualatex|tectonic`; `tectonic` is used
+only when named and is refused in L2 and no-egress runs. `render` accepts
+`--class article|elsarticle|IEEEtran|svjour3`, and `--force` keeps a hand-edited
+`main.tex` as a backup first.
+
 ## `scieflow run`
 
 A run's state, history and lifecycle. Every subcommand needs the run's
