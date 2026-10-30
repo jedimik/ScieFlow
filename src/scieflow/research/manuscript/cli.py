@@ -12,6 +12,7 @@ import click
 
 from scieflow.core.project import Project, ProjectError
 from scieflow.research.manuscript import check as check_mod
+from scieflow.research.manuscript import checklist, judgement, tex
 
 OK, REFUSED, USAGE = 0, 1, 2
 
@@ -69,3 +70,26 @@ def check(run, journal, article_type, guidelines, main_file, as_json, no_write):
             click.echo(f"report: {json_path}")
             click.echo(f"report: {md_path}")
     raise SystemExit(report.exit_code)
+
+
+@manuscript.command("checklist-prompt")
+@click.argument("run")
+@click.option("--guideline", "guideline", required=True, help="The reporting guideline id to judge.")
+@click.option("--main", "main_file", default=None, help="The main TeX file (default main.tex).")
+@click.option("--write", "write", is_flag=True, help="Write prompts/checklist-<id>.md (default: print it).")
+def checklist_prompt(run, guideline, main_file, write):
+    """Write the reviewer prompt for the checklist items that need judgement (M-F 5.10).
+
+    Dispatch it with --role research.reviewer; the reviewer writes report/checklist/<id>.judgement.json.
+    """
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        text = judgement.prompt_for(project.root, folder, guideline, main=main_file)
+    except (tex.TexError, checklist.ChecklistError) as exc:
+        _fail(str(exc))
+    if write:
+        click.echo(f"prompt: {judgement.write_prompt(folder, guideline, text)}")
+    else:
+        click.echo(text, nl=False)
+    raise SystemExit(OK)

@@ -18,7 +18,7 @@ from pathlib import Path
 from scieflow._vendor.researcher_core.contributors import MetadataError, validate_orcid
 from scieflow.core import events
 from scieflow.research.journal import profile, state
-from scieflow.research.manuscript import metadata, tex
+from scieflow.research.manuscript import checklist, judgement, metadata, tex
 
 VERSION = 1
 REPORT_DIR = "report"
@@ -69,6 +69,8 @@ class Report:
     findings: list = field(default_factory=list)
     guidelines: list = field(default_factory=list)
     information: dict = field(default_factory=dict)
+    reporting: list = field(default_factory=list)
+    filled: dict = field(default_factory=dict)
 
     @property
     def errors(self) -> list:
@@ -89,6 +91,7 @@ class Report:
             "counts": dict(sorted(self.counts.items())),
             "findings": [f.to_dict() for f in self.findings],
             "guidelines": list(self.guidelines), "information": self.information,
+            "reporting": self.reporting,
         }
 
 
@@ -267,9 +270,41 @@ def run_check(root, run_dir, *, journal: str | None = None, article_type: str | 
                     where=decl))
         _template_rules(findings, prof, analysis)
 
+    selection = checklist.select(root, run, prof if profile_ok else None, requested)
+    for rule, severity, message, where in selection.problems:
+        findings.append(Finding(rule, severity, message, where=where))
+    index = checklist.build_index(tree, analysis)
+    records, filled = [], {}
+    for reporting_checklist in selection.checklists:
+        rows = checklist.evaluate(reporting_checklist, index)
+        rows, judged = judgement.merge(run, reporting_checklist, rows, index, tree_hash)
+        for rule, severity, message, where in judged:
+            findings.append(Finding(rule, severity, message, where=where))
+        findings.extend(_item_findings(rows, checklist.is_verified(reporting_checklist)))
+        records.append(checklist.summary(reporting_checklist, rows))
+        filled[reporting_checklist.id] = checklist.render(reporting_checklist, rows)
+
     return Report(journal=slug, article_type=chosen, profile_sha256=prof_sha,
                   manuscript_sha256=tree_hash, counts=counts, findings=findings,
-                  guidelines=requested, information=information)
+                  guidelines=selection.ids, information=information,
+                  reporting=records, filled=filled)
+
+
+def _item_findings(rows, verified: bool) -> list:
+    """Checklist items as findings (M-F-D9): missing is an error once the checklist is verified."""
+    found = []
+    for row in rows:
+        if row.status == "missing":
+            severity = "error" if verified else "warning"
+            found.append(Finding("guideline-item-missing", severity,
+                                 f"{row.topic}: not found under {row.where}", where=row.id))
+        elif row.status == "needs-judgement":
+            found.append(Finding("guideline-item-needs-judgement", "info",
+                                 f"{row.topic}: a reader must judge it", where=row.id))
+        elif row.status == "judged-absent":
+            found.append(Finding("guideline-item-judged-absent", "warning",
+                                 f"{row.topic}: judged absent (see the checklist)", where=row.id))
+    return found
 
 
 def _limit_rules(findings, atype, analysis, counts, keywords, highlights, meta) -> None:
@@ -380,6 +415,13 @@ def render_markdown(report: Report) -> str:
              f"- Manuscript sha256: {report.manuscript_sha256}",
              f"- Errors: {len(report.errors)}; warnings: {len(report.warnings)}", "", "## Counts", ""]
     lines += [f"- {key}: {value}" for key, value in sorted(report.counts.items())]
+    lines += ["", "## Guidelines", ""]
+    if not report.reporting:
+        lines.append("None.")
+    for record in report.reporting:
+        state_text = "verified" if record["verified"] else "unverified skeleton"
+        counts = ", ".join(f"{key} {value}" for key, value in record["counts"].items() if value)
+        lines.append(f"- {record['id']} ({state_text}): {counts or 'no items'}")
     lines += ["", "## Findings", ""]
     if not report.findings:
         lines.append("None.")
@@ -398,6 +440,8 @@ def write_report(report: Report, run_dir) -> tuple:
     md_path = folder / MD_NAME
     state.atomic_write(json_path, document.encode("utf-8"))
     state.atomic_write(md_path, render_markdown(report).encode("utf-8"))
+    for guideline, text in sorted(report.filled.items()):
+        state.atomic_write(folder / f"reporting-checklist-{guideline}.md", text.encode("utf-8"))
     return json_path, md_path
 
 
