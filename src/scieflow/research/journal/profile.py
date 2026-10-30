@@ -8,8 +8,8 @@ page, a number or guideline name that the quote does not contain, or a conflict 
 the field's value is an error. Warnings (`stale`, `sources-unavailable`) never fail a check.
 
 Run sources (written by `journal research`, M-F 5.4): `workspace/<run>/journal/sources.json` is
-`{"version": 1, "sources": [row, ...]}`; each `ok` row has `id`, `url`, `text_sha256`, and its text is
-`journal/sources/<id>.txt`. This module only reads them.
+`{"version": 1, "rows": [row, ...]}` (the key `sources.py` writes); each `ok` row has `id`, `url`,
+`text_sha256`, and its text is `journal/sources/<id>.txt`. This module only reads them.
 
 Nothing here touches the network or writes a file. Synthetic and human-approved pages only.
 """
@@ -209,7 +209,7 @@ def load_sources(run_dir) -> SourceSet | None:
     if path.is_symlink() or not path.is_file():
         return None
     data = _yaml(_read_regular(path, "sources.json", MAX_SOURCES_BYTES), "sources.json")
-    rows = data.get("sources") if isinstance(data, dict) else None
+    rows = data.get("rows") if isinstance(data, dict) else None
     if not isinstance(rows, list):
         raise ProfileError("sources.json: no sources list")
     found = SourceSet()

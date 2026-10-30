@@ -130,7 +130,7 @@ def test_refused_without_an_ok_source(synth, profile_data):
     import json
 
     data = json.loads(path.read_text(encoding="utf-8"))
-    for row in data["sources"]:
+    for row in data["rows"]:
         row["status"] = "failed"
     path.write_text(json.dumps(data), encoding="utf-8")
     assert _adopt().exit_code == 1

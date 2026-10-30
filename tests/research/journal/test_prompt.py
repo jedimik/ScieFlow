@@ -27,7 +27,7 @@ def _set_source_text(synth, sid: str, text: str) -> None:
     (journal / "sources" / f"{sid}.txt").write_bytes(raw)
     path = journal / "sources.json"
     data = json.loads(path.read_text(encoding="utf-8"))
-    for row in data["sources"]:
+    for row in data["rows"]:
         if row["id"] == sid:
             row["text_sha256"] = hashlib.sha256(raw).hexdigest()
             row["chars"] = len(text)
@@ -101,7 +101,7 @@ def test_cross_check_adds_every_draft_as_data(synth):
 def test_no_prompt_without_an_ok_source(synth):
     path = synth.journal_dir / "sources.json"
     data = json.loads(path.read_text(encoding="utf-8"))
-    for row in data["sources"]:
+    for row in data["rows"]:
         row["status"] = "failed"
     path.write_text(json.dumps(data), encoding="utf-8")
     result = _prompt("--write")

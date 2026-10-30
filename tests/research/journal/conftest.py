@@ -175,6 +175,6 @@ def synth(tmp_path, monkeypatch) -> Synth:
                      "retrieved_by": "gateway", "raw_sha256": _sha(raw), "text_sha256": _sha(raw),
                      "chars": len(text)})
     (run_dir / "journal" / "sources.json").write_text(
-        json.dumps({"version": 1, "sources": rows}, indent=2), encoding="utf-8")
+        json.dumps({"version": 1, "rows": rows}, indent=2), encoding="utf-8")
     monkeypatch.chdir(root)
     return Synth(root=root, run_dir=run_dir)
