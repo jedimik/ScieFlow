@@ -201,3 +201,66 @@ def test_datacite_full_name_in_family_is_split():
         "creators": [{"name": "Ines Montani", "familyName": "Ines Montani",
                       "nameType": "Personal"}]}})
     assert rec.author[0].surname.casefold() == "montani"
+
+
+# --- identifiers that are not plain DOIs are never sent (M-C2 t4 review r1, findings 1 and 4) --
+
+#: DOI-looking text from a bibliography that would put data into a URL path, a query or a fragment,
+#: or that is free text. Each must send nothing and resolve to None.
+HOSTILE_DOIS = [
+    "10.1234/home/jsmith/patients_2024.csv",   # path-shaped: a file name
+    "10.1234/John Smith born 1960-01-01",     # spaced free text
+    "10.1234/x?email=a@b.c",                  # a query string
+    "10.1234/x#fragment",                     # a fragment
+    "10.1234/x/../y",                         # a traversal segment
+]
+
+
+@pytest.mark.parametrize("conn_cls", [OpenAlexIdentity, CrossrefIdentity, DataCiteIdentity])
+@pytest.mark.parametrize("doi", HOSTILE_DOIS)
+def test_a_doi_that_is_not_a_plain_doi_is_never_sent(make_gateway, fast_send, conn_cls, doi):
+    """Not sent, and not a clean negative either: a source that was not asked has not answered."""
+    gw = make_gateway(None)
+    sink = NoTransport()
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        rsps.add_callback(responses.GET, IDENTITY_URL, callback=sink)
+        with pytest.raises(verify.SourceError) as exc:
+            asyncio.run(conn_cls(gw).resolve_doi(doi))
+        assert exc.value.kind.value == "config"
+        with pytest.raises(verify.SourceError):
+            asyncio.run(conn_cls(gw).get_by_id(doi))
+    assert sink.calls == []
+    assert "patients" not in str(exc.value) and "John" not in str(exc.value)
+
+
+@pytest.mark.parametrize("conn_cls", [OpenAlexIdentity, CrossrefIdentity, DataCiteIdentity])
+@pytest.mark.parametrize("text", ["../../etc/passwd", "2101.00001 extra", "hep-th/9901001?x=1",
+                                  "{injected}", "2101.000"])
+def test_a_non_arxiv_identifier_is_not_sent(make_gateway, fast_send, conn_cls, text):
+    gw = make_gateway(None)
+    sink = NoTransport()
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        rsps.add_callback(responses.GET, IDENTITY_URL, callback=sink)
+        with pytest.raises(verify.SourceError) as exc:
+            asyncio.run(conn_cls(gw).get_by_id(text))
+    assert exc.value.kind.value == "config"
+    assert sink.calls == []
+
+
+def test_an_arxiv_id_goes_to_crossref_as_its_plain_path_and_a_miss_is_none(make_gateway, fast_send):
+    """Researcher parity (M-C2 5.4): Crossref treats an arXiv id as a DOI path; a 404 is no record."""
+    gw = make_gateway(None)
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        rsps.add(responses.GET, re.compile(r"https://api\.crossref\.org/works/.*"), status=404)
+        assert asyncio.run(CrossrefIdentity(gw).get_by_id("arXiv:2101.00001")) is None
+        sent = [c.request.url.split("?")[0] for c in rsps.calls]
+    assert sent == ["https://api.crossref.org/works/2101.00001"]
+
+
+def test_a_search_404_is_a_source_error_not_a_clean_negative(make_gateway, fast_send):
+    gw = make_gateway(None)
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        rsps.add(responses.GET, re.compile(r"https://api\.openalex\.org/works.*"), status=404)
+        with pytest.raises(verify.SourceError) as exc:
+            asyncio.run(OpenAlexIdentity(gw).search("Deep learning for diagnosis"))
+    assert exc.value.kind.value == "bad_response"

@@ -11,7 +11,9 @@ sources one after another in source order: deterministic.
 
 Failures: a clean "no such record" (404/410) is None; a failed request (rate limit, server error,
 malformed body) is a SourceError whose message is the classification only; a title the search leak
-check refuses is not sent and is a SourceError of kind config. NetworkMiss, ProviderRefused and
+check refuses is not sent and is a SourceError of kind config, and so is an identifier that is not a
+plain DOI or arXiv id (path-shaped, spaced, a query or fragment): it is not sent, and no source has
+answered, so it is never a negative. NetworkMiss, ProviderRefused and
 SnapshotCorrupt are not caught here: the command maps them to its exit codes.
 """
 
@@ -26,8 +28,7 @@ from urllib.parse import quote
 from scieflow._vendor.researcher_core import query as _vquery
 from scieflow._vendor.researcher_core import verify
 from scieflow._vendor.researcher_core._deps import BaseConnector, SourceError, SourceErrorKind
-from scieflow._vendor.researcher_core.model import normalize_doi
-from scieflow.core.review.claims import LeakError
+from scieflow.core.review.claims import LeakError, safe_doi
 from scieflow.research.lib import http, records
 from scieflow.research.search import registry
 
@@ -48,6 +49,19 @@ _KIND = {
     "TRANSIENT": SourceErrorKind.SERVER_ERROR,
     "MALFORMED": SourceErrorKind.BAD_RESPONSE,
 }
+_URL_MARKERS = re.compile(r"[?#]")
+
+
+def _doi_key(value) -> str | None:
+    """The DOI that may go into a request URL, or None: nothing is sent (M-C2 5.4, 5.9).
+
+    claims.safe_doi refuses path-shaped, spaced and traversal text. It does not refuse a query or
+    fragment marker, which would start a part of the URL the Gateway never checked, so those are
+    refused here too."""
+    key = safe_doi(value)
+    if key is None or _URL_MARKERS.search(key):
+        return None
+    return key
 
 
 def _expect_object(body: Any) -> None:
@@ -69,9 +83,11 @@ class _Identity(BaseConnector):
     def __init__(self, gateway) -> None:
         self.gateway = gateway
 
-    def _get(self, op: str, url: str, **kwargs: Any) -> Any:
+    def _get(self, op: str, url: str, *, absent: tuple[int, ...] = (), **kwargs: Any) -> Any:
+        """`absent` lists the statuses that mean "no such record". Only a DOI lookup passes it: a
+        404 from a search endpoint is an anomaly and raises (a SourceError), never a negative."""
         try:
-            return self.gateway.get_json(self.provider, op, url, absent=ABSENT,
+            return self.gateway.get_json(self.provider, op, url, absent=absent,
                                          validate=_expect_object, **kwargs)
         except http.HTTPFailure as exc:
             raise self._failure(exc) from None
@@ -80,6 +96,12 @@ class _Identity(BaseConnector):
         kind = _KIND.get(exc.classification, SourceErrorKind.BAD_RESPONSE)
         return SourceError(self.name, f"request failed: {exc.classification}", kind=kind,
                            status_code=exc.status)
+
+    def _not_sent(self) -> SourceError:
+        """An identifier that is not sent is not a clean negative: no source answered (like a
+        refused title, M-C2 t4 review r1 finding 1)."""
+        return SourceError(self.name, "identifier not sent: it is not a plain DOI or arXiv id",
+                           kind=SourceErrorKind.CONFIG)
 
     def _checked_title(self, query: str):
         text = _vquery.sanitize_query(query)
@@ -100,10 +122,10 @@ class OpenAlexIdentity(_Identity):
     provider: ClassVar[str] = PROVIDER["openalex"]
 
     async def resolve_doi(self, doi: str):
-        key = normalize_doi(doi)
-        if not key:
-            return None
-        body = self._get("works-doi", f"{OPENALEX_API}/works/doi:{key}",
+        key = _doi_key(doi)
+        if key is None:
+            raise self._not_sent()
+        body = self._get("works-doi", f"{OPENALEX_API}/works/doi:{key}", absent=ABSENT,
                          fixed={"select": records.OPENALEX_SELECT})
         return None if body is None else records.openalex_record(body)
 
@@ -112,9 +134,9 @@ class OpenAlexIdentity(_Identity):
         if text.startswith("10."):
             return await self.resolve_doi(text)
         match = _ARXIV_ID.match(text)
-        if match:
-            return await self.resolve_doi(f"10.48550/arxiv.{match.group(1).lower()}")
-        return None
+        if match is None:
+            raise self._not_sent()
+        return await self.resolve_doi(f"10.48550/arxiv.{match.group(1).lower()}")
 
     async def search(self, query: str, *, limit: int = 5, since: str | None = None):
         # `since` is part of the connector interface; verify-bib never passes it.
@@ -136,15 +158,26 @@ class CrossrefIdentity(_Identity):
     provider: ClassVar[str] = PROVIDER["crossref"]
 
     async def resolve_doi(self, doi: str):
-        key = normalize_doi(doi)
-        if not key:
-            return None
-        body = self._get("works-doi", f"{CROSSREF_API}/works/{quote(key, safe='/')}")
-        message = body.get("message") if isinstance(body, Mapping) else None
-        return records.crossref_record(message) if isinstance(message, Mapping) else None
+        key = _doi_key(doi)
+        if key is None:
+            raise self._not_sent()
+        return await self._work(key)
 
     async def get_by_id(self, identifier: str):
-        return await self.resolve_doi(identifier)
+        # Researcher sends an arXiv id as a DOI path (M-C2 5.4). Only a strictly arXiv-shaped id is
+        # sent, so the path cannot carry anything else; any other text is not sent.
+        text = str(identifier or "").strip()
+        if text.startswith("10."):
+            return await self.resolve_doi(text)
+        match = _ARXIV_ID.match(text)
+        if match is None:
+            raise self._not_sent()
+        return await self._work(match.group(1).lower())
+
+    async def _work(self, key: str):
+        body = self._get("works-doi", f"{CROSSREF_API}/works/{quote(key, safe='/')}", absent=ABSENT)
+        message = body.get("message") if isinstance(body, Mapping) else None
+        return records.crossref_record(message) if isinstance(message, Mapping) else None
 
     async def search(self, query: str, *, limit: int = 5, since: str | None = None):
         # `since` is part of the connector interface; verify-bib never passes it.
@@ -166,15 +199,25 @@ class DataCiteIdentity(_Identity):
     provider: ClassVar[str] = PROVIDER["datacite"]
 
     async def resolve_doi(self, doi: str):
-        key = normalize_doi(doi)
-        if not key:
-            return None
-        body = self._get("dois-doi", f"{DATACITE_API}/dois/{key}")
-        data = body.get("data") if isinstance(body, Mapping) else None
-        return records.datacite_record(data) if isinstance(data, Mapping) else None
+        key = _doi_key(doi)
+        if key is None:
+            raise self._not_sent()
+        return await self._work(key)
 
     async def get_by_id(self, identifier: str):
-        return await self.resolve_doi(identifier)
+        # As for Crossref: only a strictly arXiv-shaped id is sent (M-C2 5.4); other text is not sent.
+        text = str(identifier or "").strip()
+        if text.startswith("10."):
+            return await self.resolve_doi(text)
+        match = _ARXIV_ID.match(text)
+        if match is None:
+            raise self._not_sent()
+        return await self._work(match.group(1).lower())
+
+    async def _work(self, key: str):
+        body = self._get("dois-doi", f"{DATACITE_API}/dois/{key}", absent=ABSENT)
+        data = body.get("data") if isinstance(body, Mapping) else None
+        return records.datacite_record(data) if isinstance(data, Mapping) else None
 
     async def search(self, query: str, *, limit: int = 5, since: str | None = None):
         # `since` is part of the connector interface; verify-bib never passes it.

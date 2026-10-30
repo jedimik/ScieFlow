@@ -21,6 +21,14 @@ Outputs, written next to this script:
   * identity.yaml                     copied byte for byte (sha256 checked).
   * references.bib                    vendored emit_bib over one entry per gold item.
 
+Pinned outputs (sha256). tests/research/kernel2/test_identity_gold.py asserts these digests and
+that this header records them; a change to any output must update both:
+  gold-responses.json.gz           f8f49983dd9b0c12daa58a7340283794b6b2585529b06db1a428e6c2e08a890a
+  identity_baseline_verdicts.json  bb1b1cc99fb4fdfda62905a463dbec1f6758133e3ca626ef56b18377b6cd444c
+  identity.yaml                    55f0fe7594b5b9631fb27177be69942b7eef2afa4de716e7a5596e0daa98f27b
+  references.bib                   72f32d6dc6dc90ae1ed9285b6bab778484356745170a5270384dc0fde1bed7fb
+                                   (150 entries, gold001..gold150)
+
 No network call is made. Nothing outside this directory is written.
 """
 

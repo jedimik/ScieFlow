@@ -11,14 +11,23 @@ instead of `negative`, and nothing else may differ.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import re
 from collections import Counter
 
 import pytest
 import responses
 import yaml
 
-from tests.research.kernel2.identity_support import BASELINE_FILE, GOLD_YAML, IDENTITY_URL, GoldTransport
+from tests.research.kernel2.identity_support import (
+    BASELINE_FILE,
+    BIB_FILE,
+    GOLD_YAML,
+    IDENTITY_DIR,
+    IDENTITY_URL,
+    GoldTransport,
+)
 from scieflow._vendor.researcher_core import verify
 from scieflow.core.review.claims import LeakError
 from scieflow.research.lib.identity import CrossrefIdentity, DataCiteIdentity, OpenAlexIdentity
@@ -27,6 +36,14 @@ from scieflow.research.search import registry
 REFUSAL = ("mismatch", "unresolvable")
 GOLD_ITEMS = yaml.safe_load(GOLD_YAML.read_text(encoding="utf-8"))["items"]
 BASELINE = {i["doi"]: i for i in json.loads(BASELINE_FILE.read_text(encoding="utf-8"))["items"]}
+#: sha256 of the fixture files (byte-pinned; also recorded in build_gold_fixture.py's header)
+PINNED_SHA256 = {
+    "identity.yaml": "55f0fe7594b5b9631fb27177be69942b7eef2afa4de716e7a5596e0daa98f27b",
+    "identity_baseline_verdicts.json": "bb1b1cc99fb4fdfda62905a463dbec1f6758133e3ca626ef56b18377b6cd444c",
+    "gold-responses.json.gz": "f8f49983dd9b0c12daa58a7340283794b6b2585529b06db1a428e6c2e08a890a",
+    "references.bib": "72f32d6dc6dc90ae1ed9285b6bab778484356745170a5270384dc0fde1bed7fb",
+}
+
 
 
 def claim_for(item) -> verify.ReferenceClaim:
@@ -66,6 +83,7 @@ def test_identity_gold_verdicts_match_the_baseline(gold, capsys):
         base = BASELINE[item["doi"]]
         confusion[(item["expected"], entry.verdict)] += 1
         assert entry.verdict == base["verdict"], item["doi"]
+        assert len(entry.outcomes) == len(base["outcomes"]), item["doi"]
         for got, want_outcome in zip(entry.outcomes, base["outcomes"]):
             if got.outcome == want_outcome:
                 continue
@@ -85,6 +103,16 @@ def test_identity_gold_verdicts_match_the_baseline(gold, capsys):
           f"leak-refused outcome cells {refused_cells}")
     assert fp == 0 and fn == 0
     assert refused_cells > 0   # the leak-refused titles really are exercised
+
+
+def test_the_gold_fixture_files_match_their_pinned_sha256():
+    """The fixture is byte-pinned: the build script header records the same digests (M-C2 t4 F3)."""
+    for name, digest in PINNED_SHA256.items():
+        assert hashlib.sha256((IDENTITY_DIR / name).read_bytes()).hexdigest() == digest, name
+    header = (IDENTITY_DIR / "build_gold_fixture.py").read_text(encoding="utf-8")
+    for digest in PINNED_SHA256.values():
+        assert digest in header
+    assert len(re.findall(r"^@article\{", BIB_FILE.read_text(encoding="utf-8"), re.M)) == 150
 
 
 def test_a_request_outside_the_fixture_fails_the_test(gold):

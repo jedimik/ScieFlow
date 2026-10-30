@@ -39,6 +39,12 @@ def gold_entry(expected: str, nth: int = 0) -> tuple[str, str]:
     return key, next(b for b in blocks if b.startswith("@article{" + key + ","))
 
 
+def verdicts_by_key() -> dict[str, str]:
+    """bib key -> the baseline verdict of that gold item (the bib keys are gold001..gold150, in order)."""
+    return {f"gold{n + 1:03d}": BASELINE[item["doi"]]["verdict"] for n, item in enumerate(GOLD_ITEMS)}
+
+
+
 @pytest.fixture
 def vb(cli_project, fast_send, cli_run):
     from scieflow.research import verify_bib
@@ -130,6 +136,19 @@ def test_a_bib_outside_the_run_exits_1(vb, cli_project, tmp_path, no_http):
     assert no_http.calls == []
 
 
+def test_an_l2_run_sends_nothing_and_exits_3(vb, cli_project, bib_in_run, no_http):
+    """The M-B data check runs before every live and record request (plan 5.9, ticket security line)."""
+    _root, ws = cli_project
+    (ws / "data.yml").write_text(yaml.safe_dump({
+        "version": 1, "default_level": "L2", "levels": [], "pending_releases": [],
+        "released": [], "imports": []}, sort_keys=False), encoding="utf-8")
+    bib_in_run(gold_entry("verified", 0)[1] + "\n" + gold_entry("verified", 1)[1] + "\n")
+    for mode in ("live", "record"):
+        code, out, err = vb(["demo", "--network", mode, "--json"])
+        assert code == 3, (mode, err)
+        assert no_http.calls == []
+
+
 def test_a_bib_through_a_symbolic_link_exits_1(vb, cli_project, tmp_path, bib_in_run, no_http):
     outside = tmp_path / "outside.bib"
     outside.write_text(gold_entry("verified", 0)[1] + "\n", encoding="utf-8")
@@ -152,11 +171,28 @@ def test_the_printed_output_is_sanitised(vb, bib_in_run, gold_http):
     assert doc["report"]["entries"][0]["verdict"] == "verified"
 
 
+def test_a_path_shaped_doi_in_the_bib_is_never_sent(vb, bib_in_run, gold_http):
+    """A bibliography DOI that is a file path reaches no source; the entry is inconclusive."""
+    hostile = ("@article{hostile01,\n  author = {Smith, Ann},\n  year = {2020},\n"
+               "  doi = {10.1234/home/jsmith/patients_2024.csv}\n}")
+    bib_in_run(hostile + "\n\n" + gold_entry("verified", 0)[1] + "\n")
+    code, out, err = vb(["demo", "--json"])
+    assert code == 0, err
+    verdicts = {e["key"]: e["verdict"] for e in json.loads(out)["report"]["entries"]}
+    assert verdicts["hostile01"] == "inconclusive"
+    assert gold_http.unrecorded == []
+    assert not any("jsmith" in endpoint for _s, endpoint, _p in gold_http.served)
+
+
 def test_record_then_replay_is_identical_and_sends_nothing_the_second_time(
         vb, bib_in_run, gold_http):
     bib_in_run(BIB_TEXT)
     code1, out1, err1 = vb(["demo", "--network", "record", "--json"])
     assert code1 == 4, err1
+    assert gold_http.unrecorded == []
+    entries = json.loads(out1)["report"]["entries"]
+    assert len(entries) == 150
+    assert {e["key"]: e["verdict"] for e in entries} == verdicts_by_key()
     sink = NoTransport()
     with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
         rsps.add_callback(responses.GET, IDENTITY_URL, callback=sink)
