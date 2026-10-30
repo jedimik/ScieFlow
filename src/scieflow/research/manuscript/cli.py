@@ -149,7 +149,7 @@ def build(run, engine, timeout, as_json):
             click.echo(f"note: {note}")
         if result.ok:
             click.echo(f"build: ok ({result.engine}), pdf sha256 {result.pdf_sha256[:12]}")
-            click.echo(f"build: {folder / 'build' / 'main.pdf'}")
+            click.echo(f"build: {folder / 'manuscript' / build_mod.BUILD_DIR / 'main.pdf'}")
     if not result.ok:
         click.echo("build failed; last lines of the log:", err=True)
         click.echo(result.log_tail, err=True)
