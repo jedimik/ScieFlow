@@ -118,3 +118,35 @@ def test_waive_refused_inside_a_dispatch_exits_one(synth, monkeypatch):
                                        "--reason", "A synthetic reason that is long enough."],
                                 catch_exceptions=False)
     assert result.exit_code == 1 and "waive refused" in result.output
+
+
+def test_check_json_and_markdown_are_exact_for_the_planted_fixture(synth):
+    """M-G t3 item 6: check.json and check.md are compared byte for byte with the expected report of the planted
+    fixture (version, both hashes from the ledger, counts, the one finding, no waived entries, the table)."""
+    results_run(synth, PLANTED)
+    invoke("build", RUN)
+    assert invoke("check", RUN).exit_code == 1
+    claim = ledger.read(synth.run_dir)[0]["id"]
+    ledger_doc = json.loads((report_dir(synth) / "ledger.json").read_text(encoding="utf-8"))
+    message = "the number 0.93 is not in the evidence it cites (inputs/metrics.csv)"
+    expected = {
+        "version": 1,
+        "manuscript_tree_sha256": ledger_doc["manuscript_tree_sha256"],
+        "ledger_sha256": ledger_doc["claims_sha256"],
+        "counts": {"by_code": {"C002": 1}, "errors": 1, "waived": 0, "warnings": 0},
+        "findings": [{"claim": claim, "code": "C002", "file": "main.tex", "line": 4, "message": message,
+                      "rule": "number-missing", "severity": "error"}],
+        "waived": [],
+    }
+    expected_json = json.dumps(expected, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    expected_md = (
+        "# Claim check\n\n"
+        f"manuscript tree sha256: {ledger_doc['manuscript_tree_sha256']}\n"
+        f"ledger sha256: {ledger_doc['claims_sha256']}\n"
+        "errors: 1, warnings: 0, waived: 0\n\n"
+        "| Severity | Code | Rule | Claim | Location | Message |\n"
+        "|---|---|---|---|---|---|\n"
+        f"| error | C002 | number-missing | {claim} | main.tex:4 | {message} |\n"
+    )
+    assert (report_dir(synth) / "check.json").read_bytes() == expected_json.encode("utf-8")
+    assert (report_dir(synth) / "check.md").read_bytes() == expected_md.encode("utf-8")
