@@ -1,24 +1,29 @@
 """The claim ledger (M-G 5.3): build `report/claims/claims.jsonl` and `ledger.json`, and read them back for show.
 
-A build reads only the manuscript (no evidence yet: the pins come with M-G t2), makes no network call and
-writes deterministic bytes: sorted keys, no timestamps, one record per claim sorted by (file order, line, id).
-A claim is a unit with at least one checkable number, one reference or one cite key. More than 5,000 claims
-is refused (`claims-limit`) and nothing is written.
+A build reads the manuscript and the run's evidence (M-G t2: pins and reference findings), makes no network call
+and writes deterministic bytes: sorted keys, no timestamps, one record per claim sorted by (file order, line, id).
+A claim is a unit with at least one checkable number, one reference or one cite key. More than 5,000 claims is
+refused (`claims-limit`) and nothing is written. Pins are carried from the previous ledger while a claim's id and
+references are unchanged; `repin` / `repin_claims` take them from the current evidence and emit one
+`note.claims_repinned` event.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from scieflow.core import events
+from scieflow.core.review.claims import parser as claim_parser
 from scieflow.research.journal import state
 from scieflow.research.manuscript import tex
+from scieflow.research.manuscript.claims import evidence as ev
 from scieflow.research.manuscript.claims import numbers as numbers_mod
 from scieflow.research.manuscript.claims import refs as refs_mod
+from scieflow.research.manuscript.claims import resolve as resolve_mod
 from scieflow.research.manuscript.claims import units as units_mod
-from scieflow.core.review.claims import parser as claim_parser
 
 LEDGER_VERSION = 1
 PARSER_VERSION = 1
@@ -41,6 +46,8 @@ class BuildResult:
     count: int
     claims_path: Path
     ledger_path: Path
+    problems: list = field(default_factory=list)
+    repinned: int = 0
 
 
 def ledger_folder(run_folder) -> Path:
@@ -51,15 +58,14 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _bib_dois(run_folder: Path) -> dict:
+def _bib_text(run_folder: Path) -> str:
     bib = run_folder / "manuscript" / "references.bib"
     if not bib.exists():
-        return {}
+        return ""
     try:
-        text = tex.read_regular_text(run_folder / "manuscript", "references.bib")
+        return tex.read_regular_text(run_folder / "manuscript", "references.bib")
     except tex.TexError as exc:
         raise ClaimsError(exc.rule, exc.message) from exc
-    return claim_parser().parse_bib(text)
 
 
 def _record(unit, found: list, keys: list, nums: list) -> dict:
@@ -85,19 +91,53 @@ def _record(unit, found: list, keys: list, nums: list) -> dict:
     return record
 
 
-def build(run_folder, main: str = "main.tex") -> BuildResult:
-    """Write the claim ledger of the run's manuscript (M-G 5.3). Raises ClaimsError (no file written)."""
+def _problem(unit, item: dict, ref: dict | None = None) -> dict:
+    out = {"claim": unit.id, "file": unit.file, "line": unit.line, "rule": item["rule"],
+           "severity": item["severity"], "message": item["message"]}
+    if ref is not None:
+        out["ref"] = f"{ref['type']}:{ref['id']}"
+    return out
+
+
+def _previous(run_folder: Path) -> dict:
+    """The records of the previous ledger by id; empty when there is none or it cannot be read."""
+    try:
+        return {rec["id"]: rec for rec in read(run_folder)}
+    except ClaimsError:
+        return {}
+
+
+def _pins(run_folder: Path, outcomes: list) -> dict:
+    pins = {}
+    for outcome in outcomes:
+        if outcome.pinned and outcome.files:
+            ref = outcome.ref
+            try:
+                pins[f"{ref['type']}:{ref['id']}"] = ev.pins_for(run_folder, outcome.files)
+            except (ev.EvidenceError, OSError) as exc:
+                raise ClaimsError("claims-path", "a pinned evidence file cannot be read") from exc
+    return pins
+
+
+def build(run_folder, main: str = "main.tex", *, repin: bool = False, repin_claims=()) -> BuildResult:
+    """Write the claim ledger of the run's manuscript (M-G 5.3). Raises ClaimsError (no ledger file written)."""
     run_folder = Path(run_folder)
+    _refuse_links(run_folder)
     manuscript = run_folder / "manuscript"
     try:
         tree = tex.read_tree(manuscript, main, keep_comments=True)
     except tex.TexError as exc:
         raise ClaimsError(exc.rule, exc.message) from exc
-    bib = _bib_dois(run_folder)
+    text = _bib_text(run_folder)
+    parser = claim_parser()
+    bib = parser.parse_bib(text)
+    bib_keys = {match.group(2) for match in parser.ENTRY_RE.finditer(text)}
     order = {name: index for index, name in enumerate(tree.files)}
+    problems: list = []
     claims = []
     for unit in units_mod.extract_units(tree):
-        found, _problems = refs_mod.parse_refs("\n".join(unit.comments), unit.text, bib)
+        found, parse_problems = refs_mod.parse_refs("\n".join(unit.comments), unit.text, bib)
+        problems += [_problem(unit, resolve_mod.finding(p["rule"], p["message"])) for p in parse_problems]
         keys = refs_mod.cite_keys(unit.text)
         nums = numbers_mod.extract(unit.text)
         if not (found or keys or nums):
@@ -107,8 +147,30 @@ def build(run_folder, main: str = "main.tex") -> BuildResult:
         raise ClaimsError("claims-limit",
                           f"{len(claims)} claims: the ledger holds at most {MAX_CLAIMS}")
     numbered = units_mod.number([unit for unit, _found, _keys, _nums in claims])
-    records = [_record(unit, found, keys, nums)
-               for unit, (_u, found, keys, nums) in zip(numbered, claims)]
+    if set(repin_claims) - {unit.id for unit in numbered}:
+        raise ClaimsError("claim-unknown", "no claim with that id in the manuscript")
+    try:
+        ctx = resolve_mod.open_context(run_folder, bib_keys, bib)
+    except ev.EvidenceError as exc:
+        raise ClaimsError(exc.rule, exc.message) from exc
+    previous = _previous(run_folder)
+    records = []
+    requested = 0
+    for unit, (_u, found, keys, nums) in zip(numbered, claims):
+        outcomes = [resolve_mod.resolve_ref(ctx, ref) for ref in found]
+        for outcome in outcomes:
+            problems += [_problem(unit, item, outcome.ref) for item in outcome.findings]
+        for key in keys:
+            problems += [_problem(unit, item) for item in resolve_mod.resolve_cite(ctx, key)]
+        record = _record(unit, found, keys, nums)
+        asked = repin or unit.id in repin_claims
+        old = previous.get(unit.id)
+        if not asked and old is not None and old.get("refs") == found:
+            record["pins"] = old.get("pins", {})
+        else:
+            record["pins"] = _pins(run_folder, outcomes)
+            requested += int(asked)
+        records.append(record)
     records.sort(key=lambda r: (order.get(r["file"], len(order)), r["line"], r["id"]))
 
     claim_lines = b"".join(
@@ -135,7 +197,10 @@ def build(run_folder, main: str = "main.tex") -> BuildResult:
         state.atomic_write(ledger_path, ledger_bytes)
     except (state.StateError, OSError) as exc:
         raise ClaimsError("claims-path", f"the claim ledger cannot be written: {exc}") from exc
-    return BuildResult(count=len(records), claims_path=claims_path, ledger_path=ledger_path)
+    if repin or repin_claims:
+        events.emit(run_folder, "note.claims_repinned", "system", count=requested)
+    return BuildResult(count=len(records), claims_path=claims_path, ledger_path=ledger_path,
+                       problems=problems, repinned=requested)
 
 
 def read(run_folder, claim_id: str | None = None) -> list[dict]:
@@ -188,4 +253,3 @@ def _confined(run_folder: Path, path: Path) -> None:
     """Refuse a path that resolves outside the run folder."""
     if not path.resolve(strict=False).is_relative_to(Path(run_folder).resolve()):
         raise ClaimsError("claims-path", f"{path.name} lies outside the run folder")
-

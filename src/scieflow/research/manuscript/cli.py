@@ -204,12 +204,16 @@ def claims():
 @click.argument("run")
 @click.option("--main", "main_file", default=None, help="The main TeX file (default main.tex).")
 @click.option("--json", "as_json", is_flag=True, help="Print the ledger document as JSON.")
-def claims_build(run, main_file, as_json):
-    """Write report/claims/claims.jsonl and ledger.json for RUN from its manuscript (no evidence read)."""
+@click.option("--repin", is_flag=True, help="Take every claim's pins from the current evidence.")
+@click.option("--repin-claim", "repin_claims", multiple=True, metavar="ID",
+              help="Take this claim's pins from the current evidence (repeatable).")
+def claims_build(run, main_file, as_json, repin, repin_claims):
+    """Write report/claims/claims.jsonl and ledger.json for RUN, pinning the evidence it cites."""
     project = Project.discover()
     folder = _run_folder(project, run)
     try:
-        result = ledger_mod.build(folder, main=main_file or "main.tex")
+        result = ledger_mod.build(folder, main=main_file or "main.tex", repin=repin,
+                                  repin_claims=tuple(repin_claims))
     except ledger_mod.ClaimsError as exc:
         _fail(f"claims refused [{exc.rule}]: {exc.message}")
     if as_json:
@@ -217,6 +221,12 @@ def claims_build(run, main_file, as_json):
         click.echo(json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False))
     else:
         click.echo(f"claims: {result.count} claims written to {result.claims_path}")
+        if result.problems:
+            rules: dict = {}
+            for item in result.problems:
+                rules[item["rule"]] = rules.get(item["rule"], 0) + 1
+            summary = ", ".join(f"{rule} {count}" for rule, count in sorted(rules.items()))
+            click.echo(f"reference problems: {summary}")
     raise SystemExit(OK)
 
 
