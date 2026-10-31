@@ -16,6 +16,7 @@ from scieflow.research.manuscript import build as build_mod
 from scieflow.research.manuscript import check as check_mod
 from scieflow.research.manuscript import checklist, judgement, letters as letters_mod
 from scieflow.research.manuscript import package as package_mod, render as render_mod, templates, tex
+from scieflow.research.manuscript.claims import ledger as ledger_mod
 
 OK, REFUSED, USAGE = 0, 1, 2
 
@@ -191,4 +192,50 @@ def letter(run, kind, force):
     except letters_mod.LetterError as exc:
         _fail(f"letter refused [{exc.rule}]: {exc.message}")
     click.echo(f"letter: {path}")
+    raise SystemExit(OK)
+
+
+@manuscript.group()
+def claims():
+    """The claim ledger: one record per checkable sentence, figure or table (M-G 5.2-5.3)."""
+
+
+@claims.command("build")
+@click.argument("run")
+@click.option("--main", "main_file", default=None, help="The main TeX file (default main.tex).")
+@click.option("--json", "as_json", is_flag=True, help="Print the ledger document as JSON.")
+def claims_build(run, main_file, as_json):
+    """Write report/claims/claims.jsonl and ledger.json for RUN from its manuscript (no evidence read)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        result = ledger_mod.build(folder, main=main_file or "main.tex")
+    except ledger_mod.ClaimsError as exc:
+        _fail(f"claims refused [{exc.rule}]: {exc.message}")
+    if as_json:
+        document = json.loads(result.ledger_path.read_text(encoding="utf-8"))
+        click.echo(json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False))
+    else:
+        click.echo(f"claims: {result.count} claims written to {result.claims_path}")
+    raise SystemExit(OK)
+
+
+@claims.command("show")
+@click.argument("run")
+@click.option("--id", "claim_id", default=None, help="Show only the claim with this id.")
+@click.option("--json", "as_json", is_flag=True, help="Print the records as a JSON list.")
+def claims_show(run, claim_id, as_json):
+    """Print the claim ledger of RUN (excerpts of at most 60 characters in the table view)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        records = ledger_mod.read(folder, claim_id=claim_id)
+    except ledger_mod.ClaimsError as exc:
+        _fail(f"claims refused [{exc.rule}]: {exc.message}")
+    if as_json:
+        click.echo(json.dumps(records, indent=2, sort_keys=True, ensure_ascii=False))
+    else:
+        for record in records:
+            click.echo(f"{record['id']}  {record['file']}:{record['line']}  {record['unit']}  "
+                       f"{tex.excerpt(record['text'])}")
     raise SystemExit(OK)

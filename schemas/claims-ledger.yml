@@ -1,0 +1,13 @@
+# The claim ledger record and ledger.json shape (M-G 5.3). The writer is
+# src/scieflow/research/manuscript/claims/ledger.py; tests/research/manuscript/claims pins these keys.
+version: 1
+line_keys: [version, id, file, line, end_line, unit, section, section_kinds, text, text_sha256, numbers, refs, cites, pins]
+optional_line_keys: [text_truncated]
+number_keys: [raw, value, decimals, percent, relation]
+ref_keys: [type, id, via]
+ref_optional_keys: [key]
+ledger_keys: [version, parser_version, main, manuscript_tree_sha256, count, claims_sha256]
+units: [sentence, abstract, figure, table]
+relations: ["=", "<", "<=", ">", ">="]
+ref_types: [data, run, doi]
+ref_via: [comment, inline, cite]
