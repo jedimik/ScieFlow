@@ -101,6 +101,8 @@ def test_symlinked_folder_is_refused(synth):
     (synth.ms / "linked").symlink_to(synth.root)
     result = cli("point", "add", RUN, "v1")
     assert result.exit_code == 1, result.output
+    assert "[symlink]" in result.output
+    assert "linked is a symbolic link; refused" in result.output
     assert not point_folder(synth, "v1").exists()
 
 
@@ -114,6 +116,8 @@ def test_exactly_200_files_is_accepted_and_201_is_refused(synth):
     (extra / "f-over.txt").write_text("synthetic\n", encoding="utf-8")
     result = cli("point", "add", RUN, "over")
     assert result.exit_code == 1, result.output
+    assert "[point-limit]" in result.output
+    assert "more than 200 files in the source tree" in result.output
     assert not point_folder(synth, "over").exists()
 
 
@@ -121,6 +125,8 @@ def test_more_than_50_mb_is_refused(synth):
     (synth.ms / "big.bin").write_bytes(b"\0" * (50 * 1024 * 1024 + 1))
     result = cli("point", "add", RUN, "v1")
     assert result.exit_code == 1, result.output
+    assert "[point-limit]" in result.output
+    assert "the source tree is over" in result.output
     assert not point_folder(synth, "v1").exists()
 
 

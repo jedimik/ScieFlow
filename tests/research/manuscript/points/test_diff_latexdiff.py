@@ -1,7 +1,9 @@
 """latexdiff for `scieflow manuscript diff` (M-G 5.9, 5.16): fixed argv, cwd, minimal env, timeout, capped output.
 
-latexdiff is not installed on this host, so the subprocess is replaced by a mock. The argv, working folder,
-environment and timeout are the things under test. The real-binary test skips where latexdiff is absent.
+latexdiff is not installed on this host, so the subprocess is replaced by a fake that writes its stdout and
+stderr into the files it is handed (the code passes files, never pipes, so output is never held in memory).
+The argv, working folder, environment, timeout and the output cap are the things under test. The real-binary
+test skips where latexdiff is absent, looking on the same minimal PATH the code uses.
 """
 
 from __future__ import annotations
@@ -38,16 +40,24 @@ def found(monkeypatch, location="/usr/bin/latexdiff"):
 
 
 def completed(stdout=b"% latexdiff output\n", stderr=b"", code=0):
-    return subprocess.CompletedProcess(args=ARGV, returncode=code, stdout=stdout, stderr=stderr)
+    """A subprocess.run stand-in: writes the bytes into the stdout and stderr files the code passes in."""
+
+    def fake(argv, **kwargs):
+        kwargs["stdout"].write(stdout)
+        kwargs["stderr"].write(stderr)
+        return subprocess.CompletedProcess(args=argv, returncode=code, stdout=None, stderr=None)
+
+    return fake
 
 
 def test_argv_cwd_env_and_timeout_are_fixed(pair, monkeypatch):
     found(monkeypatch)
     calls = []
+    real = completed()
 
     def fake_run(argv, **kwargs):
         calls.append((argv, kwargs))
-        return completed()
+        return real(argv, **kwargs)
 
     monkeypatch.setattr(diff_mod.subprocess, "run", fake_run)
     result = diff_mod.diff(pair.run_dir, "v1", "current")
@@ -58,17 +68,20 @@ def test_argv_cwd_env_and_timeout_are_fixed(pair, monkeypatch):
     assert kwargs["env"] == {"PATH": "/usr/bin:/bin", "HOME": str(scratch(pair))}
     assert kwargs["timeout"] == 120
     assert not kwargs.get("shell", False)
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["stdout"] is not subprocess.PIPE and kwargs["stderr"] is not subprocess.PIPE
     assert result.latexdiff is True
 
 
 def test_the_two_flattened_sides_are_written_for_latexdiff(pair, monkeypatch):
     found(monkeypatch)
     seen = {}
+    real = completed()
 
     def fake_run(argv, **kwargs):
         seen["old"] = (kwargs["cwd"] / "old.tex").read_text(encoding="utf-8")
         seen["new"] = (kwargs["cwd"] / "new.tex").read_text(encoding="utf-8")
-        return completed()
+        return real(argv, **kwargs)
 
     monkeypatch.setattr(diff_mod.subprocess, "run", fake_run)
     diff_mod.diff(pair.run_dir, "v1", "current")
@@ -78,10 +91,11 @@ def test_the_two_flattened_sides_are_written_for_latexdiff(pair, monkeypatch):
 
 def test_the_latexdiff_output_is_written_as_diff_tex(pair, monkeypatch):
     found(monkeypatch)
-    monkeypatch.setattr(diff_mod.subprocess, "run", lambda argv, **kw: completed(stdout=b"\\DIFadd{x}\n"))
+    monkeypatch.setattr(diff_mod.subprocess, "run", completed(stdout=b"\\DIFadd{x}\n"))
     assert cli("diff", RUN, "--from", "v1").exit_code == 0
     written = (pair.run_dir / "report" / "diff" / "v1..current" / "diff.tex").read_bytes()
     assert written == b"\\DIFadd{x}\n"
+    assert not any(scratch(pair).glob("latexdiff.*"))
 
 
 def test_absent_latexdiff_runs_no_subprocess(pair, monkeypatch):
@@ -99,7 +113,7 @@ def test_absent_latexdiff_runs_no_subprocess(pair, monkeypatch):
 def test_a_nonzero_exit_is_refused_with_the_last_20_stderr_lines_capped_at_60(pair, monkeypatch):
     found(monkeypatch)
     stderr = "".join(f"line {index} " + "x" * 100 + "\n" for index in range(30)).encode("utf-8")
-    monkeypatch.setattr(diff_mod.subprocess, "run", lambda argv, **kw: completed(stderr=stderr, code=1))
+    monkeypatch.setattr(diff_mod.subprocess, "run", completed(stderr=stderr, code=1))
     with pytest.raises(diff_mod.DiffError) as caught:
         diff_mod.diff(pair.run_dir, "v1", "current")
     assert caught.value.rule == "latexdiff-failed"
@@ -109,9 +123,19 @@ def test_a_nonzero_exit_is_refused_with_the_last_20_stderr_lines_capped_at_60(pa
     assert "x" * 61 not in message
 
 
+def test_a_nonzero_exit_is_exit_1_with_the_stderr_tail_on_the_console(pair, monkeypatch):
+    found(monkeypatch)
+    monkeypatch.setattr(diff_mod.subprocess, "run", completed(stderr=b"! Undefined control sequence.\n", code=1))
+    result = cli("diff", RUN, "--from", "v1")
+    assert result.exit_code == 1, result.output
+    assert "diff refused [latexdiff-failed]" in result.output
+    assert "! Undefined control sequence." in result.output
+    assert not (pair.run_dir / "report" / "diff" / "v1..current").exists()
+
+
 def test_a_failed_latexdiff_writes_no_report(pair, monkeypatch):
     found(monkeypatch)
-    monkeypatch.setattr(diff_mod.subprocess, "run", lambda argv, **kw: completed(stderr=b"! bad\n", code=1))
+    monkeypatch.setattr(diff_mod.subprocess, "run", completed(stderr=b"! bad\n", code=1))
     with pytest.raises(diff_mod.DiffError):
         diff_mod.diff(pair.run_dir, "v1", "current")
     out = pair.run_dir / "report" / "diff" / "v1..current"
@@ -130,19 +154,22 @@ def test_a_timeout_is_refused(pair, monkeypatch):
     with pytest.raises(diff_mod.DiffError) as caught:
         diff_mod.diff(pair.run_dir, "v1", "current")
     assert caught.value.rule == "latexdiff-timeout"
+    assert not any(scratch(pair).glob("latexdiff.*"))
 
 
 def test_output_over_20_mb_is_refused(pair, monkeypatch):
     found(monkeypatch)
     big = b"%" * (20 * 1024 * 1024 + 1)
-    monkeypatch.setattr(diff_mod.subprocess, "run", lambda argv, **kw: completed(stdout=big))
+    monkeypatch.setattr(diff_mod.subprocess, "run", completed(stdout=big))
     with pytest.raises(diff_mod.DiffError) as caught:
         diff_mod.diff(pair.run_dir, "v1", "current")
     assert caught.value.rule == "latexdiff-output"
     assert not (pair.run_dir / "report" / "diff" / "v1..current" / "diff.tex").exists()
+    assert not any(scratch(pair).glob("latexdiff.*"))
 
 
-@pytest.mark.skipif(shutil.which("latexdiff") is None, reason="latexdiff is not installed")
+@pytest.mark.skipif(shutil.which("latexdiff", path=diff_mod.MINIMAL_PATH) is None,
+                    reason="latexdiff is not installed on the minimal PATH")
 def test_real_latexdiff_marks_the_change(pair):
     result = diff_mod.diff(pair.run_dir, "v1", "current")
     assert result.latexdiff is True

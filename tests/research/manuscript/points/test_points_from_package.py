@@ -1,7 +1,8 @@
 """`scieflow manuscript point add --from-package` (M-G 5.9, 5.16): the source.zip of a package, pinned.
 
 Synthetic data only. Every archive here is built by point_support.zip_bytes. The refusals cover the digest
-pin, unsafe names, symbolic links, the entry and size limits, a missing package and a dispatch.
+pin, unsafe names, symbolic links, the entry and size limits, a missing package and a dispatch. Each refusal
+asserts its rule-specific message, so a refusal for the wrong reason fails the test.
 """
 
 from __future__ import annotations
@@ -42,11 +43,14 @@ def test_from_package_emits_the_origin_event(packaged):
     assert data["origin"] == "package"
 
 
-def test_a_tampered_zip_is_refused(packaged):
+def test_a_tampered_zip_is_refused_by_the_digest_pin_alone(packaged):
+    # A VALID archive with other contents, package.json left as it was: only the sha256 pin can refuse it.
     sub = submission(packaged)
-    (sub / "source.zip").write_bytes(b"not the archive the package pinned")
+    (sub / "source.zip").write_bytes(zip_bytes([("main.tex", b"x\n")]))
     result = cli("point", "add", RUN, "pkg", "--from-package")
     assert result.exit_code == 1, result.output
+    assert "[package-digest]" in result.output
+    assert "does not match the digest in package.json" in result.output
     assert not point_folder(packaged, "pkg").exists()
 
 
@@ -55,6 +59,8 @@ def test_unsafe_entry_names_are_refused_before_any_write(packaged, name):
     replace_source_zip(packaged, zip_bytes([("main.tex", b"x\n"), (name, b"y\n")]))
     result = cli("point", "add", RUN, "pkg", "--from-package")
     assert result.exit_code == 1, result.output
+    assert "[zip-name]" in result.output
+    assert "is not a safe relative path" in result.output
     assert not point_folder(packaged, "pkg").exists()
     assert not (packaged.run_dir / "x.tex").exists()
     assert not (packaged.run_dir / "revision" / "x.tex").exists()
@@ -64,6 +70,8 @@ def test_a_symbolic_link_entry_is_refused(packaged):
     replace_source_zip(packaged, zip_bytes([("main.tex", b"x\n"), ("alias.tex", b"main.tex", 0o120777)]))
     result = cli("point", "add", RUN, "pkg", "--from-package")
     assert result.exit_code == 1, result.output
+    assert "[symlink]" in result.output
+    assert "is a symbolic link entry; refused" in result.output
     assert not point_folder(packaged, "pkg").exists()
 
 
@@ -72,6 +80,8 @@ def test_more_than_200_entries_are_refused(packaged):
     replace_source_zip(packaged, zip_bytes(entries))
     result = cli("point", "add", RUN, "pkg", "--from-package")
     assert result.exit_code == 1, result.output
+    assert "[point-limit]" in result.output
+    assert "more than 200 entries in source.zip" in result.output
     assert not point_folder(packaged, "pkg").exists()
 
 
@@ -79,6 +89,8 @@ def test_more_than_50_mb_of_entries_is_refused(packaged):
     replace_source_zip(packaged, zip_bytes([("big.bin", b"\0" * (50 * 1024 * 1024 + 1))]))
     result = cli("point", "add", RUN, "pkg", "--from-package")
     assert result.exit_code == 1, result.output
+    assert "[point-limit]" in result.output
+    assert "the entries of source.zip are over" in result.output
     assert not point_folder(packaged, "pkg").exists()
 
 
@@ -90,12 +102,16 @@ def test_a_symbolic_source_zip_is_refused(packaged):
     (sub / "source.zip").symlink_to(elsewhere)
     result = cli("point", "add", RUN, "pkg", "--from-package")
     assert result.exit_code == 1, result.output
+    assert "[symlink]" in result.output
+    assert "source.zip is a symbolic link; refused" in result.output
     assert not point_folder(packaged, "pkg").exists()
 
 
 def test_a_missing_package_is_refused(synth):
     result = cli("point", "add", RUN, "pkg", "--from-package")
     assert result.exit_code == 1, result.output
+    assert "[package-missing]" in result.output
+    assert "no report/submission folder" in result.output
     assert not point_folder(synth, "pkg").exists()
 
 
