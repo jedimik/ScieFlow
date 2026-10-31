@@ -1,0 +1,307 @@
+{
+  "endpoint": "paper/search",
+  "request_key": "a674294777c79d50d138170bc5e7ac085fa357721604c2223805c5a058ae8fd6",
+  "request_params": {
+    "fields": "paperId,externalIds,url,title,venue,publicationVenue,year,publicationDate,journal,authors,citationCount,referenceCount,isOpenAccess,openAccessPdf,publicationTypes",
+    "limit": 5,
+    "query": "self-supervised ECG"
+  },
+  "response_body": {
+    "data": [
+      {
+        "authors": [
+          {
+            "authorId": "1391090863",
+            "name": "Pritam Sarkar"
+          },
+          {
+            "authorId": "2394912477",
+            "name": "Ali Etemad"
+          }
+        ],
+        "citationCount": 353,
+        "externalIds": {
+          "ArXiv": "2002.03898",
+          "CorpusId": 211069320,
+          "DBLP": "journals/taffco/SarkarE22",
+          "DOI": "10.1109/TAFFC.2020.3014842",
+          "MAG": "3103192617"
+        },
+        "isOpenAccess": true,
+        "journal": {
+          "name": "IEEE Transactions on Affective Computing",
+          "pages": "1541-1554",
+          "volume": "13"
+        },
+        "openAccessPdf": {
+          "license": null,
+          "status": "GREEN",
+          "url": "https://arxiv.org/pdf/2002.03898"
+        },
+        "paperId": "a484fc24b62758b5bc61e6b967e7935c1a08dcab",
+        "publicationDate": "2020-02-04",
+        "publicationTypes": [
+          "JournalArticle"
+        ],
+        "publicationVenue": {
+          "alternate_names": [
+            "IEEE Trans Affect Comput"
+          ],
+          "alternate_urls": [
+            "http://ieeexplore.ieee.org/servlet/opac?punumber=5165369"
+          ],
+          "id": "a88e2a6c-903f-42e1-8dfc-f2547e32020a",
+          "issn": "1949-3045",
+          "name": "IEEE Transactions on Affective Computing",
+          "type": "journal",
+          "url": "https://ieeexplore.ieee.org/document/7160715/"
+        },
+        "referenceCount": 57,
+        "title": "Self-Supervised ECG Representation Learning for Emotion Recognition",
+        "url": "https://www.semanticscholar.org/paper/a484fc24b62758b5bc61e6b967e7935c1a08dcab",
+        "venue": "IEEE Transactions on Affective Computing",
+        "year": 2020
+      },
+      {
+        "authors": [
+          {
+            "authorId": "2185997269",
+            "name": "Chongrui Tian"
+          },
+          {
+            "authorId": "2350144395",
+            "name": "Fengbin Zhang"
+          }
+        ],
+        "citationCount": 8,
+        "externalIds": {
+          "CorpusId": 278825208,
+          "DBLP": "journals/access/TianZ25",
+          "DOI": "10.1109/ACCESS.2025.3572484"
+        },
+        "isOpenAccess": true,
+        "journal": {
+          "name": "IEEE Access",
+          "pages": "97585-97596",
+          "volume": "13"
+        },
+        "openAccessPdf": {
+          "license": null,
+          "status": "GOLD",
+          "url": "https://doi.org/10.1109/access.2025.3572484"
+        },
+        "paperId": "5ba2b9e3ce64a37f6a6215e8dd0a89d66017f1d9",
+        "publicationDate": null,
+        "publicationTypes": [
+          "JournalArticle"
+        ],
+        "publicationVenue": {
+          "alternate_urls": [
+            "http://ieeexplore.ieee.org/servlet/opac?punumber=6287639"
+          ],
+          "id": "2633f5b2-c15c-49fe-80f5-07523e770c26",
+          "issn": "2169-3536",
+          "name": "IEEE Access",
+          "type": "journal",
+          "url": "http://www.ieee.org/publications_standards/publications/ieee_access.html"
+        },
+        "referenceCount": 37,
+        "title": "Self-Supervised ECG Anomaly Detection Based on Time-Frequency Specific Waveform Mask Feature Fusion",
+        "url": "https://www.semanticscholar.org/paper/5ba2b9e3ce64a37f6a6215e8dd0a89d66017f1d9",
+        "venue": "IEEE Access",
+        "year": 2025
+      },
+      {
+        "authors": [
+          {
+            "authorId": "50331763",
+            "name": "S. Soltanieh"
+          },
+          {
+            "authorId": "1819160392",
+            "name": "J. Hashemi"
+          },
+          {
+            "authorId": "1379982213",
+            "name": "Ali Etemad"
+          }
+        ],
+        "citationCount": 31,
+        "externalIds": {
+          "ArXiv": "2304.06427",
+          "CorpusId": 258108043,
+          "DBLP": "journals/corr/abs-2304-06427",
+          "DOI": "10.1109/JBHI.2023.3331626",
+          "PubMed": "37948139"
+        },
+        "isOpenAccess": true,
+        "journal": {
+          "name": "IEEE Journal of Biomedical and Health Informatics",
+          "pages": "789-800",
+          "volume": "28"
+        },
+        "openAccessPdf": {
+          "license": null,
+          "status": "GREEN",
+          "url": "https://arxiv.org/pdf/2304.06427"
+        },
+        "paperId": "0af7f53fc65c2b037194d17d32668d8d5ef20223",
+        "publicationDate": "2023-04-13",
+        "publicationTypes": [
+          "JournalArticle"
+        ],
+        "publicationVenue": {
+          "alternate_names": [
+            "IEEE Journal of Biomedical and Health Informatics",
+            "IEEE j biomed health informatics",
+            "IEEE J Biomed Health Informatics"
+          ],
+          "alternate_urls": [
+            "https://ieeexplore.ieee.org/xpl/RecentIssue.jsp?punumber=6221020"
+          ],
+          "id": "eac74c9c-a5c0-417d-8088-8164a6a8bfb3",
+          "issn": "2168-2194",
+          "name": "IEEE journal of biomedical and health informatics",
+          "type": "journal",
+          "url": "https://ieeexplore.ieee.org/xpl/aboutJournal.jsp?punumber=6221020"
+        },
+        "referenceCount": 46,
+        "title": "In-Distribution and Out-of-Distribution Self-Supervised ECG Representation Learning for Arrhythmia Detection",
+        "url": "https://www.semanticscholar.org/paper/0af7f53fc65c2b037194d17d32668d8d5ef20223",
+        "venue": "IEEE journal of biomedical and health informatics",
+        "year": 2023
+      },
+      {
+        "authors": [
+          {
+            "authorId": "2284694829",
+            "name": "Shunxiang Yang"
+          },
+          {
+            "authorId": "144451455",
+            "name": "Cheng Lian"
+          },
+          {
+            "authorId": "2204109097",
+            "name": "Zhigang Zeng"
+          },
+          {
+            "authorId": "2238152508",
+            "name": "Bingrong Xu"
+          },
+          {
+            "authorId": "26993866",
+            "name": "Yixin Su"
+          },
+          {
+            "authorId": "2367415070",
+            "name": "Chenyang Xue"
+          }
+        ],
+        "citationCount": 12,
+        "externalIds": {
+          "CorpusId": 267745670,
+          "DBLP": "journals/nca/YangLZXSX24",
+          "DOI": "10.1007/s00521-024-09486-4"
+        },
+        "isOpenAccess": false,
+        "journal": {
+          "name": "Neural Computing and Applications",
+          "pages": "7625 - 7637",
+          "volume": "36"
+        },
+        "openAccessPdf": {
+          "license": null,
+          "status": "CLOSED",
+          "url": ""
+        },
+        "paperId": "abc54d21d6afe3d4886b0c72918a12854939686e",
+        "publicationDate": "2024-02-17",
+        "publicationTypes": [
+          "JournalArticle"
+        ],
+        "publicationVenue": {
+          "alternate_names": [
+            "Neural comput  appl (print",
+            "Neural Comput Appl",
+            "Neural Computing and Applications"
+          ],
+          "id": "702e18c0-c8c6-4800-a398-42aa159394d1",
+          "issn": "0941-0643",
+          "name": "Neural computing & applications (Print)",
+          "type": "journal",
+          "url": "https://link.springer.com/journal/521"
+        },
+        "referenceCount": 47,
+        "title": "Masked self-supervised ECG representation learning via multiview information bottleneck",
+        "url": "https://www.semanticscholar.org/paper/abc54d21d6afe3d4886b0c72918a12854939686e",
+        "venue": "Neural computing & applications (Print)",
+        "year": 2024
+      },
+      {
+        "authors": [
+          {
+            "authorId": "117636048",
+            "name": "Wenrui Zhang"
+          },
+          {
+            "authorId": "37953292",
+            "name": "Shijia Geng"
+          },
+          {
+            "authorId": "2317297",
+            "name": "linda Qiao"
+          }
+        ],
+        "citationCount": 40,
+        "externalIds": {
+          "ArXiv": "2202.12458",
+          "CorpusId": 252408805,
+          "DBLP": "journals/bspc/ZhangGH23",
+          "DOI": "10.1016/j.bspc.2022.104194"
+        },
+        "isOpenAccess": true,
+        "journal": {
+          "name": "Biomed. Signal Process. Control.",
+          "pages": "104194",
+          "volume": "79"
+        },
+        "openAccessPdf": {
+          "license": null,
+          "status": "GREEN",
+          "url": "https://arxiv.org/pdf/2202.12458"
+        },
+        "paperId": "9fececdebf3c2c034e46f5d59e5743855c5a053d",
+        "publicationDate": "2022-02-25",
+        "publicationTypes": [
+          "JournalArticle"
+        ],
+        "publicationVenue": {
+          "alternate_names": [
+            "Biomed Signal Process Control"
+          ],
+          "alternate_urls": [
+            "http://www.sciencedirect.com/science/journal/17468094"
+          ],
+          "id": "1bac31b4-014a-4981-ae41-af2a40acc162",
+          "issn": "1746-8094",
+          "name": "Biomedical Signal Processing and Control",
+          "type": "journal",
+          "url": "https://www.journals.elsevier.com/biomedical-signal-processing-and-control"
+        },
+        "referenceCount": 31,
+        "title": "A simple self-supervised ECG representation learning method via manipulated temporal-spatial reverse detection",
+        "url": "https://www.semanticscholar.org/paper/9fececdebf3c2c034e46f5d59e5743855c5a053d",
+        "venue": "Biomedical Signal Processing and Control",
+        "year": 2022
+      }
+    ],
+    "next": 5,
+    "offset": 0,
+    "total": 100724
+  },
+  "response_hash": "e8103678f7d689f0a5e6b58e5fa62df34846458a28367723cab1954db7fdd900",
+  "retrieved_at": "2026-07-14T12:56:17Z",
+  "schema_version": "1.0",
+  "source": "semantic_scholar"
+}

@@ -1,0 +1,1510 @@
+{
+ "generator": "researcher 1.0.0 verify over evals/snapshots (replay), M-C2 plan probe",
+ "sources": [
+  "openalex",
+  "crossref",
+  "datacite"
+ ],
+ "items": [
+  {
+   "doi": "10.1016/j.ins.2016.01.082",
+   "expected": "verified",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1038/s41591-018-0268-3",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1001/jamacardio.2019.0640",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.isci.2021.102373",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.asoc.2019.105778",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1038/s41591-020-0791-x",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.cmpb.2019.105001",
+   "expected": "verified",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1111/jce.13889",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/s2589-7500(20)30107-2",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.jacadv.2023.100686",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.neucom.2020.04.076",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1007/s12530-023-09559-0",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1038/s41591-018-0240-2",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/tem.2021.3104751",
+   "expected": "verified",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1186/s12911-021-01521-x",
+   "expected": "verified",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.artmed.2020.101919",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.jcmg.2021.08.004",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.21037/cdt.2019.12.10",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1111/exsy.12864",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1038/s41598-021-92172-5",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.ijcard.2020.12.065",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.jelectrocard.2018.11.013",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1088/1361-6579/aaf339",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.4258/hir.2021.27.1.19",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.sbsr.2022.100502",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/msp.2021.3134634",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1007/s11263-023-01852-4",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/cvpr.2019.01061",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/cvpr.2019.00202",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/iccv48922.2021.00647",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.compbiomed.2021.105114",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.knosys.2022.109631",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/cvpr.2019.01118",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/tii.2023.3280337",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/cvpr.2017.607",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.18653/v1/2021.acl-long.393",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.patrec.2022.02.007",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/iccv48922.2021.00937",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.21437/interspeech.2022-143",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1609/aaai.v33i01.33018545",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/taffc.2020.3014842",
+   "expected": "verified",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/isbi45749.2020.9098666",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.3390/rs12111868",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/taslp.2021.3095662",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1038/s42256-023-00640-6",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/tcsvt.2020.3003048",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1145/3459637.3482389",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/tkde.2021.3090866",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/iccv.2019.00334",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/tsm.2020.3038165",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/tbme.2012.2208112",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.bspc.2020.102194",
+   "expected": "verified",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/eurheartj/ehq278",
+   "expected": "verified",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1056/nejm199809033391003",
+   "expected": "verified",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.jelectrocard.2009.06.006",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1161/circulationaha.108.811877",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1152/ajpheart.00561.2010",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1212/wnl.0000000000002282",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/jbhi.2017.2688473",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1186/1475-925x-8-38",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/eurheartj/ehw210",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/europace/euw295",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/eurheartj/ehaa612",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1056/nejmoa1313600",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.jacc.2018.03.003",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1001/jamacardio.2018.0136",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1038/s41598-019-49092-2",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/tbme.2013.2264721",
+   "expected": "verified",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1046/j.1540-8167.2001.00809.x",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/j.hrthm.2018.06.037",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1001/jama.2021.6128",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1161/strokeaha.119.025384",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/s0140-6736(21)01698-6",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1007/s40846-022-00681-z",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1007/s10439-009-9740-z",
+   "expected": "verified",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "confirmed",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1164/ajrccm.165.6.2106079",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1001/jama.288.3.321",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1056/nejmoa1511939",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1053/j.gastro.2009.01.043",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1056/nejmoa1402670",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1161/01.hyp.26.5.820",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1056/nejm199704173361601",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/eurheartj/eht151",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/s0735-1097(02)01786-2",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/s0140-6736(10)62039-9",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/eurheartj/ehz646",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1161/hypertensionaha.116.07862",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1056/nejmoa1411892",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1056/nejmoa1308573",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1056/nejm200006223422507",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/eurheartj/ehy339",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1161/circulationaha.115.018912",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1056/nejmoa012212",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/ndt/gft515",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1097/hjh.0b013e32833b9c63",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1001/jama.262.13.1801",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1056/nejm199602013340504",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1161/hypertensionaha.115.05283",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/tnn.2008.2005605",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/tnnls.2020.2978386",
+   "expected": "mismatch",
+   "verdict": "mismatch",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/s19157-2019-47617-1",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/s34493-2022-16900-1",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1371/s22850-2023-54161-9",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/s20215-2019-33108-2",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1038/s69021-2020-49434-3",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/s74909-2023-89352-4",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/s64349-2021-84637-6",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1371/s74916-2021-47222-5",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/s25259-2022-88627-1",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1038/s18934-2019-23553-5",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/s31519-2019-12056-3",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/s99657-2019-81511-5",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1371/s79109-2021-30795-7",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/s69460-2019-86330-5",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1038/s93507-2021-16068-8",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/s11263-2022-54626-9",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/s36491-2020-68324-1",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1371/s11891-2021-55623-3",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/s90981-2020-57255-8",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1038/s98693-2021-38506-7",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1016/s92435-2022-42467-8",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1109/s58324-2020-96130-8",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1371/s85006-2022-20237-4",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1093/s26278-2020-47962-8",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.1038/s18880-2023-36847-5",
+   "expected": "unresolvable",
+   "verdict": "unresolvable",
+   "outcomes": [
+    "negative",
+    "negative",
+    "negative"
+   ]
+  },
+  {
+   "doi": "10.7283/2ykk-3g92",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358727",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.26007/6gq7-p170",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358279",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358278",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358665",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.17877564",
+   "expected": "inconclusive",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358666",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21276722",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.26007/y9p8-4h58",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358562",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.18433633",
+   "expected": "inconclusive",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.17877565",
+   "expected": "inconclusive",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.17026/ar/sraj8f",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.17026/ar/jzlhsu",
+   "expected": "inconclusive",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358658",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358657",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358714",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358715",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358409",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358408",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358572",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.5281/zenodo.21358573",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.15468/dl.ywyxjq",
+   "expected": "inconclusive",
+   "verdict": "inconclusive",
+   "outcomes": [
+    "negative",
+    "negative",
+    "confirmed"
+   ]
+  },
+  {
+   "doi": "10.60966/ihisavwe",
+   "expected": "inconclusive",
+   "verdict": "verified",
+   "outcomes": [
+    "confirmed",
+    "negative",
+    "confirmed"
+   ]
+  }
+ ]
+}

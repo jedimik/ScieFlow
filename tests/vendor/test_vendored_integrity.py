@@ -15,7 +15,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 PKG = REPO / "src" / "scieflow" / "_vendor" / "researcher_core"
-AUTHORED = {"__init__.py", "_fuzz.py"}
+AUTHORED = {"__init__.py", "_fuzz.py", "_deps.py"}
 
 
 def _sha(data: bytes) -> str:

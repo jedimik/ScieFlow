@@ -290,8 +290,11 @@ For round N = 1..`max_review_rounds`:
 
 ## Phase 5 — merge (coordinator only, no dispatch)
 
-0. **Blockers first.** `uv run scieflow review merge-check <slug>` exits 1
-   while a retracted or unresolvable reference is an open blocker. Merge
+0. **Identity check, then blockers.** Before merge-check, run `uv run scieflow research verify-bib <slug> --round <N>`
+   (N = the round being merged). It checks each reference against OpenAlex, Crossref and DataCite and
+   opens a human-only `review-blocker` gate for each `mismatch` or `unresolvable` one; `inconclusive`
+   never blocks. Then `uv run scieflow review merge-check <slug>` exits 1 while a retracted or
+   unresolvable reference, or a reference that `verify-bib` flagged, is an open blocker. Merge
    only after it passes: the author replaced the reference and the next
    round's bundle no longer flags it, or the user overruled the
    `review-blocker` gate with a reason. Never answer that gate yourself.

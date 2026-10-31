@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sokolmarek.github.io/researcher/schemas/record.schema.json",
+  "title": "CSLRecord",
+  "description": "A single bibliographic record in CSL-JSON, the canonical record format of researcher_core (D4). Every connector normalizes its raw API response into this shape; BibTeX and RIS are emitters, never the canonical form. The vocabulary is the CSL-JSON item vocabulary (closed: additionalProperties is false, exactly as in the upstream csl-data.json schema), so a misspelled field fails validation instead of passing through silently. Kernel-specific provenance (which sources produced the record, which snapshot hashes back it) lives under the CSL-standard 'custom' extension object rather than polluting the standard namespace.",
+  "type": "object",
+  "required": ["id", "type"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "description": "Stable identifier for the record within a run. Canonically the lowercased DOI when one exists, otherwise a source-prefixed native id (for example 'openalex:W2741809807' or 'arxiv:2103.00020'), otherwise a content-derived key.",
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "$ref": "#/$defs/cslType"
+    },
+    "custom": {
+      "$ref": "#/$defs/kernelExtension"
+    },
+
+    "author": { "$ref": "#/$defs/nameVariable" },
+    "chair": { "$ref": "#/$defs/nameVariable" },
+    "collection-editor": { "$ref": "#/$defs/nameVariable" },
+    "compiler": { "$ref": "#/$defs/nameVariable" },
+    "composer": { "$ref": "#/$defs/nameVariable" },
+    "container-author": { "$ref": "#/$defs/nameVariable" },
+    "contributor": { "$ref": "#/$defs/nameVariable" },
+    "curator": { "$ref": "#/$defs/nameVariable" },
+    "director": { "$ref": "#/$defs/nameVariable" },
+    "editor": { "$ref": "#/$defs/nameVariable" },
+    "editorial-director": { "$ref": "#/$defs/nameVariable" },
+    "editor-translator": { "$ref": "#/$defs/nameVariable" },
+    "executive-producer": { "$ref": "#/$defs/nameVariable" },
+    "guest": { "$ref": "#/$defs/nameVariable" },
+    "host": { "$ref": "#/$defs/nameVariable" },
+    "illustrator": { "$ref": "#/$defs/nameVariable" },
+    "interviewer": { "$ref": "#/$defs/nameVariable" },
+    "narrator": { "$ref": "#/$defs/nameVariable" },
+    "organizer": { "$ref": "#/$defs/nameVariable" },
+    "original-author": { "$ref": "#/$defs/nameVariable" },
+    "performer": { "$ref": "#/$defs/nameVariable" },
+    "producer": { "$ref": "#/$defs/nameVariable" },
+    "recipient": { "$ref": "#/$defs/nameVariable" },
+    "reviewed-author": { "$ref": "#/$defs/nameVariable" },
+    "script-writer": { "$ref": "#/$defs/nameVariable" },
+    "series-creator": { "$ref": "#/$defs/nameVariable" },
+    "translator": { "$ref": "#/$defs/nameVariable" },
+
+    "accessed": { "$ref": "#/$defs/dateVariable" },
+    "available-date": { "$ref": "#/$defs/dateVariable" },
+    "event-date": { "$ref": "#/$defs/dateVariable" },
+    "issued": { "$ref": "#/$defs/dateVariable" },
+    "original-date": { "$ref": "#/$defs/dateVariable" },
+    "submitted": { "$ref": "#/$defs/dateVariable" },
+
+    "abstract": { "$ref": "#/$defs/stringOrNumber" },
+    "annote": { "$ref": "#/$defs/stringOrNumber" },
+    "archive": { "$ref": "#/$defs/stringOrNumber" },
+    "archive_collection": { "$ref": "#/$defs/stringOrNumber" },
+    "archive_location": { "$ref": "#/$defs/stringOrNumber" },
+    "archive-place": { "$ref": "#/$defs/stringOrNumber" },
+    "authority": { "$ref": "#/$defs/stringOrNumber" },
+    "call-number": { "$ref": "#/$defs/stringOrNumber" },
+    "categories": {
+      "description": "Free-form subject categories.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "chapter-number": { "$ref": "#/$defs/stringOrNumber" },
+    "citation-key": { "$ref": "#/$defs/stringOrNumber" },
+    "citation-label": { "$ref": "#/$defs/stringOrNumber" },
+    "citation-number": { "$ref": "#/$defs/stringOrNumber" },
+    "collection-number": { "$ref": "#/$defs/stringOrNumber" },
+    "collection-title": { "$ref": "#/$defs/stringOrNumber" },
+    "container-title": { "$ref": "#/$defs/stringOrNumber" },
+    "container-title-short": { "$ref": "#/$defs/stringOrNumber" },
+    "dimensions": { "$ref": "#/$defs/stringOrNumber" },
+    "division": { "$ref": "#/$defs/stringOrNumber" },
+    "DOI": {
+      "description": "DOI, normalized to lowercase and stripped of any resolver prefix (bare '10.xxxx/yyyy', not a https://doi.org URL).",
+      "type": "string",
+      "pattern": "^10\\.[0-9]{4,9}/[^\\s]+$"
+    },
+    "edition": { "$ref": "#/$defs/stringOrNumber" },
+    "event": {
+      "description": "Deprecated CSL alias of event-title; retained because upstream sources still emit it.",
+      "$ref": "#/$defs/stringOrNumber"
+    },
+    "event-place": { "$ref": "#/$defs/stringOrNumber" },
+    "event-title": { "$ref": "#/$defs/stringOrNumber" },
+    "first-reference-note-number": { "$ref": "#/$defs/stringOrNumber" },
+    "genre": { "$ref": "#/$defs/stringOrNumber" },
+    "ISBN": { "$ref": "#/$defs/stringOrNumber" },
+    "ISSN": { "$ref": "#/$defs/stringOrNumber" },
+    "issue": { "$ref": "#/$defs/stringOrNumber" },
+    "journalAbbreviation": { "$ref": "#/$defs/stringOrNumber" },
+    "jurisdiction": { "$ref": "#/$defs/stringOrNumber" },
+    "keyword": { "$ref": "#/$defs/stringOrNumber" },
+    "language": {
+      "description": "Language of the item, ideally a BCP 47 tag (for example 'en', 'de-DE').",
+      "type": "string"
+    },
+    "locator": { "$ref": "#/$defs/stringOrNumber" },
+    "medium": { "$ref": "#/$defs/stringOrNumber" },
+    "note": { "$ref": "#/$defs/stringOrNumber" },
+    "number": { "$ref": "#/$defs/stringOrNumber" },
+    "number-of-pages": { "$ref": "#/$defs/stringOrNumber" },
+    "number-of-volumes": { "$ref": "#/$defs/stringOrNumber" },
+    "original-publisher": { "$ref": "#/$defs/stringOrNumber" },
+    "original-publisher-place": { "$ref": "#/$defs/stringOrNumber" },
+    "original-title": { "$ref": "#/$defs/stringOrNumber" },
+    "page": { "$ref": "#/$defs/stringOrNumber" },
+    "page-first": { "$ref": "#/$defs/stringOrNumber" },
+    "part": { "$ref": "#/$defs/stringOrNumber" },
+    "part-title": { "$ref": "#/$defs/stringOrNumber" },
+    "PMCID": { "$ref": "#/$defs/stringOrNumber" },
+    "PMID": { "$ref": "#/$defs/stringOrNumber" },
+    "printing": { "$ref": "#/$defs/stringOrNumber" },
+    "publisher": { "$ref": "#/$defs/stringOrNumber" },
+    "publisher-place": { "$ref": "#/$defs/stringOrNumber" },
+    "references": { "$ref": "#/$defs/stringOrNumber" },
+    "reviewed-genre": { "$ref": "#/$defs/stringOrNumber" },
+    "reviewed-title": { "$ref": "#/$defs/stringOrNumber" },
+    "scale": { "$ref": "#/$defs/stringOrNumber" },
+    "section": { "$ref": "#/$defs/stringOrNumber" },
+    "shortTitle": { "$ref": "#/$defs/stringOrNumber" },
+    "source": { "$ref": "#/$defs/stringOrNumber" },
+    "status": { "$ref": "#/$defs/stringOrNumber" },
+    "supplement": { "$ref": "#/$defs/stringOrNumber" },
+    "title": {
+      "description": "Item title, NFC-normalized with collapsed whitespace by model.py.",
+      "$ref": "#/$defs/stringOrNumber"
+    },
+    "title-short": { "$ref": "#/$defs/stringOrNumber" },
+    "URL": {
+      "description": "Landing page or resource URL.",
+      "type": "string"
+    },
+    "version": { "$ref": "#/$defs/stringOrNumber" },
+    "volume": { "$ref": "#/$defs/stringOrNumber" },
+    "volume-title": { "$ref": "#/$defs/stringOrNumber" },
+    "volume-title-short": { "$ref": "#/$defs/stringOrNumber" },
+    "year-suffix": { "$ref": "#/$defs/stringOrNumber" }
+  },
+  "$defs": {
+    "stringOrNumber": {
+      "description": "CSL-JSON standard variables accept a string or a number; producers normalize to string where practical.",
+      "type": ["string", "number"]
+    },
+    "cslType": {
+      "description": "CSL item type. Closed vocabulary from the CSL specification.",
+      "type": "string",
+      "enum": [
+        "article",
+        "article-journal",
+        "article-magazine",
+        "article-newspaper",
+        "bill",
+        "book",
+        "broadcast",
+        "chapter",
+        "classic",
+        "collection",
+        "dataset",
+        "document",
+        "entry",
+        "entry-dictionary",
+        "entry-encyclopedia",
+        "event",
+        "figure",
+        "graphic",
+        "hearing",
+        "interview",
+        "legal_case",
+        "legislation",
+        "manuscript",
+        "map",
+        "motion_picture",
+        "musical_score",
+        "pamphlet",
+        "paper-conference",
+        "patent",
+        "performance",
+        "periodical",
+        "personal_communication",
+        "post",
+        "post-weblog",
+        "regulation",
+        "report",
+        "review",
+        "review-book",
+        "software",
+        "song",
+        "speech",
+        "standard",
+        "thesis",
+        "treaty",
+        "webpage"
+      ]
+    },
+    "nameVariable": {
+      "description": "A CSL name variable: a list of agents, each either a structured name or a literal name.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "family": { "type": "string" },
+          "given": { "type": "string" },
+          "dropping-particle": { "type": "string" },
+          "non-dropping-particle": { "type": "string" },
+          "suffix": { "type": "string" },
+          "comma-suffix": { "type": ["string", "number", "boolean"] },
+          "static-ordering": { "type": ["string", "number", "boolean"] },
+          "literal": { "type": "string" },
+          "parse-names": { "type": ["string", "number", "boolean"] },
+          "sequence": {
+            "description": "Kernel extension retained from Crossref: 'first' or 'additional'.",
+            "type": "string",
+            "enum": ["first", "additional"]
+          },
+          "ORCID": {
+            "description": "Kernel extension: ORCID iD of the agent, as a bare identifier or a https://orcid.org URL.",
+            "type": "string"
+          }
+        },
+        "anyOf": [
+          { "required": ["family"] },
+          { "required": ["literal"] }
+        ]
+      }
+    },
+    "dateVariable": {
+      "description": "A CSL date variable. date-parts is the canonical machine form: an array of one or two date points, each [year] or [year, month] or [year, month, day].",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "date-parts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": { "type": ["string", "number"] }
+          }
+        },
+        "season": { "type": ["string", "number"] },
+        "circa": { "type": ["string", "number", "boolean"] },
+        "literal": { "type": "string" },
+        "raw": { "type": "string" },
+        "edtf": { "type": "string" }
+      }
+    },
+    "kernelExtension": {
+      "description": "The CSL-standard 'custom' extension object, used by researcher_core to carry non-bibliographic kernel metadata. Open by design so downstream milestones can add keys without a schema break.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "sources": {
+          "description": "Connector names that contributed to this record after dedup merge, in merge order.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/sourceName" }
+        },
+        "source_ids": {
+          "description": "Native identifiers per contributing source, keyed by connector name.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "source_response_hashes": {
+          "description": "Content-addressed hashes of the snapshots this record was derived from, tying the record to snapshot.schema.json entries and to provenance events.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/contentHash" }
+        },
+        "retrieved_at": {
+          "description": "Caller-supplied retrieval timestamp, RFC 3339.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "is_retracted": {
+          "description": "Raw OpenAlex is_retracted flag as reported. This is an input to axis (b), not the axis (b) verdict itself; the verdict lives in status-report.schema.json.",
+          "type": "boolean"
+        },
+        "cited_by_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "is_oa": { "type": "boolean" },
+        "oa_url": { "type": "string" },
+        "score": {
+          "description": "Composite rank score assigned by rank.py; comparable only within one result set.",
+          "type": "number"
+        },
+        "parser_version": { "$ref": "#/$defs/versionString" }
+      }
+    },
+    "sourceName": {
+      "description": "Connector name. Known values: openalex, crossref, datacite, semantic_scholar, arxiv, pubmed, unpaywall, opencitations.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "contentHash": {
+      "description": "SHA-256 content hash, hex encoded, optionally prefixed with 'sha256:'.",
+      "type": "string",
+      "pattern": "^(sha256:)?[0-9a-f]{64}$"
+    },
+    "versionString": {
+      "description": "Dotted version identifier, for example '0.1.0' or '1.2'.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?([-+.][0-9A-Za-z.-]+)?$"
+    }
+  }
+}

@@ -55,6 +55,23 @@ ledger. The output records are unchanged.
   `search all` fan-out and the snapshot store are in
   [Literature kernel](literature-kernel.md).
 
+## Identity, snowball and open-access providers (M-C2)
+
+Five more providers are in the catalogue. Each has its own switch in the `providers:` mapping of
+`config/integrations.yml`, and each request is checked by the data-protection policy first:
+
+- `search-pubmed`: PubMed search (`scieflow research search pubmed`). Off until `enabled: true` (D16).
+- `search-semantic-scholar`: Semantic Scholar search and snowball. Keyless. Off until `enabled: true` (D16).
+- `search-datacite`: DataCite search and identity lookups for datasets and software. On by default.
+- `opencitations`: citing and cited DOIs for `scieflow research snowball`. On by default.
+- `unpaywall`: the open-access lookup (`scieflow research oa`). Off until both `enabled: true` and
+  `contact_email` are set. Unpaywall receives your address with each request; ScieFlow never writes
+  it to a file, ledger, snapshot, event or printed output.
+
+Identity checks (`verify-bib`) use the `search-openalex`, `search-crossref` and `search-datacite` entries.
+`config/integrations.example.yml` lists all five. Copying the example does not switch PubMed, Semantic
+Scholar or Unpaywall on, and no address belongs in the example file or in any document.
+
 ## What leaves the machine
 
 Every query parameter is classified, deny by default:

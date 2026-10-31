@@ -1,0 +1,1505 @@
+{
+ "generator": "rapidfuzz 3.14.6 fuzz.ratio (M-C2 plan probe)",
+ "cases": [
+  {
+   "a": "",
+   "b": "",
+   "score": 100.0
+  },
+  {
+   "a": "a",
+   "b": "",
+   "score": 0.0
+  },
+  {
+   "a": "",
+   "b": "b",
+   "score": 0.0
+  },
+  {
+   "a": "nunez",
+   "b": "núñez",
+   "score": 60.0
+  },
+  {
+   "a": "postuma",
+   "b": "postuma",
+   "score": 100.0
+  },
+  {
+   "a": "risk the alpha eeg parkinson rem idiopathic",
+   "b": "disease a in behaviour cohort disorder alpha bodies skin study dementia cohort disease bodies",
+   "score": 38.23529411764706
+  },
+  {
+   "a": "dementia sleep rem in biopsy disease bodies lewy biomarker",
+   "b": "synuclein alpha biomarker biomarker isolated the synuclein lewy bodies parkinson risk",
+   "score": 44.75524475524476
+  },
+  {
+   "a": " c dñadcb漢b",
+   "b": "漢cedñ é eb漢ñddeaéee 漢 漢 d ",
+   "score": 27.027027027027028
+  },
+  {
+   "a": "alpha isolated",
+   "b": "alpha isolated",
+   "score": 100.0
+  },
+  {
+   "a": "the alpha biomarker risk bodies cohort risk skin bod",
+   "b": "the alpha biomarker risk bodies cohort risk skin bod",
+   "score": 100.0
+  },
+  {
+   "a": "漢漢漢ed c a漢aéé漢b ",
+   "b": "addñe漢eédceéée ñacdaéa漢e  漢aañccéecccñ漢bñeéb ñ漢eéeñéb",
+   "score": 34.78260869565217
+  },
+  {
+   "a": "dementia the idiopathic lewy idiopathi",
+   "b": "dementia the idiopathic lewy idiopathi",
+   "score": 100.0
+  },
+  {
+   "a": "dxsorder ",
+   "b": "disorder ",
+   "score": 88.88888888888889
+  },
+  {
+   "a": "postuma",
+   "b": "högl",
+   "score": 0.0
+  },
+  {
+   "a": "alpha neurodegeneratio",
+   "b": "alpha neurodegeneratio",
+   "score": 100.0
+  },
+  {
+   "a": " cbaé cñ béeaaddañññdñbeab eéabb dabañdñ漢 aaac漢cñebc漢añ ñ",
+   "b": "ñe漢cñéé漢ñe漢éedñaaeabééeé漢aé",
+   "score": 33.333333333333336
+  },
+  {
+   "a": "bodies",
+   "b": "bodies",
+   "score": 100.0
+  },
+  {
+   "a": "eeg cohortbparkinson eeg alpha risk behaviour for neu",
+   "b": "eeg cohort parkinson eeg alpha risk behaviour for neu",
+   "score": 98.11320754716981
+  },
+  {
+   "a": "o'brien",
+   "b": "krajca",
+   "score": 15.384615384615385
+  },
+  {
+   "a": "zhang",
+   "b": "vanderberg",
+   "score": 40.0
+  },
+  {
+   "a": "nunez",
+   "b": "krajca",
+   "score": 0.0
+  },
+  {
+   "a": "skin of parkinson rbd parkinson",
+   "b": "idiopathic study prodromal idiopathic 2023 biopsy biopsy skin",
+   "score": 34.78260869565217
+  },
+  {
+   "a": "parkinson prodromal prodromal sleep in bodies skin of synuclein dementia rem isolated dementia for in sleep",
+   "b": "the behavior dementia rbd rbd",
+   "score": 29.411764705882348
+  },
+  {
+   "a": "biopsy risk biomarker neurodegeneration eeg rem lewy eeg biopsy polysomnography synuclein parkinson",
+   "b": "parkinson sleep biomarker skin the",
+   "score": 33.08270676691729
+  },
+  {
+   "a": "risk lewy disorde",
+   "b": "risk lewy disorde",
+   "score": 100.0
+  },
+  {
+   "a": "for isolated lewy risk and r",
+   "b": "for isolated lewy risk and r",
+   "score": 100.0
+  },
+  {
+   "a": "smith",
+   "b": "nunez",
+   "score": 0.0
+  },
+  {
+   "a": "isolated rem study skin rbd in risk rbd study parkinson rem polysomnography disease biomarker disorder study of",
+   "b": "study rem isolated alpha behaviour behavior idiopathic disorder prodromal eeg 2023 behavior dementia lewy 2023 rbd the",
+   "score": 41.92139737991266
+  },
+  {
+   "a": "biomarker biomarker rbd",
+   "b": "the study behavior disorder and dementia cohort dementia",
+   "score": 32.91139240506329
+  },
+  {
+   "a": "nunez",
+   "b": "",
+   "score": 0.0
+  },
+  {
+   "a": "cohort eeg skin",
+   "b": "skin lewy biomarker",
+   "score": 23.529411764705888
+  },
+  {
+   "a": "muller",
+   "b": "",
+   "score": 0.0
+  },
+  {
+   "a": "in disorder rem of idiopathic risk disease prodromal behaviour polysomnography for a biomarker",
+   "b": "of of parkinson prodromal sleep",
+   "score": 38.4
+  },
+  {
+   "a": "biopsy disorder skin polysomnography parkinson behaviour behaviour polysomnography",
+   "b": "2023 sleep a cohort rbd for lewy 2023 for 2023 synuclein risk isolated parkinson behavior rem dementia",
+   "score": 43.47826086956522
+  },
+  {
+   "a": "postumа",
+   "b": "dvořák",
+   "score": 15.384615384615385
+  },
+  {
+   "a": "eaacañeññé ñéacc bacaeeañé漢dada",
+   "b": "dé漢ééca cñññédd漢ceaddd漢 ",
+   "score": 40.0
+  },
+  {
+   "a": "study neurodegeneration biomarker skin lewy idiopat",
+   "b": "study neurodegeneration biomarker skin lewy idiopat",
+   "score": 100.0
+  },
+  {
+   "a": "postumа",
+   "b": "van der berg",
+   "score": 0.0
+  },
+  {
+   "a": "a漢ñeée bddbacñ漢ec é ",
+   "b": "漢déaéññd ñ ñ ña 漢dd漢abceé  acñc漢ae漢eed漢c 漢daeñ eed éabée",
+   "score": 36.8421052631579
+  },
+  {
+   "a": "postuma",
+   "b": "van der berg",
+   "score": 10.526315789473683
+  },
+  {
+   "a": "smith",
+   "b": "o'brien",
+   "score": 16.666666666666664
+  },
+  {
+   "a": "risk in for bodies biopsy behaviour skin synuclein behavicur cohort re",
+   "b": "risk in for bodies biopsy behaviour skin synuclein behaviour cohort re",
+   "score": 98.57142857142858
+  },
+  {
+   "a": "of bewy",
+   "b": "of lewy",
+   "score": 85.71428571428572
+  },
+  {
+   "a": "neurodegeneration risk",
+   "b": "neurodegeneration risk",
+   "score": 100.0
+  },
+  {
+   "a": "smith",
+   "b": "krajča",
+   "score": 0.0
+  },
+  {
+   "a": "muller",
+   "b": "van der berg",
+   "score": 22.22222222222222
+  },
+  {
+   "a": "vanderberg",
+   "b": "dvořák",
+   "score": 12.5
+  },
+  {
+   "a": "krajča",
+   "b": "zhong",
+   "score": 0.0
+  },
+  {
+   "a": "núñez",
+   "b": "iranzo",
+   "score": 36.36363636363637
+  },
+  {
+   "a": "漢漢eebdac d漢",
+   "b": "dbéñcbabcñeecaeñañ ññddééañbbñdd漢c漢",
+   "score": 26.086956521739136
+  },
+  {
+   "a": "li",
+   "b": "hogl",
+   "score": 33.333333333333336
+  },
+  {
+   "a": "van der berg",
+   "b": "vanderberg",
+   "score": 90.9090909090909
+  },
+  {
+   "a": "högl",
+   "b": "obrien",
+   "score": 0.0
+  },
+  {
+   "a": "behaviour parkinson behavior study behaviour rbd idiopathic the rbd behavior in of idiopathic",
+   "b": "biomarker neurodegeneration risk sleep disorder of eeg of eeg dementia disorder study and rbd",
+   "score": 38.70967741935484
+  },
+  {
+   "a": "rem behaviour parkinson beh",
+   "b": "rem behaviour parkinson beh",
+   "score": 100.0
+  },
+  {
+   "a": "zhong",
+   "b": "o'brien",
+   "score": 33.333333333333336
+  },
+  {
+   "a": "anz risk",
+   "b": "and risk",
+   "score": 87.5
+  },
+  {
+   "a": "dementia rem rem 2023 risk skin for bodies sleep prodromal alpha behaviour behaviour for and cohort",
+   "b": "disorder dementia parkinson isolated skin parkinson isolated skin disorder parkinson eeg 2023 disease study disorder study",
+   "score": 40.723981900452486
+  },
+  {
+   "a": "rbd bodies neurodegeneration behavior",
+   "b": "study disease bodies skin isolated disease polysomnography risk eeg of",
+   "score": 39.252336448598136
+  },
+  {
+   "a": "postuma",
+   "b": "postuma",
+   "score": 100.0
+  },
+  {
+   "a": "li",
+   "b": "lee",
+   "score": 40.0
+  },
+  {
+   "a": "in in in behavior parkinson biopsy study the neurodegeneration",
+   "b": "polysomnography synuclein parkinson sleep dementia 2023 skin skin and biomarker eeg rem behaviour neurodegeneration prodromal 2023",
+   "score": 43.75
+  },
+  {
+   "a": "o'brien",
+   "b": "smith",
+   "score": 16.666666666666664
+  },
+  {
+   "a": "dementia parkinson c",
+   "b": "dementia parkinson c",
+   "score": 100.0
+  },
+  {
+   "a": "alpha eeg risk for eeg rem behavior prodromal disease parkinson for alpha cohort idiopathic bodies",
+   "b": "cohort isolated in behavior a of for the behavior sleep rem eeg eeg the the",
+   "score": 41.61849710982659
+  },
+  {
+   "a": "",
+   "b": "müller",
+   "score": 0.0
+  },
+  {
+   "a": "behavior polysomnography neurodegeneration biopsy dementia polysomnography behaviour prodromal risk a for study cohort disease skin idiopathic idiopathic",
+   "b": "sleep eeg disease behavior 2023 of lewy for in of for idiopathic the",
+   "score": 42.533936651583716
+  },
+  {
+   "a": "cohort behavior 2023 synuclein disease biopsy prodromal and of idiopathic rem",
+   "b": "of disorder and behavior skin lewy disorder bodies parkinson eeg idiopathic isolated",
+   "score": 55.90062111801242
+  },
+  {
+   "a": "dvorak",
+   "b": "vanderberg",
+   "score": 25.0
+  },
+  {
+   "a": "núñez",
+   "b": "iranso",
+   "score": 18.181818181818176
+  },
+  {
+   "a": "a023 park",
+   "b": "2023 park",
+   "score": 88.88888888888889
+  },
+  {
+   "a": "krajca",
+   "b": "núñez",
+   "score": 0.0
+  },
+  {
+   "a": "rem prodromal neurodegeneration biopsy",
+   "b": "eeg of and risk disease of",
+   "score": 34.375
+  },
+  {
+   "a": "alpha of the idiopathic 2023 rbd lewy",
+   "b": "rem study rbd for synuclein risk isolated skin study behavior behavior sleep alpha",
+   "score": 30.252100840336137
+  },
+  {
+   "a": "rbd eeg 2023",
+   "b": "for alpha rbd synuclein disorder biopsy for in",
+   "score": 24.13793103448276
+  },
+  {
+   "a": "bodies eeg behavior for and prodromal bodies cohort biomarker lewy in disorder rbd neurodegeneration neurodegeneration",
+   "b": "isolated of synuclein the",
+   "score": 23.77622377622378
+  },
+  {
+   "a": "li",
+   "b": "lee",
+   "score": 40.0
+  },
+  {
+   "a": "rbd in the of eeg polysomnography parkinson alpha prodromal biomarker th",
+   "b": "rbd in the of eeg polysomnography parkinson alpha prodromal biomarker th",
+   "score": 100.0
+  },
+  {
+   "a": "disorder behavior bodies a cohort rem parkinson parkinson skin lewy parkinson study 2023",
+   "b": "behavior risk and the prodromal parkinson a bodies prodromal sleep lewy behavior parkinson in eeg skin idiopathic",
+   "score": 52.736318407960205
+  },
+  {
+   "a": "the rbd dem",
+   "b": "the rbd dem",
+   "score": 100.0
+  },
+  {
+   "a": "disorder prodro",
+   "b": "disorder prodro",
+   "score": 100.0
+  },
+  {
+   "a": "postuma",
+   "b": "högl",
+   "score": 0.0
+  },
+  {
+   "a": "idiopath",
+   "b": "idiopath",
+   "score": 100.0
+  },
+  {
+   "a": "2023 2023 a risk cohort biomarker c",
+   "b": "2023 2023 a risk cohort biomarker c",
+   "score": 100.0
+  },
+  {
+   "a": "yement",
+   "b": "dement",
+   "score": 83.33333333333334
+  },
+  {
+   "a": "rbd biops",
+   "b": "rbd biops",
+   "score": 100.0
+  },
+  {
+   "a": "lewy of disease bocies rem 2023 bi",
+   "b": "lewy of disease bodies rem 2023 bi",
+   "score": 97.05882352941177
+  },
+  {
+   "a": "polysomnography dementia disease lewy disorder prodromal lewy skin disease behaviour dementia synuclein alpha lewy biopsy skin",
+   "b": "of biomarker dementia behaviour prodromal a lewy",
+   "score": 41.379310344827594
+  },
+  {
+   "a": "obrien",
+   "b": "postuma",
+   "score": 15.384615384615385
+  },
+  {
+   "a": "lewy biopsy the eeg a in eeg parkinson lewy",
+   "b": "lewy biopsy the eeg a in eeg parkinson lewy",
+   "score": 100.0
+  },
+  {
+   "a": "eez idiopathic rbd ",
+   "b": "eeg idiopathic rbd ",
+   "score": 94.73684210526316
+  },
+  {
+   "a": "rem behavior prodromal sleep sleep in isolated neurodegeneration rbd rbd bodies 2023 alpha skin",
+   "b": "behavior prodromal for the a dementia risk disease biomarker parkinson neurodegeneration in alpha",
+   "score": 59.375
+  },
+  {
+   "a": "van der berg",
+   "b": "obrien",
+   "score": 22.22222222222222
+  },
+  {
+   "a": "iranzo",
+   "b": "dvorak",
+   "score": 33.333333333333336
+  },
+  {
+   "a": "2023 eeg neurodegeneration and isolated biomarker disorder behaviour a risk for 2023 parkinson synuclein alpha bodies parkinson",
+   "b": "behavior idiopathic dementia biomarker dementia the 2023",
+   "score": 36.065573770491795
+  },
+  {
+   "a": "krajca",
+   "b": "krajca",
+   "score": 100.0
+  },
+  {
+   "a": " c",
+   "b": "adedb漢cdd e漢 ée",
+   "score": 11.764705882352944
+  },
+  {
+   "a": "biopsy prodromal behavior disease 2023 prodromal rem prodromal isolated dementia idiopathic eeg biomarker study eeg",
+   "b": "of polysomnography eeg and eeg the",
+   "score": 32.21476510067114
+  },
+  {
+   "a": "rem neurodegeneration biomarker",
+   "b": "for behaviour a neurodegeneration alpha and cohort rem parkinson bodies skin of cohort rbd biopsy biomarker in",
+   "score": 42.553191489361694
+  },
+  {
+   "a": "nunez",
+   "b": "iranso",
+   "score": 18.181818181818176
+  },
+  {
+   "a": "polysomnography isolated biopsy behavior parkinson biopsy for dementia 2023 dementia in idiopathic behaviour study",
+   "b": "synuclein the biomarker rem isolated eeg dementia bodies a alpha isolated risk rem",
+   "score": 40.816326530612244
+  },
+  {
+   "a": "ccédca éña bñdbé漢b漢ñ漢da",
+   "b": "aé漢a漢bedb d漢dadec  dcéaññabééd漢cññ漢 ñbea ñaéñécñ éaddcédd",
+   "score": 32.49999999999999
+  },
+  {
+   "a": "disease disease polysomnography behaviour idiopathix behavior dementia beha",
+   "b": "disease disease polysomnography behaviour idiopathic behavior dementia beha",
+   "score": 98.66666666666667
+  },
+  {
+   "a": "skin dementia 2023 dementia for eeg neurodegeneration polysomnography disease and biopsy prodromal study in",
+   "b": "lewy biopsy 2023 sleep synuclein disorder risk bodies skin",
+   "score": 38.787878787878796
+  },
+  {
+   "a": "lywy rbd rem idiopathic idiopathic po",
+   "b": "lewy rbd rem idiopathic idiopathic po",
+   "score": 97.2972972972973
+  },
+  {
+   "a": "behaviour in rem rem b",
+   "b": "behaviour in rem rem b",
+   "score": 100.0
+  },
+  {
+   "a": "muller",
+   "b": "iranzo",
+   "score": 16.666666666666664
+  },
+  {
+   "a": "behaviour rem dementia and alpha a behaviour idiopathic study disorder lewy alpha behaviour biomarker a prodromal",
+   "b": "eeg prodromal sleep isolated",
+   "score": 26.95035460992907
+  },
+  {
+   "a": "hogl",
+   "b": "van der berg",
+   "score": 12.5
+  },
+  {
+   "a": "the rbd dementia prodromal neurodegeneration eeg behaviour dementia biomarker 2023",
+   "b": "cohort dementia eeg alpha 2023 behaviour skin polysomnography for isolated eeg",
+   "score": 46.25
+  },
+  {
+   "a": "smith",
+   "b": "postuma",
+   "score": 33.333333333333336
+  },
+  {
+   "a": "behaviour cohort the behaviour for risk be",
+   "b": "behaviour cohort the behaviour for risk be",
+   "score": 100.0
+  },
+  {
+   "a": "müller",
+   "b": "núñez",
+   "score": 18.181818181818176
+  },
+  {
+   "a": "dvorak",
+   "b": "muller",
+   "score": 16.666666666666664
+  },
+  {
+   "a": "adadce漢eññcée c écb ñe bbcccccbba e漢abddab漢",
+   "b": "ñe漢eeññda b e   dññc b ñbñbd  acé ñd ñcad",
+   "score": 42.85714285714286
+  },
+  {
+   "a": "sleep study risk a 2023 cohort behavior bodies polysomnography synuclein 2023 a biomarker biopsy rem neurodegeneration neurodegeneration",
+   "b": "rbd in isolated biomarker rbd a biopsy",
+   "score": 31.034482758620683
+  },
+  {
+   "a": "dement",
+   "b": "dement",
+   "score": 100.0
+  },
+  {
+   "a": "rem rbd",
+   "b": "rem rbd",
+   "score": 100.0
+  },
+  {
+   "a": "disease remcpol",
+   "b": "disease rem pol",
+   "score": 93.33333333333333
+  },
+  {
+   "a": "2023 lewy a rbd biomarke",
+   "b": "2023 lewy a rbd biomarke",
+   "score": 100.0
+  },
+  {
+   "a": "synuclein rbb dement",
+   "b": "synuclein rbd dement",
+   "score": 95.0
+  },
+  {
+   "a": "disorder alpha the isolated disorder for ",
+   "b": "disorder alpha the isolated disorder for ",
+   "score": 100.0
+  },
+  {
+   "a": "bñbdaacde 漢a cbd bñebécbbñññ",
+   "b": " déedeeéé éeé bbddbcad漢dcbéeeéccca ñ",
+   "score": 37.5
+  },
+  {
+   "a": "alpha rbd idiopathic of sleep of eeg 2023 the behaviour study disorder isolated cohort and behavior alpha",
+   "b": "rbd behavior behaviour for polysomnography prodromal a behaviour idiopathic and skin bodies risk disorder for rbd sleep",
+   "score": 42.85714285714286
+  },
+  {
+   "a": "iranso",
+   "b": "li",
+   "score": 25.0
+  },
+  {
+   "a": "a behaviour biocarker ",
+   "b": "a behaviour biomarker ",
+   "score": 95.45454545454545
+  },
+  {
+   "a": "ñdedññ漢漢ébbbc漢eañb漢漢dcé漢漢d",
+   "b": "ddéébécccñdedbéb cccdñaacéb",
+   "score": 37.735849056603776
+  },
+  {
+   "a": "bde",
+   "b": " bebeedbedeñd ñacébae漢a édéd edcccaébeñañ ñ dñ漢dédc dbcda",
+   "score": 9.999999999999998
+  },
+  {
+   "a": "lewy cohort a lewy a neurodegeneration synuclein sleep behavior eeg prodromal sleep lewy rem disease alpha",
+   "b": "sleep polysomnography cohort a skin the behaviour biomarker behavior neurodegeneration skin polysomnography a disorder isolated biomarker parkinson 2023",
+   "score": 45.736434108527135
+  },
+  {
+   "a": "rbd of a in polysomnography isolated",
+   "b": "disorder skin parkinson idiopathic sleep skin polysomnography neurodegeneration lewy and and and rem a the biopsy",
+   "score": 42.95302013422819
+  },
+  {
+   "a": "",
+   "b": "li",
+   "score": 0.0
+  },
+  {
+   "a": "lewy parkinson in disorder",
+   "b": "in sleep rbd parkinson a neurodegeneration rem idiopathic prodromal idiopathic sleep skin cohort",
+   "score": 37.704918032786885
+  },
+  {
+   "a": "li",
+   "b": "müller",
+   "score": 25.0
+  },
+  {
+   "a": "zhong",
+   "b": "iranso",
+   "score": 18.181818181818176
+  },
+  {
+   "a": "isolated alpha dementia disease of eeg biomarker in behaviour bodies s",
+   "b": "isolated alpha dementia disease of eeg biomarker in behaviour bodies s",
+   "score": 100.0
+  },
+  {
+   "a": "rem neurodegeneration eeg dementia isolated in the rbd eeg",
+   "b": "rem rbd polysomnography polysomnography behaviour synuclein rbd in polysomnography cohort study biopsy risk skin parkinson synuclein",
+   "score": 31.57894736842105
+  },
+  {
+   "a": "idiopathic cohort biopsy of the biopsy prodromal rem eeg behaviour and study lewy",
+   "b": "risk bodies idiopathic",
+   "score": 25.24271844660194
+  },
+  {
+   "a": "cohort alpha behavior idiopathic cohort synuclein",
+   "b": "idiopathic neurodegeneration eeg parkinson the idiopathic skin",
+   "score": 45.04504504504504
+  },
+  {
+   "a": "muller",
+   "b": "postuma",
+   "score": 15.384615384615385
+  },
+  {
+   "a": "in lewy skin parkinson synuclein eeg synuclein for prodromal",
+   "b": "sleep and neurodegeneration risk bodies the of",
+   "score": 37.735849056603776
+  },
+  {
+   "a": "iai",
+   "b": "idi",
+   "score": 66.66666666666667
+  },
+  {
+   "a": "bodies risk biomarker synuclein a parkinson cohort risk cohort alpha cohort lewy",
+   "b": "in biopsy polysomnography risk 2023 biopsy a the 2023 isolated study parkinson biomarker eeg neurodegeneration isolated",
+   "score": 42.21105527638191
+  },
+  {
+   "a": "behavior behavior parkinson alpha eeg a rbd alpha skin in biomarker 2023 isolated rem and polysomnography synuclein",
+   "b": "idiopathic isolated risk alpha alpha behavior biomarker 2023",
+   "score": 43.42857142857143
+  },
+  {
+   "a": "postuma",
+   "b": "müller",
+   "score": 15.384615384615385
+  },
+  {
+   "a": "behavior in disorder study 2023 alpha a the alpha rbd isolated risk rbd biopsy",
+   "b": "rbd rem rbd synuclein alpha",
+   "score": 30.476190476190478
+  },
+  {
+   "a": "skin risk biomarker skin exg 2023 of",
+   "b": "skin risk biomarker skin eeg 2023 of",
+   "score": 97.22222222222221
+  },
+  {
+   "a": "disorder skin 2023 idiopathic biopsy behavior sleep polysomnography cohort isolxte",
+   "b": "disorder skin 2023 idiopathic biopsy behavior sleep polysomnography cohort isolate",
+   "score": 98.78048780487805
+  },
+  {
+   "a": "rbd biomarker rem of",
+   "b": "rbd biomarker rem of",
+   "score": 100.0
+  },
+  {
+   "a": "postumа",
+   "b": "postumа",
+   "score": 100.0
+  },
+  {
+   "a": "postumа",
+   "b": "obrien",
+   "score": 15.384615384615385
+  },
+  {
+   "a": "study rbd synuclein isolated and alpha 2023 risk bodies",
+   "b": "lewy cohort in 2023 behaviour disease bodies biopsy rem 2023 study prodromal rbd",
+   "score": 38.51851851851852
+  },
+  {
+   "a": "o'brien",
+   "b": "lee",
+   "score": 19.999999999999996
+  },
+  {
+   "a": "dementia parkinson dementia in the neurodegeneration lewy rbd alpha study biomarker",
+   "b": "biomarker parkinson eeg parkinson sleep sleep neurodegeneration neurodegeneration rem skin neurodegeneration biopsy study rem polysomnography alpha for",
+   "score": 48.71794871794872
+  },
+  {
+   "a": "polysomnography and polysomnography study behaviour and neurodegeneration parkinson disease",
+   "b": "2023 rbd skin neurodegeneration biopsy and of synuclein study of disease cohort 2023 lewy biomarker bodies",
+   "score": 40.609137055837564
+  },
+  {
+   "a": "neurodegeneration polysomnography neurodegeneration a rem rem synuclein biopsy eeg a the parkinson behaviour behaviour sleep parkinson and",
+   "b": "parkinson the in polysomnography neurodegeneration cohort disease isolated",
+   "score": 53.77358490566038
+  },
+  {
+   "a": "polysomnograp",
+   "b": "polysomnograp",
+   "score": 100.0
+  },
+  {
+   "a": "muller",
+   "b": "vanderberg",
+   "score": 25.0
+  },
+  {
+   "a": "disease rem biopsy lewy cohort study biomarker synuclein 2023",
+   "b": "disease rem biopsy lewy cohort study biomarker synuclein 2023",
+   "score": 100.0
+  },
+  {
+   "a": "nunez",
+   "b": "o'brien",
+   "score": 16.666666666666664
+  },
+  {
+   "a": "muller",
+   "b": "lee",
+   "score": 44.44444444444444
+  },
+  {
+   "a": "a in skin bodies idiopathic cohort in sleep behavior polysomnography dementia rem sleep dementia idiopathic 2023 dementia alpha",
+   "b": "skin and polysomnography biomarker neurodegeneration sleep in lewy isolated",
+   "score": 43.56435643564357
+  },
+  {
+   "a": "disorder 2023 of isolated for of biopsy of",
+   "b": "isolated behavior eeg synuclein in biopsy alpha biopsy",
+   "score": 43.75
+  },
+  {
+   "a": "and study polysomnography biopsy rbd for isolated sleep disorder beha",
+   "b": "and study polysomnography biopsy rbd for isolated sleep disorder beha",
+   "score": 100.0
+  },
+  {
+   "a": "postumа",
+   "b": "muller",
+   "score": 15.384615384615385
+  },
+  {
+   "a": "nunez",
+   "b": "núñez",
+   "score": 60.0
+  },
+  {
+   "a": "ñé b",
+   "b": " decédabcéedeñ漢déaé漢abc漢bbdbññ漢dñbbddé",
+   "score": 14.28571428571429
+  },
+  {
+   "a": "isolated neurodegeneration rbd study prodromal dementia sleep lewy disease and parkinson dementia",
+   "b": "rbd and synuclein biomarker",
+   "score": 29.032258064516125
+  },
+  {
+   "a": "a polysomnography prodromal lewy cohort disease behavior",
+   "b": "isolated in biomarker skin synuclein biopsy biopsy a rem idiopathic",
+   "score": 32.52032520325203
+  },
+  {
+   "a": "eeg behavior polysomnography eeg rbd alpha disorder idiopathic in disease in rbd parkinson and rem a biopsy behavior",
+   "b": "rbd biopsy disorder skin synuclein eeg neurodegeneration prodromal the isolated risk parkinson behaviour behaviour and bodies prodromal",
+   "score": 46.21513944223108
+  },
+  {
+   "a": "cohort biomarker of disorder in biopsy risk bodies prodromal cohort in parkinson of idiopathic",
+   "b": "polysomnography biopsy 2023 2023 rem disorder idiopathic of cohort a isolated idiopathic risk neurodegeneration prodromal eeg in dementia",
+   "score": 44.15584415584416
+  },
+  {
+   "a": "disease behaviour rbd prodromal neurodegeneration and",
+   "b": "disorder dementia rem rem behavior cohort isolated idiopathic idiopathic dementia skin idiopathic risk and behavior the dementia",
+   "score": 38.67403314917127
+  },
+  {
+   "a": "for iyiopathic disorder disease biomarker disease eeg of rem disease eeg behavior 2023 lewy idi",
+   "b": "for idiopathic disorder disease biomarker disease eeg of rem disease eeg behavior 2023 lewy idi",
+   "score": 98.94736842105263
+  },
+  {
+   "a": "dvořák",
+   "b": "iranzo",
+   "score": 16.666666666666664
+  },
+  {
+   "a": "núñez",
+   "b": "postuma",
+   "score": 0.0
+  },
+  {
+   "a": "",
+   "b": "",
+   "score": 100.0
+  },
+  {
+   "a": "zhong",
+   "b": "van der berg",
+   "score": 23.529411764705888
+  },
+  {
+   "a": "slexp lewy lewy parkinson study study rbd fo",
+   "b": "sleep lewy lewy parkinson study study rbd fo",
+   "score": 97.72727272727273
+  },
+  {
+   "a": "study rem sleep lewy disorder 2023 and behaviour skin dementia cohort 2023 cohort rem risk",
+   "b": "prodromal parkinson disorder rem neurodegeneration",
+   "score": 38.57142857142857
+  },
+  {
+   "a": "obrien",
+   "b": "zhong",
+   "score": 36.36363636363637
+  },
+  {
+   "a": "vanderberg",
+   "b": "postuma",
+   "score": 11.764705882352944
+  },
+  {
+   "a": "biomarker bodies isolated biopsy rbd",
+   "b": "cohort 2023 and prodromal 2023 of disease isolated cohort the risk idiopathic study and rbd in",
+   "score": 44.61538461538461
+  },
+  {
+   "a": "a cohort of rem lewy neurodegeneration biopsy polysomnography biopsy rem in",
+   "b": "in study behavior in disease and 2023 bodies study risk",
+   "score": 33.84615384615385
+  },
+  {
+   "a": "núñez",
+   "b": "krajča",
+   "score": 0.0
+  },
+  {
+   "a": "cf neuro",
+   "b": "of neuro",
+   "score": 87.5
+  },
+  {
+   "a": "cñaddñaécdñcé e漢éeécéeéaédcñ漢漢abcééécb é  éññ",
+   "b": "abeadñd漢bñaeée漢cdcée abdc",
+   "score": 40.0
+  },
+  {
+   "a": "neurodegeneration sleep dementia 2023 polysomnography dementi",
+   "b": "neurodegeneration sleep dementia 2023 polysomnography dementi",
+   "score": 100.0
+  },
+  {
+   "a": "obrien",
+   "b": "muller",
+   "score": 16.666666666666664
+  },
+  {
+   "a": "obrien",
+   "b": "núñez",
+   "score": 18.181818181818176
+  },
+  {
+   "a": "synuclein and for cohort the bodies disease in skin eeg in risk isolated biopsy disease disease and",
+   "b": "biopsy behaviour study biopsy of disorder synuclein disorder skin sleep the dementia the biopsy idiopathic biopsy cohort",
+   "score": 45.662100456621005
+  },
+  {
+   "a": "and polysomnography behaviour risk polysomnography a risk a behavior disease dementia parkinson disease synuclein rem",
+   "b": "lewy prodromal for for 2023 cohort",
+   "score": 23.841059602649008
+  },
+  {
+   "a": "vanderberg",
+   "b": "zhang",
+   "score": 40.0
+  },
+  {
+   "a": "li",
+   "b": "muller",
+   "score": 25.0
+  },
+  {
+   "a": "lewy sleep disorder prodromal 2023 disorder risk isolated risk a in idiopathic risk in biomarker",
+   "b": "synuclein prodromal lewy skin risk alpha for",
+   "score": 45.714285714285715
+  },
+  {
+   "a": "parkinson prodrom",
+   "b": "parkinson prodrom",
+   "score": 100.0
+  },
+  {
+   "a": "iranso",
+   "b": "postuma",
+   "score": 15.384615384615385
+  },
+  {
+   "a": "bxhavior biomarker cohort rem risk",
+   "b": "behavior biomarker cohort rem risk",
+   "score": 97.05882352941177
+  },
+  {
+   "a": "biomayker the dementia a",
+   "b": "biomarker the dementia a",
+   "score": 95.83333333333334
+  },
+  {
+   "a": "högl",
+   "b": "müller",
+   "score": 19.999999999999996
+  },
+  {
+   "a": "biopsy a neurodegeneration cohort isolated study parkinson polysomnography behavior isolated for eeg and neurodegeneration bodies behaviour",
+   "b": "parkinson cohort rem idiopathic and behaviour of rbd polysomnography alpha eeg cohort polysomnography",
+   "score": 47.5
+  },
+  {
+   "a": "biomarker bodies disease alpha of cohort disease be",
+   "b": "biomarker bodies disease alpha of cohort disease be",
+   "score": 100.0
+  },
+  {
+   "a": "a cohort in sleep risk",
+   "b": "behaviour behaviour rbd alpha disorder study parkinson behaviour rem behaviour dementia skin alpha idiopathic bodies skin idiopathic",
+   "score": 23.376623376623375
+  },
+  {
+   "a": "polysomnography eeg rem in isolated eeg rbd eeg for polysomnography idiopathic dementia sleep the risk risk disorder",
+   "b": "risk cohort a disease disorder synuclein rbd polysomnography prodromal disorder biomarker parkinson behavior study dementia for idiopathic alpha",
+   "score": 46.15384615384615
+  },
+  {
+   "a": "rbd the pcrk",
+   "b": "rbd the park",
+   "score": 91.66666666666666
+  },
+  {
+   "a": "biopsy idiopathic biopsy biopsy disorder dementia disorder lewy dementia biomarker behaviour for behaviour synuclein a",
+   "b": "bodies risk of disease sleep disease for 2023 neurodegeneration eeg eeg for the",
+   "score": 42.639593908629436
+  },
+  {
+   "a": "eeg andxprodro",
+   "b": "eeg and prodro",
+   "score": 92.85714285714286
+  },
+  {
+   "a": "cohort for bodies",
+   "b": "dementia biomarker the prodromal dementia",
+   "score": 31.034482758620683
+  },
+  {
+   "a": "neurodegeneration skin for lewy prodromal parkinson synuclein cohort a alpha 2023 isolated a disorder isolated for skin a",
+   "b": "neurodegeneration skin for lewy prodromal parkinson synuclein cohort a alpha 2023 isolated a disorder isolated for skin a",
+   "score": 100.0
+  },
+  {
+   "a": "polysomnography and skin and of polysomnography study study disorder the parkinson biopsy polysomnography the disease sleep disorder 2023",
+   "b": "of rem in dementia biopsy a of sleep",
+   "score": 32.36994219653179
+  },
+  {
+   "a": "behavior of dementia a rbd in polysomnography biomarker sleep parkinson parkinson disorder idiopathic neurodegeneration",
+   "b": "sleep rbd dementia lewy risk of",
+   "score": 28.000000000000004
+  },
+  {
+   "a": "postumа",
+   "b": "obrien",
+   "score": 15.384615384615385
+  },
+  {
+   "a": "iranso",
+   "b": "nunez",
+   "score": 18.181818181818176
+  },
+  {
+   "a": "synuclein of dementia risk disease sleep idiopathic behavior biopsy neurodegeneration sleep skin dem",
+   "b": "synuclein of dementia risk disease sleep idiopathic behavior biopsy neurodegeneration sleep skin dem",
+   "score": 100.0
+  },
+  {
+   "a": "behaviour idiopathic behaviour l",
+   "b": "behaviour idiopathic behaviour l",
+   "score": 100.0
+  },
+  {
+   "a": "smith",
+   "b": "högl",
+   "score": 22.22222222222222
+  },
+  {
+   "a": "rbd for",
+   "b": "rbd for",
+   "score": 100.0
+  },
+  {
+   "a": "ybd coh",
+   "b": "rbd coh",
+   "score": 85.71428571428572
+  },
+  {
+   "a": "dementia for skin cohort a",
+   "b": "risk idiopathic bodies sleep and dementia the polysomnography 2023 study isolated biopsy alpha biopsy synuclein parkinson disease",
+   "score": 27.09677419354839
+  },
+  {
+   "a": "smyth",
+   "b": "muller",
+   "score": 18.181818181818176
+  },
+  {
+   "a": "dvorak",
+   "b": "smyth",
+   "score": 0.0
+  },
+  {
+   "a": "for be",
+   "b": "for be",
+   "score": 100.0
+  },
+  {
+   "a": "behavior rbd sleep in for lewy biomarker study in rem biopsy dementia eeg idiopathic",
+   "b": "behavior 2023 parkinson polysomnography 2023",
+   "score": 37.5
+  },
+  {
+   "a": "synuclein behavior cohort park",
+   "b": "synuclein behavior cohort park",
+   "score": 100.0
+  },
+  {
+   "a": "céedcbééc éedéacññdce",
+   "b": "ññ ",
+   "score": 16.666666666666664
+  },
+  {
+   "a": "sleep andy",
+   "b": "sleep and ",
+   "score": 90.0
+  },
+  {
+   "a": "isolated dementia study study rem sleep disease in for idiopathic",
+   "b": "isolated dementia study study rem sleep disease in for idiopathic",
+   "score": 100.0
+  },
+  {
+   "a": "prodromal isolated rbd eeg study and rbd study",
+   "b": "rem behavior biopsy of isolated eeg biomarker and biomarker behavior study idiopathic eeg neurodegeneration sleep synuclein idiopathic bodies",
+   "score": 36.36363636363637
+  },
+  {
+   "a": "smith",
+   "b": "núñez",
+   "score": 0.0
+  },
+  {
+   "a": "漢dcñeñéébñdééñññ漢",
+   "b": "ab漢 éñeññcd",
+   "score": 42.85714285714286
+  },
+  {
+   "a": "éed漢éédd漢ddéñdabé    dc漢é漢caadéeéd漢漢dacbeé bécdcccaaeeebbcda",
+   "b": "adñ",
+   "score": 6.349206349206349
+  },
+  {
+   "a": "cohort disease 2023 cohort idiopathic in of alpha lewy parkinson idiopathic risk skin skin",
+   "b": "lewy study idiopathic skin prodromal risk dementia in polysomnography prodromal idiopathic dementia prodromal cohort in",
+   "score": 44.019138755980855
+  },
+  {
+   "a": "rem disease prodromal",
+   "b": "rem disease prodromal",
+   "score": 100.0
+  },
+  {
+   "a": "eeg alpha idiopathic dementia study behavior synuclein alpha biomarker dementia of behaviour rbd isolated disorder eeg disease neurodegeneration",
+   "b": "the parkinson eeg isolated in alpha sleep alpha skin of behaviour of sleep for",
+   "score": 45.945945945945944
+  },
+  {
+   "a": "in dementia the rem polysomnography isolated disease parkinson rem the dementia dementia sleep biomarker behavior",
+   "b": "a alpha risk the polysomnography disease study rbd eeg synuclein rem behaviour and of behaviour",
+   "score": 54.807692307692314
+  },
+  {
+   "a": "muller",
+   "b": "nunez",
+   "score": 36.36363636363637
+  },
+  {
+   "a": "d c ddcéeebñada漢漢e漢ñee漢ñc ééañe漢ebacedceñ",
+   "b": "c漢ñb漢漢漢 eeññdñééaacña  ñcdébécbé",
+   "score": 43.83561643835616
+  },
+  {
+   "a": "the sleep rem cohort alpha in and skinaidiopathic neurode",
+   "b": "the sleep rem cohort alpha in and skin idiopathic neurode",
+   "score": 98.24561403508771
+  },
+  {
+   "a": "in lewy skin dementia behavior behavior ee",
+   "b": "in lewy skin dementia behavior behavior ee",
+   "score": 100.0
+  },
+  {
+   "a": "for disease in biomarker 2023",
+   "b": "risk study skin rbd",
+   "score": 37.5
+  },
+  {
+   "a": "cohort disorde",
+   "b": "cohort disorde",
+   "score": 100.0
+  },
+  {
+   "a": "dementia eeg parkinson the behaviour polysomnography the for lewy biomarker disease parkinson skin cohort rem",
+   "b": "skin and bodies of behaviour",
+   "score": 27.73722627737226
+  },
+  {
+   "a": "synuclein rem alpha neurodegeneration rem prodromal behavior lewy rem",
+   "b": "polysomnography sleep biopsy cohort eeg synuclein rem of the dementia isolated rem bodies",
+   "score": 43.0379746835443
+  },
+  {
+   "a": "study risk for neurodegeneration bodies the skin dementia isolated dementia disorder idiopathic study polysomnography behavior disease cohort",
+   "b": "behaviour 2023 disorder lewy lewy study isolated eeg idiopathic rem dementia",
+   "score": 43.31797235023041
+  },
+  {
+   "a": "rbd cohort a synuclein lewy",
+   "b": "synuclein disease the synuclein isolated lewy cohort disease lewy study disease disorder in behavior lewy",
+   "score": 31.818181818181824
+  },
+  {
+   "a": "e d ba漢 dd bé é漢acañeña漢ecc 漢ée漢 漢c漢eadñac e 漢dbacac漢 漢dcbd",
+   "b": "béée漢édadbcdc abcbdbéeedéd",
+   "score": 37.64705882352941
+  },
+  {
+   "a": "idiopathic of skin sleep sleep rem and lewy rbd in disease disorder cohort synuclein idiopathic",
+   "b": "eeg disorder cohort isolated disease eeg bodies rbd behavior",
+   "score": 38.70967741935484
+  },
+  {
+   "a": "",
+   "b": "",
+   "score": 100.0
+  },
+  {
+   "a": "a disexse",
+   "b": "a disease",
+   "score": 88.88888888888889
+  },
+  {
+   "a": "cohort lewy idiopathic behaviour cohort rbd the behaviour rbd prodromal lewy study bodies for the",
+   "b": "disease synuclein behaviour synuclein lewy polysomnography isolated and biomarker skin bodies bodies",
+   "score": 42.639593908629436
+  },
+  {
+   "a": "parkinson skin rem dementia s",
+   "b": "parkinson skin rem dementia s",
+   "score": 100.0
+  },
+  {
+   "a": "iranso",
+   "b": "zhong",
+   "score": 18.181818181818176
+  },
+  {
+   "a": "risk cohort of risk for disease rbd idiopathic dementia disease",
+   "b": "alpha skin cohort and cohort neurodegeneration rbd 2023 alpha lewy rbd disorder synuclein synuclein of rem polysomnography",
+   "score": 37.83783783783784
+  },
+  {
+   "a": "lee",
+   "b": "iranso",
+   "score": 0.0
+  },
+  {
+   "a": "for in rbd idzopathic risk synuc",
+   "b": "for in rbd idiopathic risk synuc",
+   "score": 96.875
+  },
+  {
+   "a": "idiopathic isolated rbd biomarker alpha for a disease behaviour biomarker disease biomarker",
+   "b": "behaviour prodromal rbd disorder isolated alpha sleep dementia for biomarker neurodegeneration of of lewy disease risk alpha a",
+   "score": 47.004608294930875
+  },
+  {
+   "a": "édñd",
+   "b": "ac cd漢ébc dñdea漢ñdcéé漢daññéb dñbñbc漢 eeéda漢 dñññ漢",
+   "score": 15.094339622641506
+  },
+  {
+   "a": "sleep biopsy risk skin the biopsy rem of behaviour disorder rem idiopathic disorder 2023",
+   "b": "in cohort disease bodies study 2023 biopsy",
+   "score": 36.92307692307693
+  },
+  {
+   "a": "the synuclein disorder of the and of cohort biomarker in dementia for disorder a 2023 a the prodromal",
+   "b": "prodromal eeg skin in study lewy study rem for polysomnography for",
+   "score": 35.928143712574844
+  },
+  {
+   "a": "alpha tye eeg of eeg risk disorder biomarker synuclein idiop",
+   "b": "alpha the eeg of eeg risk disorder biomarker synuclein idiop",
+   "score": 98.33333333333333
+  },
+  {
+   "a": "biopsy cohort eeg the parkc",
+   "b": "biopsy cohort eeg the parki",
+   "score": 96.2962962962963
+  },
+  {
+   "a": "in bodies rbd disorder risk synuclein biopsy for disorder polysomnogra",
+   "b": "in bodies rbd disorder risk synuclein biopsy for disorder polysomnogra",
+   "score": 100.0
+  },
+  {
+   "a": "idiop",
+   "b": "idiop",
+   "score": 100.0
+  },
+  {
+   "a": "disease disorder parkinson synuclein 2023 of eeg 2023 prodromal for and disorder neurodegeneration for rbd study risk isolated",
+   "b": "of cohort behavior prodromal bodies and",
+   "score": 31.51515151515152
+  },
+  {
+   "a": "behavior skin 2023 behavior disorder lewy disorder parkinson skin and 2023 isolated of of behaviour risk the",
+   "b": "neurodegeneration skin risk in rbd idiopathic for dementia lewy neurodegeneration sleep the behaviour",
+   "score": 46.889952153110045
+  },
+  {
+   "a": "rem behaviour for polysomnography risk isolated 2023 disorder and rem risk polysomnography pol",
+   "b": "rem behaviour for polysomnography risk isolated 2023 disorder and rem risk polysomnography pol",
+   "score": 100.0
+  },
+  {
+   "a": "parkinson neurodegeneration cohort skin biomar",
+   "b": "parkinson neurodegeneration cohort skin biomar",
+   "score": 100.0
+  },
+  {
+   "a": "bodies alpha sleep rbd cohort for disorder the disease isolated",
+   "b": "prodromal idiopathic dementia disorder rbd synuclein lewy synuclein behavior isolated sleep disease bodies parkinson cohort prodromal in 2023",
+   "score": 39.21568627450981
+  },
+  {
+   "a": "a lewy prodromal synuclein disorder alpha skin for risk sleep for parkinson biopsy",
+   "b": "behaviour a lewy of in and alpha risk isolated biomarker isolated polysomnography",
+   "score": 49.079754601227
+  },
+  {
+   "a": "the and disease biopsy the dementia synucaein polysomnography",
+   "b": "the and disease biopsy the dementia synuclein polysomnography",
+   "score": 98.36065573770492
+  },
+  {
+   "a": "disorder rbd risk cohort rbd ",
+   "b": "disorder rbd risk cohort rbd ",
+   "score": 100.0
+  },
+  {
+   "a": "añ漢ée bdd漢ñb eñéd 漢ec漢ééñbb漢éadbñcccedceñceccéña",
+   "b": "eed漢c漢bbeécedéaeécbeabñdce  cébñb漢eña漢漢 cecéba",
+   "score": 48.93617021276596
+  },
+  {
+   "a": "isolated isolated behaviour a",
+   "b": "isolated isolated behaviour a",
+   "score": 100.0
+  },
+  {
+   "a": "risk dementia disease",
+   "b": "isolated 2023 eeg biopsy 2023 2023 for",
+   "score": 27.118644067796616
+  },
+  {
+   "a": "vanderberg",
+   "b": "högl",
+   "score": 14.28571428571429
+  },
+  {
+   "a": "behavior study lewy prodromal study study for neurodegeneration isolated",
+   "b": "synuclein study idiopathic rem prodromal sleep rem polysomnography",
+   "score": 43.47826086956522
+  },
+  {
+   "a": "study synuclein synuclein rem risk behavior idiopathic disorder behaviour dementia idiopathic",
+   "b": "behaviour for biomarker isolated eeg parkinson disorder and 2023",
+   "score": 38.21656050955414
+  },
+  {
+   "a": "neurodegenerati",
+   "b": "neurodegenerati",
+   "score": 100.0
+  },
+  {
+   "a": "behaviour behaviour skin a disorder behavior disease",
+   "b": "bodies in behavior parkinson biopsy disorder",
+   "score": 56.25
+  },
+  {
+   "a": "bodies disorder synuclein disorder cohort eeg",
+   "b": "idiopathic parkinson isolated cohort study idiopathic of prodromal",
+   "score": 36.03603603603604
+  },
+  {
+   "a": "postuma",
+   "b": "krajca",
+   "score": 15.384615384615385
+  },
+  {
+   "a": "idiopathic idiopathic cohort dementia prodroma",
+   "b": "idiopathic idiopathic cohort dementia prodroma",
+   "score": 100.0
+  },
+  {
+   "a": "hogl",
+   "b": "dvorak",
+   "score": 19.999999999999996
+  },
+  {
+   "a": "dvorak",
+   "b": "smith",
+   "score": 0.0
+  },
+  {
+   "a": "lewy synuclein biopsy polysomnography disorder 2023 bodies disorder polysomnography 2023 biopsy polysomnography for",
+   "b": "lewy skin isolated isolated a idiopathic polysomnography dementia synuclein idiopathic neurodegeneration disease dementia biopsy idiopathic biopsy behavior alpha",
+   "score": 47.82608695652174
+  },
+  {
+   "a": "disease rem biopsy behaviour alpha idiopathic bodies",
+   "b": "alpha rem eeg disease biopsy parkinson",
+   "score": 42.22222222222223
+  },
+  {
+   "a": "neurodegeneration in eeg cohort sleep demen",
+   "b": "neurodegeneration in eeg cohort sleep demen",
+   "score": 100.0
+  },
+  {
+   "a": "cohort rex neurod",
+   "b": "cohort rem neurod",
+   "score": 94.11764705882352
+  },
+  {
+   "a": "zhong",
+   "b": "van der berg",
+   "score": 23.529411764705888
+  },
+  {
+   "a": "risk bodies behaviour of dementia behavior study behaviour cohort the alpha parkinson 2023 dementia neurodegeneration disorder eeg lewy",
+   "b": "in isolated for idiopathic of polysomnography a biomarker study disease and eeg synuclein disorder alpha the for",
+   "score": 43.7246963562753
+  },
+  {
+   "a": "idiopathic idiopathic parkinson risk behavior disorder biopsy rem dementia",
+   "b": "lewy polysomnography 2023 skin behaviour",
+   "score": 29.824561403508774
+  },
+  {
+   "a": "prodromal",
+   "b": "prodromal",
+   "score": 100.0
+  },
+  {
+   "a": "of behavior idiopathic ciomarker st",
+   "b": "of behavior idiopathic biomarker st",
+   "score": 97.14285714285714
+  },
+  {
+   "a": "hogl",
+   "b": "müller",
+   "score": 19.999999999999996
+  },
+  {
+   "a": "dementia polysomnography biopsy eeg for disorder cohort polysomnography",
+   "b": "a biopsy for 2023 behavior dementia rem",
+   "score": 38.18181818181819
+  },
+  {
+   "a": "ñecñññe漢b a",
+   "b": "cdeacñedd 漢ddabéñdbe déééd漢éece",
+   "score": 33.333333333333336
+  },
+  {
+   "a": "biopsy of idiopathic disorder of rem",
+   "b": "biopsy of idiopathic disorder of rem",
+   "score": 100.0
+  },
+  {
+   "a": "skin the for 2023 cohort neurodegeneration bodies disease prodromal disease in biomarker neurodegeneration disorder alpha prodromal behavior study",
+   "b": "isolated 2023 dementia synuclein in biopsy alpha parkinson rbd the eeg eeg idiopathic 2023 dementia a the",
+   "score": 41.43426294820717
+  },
+  {
+   "a": "parkinson prodromal idiopathic alpha sle",
+   "b": "parkinson prodromal idiopathic alpha sle",
+   "score": 100.0
+  },
+  {
+   "a": "skin disorder polysomnography idiopathic bodi",
+   "b": "skin disorder polysomnography idiopathic bodi",
+   "score": 100.0
+  },
+  {
+   "a": "the idiopathic biomarxer rem ",
+   "b": "the idiopathic biomarker rem ",
+   "score": 96.55172413793103
+  },
+  {
+   "a": "behaviour cohort the behaviour for risk behavior the biomarker biopsy behaviour behavior in risk",
+   "b": "neurodegeneration 2023 disorder disorder behaviour the of synuclein idiopathic skin isolated eeg the isolated disease the in",
+   "score": 43.63636363636364
+  }
+ ]
+}

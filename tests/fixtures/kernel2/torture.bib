@@ -1,0 +1,114 @@
+% Torture fixture for the brace-aware tokenizer in researcher_core/bib.py (D20).
+% Every hard case lives in this one file. The first five entries are ported verbatim from
+% scripts/tests/fixtures/torture.bib (the M1 reference implementation); the rest are the
+% constructs core adds on top of it.
+%
+% M1 cases:   nested braces; a quoted value carrying both a comma and braces; bare numeric
+%             and bare macro values; a compact entry terminated by }} on its last field
+%             line; a trailing comma; and the three skipped block types (@comment with a
+%             comma AND braces, @preamble with backslashes, @string).
+% Core cases: @string macros are EXPANDED, not left as the macro name; concatenation of a
+%             macro with a literal; a parenthesis-delimited entry; LaTeX accents and
+%             escaped punctuation; a braced corporate author that must not be split into
+%             given/family; "and others"; an uppercase @ARTICLE type; a key with
+%             punctuation; unknown fields that must survive; and a % line comment holding a
+%             decoy @article that must NOT be parsed as an entry.
+%
+% Eleven real entries. The skipped blocks and the decoy must yield none of them.
+
+@comment{Not an entry: it holds a comma, plus {nested {braces}} that a regex parser
+         would happily mistake for a citation key.}
+
+@preamble{"\newcommand{\noopsort}[1]{} \newcommand{\printfirst}[2]{#1}"}
+
+@string{jbhi = {IEEE Journal of Biomedical and Health Informatics}}
+@string{spec = {Special Issue on Determinism}}
+
+% @article{decoy2099, title={A commented-out entry that must never be parsed}, year={2099}}
+
+@article{nested2020,
+  title={A {Nested {Deep}} Title, with comma},
+  author={Doe, Jane and Roe, Richard},
+  journal={Journal of Balanced Braces},
+  year={2020},
+  doi={10.1234/nested}
+}
+
+@article{quoted2021,
+  title = "Commas, {Braces}, and Quotes All in One Value",
+  author = "van der Berg, Hans",
+  journal = "Journal of Quoted Values",
+  year = 2021,
+  doi = "10.1234/quoted"
+}
+
+@article{bare2022,
+  title = {Bare Numeric and Bare Macro Values},
+  author = {Solo, Han},
+  journal = jbhi,
+  volume = 26,
+  pages = {1--10},
+  year = 2022,
+  doi = {10.1234/bare}
+}
+
+@inproceedings{compact2023, title={A Compact Entry Closed On Its Last Field Line}, author={Ng, Andrew}, booktitle={Proceedings of Compactness}, year={2023}, doi={10.1234/compact}}
+
+@book{trailing2024,
+  title={A Trailing Comma Before The Closing Brace},
+  author={Knuth, Donald E.},
+  publisher={Addison-Wesley},
+  year={2024},
+  doi={10.1234/trailing},
+}
+
+@article{concat2016,
+  title = {Concatenation of a Macro With a Literal},
+  author = {Lovelace, Ada},
+  journal = jbhi # {: } # spec,
+  year = 2016,
+  doi = {10.1234/concat}
+}
+
+@article(paren2019,
+  title = {A Parenthesis-Delimited Entry},
+  author = {Hopper, Grace},
+  journal = {Journal of Delimiters},
+  year = 2019,
+  doi = {10.1234/paren}
+)
+
+@article{accents2018,
+  title={Deep Learning \& Signal Processing for the Erd{\H o}s Problem},
+  author={Ribeiro, Ant{\^o}nio H. and Sk{\l}odowska, Maria and others},
+  journal={Journal of {\'E}tudes},
+  year={2018},
+  doi={10.1234/accents}
+}
+
+@techreport{corporate2017,
+  title={Global Report on Braced Corporate Authors},
+  author={{World Health Organization}},
+  institution={{World Health Organization}},
+  number={WHO-2017-1},
+  year={2017},
+  doi={10.1234/corporate}
+}
+
+@ARTICLE{upper2014,
+  title={An Uppercase Entry Type},
+  author={Turing, Alan M.},
+  journal={Journal of Case Insensitivity},
+  year={2014},
+  doi={10.1234/upper}
+}
+
+@misc{smith:2019-a,
+  title={A Key With Punctuation, and Fields Nobody Maps},
+  author={Smith, John},
+  year={2019},
+  doi={10.1234/punct},
+  keywords={determinism, parsing},
+  annote={An unmapped field that must survive the round trip.},
+  langid={english}
+}

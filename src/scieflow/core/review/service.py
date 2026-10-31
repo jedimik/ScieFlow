@@ -38,6 +38,7 @@ from scieflow.core.project import Project, ProjectError
 from scieflow.core.review import assign as _assign
 from scieflow.core.review import claims as _claims
 from scieflow.core.review import decisions as _decisions
+from scieflow.core.review import identity_gates as _identity
 from scieflow.core.review import settings as _settings
 
 PASSES = ("blind", "evidence")
@@ -419,8 +420,8 @@ def _earlier_overrules(ws: Path, rounds_: list[int]) -> set[tuple[str, str]]:
     return out
 
 
-def blockers(project: Project, slug: str) -> list[dict]:
-    """Open blockers of the latest round that has a matrix or a bundle.
+def _evidence_blockers(ws: Path) -> list[dict]:
+    """Open evidence blockers of the latest round that has a matrix or a bundle (M-C1 contract).
 
     A blocker cluster stays open until a human `reject` with an
     overrule_reason (an overrule) is recorded through decide(); a blocker flag
@@ -429,9 +430,6 @@ def blockers(project: Project, slug: str) -> list[dict]:
     rounds. A later round whose bundle no longer flags the reference has no
     blocker.
     """
-    ws = _ws(project, slug)
-    if ws is None:
-        return []
     n = _latest_evidence_round(ws)
     if n is None:
         return []
@@ -470,6 +468,19 @@ def blockers(project: Project, slug: str) -> list[dict]:
             out.append({"round": n, "cluster": None, "reason": f["kind"], "title": None,
                         "flags": [fid], "references": refs([fid]), "decision": None})
     return out
+
+
+def blockers(project: Project, slug: str) -> list[dict]:
+    """Every open blocker of a run: the evidence blockers, then the identity blockers.
+
+    The identity blockers (M-C2 D18, `core/review/identity_gates.py`) are returned on every path,
+    including a run with no round that has a matrix or a bundle. An empty list when the run does
+    not exist.
+    """
+    ws = _ws(project, slug)
+    if ws is None:
+        return []
+    return _evidence_blockers(ws) + _identity.blockers(project, slug)
 
 
 # --- scite ----------------------------------------------------------------------

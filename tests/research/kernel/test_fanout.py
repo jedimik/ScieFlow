@@ -278,7 +278,7 @@ def test_a_query_refused_by_the_leak_check_exits_three_before_any_source(project
 
 def test_an_unknown_source_name_is_a_usage_error(project, capsys):
     with pytest.raises(SystemExit) as exc:
-        fanout.main([QUERY, "--sources", "openalex,pubmed"])
+        fanout.main([QUERY, "--sources", "openalex,pubmd"])
     assert exc.value.code == 2
 
 

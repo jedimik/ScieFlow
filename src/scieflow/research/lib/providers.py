@@ -76,13 +76,28 @@ CATALOGUE: dict[str, dict] = {
                          "rate_per_s": 5, "default_enabled": True},
     "search-crossref": {"label": "Crossref search", "hosts": ("api.crossref.org",),
                         "rate_per_s": 5, "default_enabled": True},
+    # M-C2 5.2 (D16): PubMed and Semantic Scholar are off until the user lists them enabled.
+    # Semantic Scholar is keyless only; its rate is the polite limit for keyless use.
+    "search-pubmed": {"label": "PubMed search", "hosts": ("eutils.ncbi.nlm.nih.gov",),
+                      "rate_per_s": 2},
+    "search-semantic-scholar": {"label": "Semantic Scholar search", "hosts": ("api.semanticscholar.org",),
+                                "rate_per_s": 0.3},
+    "search-datacite": {"label": "DataCite search", "hosts": ("api.datacite.org",),
+                        "rate_per_s": 5, "default_enabled": True},
+    "opencitations": {"label": "OpenCitations", "hosts": ("api.opencitations.net",),
+                      "rate_per_s": 2, "default_enabled": True},
+    # M-C2 5.2: `contact` names the one wire parameter that carries the user's address (Unpaywall
+    # asks for it). The address lives only in config/integrations.yml, never in a file of ours.
+    "unpaywall": {"label": "Unpaywall", "hosts": ("api.unpaywall.org",),
+                  "rate_per_s": 5, "contact": "email"},
     # M-F 5.7: the author-guideline pages of one journal. Off unless enabled; the hosts of a run
     # come only from the run's human-approved journal-sources gate (`run_hosts=` on Gateway).
     "journal-guidelines": {"label": "Journal author-guideline pages", "hosts": (),
                            "rate_per_s": 0.5, "run_hosts": True},
 }
 _TOP_KEYS = frozenset({"providers", "cache_ttl_days"})
-_PROVIDER_KEYS = frozenset({"enabled", "hosts", "rate_per_s"})
+_PROVIDER_KEYS = frozenset({"enabled", "hosts", "rate_per_s", "contact_email"})
+_CONTACT_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 def _default_on(name: str) -> bool:
@@ -137,6 +152,7 @@ class ProviderPolicy:
     off: dict = field(default_factory=dict)         # name -> reason it is off
     cache_ttl_days: dict = field(default_factory=lambda: {"metadata": 30, "search": 7})
     path: str | None = None
+    contacts: dict = field(default_factory=dict, repr=False)   # provider -> contact address (M-C2)
 
     def allows(self, name: str) -> bool:
         return name in self.providers
@@ -152,18 +168,33 @@ class ProviderPolicy:
     def rate(self, name: str) -> float:
         return float(self.providers.get(name, {}).get("rate_per_s", CATALOGUE[name]["rate_per_s"]))
 
+    def contact(self, name: str) -> str | None:
+        """The user's contact address for a provider that takes one (never shown in output)."""
+        return self.contacts.get(name)
+
     def enabled_providers(self) -> list[str]:
         return sorted(self.providers)
 
     def describe(self) -> dict:
-        return {name: {"enabled": self.allows(name), "hosts": list(self.hosts(name)),
-                       "reason": self.reason(name)} for name in sorted(CATALOGUE)}
+        out = {}
+        for name in sorted(CATALOGUE):
+            row = {"enabled": self.allows(name), "hosts": list(self.hosts(name)),
+                   "reason": self.reason(name)}
+            if CATALOGUE[name].get("contact"):
+                # M-C2: whether an address is set, never the address itself
+                row["contact"] = "set" if self.contact(name) else "unset"
+            out[name] = row
+        return out
 
 
 def _provider(name: str, spec) -> dict | str:
     """The validated entry, or the reason it is off."""
     if not isinstance(spec, Mapping):
         raise PolicyError(f"{CONFIG}: providers.{name} must be a mapping")
+    cat = CATALOGUE[name]
+    if "contact_email" in spec and not cat.get("contact"):
+        raise PolicyError(f"{CONFIG}: providers.{name}: unknown key(s) contact_email "
+                          f"(only a provider that takes a contact address has it)")
     unknown = sorted(_show(k) for k in spec if k not in _PROVIDER_KEYS)
     if unknown:
         raise PolicyError(f"{CONFIG}: providers.{name}: unknown key(s) {', '.join(unknown)} "
@@ -171,7 +202,11 @@ def _provider(name: str, spec) -> dict | str:
     enabled = spec.get("enabled", _default_on(name))
     if not isinstance(enabled, bool):
         raise PolicyError(f"{CONFIG}: providers.{name}.enabled must be true or false")
-    cat = CATALOGUE[name]
+    contact_email = spec.get("contact_email")
+    if contact_email is not None and (not isinstance(contact_email, str)
+                                      or not _CONTACT_RE.fullmatch(contact_email)):
+        # the value is never echoed: a mistyped address is still an address
+        raise PolicyError(f"{CONFIG}: providers.{name}.contact_email must be an e-mail address")
     if cat.get("run_hosts") and "hosts" in spec:
         raise PolicyError(f"{CONFIG}: {name} takes no hosts: each run's hosts come from its "
                           f"human-approved journal-sources gate")
@@ -187,7 +222,12 @@ def _provider(name: str, spec) -> dict | str:
         raise PolicyError(f"{CONFIG}: providers.{name}.rate_per_s must be a number > 0")
     if not enabled:
         return f"{cat['label']} is disabled in {CONFIG}"
-    return {"hosts": tuple(dict.fromkeys(h.lower() for h in hosts)), "rate_per_s": rate}
+    if cat.get("contact") and contact_email is None:
+        return f"{cat['label']} needs contact_email in {CONFIG}"
+    entry = {"hosts": tuple(dict.fromkeys(h.lower() for h in hosts)), "rate_per_s": rate}
+    if contact_email is not None:
+        entry["contact_email"] = contact_email   # taken out by _validate; not a provider setting
+    return entry
 
 
 def _validate(data, path: str) -> ProviderPolicy:
@@ -210,7 +250,7 @@ def _validate(data, path: str) -> ProviderPolicy:
     if not isinstance(ttl, Mapping) or any(k not in TTL_CLASSES for k in ttl) or any(
             not isinstance(v, int) or isinstance(v, bool) or v < 0 for v in ttl.values()):
         raise PolicyError(f"{CONFIG}: cache_ttl_days takes metadata / search: integer days >= 0")
-    enabled, off = {}, {}
+    enabled, off, contacts = {}, {}, {}
     for name in CATALOGUE:
         if name not in provs:
             if _default_on(name):
@@ -222,9 +262,12 @@ def _validate(data, path: str) -> ProviderPolicy:
         if isinstance(entry, str):
             off[name] = entry
         else:
+            if "contact_email" in entry:
+                contacts[name] = entry.pop("contact_email")
             enabled[name] = entry
     return ProviderPolicy(providers=enabled, off=off,
-                          cache_ttl_days={"metadata": 30, "search": 7, **dict(ttl)}, path=path)
+                          cache_ttl_days={"metadata": 30, "search": 7, **dict(ttl)}, path=path,
+                          contacts=contacts)
 
 
 def load(root: Path) -> ProviderPolicy:
@@ -457,7 +500,8 @@ class Gateway:
                  ids: Mapping | None = None, fixed: Mapping | None = None,
                  checked: Mapping | None = None, composed: Mapping | None = None,
                  ttl_class: str = "search", count: Callable[[object], int] = _count,
-                 validate: Callable[[object], None] | None = None):
+                 validate: Callable[[object], None] | None = None,
+                 absent: tuple[int, ...] = (), contact: Mapping | None = None):
         """GET `url` with every parameter classified — deny by default:
 
         - `text`: free text; each value must pass the leak check;
@@ -467,33 +511,96 @@ class Gateway:
         - `fixed`: the caller's own constants (str / int / float scalars).
 
         `validate(value)` raises `HTTPFailure` (MALFORMED) for a body of the wrong
-        shape; such a response is ledgered as an error and never cached."""
+        shape; such a response is ledgered as an error and never cached.
+
+        `absent` lists client-error statuses that mean "no such record" (M-C2 5.2): such an
+        answer returns None, is ledgered ok with zero results and is cached and recorded as
+        an `absent` answer. Without it a 404 still raises.
+
+        `contact` is `{"email": address}` for a catalogue entry with `"contact": "email"`
+        (M-C2 5.2). The address must equal the one in config/integrations.yml. It goes on the
+        wire only; no key, ledger row, cache entry, snapshot, event or message holds it."""
         resolved = self._resolve(provider)
         self._guard(provider, url, resolved)
         params = self._params(provider, op, text=text, ids=ids, fixed=fixed,
                               checked=checked, composed=composed)
+        wire = self._contact_params(provider, op, contact, resolved)
         return self._fetch(provider, op, url, params, resolved, ttl_class=ttl_class,
-                           count=count, validate=validate, as_text=False)
+                           count=count, validate=validate, as_text=False, absent=absent,
+                           wire=wire)
 
     def get_text(self, provider: str, op: str, url: str, *, count: Callable[[object], int],
                  text: Mapping | None = None, ids: Mapping | None = None,
                  fixed: Mapping | None = None, checked: Mapping | None = None,
                  composed: Mapping | None = None, ttl_class: str = "search",
-                 validate: Callable[[object], None] | None = None) -> str:
+                 validate: Callable[[object], None] | None = None,
+                 absent: tuple[int, ...] = ()) -> str | None:
         """Like `get_json` for a non-JSON body (arXiv answers Atom XML): the same
-        policy, classification, cache, ledger and failure handling; returns the text."""
+        policy, classification, cache, ledger and failure handling; returns the text.
+        `absent` works as in `get_json` (M-C2 5.2): a listed status returns None."""
         resolved = self._resolve(provider)
         self._guard(provider, url, resolved)
         params = self._params(provider, op, text=text, ids=ids, fixed=fixed,
                               checked=checked, composed=composed)
         return self._fetch(provider, op, url, params, resolved, ttl_class=ttl_class,
-                           count=count, validate=validate, as_text=True)
+                           count=count, validate=validate, as_text=True, absent=absent)
+
+    def _contact_params(self, provider: str, op: str, contact, resolved) -> dict:
+        """The wire parameter for the contact address, checked (M-C2 5.2). Empty when none is
+        given. A transport request to a contact provider needs its address; a replay does not.
+        Messages never carry the address."""
+        if contact is None:
+            if CATALOGUE[provider].get("contact") and resolved.mode in ("live", "record"):
+                raise ValueError(f"{provider} {op}: needs its contact address "
+                                 f"(config/integrations.yml contact_email)")
+            return {}
+        if not CATALOGUE[provider].get("contact"):
+            raise ValueError(f"{provider} {op}: takes no contact address")
+        if not isinstance(contact, Mapping) or set(contact) != {"email"}:
+            raise ValueError(f"{provider} {op}: contact must be {{'email': address}}")
+        address = contact["email"]
+        if not isinstance(address, str) or address != self.policy.contact(provider):
+            raise ValueError(f"{provider} {op}: the contact address must be the one set in "
+                             f"config/integrations.yml")
+        return {"email": address}
+
+    def usable(self, provider: str) -> str | None:
+        """Why `provider` cannot be used now, or None (M-C2 5.2). Nothing is sent: it checks
+        the policy (on, with an allowed host or a run's hosts) and, in an egress mode, the M-B
+        data check of this gateway's run."""
+        if not self.policy.allows(provider):
+            return self.policy.reason(provider) or f"{provider} is off"
+        if CATALOGUE[provider].get("run_hosts"):
+            if not self._run_hosts.get(provider):
+                return f"{provider}: no run hosts approved (journal-sources gate)"
+        elif not self.policy.hosts(provider):
+            return f"{provider}: its allowed hosts list is empty (config/integrations.yml)"
+        from scieflow.core import network
+
+        try:
+            resolved = self._resolve(provider)
+        except network.NetworkRefused as exc:
+            return str(exc)
+        if resolved.mode in network.EGRESS:
+            try:
+                self._data_check(provider)
+            except ProviderRefused as exc:
+                return str(exc)
+        return None
 
     def _fetch(self, provider: str, op: str, url: str, params: dict, resolved, *,
-               ttl_class: str, count, validate, as_text: bool):
+               ttl_class: str, count, validate, as_text: bool, absent: tuple[int, ...] = (),
+               wire: Mapping | None = None):
         from scieflow.integrations.scite.cache import normalise_params, request_key
         from scieflow.research.lib import snapshots
 
+        absent = tuple(absent)
+        if any(not (400 <= code <= 499) for code in absent):
+            raise ValueError(f"{provider} {op}: absent statuses must be client errors (4xx)")
+        # rate-limit, timeout, too-early and auth answers are failures, never "no record": an
+        # absent status would pass them through unretried and cache them as a negative (5.9)
+        if any(code in (401, 403, 408, 425, 429) for code in absent):
+            raise ValueError(f"{provider} {op}: absent cannot take 401, 403, 408, 425 or 429")
         req = normalise_params(params)
         key = request_key(provider, op, {"url": url, **req})
         run, _ = self._data_scope()
@@ -502,6 +609,10 @@ class Gateway:
             snap = snapshots.load(run, provider=provider, op=op, key=key, url=url,
                                   request_params=req)
             if snap is not None:
+                if snap["body_kind"] == "absent":
+                    self.ledger.record(source=provider, op=op, round=None, results=0,
+                                       cached=True, key=key, request=req)
+                    return None
                 value = snap["response_body"]
                 if validate is not None:
                     validate(value)
@@ -521,9 +632,13 @@ class Gateway:
             snapshots.ensure_writable(run, provider=provider, key=key)   # before anything is sent
         try:
             # never follow a redirect: the next host would be one nobody checked
-            resp = http.send("GET", url, params=req, retries=self.retries,
+            resp = http.send("GET", url, params={**req, **(wire or {})}, retries=self.retries,
                              limiter=self._limiter(provider), sleep=self.sleep,
-                             session=self.session, passthrough=(), allow_redirects=False)
+                             session=self.session, passthrough=absent, allow_redirects=False)
+            if absent and resp.status_code in absent:
+                # "no such record" is an answer: ledgered ok, cached, recorded, never validated
+                return self._finish_absent(provider, op, url, key, req, run, resolved,
+                                           ttl_class)
             if as_text:
                 value = resp.text
             else:
@@ -532,6 +647,10 @@ class Gateway:
                 except ValueError:
                     raise http.HTTPFailure(f"{provider} {op} response is not JSON", "MALFORMED",
                                            resp.status_code) from None
+                if value is None:
+                    # a stored json answer is never null; only an absent status is "no record"
+                    raise http.HTTPFailure(f"{provider} {op} response is null", "MALFORMED",
+                                           resp.status_code)
             if validate is not None:
                 validate(value)
         except http.HTTPFailure as exc:
@@ -553,6 +672,28 @@ class Gateway:
             events.emit(run, "literature.snapshot", action="recorded", provider=provider, op=op,
                         key=key, response_hash=rec["response_hash"])
         return value
+
+    def _finish_absent(self, provider: str, op: str, url: str, key: str, req: dict, run,
+                       resolved, ttl_class: str):
+        """The answer of an absent status: one ok row with zero results, one cache entry and,
+        in record mode, one `absent` snapshot. Returns None."""
+        from scieflow.research.lib import snapshots
+
+        self._record(provider, op, 0, key, req, None)
+        try:
+            self.cache.put(key, ttl_class, {"value": None, "results": 0})
+        except (TypeError, ValueError, OSError):
+            pass
+        if resolved.mode == "record" and run is not None:
+            try:
+                rec = snapshots.write(run, provider=provider, op=op, key=key, url=url,
+                                      request_params=req, body_kind="absent",
+                                      response_body=None, results=0)
+            except OSError as exc:
+                raise snapshots.write_failed(run, provider, key, exc) from None
+            events.emit(run, "literature.snapshot", action="recorded", provider=provider, op=op,
+                        key=key, response_hash=rec["response_hash"])
+        return None
 
     def _cached(self, provider: str, op: str, key: str, req: dict, ttl_class: str) -> tuple[bool, Any]:
         """(True, value) for a cache entry, ledgered as a cache hit; (False, None) otherwise."""

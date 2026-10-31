@@ -28,7 +28,9 @@ SCITE_PROVIDERS = ("scite", "notebooklm")
 # Mirrors research.lib.providers.CATALOGUE (tests/core/data/test_policy.py keeps them equal). Static
 # so that loading the policy never imports the optional `research` extra (`requests`), M-B review F1.
 KNOWN_PROVIDERS = ("pubtator", "ctgov", "openalex", "europepmc", "search-openalex", "search-arxiv",
-                   "search-europepmc", "search-crossref", "journal-guidelines", *SCITE_PROVIDERS)
+                   "search-europepmc", "search-crossref", "journal-guidelines", "search-pubmed",
+                   "search-semantic-scholar", "search-datacite", "opencitations", "unpaywall",
+                   *SCITE_PROVIDERS)
 LEVELS = ("L0", "L1", "L2")
 KINDS = ("tabular", "imaging", "eeg", "other")
 LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")

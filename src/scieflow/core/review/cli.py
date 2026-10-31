@@ -615,28 +615,57 @@ def coverage_cmd(slug, round_, author):
 @click.argument("slug")
 def merge_check_cmd(slug):
     """Refuse merge (exit 1) while a retracted / unresolvable reference blocker is open."""
+    from scieflow.core.review import identity_gates
     from scieflow.core.review import service
 
-    project, _ws = _run_ws(slug)
+    project, ws = _run_ws(slug)
     try:
         open_ = service.blockers(project, slug)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
+    stale = identity_gates.stale(ws)
     if not open_:
         click.echo(f"ok: workspace/{slug} has no open blockers")
+        _stale_warning(stale)
         return
+
+    def is_identity(b) -> bool:
+        return b["reason"].startswith(identity_gates.REASON_PREFIX)
+
     click.echo(f"merge refused: workspace/{slug} has {len(open_)} open blocker(s)")
+    evidence = [b for b in open_ if not is_identity(b)]
+    identity = [b for b in open_ if is_identity(b)]
     for b in open_:
+        if is_identity(b):
+            ref = b["references"][0]
+            verdict = b["reason"][len(identity_gates.REASON_PREFIX):]
+            click.echo(f"  round {b['round']} identity: {verdict} {ref.get('doi') or '(no DOI)'} "
+                       f"({ref['key']})")
+            continue
         refs = ", ".join(" ".join(x for x in (r.get("doi"), f"({r['key']})" if r.get("key")
                                               else None) if x) for r in b["references"])
         click.echo(f"  round {b['round']} {b['cluster'] or '(no cluster)'}: {b['reason']} "
                    f"{refs}" + (f" (decided: {b['decision']})" if b["decision"] else ""))
-    click.echo("fix the citation and build the evidence of a new round, or let the user "
-               "overrule it:")
-    for b in open_:
-        if b["cluster"]:
-            click.echo(f"  scieflow review decide {slug} --round {b['round']} --decision "
-                       f"{b['cluster']}=reject --overrule {b['cluster']}=REASON --yes")
-    click.echo(f"  (or answer its open review-blocker gate: scieflow gate answer {slug} <gate id> "
-               "overrule --note REASON; `scieflow gate list` shows it)")
+    if evidence:
+        click.echo("fix the citation and build the evidence of a new round, or let the user "
+                   "overrule it:")
+        for b in evidence:
+            if b["cluster"]:
+                click.echo(f"  scieflow review decide {slug} --round {b['round']} --decision "
+                           f"{b['cluster']}=reject --overrule {b['cluster']}=REASON --yes")
+        click.echo(f"  (or answer its open review-blocker gate: scieflow gate answer {slug} <gate id> "
+                   "overrule --note REASON; `scieflow gate list` shows it)")
+    if identity:
+        n = identity[0]["round"]
+        click.echo(f"  fix the reference and re-run `scieflow research verify-bib {slug} --round {n}`, "
+                   "or answer its review-blocker gate (`scieflow gate list` shows it): "
+                   f"scieflow gate answer {slug} <gate id> overrule --note REASON")
+    _stale_warning(stale)
     sys.exit(1)
+
+
+def _stale_warning(stale: dict | None) -> None:
+    if stale is not None:
+        click.echo(f"warning: references.bib changed since the identity check of round "
+                   f"{stale['round']}; re-run verify-bib")
+

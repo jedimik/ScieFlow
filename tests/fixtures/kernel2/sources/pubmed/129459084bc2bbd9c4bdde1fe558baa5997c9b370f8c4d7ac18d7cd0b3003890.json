@@ -1,0 +1,42 @@
+{
+  "endpoint": "esearch.fcgi",
+  "request_key": "129459084bc2bbd9c4bdde1fe558baa5997c9b370f8c4d7ac18d7cd0b3003890",
+  "request_params": {
+    "db": "pubmed",
+    "retmax": 5,
+    "retmode": "json",
+    "sort": "relevance",
+    "term": "10.9999/this-doi-does-not-exist-12345[AID]"
+  },
+  "response_body": {
+    "esearchresult": {
+      "count": "0",
+      "errorlist": {
+        "fieldsnotfound": [],
+        "phrasesnotfound": [
+          "this-doi-does-not-exist-12345"
+        ]
+      },
+      "idlist": [],
+      "querytranslation": "10.9999/this-doi-does-not-exist-12345[AID]",
+      "retmax": "0",
+      "retstart": "0",
+      "translationset": [],
+      "warninglist": {
+        "outputmessages": [
+          "No items found."
+        ],
+        "phrasesignored": [],
+        "quotedphrasesnotfound": []
+      }
+    },
+    "header": {
+      "type": "esearch",
+      "version": "0.3"
+    }
+  },
+  "response_hash": "d6cb1909d6265c57c7c55d96320af24819e3cd4115b2b296848eafa186f7f36e",
+  "retrieved_at": "2026-07-14T12:58:17Z",
+  "schema_version": "1.0",
+  "source": "pubmed"
+}

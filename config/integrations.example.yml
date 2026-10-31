@@ -43,6 +43,26 @@ providers:
     enabled: true
     hosts: [api.crossref.org]
     rate_per_s: 5
+  search-pubmed:                  # `scieflow research search pubmed` (off by default, D16; set true to use it)
+    enabled: false
+    hosts: [eutils.ncbi.nlm.nih.gov]
+    rate_per_s: 2
+  search-semantic-scholar:        # `scieflow research search semantic-scholar` (off by default, D16; keyless only)
+    enabled: false
+    hosts: [api.semanticscholar.org]
+    rate_per_s: 0.3
+  search-datacite:                # `scieflow research search datacite` and `verify-bib` identity lookups
+    enabled: true
+    hosts: [api.datacite.org]
+    rate_per_s: 5
+  opencitations:                  # citing/cited DOIs for `scieflow research snowball`
+    enabled: true
+    hosts: [api.opencitations.net]
+    rate_per_s: 2
+  unpaywall:                      # `scieflow research oa`: needs contact_email, your own address (off until set)
+    enabled: false                # set contact_email here in config/integrations.yml; ScieFlow never writes it to a file
+    hosts: [api.unpaywall.org]
+    rate_per_s: 5
 
   # journal-guidelines:          # `scieflow journal research`: author-guideline pages of one journal (M-F)
   #   enabled: true              # off by default; no `hosts:` key: each run's hosts come from its journal-sources gate

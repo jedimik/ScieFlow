@@ -1,0 +1,297 @@
+{
+ "source": "semantic_scholar",
+ "endpoint": "paper/DOI:10.7717/peerj.4375/citations",
+ "converted_from": "researcher core/tests/snapshots/semantic_scholar/196ac14625ce7bb7c004fa381835953d295b8a0d23574af353534cce365f70b1.json",
+ "conversion": "response_body copied unchanged; the snapshot envelope is dropped (its recorded field list is researcher's, not ScieFlow's; the request param is not compared)",
+ "body": {
+  "data": [
+   {
+    "citingPaper": {
+     "authors": [
+      {
+       "authorId": "145276208",
+       "name": "F. H. Abanda"
+      },
+      {
+       "authorId": "2173492316",
+       "name": "N. Maluh"
+      },
+      {
+       "authorId": "2449542948",
+       "name": "Baba A."
+      },
+      {
+       "authorId": "2377490653",
+       "name": "I. A. Newen"
+      },
+      {
+       "authorId": "2449543075",
+       "name": "E.T. Sunjo"
+      },
+      {
+       "authorId": "2449542409",
+       "name": "G.M. Ngaleu"
+      }
+     ],
+     "citationCount": 0,
+     "externalIds": {
+      "CorpusId": 290125310,
+      "DOI": "10.1108/uss-03-2026-0017"
+     },
+     "isOpenAccess": true,
+     "journal": {
+      "name": "Urbanization, Sustainability and Society"
+     },
+     "openAccessPdf": {
+      "license": "CCBY",
+      "status": "GOLD",
+      "url": "https://doi.org/10.1108/uss-03-2026-0017"
+     },
+     "paperId": "743647791ee5e2df13c0bbef4491ddfc5f737a8c",
+     "publicationDate": "2026-07-14",
+     "publicationTypes": [
+      "JournalArticle",
+      "Review"
+     ],
+     "publicationVenue": null,
+     "referenceCount": 91,
+     "title": "Mapping global innovations in GenAI for smart cities and implications for Africa",
+     "url": "https://www.semanticscholar.org/paper/743647791ee5e2df13c0bbef4491ddfc5f737a8c",
+     "venue": "Urbanization, Sustainability and Society",
+     "year": 2026
+    }
+   },
+   {
+    "citingPaper": {
+     "authors": [
+      {
+       "authorId": "2188291111",
+       "name": "Alexander N. Pisarchik"
+      }
+     ],
+     "citationCount": 0,
+     "externalIds": {
+      "CorpusId": 290102452,
+      "DOI": "10.1140/epjs/s11734-026-02469-7"
+     },
+     "isOpenAccess": true,
+     "journal": {
+      "name": "The European Physical Journal Special Topics"
+     },
+     "openAccessPdf": {
+      "license": "CCBY",
+      "status": "HYBRID",
+      "url": "https://link.springer.com/content/pdf/10.1140/epjs/s11734-026-02469-7.pdf"
+     },
+     "paperId": "7e5b79b06e05471e6c1b0f2d5e122c9183ada8a8",
+     "publicationDate": "2026-07-10",
+     "publicationTypes": [
+      "JournalArticle"
+     ],
+     "publicationVenue": {
+      "alternate_names": [
+       "Eur Phys Journal-special Top",
+       "European Physical Journal-special Topics",
+       "Eur Phys J Spéc Top"
+      ],
+      "alternate_urls": [
+       "https://link.springer.com/journal/11734"
+      ],
+      "id": "db2daa0e-d864-4dcd-8226-995048c3e712",
+      "issn": "1951-6355",
+      "name": "The European Physical Journal Special Topics",
+      "type": "journal",
+      "url": "http://www.springer.com/materials/journal/11734?detailsPage=aimsAndScopes"
+     },
+     "referenceCount": 25,
+     "title": "Information networks: principles, axioms, and higher-order structures",
+     "url": "https://www.semanticscholar.org/paper/7e5b79b06e05471e6c1b0f2d5e122c9183ada8a8",
+     "venue": "The European Physical Journal Special Topics",
+     "year": 2026
+    }
+   },
+   {
+    "citingPaper": {
+     "authors": [
+      {
+       "authorId": "2650989",
+       "name": "P. Thenkabail"
+      },
+      {
+       "authorId": "2248964774",
+       "name": "Dongdong Wang"
+      }
+     ],
+     "citationCount": 0,
+     "externalIds": {
+      "CorpusId": 290021886,
+      "DOI": "10.3390/rs18142267"
+     },
+     "isOpenAccess": true,
+     "journal": {
+      "name": "Remote Sensing"
+     },
+     "openAccessPdf": {
+      "license": "CCBY",
+      "status": "GOLD",
+      "url": "https://www.mdpi.com/2072-4292/18/14/2267/pdf?version=1783492019"
+     },
+     "paperId": "3c331df006d5e91e3f7aca24790661480d599ab9",
+     "publicationDate": "2026-07-08",
+     "publicationTypes": [
+      "JournalArticle"
+     ],
+     "publicationVenue": {
+      "alternate_issns": [
+       "2072-4292"
+      ],
+      "alternate_names": [
+       "Remote Sens"
+      ],
+      "alternate_urls": [
+       "https://www.mdpi.com/journal/remotesensing",
+       "http://www.mdpi.com/journal/remotesensing",
+       "http://nbn-resolving.de/urn/resolver.pl?urn=urn:nbn:ch:bel-169233"
+      ],
+      "id": "8e1bd4b5-d5b2-4e22-ba0a-01fe5568d472",
+      "issn": "2315-4675",
+      "name": "Remote Sensing",
+      "type": "journal",
+      "url": "http://www.e-helvetica.nb.admin.ch/directAccess?callnumber=bel-169233"
+     },
+     "referenceCount": 25,
+     "title": "Comparative Scientometric Assessment of Remote Sensing Journals in 2025 Across Seven Performance Indicators",
+     "url": "https://www.semanticscholar.org/paper/3c331df006d5e91e3f7aca24790661480d599ab9",
+     "venue": "Remote Sensing",
+     "year": 2026
+    }
+   },
+   {
+    "citingPaper": {
+     "authors": [
+      {
+       "authorId": "2446845984",
+       "name": "Kenny Cesar Alca Carrasco"
+      },
+      {
+       "authorId": "2101491379",
+       "name": "O. Marín-Sánchez"
+      },
+      {
+       "authorId": "22508541",
+       "name": "Ruy D. Chacón"
+      },
+      {
+       "authorId": "2354077431",
+       "name": "Jimmy Ango-Bedriñana"
+      },
+      {
+       "authorId": "2220470270",
+       "name": "Homero Ango-Aguilar"
+      }
+     ],
+     "citationCount": 1,
+     "externalIds": {
+      "CorpusId": 289823534,
+      "DOI": "10.3390/publications14030040"
+     },
+     "isOpenAccess": true,
+     "journal": {
+      "name": "Publications"
+     },
+     "openAccessPdf": {
+      "license": "CCBY",
+      "status": "GOLD",
+      "url": "https://doi.org/10.3390/publications14030040"
+     },
+     "paperId": "17714265fcc4aac5b661b7c6077e0fc8d7ba1a4d",
+     "publicationDate": "2026-07-01",
+     "publicationTypes": [
+      "JournalArticle"
+     ],
+     "publicationVenue": {
+      "alternate_urls": [
+       "http://nbn-resolving.de/urn/resolver.pl?urn=urn:nbn:ch:bel-317977",
+       "https://www.mdpi.com/journal/publications"
+      ],
+      "id": "68b89063-4681-4b47-81c0-092409499580",
+      "issn": "2304-6775",
+      "name": "Publications",
+      "type": "journal",
+      "url": "http://www.e-helvetica.nb.admin.ch/directAccess?callnumber=bel-317977"
+     },
+     "referenceCount": 35,
+     "title": "A Bibliometric Analysis of Microbiology and Parasitology Research Indexed in SciELO Peru, 2000–2023",
+     "url": "https://www.semanticscholar.org/paper/17714265fcc4aac5b661b7c6077e0fc8d7ba1a4d",
+     "venue": "Publications",
+     "year": 2026
+    }
+   },
+   {
+    "citingPaper": {
+     "authors": [
+      {
+       "authorId": "2114942482",
+       "name": "G. Tiruneh"
+      },
+      {
+       "authorId": "5398574",
+       "name": "C. Righi"
+      },
+      {
+       "authorId": "51358302",
+       "name": "C. Nwaogu"
+      },
+      {
+       "authorId": "2099673015",
+       "name": "J. L. Polizel"
+      },
+      {
+       "authorId": "2391723402",
+       "name": "Carlos Rodrigues Pereira"
+      }
+     ],
+     "citationCount": 0,
+     "externalIds": {
+      "CorpusId": 289927229,
+      "DOI": "10.1016/j.tfp.2026.101391"
+     },
+     "isOpenAccess": true,
+     "journal": {
+      "name": "Trees, Forests and People"
+     },
+     "openAccessPdf": {
+      "license": "CCBYNCND",
+      "status": "GOLD",
+      "url": "https://www.sciencedirect.com/science/article/pii/S266671932600244X/pdf"
+     },
+     "paperId": "1001efebbdd7650023a2858d18d6efe80029c647",
+     "publicationDate": "2026-07-01",
+     "publicationTypes": [
+      "JournalArticle"
+     ],
+     "publicationVenue": {
+      "alternate_names": [
+       "Tree For People"
+      ],
+      "alternate_urls": [
+       "https://www.sciencedirect.com/journal/trees-forests-and-people"
+      ],
+      "id": "b654a465-6ed7-4ff8-838f-281dbbb84129",
+      "issn": "2666-7193",
+      "name": "Trees, Forests and People",
+      "type": "journal",
+      "url": "https://www.journals.elsevier.com/trees-forests-and-people"
+     },
+     "referenceCount": 64,
+     "title": "Scientific Research on Amazonian Islands: Trends and Regional Contributions",
+     "url": "https://www.semanticscholar.org/paper/1001efebbdd7650023a2858d18d6efe80029c647",
+     "venue": "Trees, Forests and People",
+     "year": 2026
+    }
+   }
+  ],
+  "next": 5,
+  "offset": 0
+ }
+}

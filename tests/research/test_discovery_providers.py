@@ -70,10 +70,11 @@ def gateway(proj, cfg=None, **kw):
 
 def test_absent_config_means_every_discovery_provider_off(proj):
     # M-A-D1: the four literature search sources are on by default (test_search_gateway.py);
-    # the discovery providers keep the deny-by-default rule.
+    # M-C2-D5: DataCite search and OpenCitations are on by default too;
+    # the other discovery providers keep the deny-by-default rule.
     root, ws, home = proj
     pol = providers.load(root)
-    assert set(pol.enabled_providers()) == {"search-openalex", "search-arxiv", "search-europepmc", "search-crossref"}
+    assert set(pol.enabled_providers()) == {"search-openalex", "search-arxiv", "search-europepmc", "search-crossref", "search-datacite", "opencitations"}
     for name in ("pubtator", "ctgov", "openalex", "europepmc"):
         assert not pol.allows(name)
         assert "config/integrations.yml" in pol.reason(name)
@@ -91,14 +92,18 @@ def test_absent_config_refuses_before_any_request(proj):
     assert not (ws / "scite" / "ledger.jsonl").exists()
 
 
-def test_shipped_example_enables_every_catalogue_provider(proj):
+def test_shipped_example_enables_every_provider_except_the_opt_in_ones(proj):
     root, _, _ = proj
     pol = enable(root)
     assert pol.enabled_providers() == sorted([
-        "ctgov", "europepmc", "openalex", "pubtator",
-        "search-arxiv", "search-crossref", "search-europepmc", "search-openalex"])
-    for name, spec in providers.CATALOGUE.items():
-        assert set(pol.hosts(name)) == set(spec["hosts"])
+        "ctgov", "europepmc", "openalex", "opencitations", "pubtator",
+        "search-arxiv", "search-crossref", "search-datacite", "search-europepmc", "search-openalex"])
+    # M-C2-D16: PubMed, Semantic Scholar and Unpaywall are off in the shipped example
+    for name in ("search-pubmed", "search-semantic-scholar", "unpaywall"):
+        assert not pol.allows(name)
+        assert "disabled" in pol.reason(name)
+    for name in pol.enabled_providers():
+        assert set(pol.hosts(name)) == set(providers.CATALOGUE[name]["hosts"])
 
 
 def test_example_is_gitignored_copy_target():
@@ -129,7 +134,7 @@ def test_disabled_or_unlisted_provider_is_off(proj):
     root, _, _ = proj
     pol = enable(root, {"providers": {"openalex": {"enabled": True},
                                       "ctgov": {"enabled": False}}})
-    assert [n for n in pol.enabled_providers() if not n.startswith("search-")] == ["openalex"]
+    assert [n for n in pol.enabled_providers() if not n.startswith("search-")] == ["openalex", "opencitations"]
     assert "disabled" in pol.reason("ctgov")
     assert "not listed" in pol.reason("pubtator")
 

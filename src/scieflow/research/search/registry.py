@@ -97,6 +97,52 @@ def europepmc_query(checked, from_year: int | None = None) -> providers.Composed
     return providers._mint(providers.Composed, text)
 
 
+# M-C2-D6: the PubMed field tags the check ignores (case-insensitive). Any other bracket is refused.
+PUBMED_TAGS = ("tiab", "ti", "ab", "mh", "mesh", "majr", "tw", "pt", "la", "sb", "au")
+_PUBMED_TAG = re.compile(r"\[(?:" + "|".join(PUBMED_TAGS) + r")\]", re.IGNORECASE)
+_BRACKET = re.compile(r"[\[\]]")
+
+
+def check_pubmed_query(query: str) -> providers.Checked:
+    """The PubMed query as a `Checked` value (M-C2 5.3, D6). The same repair and leak check as
+    `check_query`, except that the closed PubMed field tags are ignored by the check only; the
+    query is sent as typed. Any other bracket (an unknown tag, `[dp]` written by the user) is
+    refused before anything is built."""
+    if not isinstance(query, str):
+        raise LeakError("refused: nothing left that can be sent")
+    repaired = repair_query(query)
+    if not repaired:
+        raise LeakError("refused: nothing left that can be sent")
+    if _BRACKET.search(_PUBMED_TAG.sub(" ", repaired)):
+        raise LeakError("refused: unknown PubMed field tag")
+    text = _PUBMED_TAG.sub(" ", repaired)
+    check_text(_WORD_DIGIT.sub(" ", _WILDCARD.sub("", _folded(text))))
+    return providers._mint(providers.Checked, repaired)
+
+
+def pubmed_term(checked, from_year: int | None = None) -> providers.Composed:
+    """The PubMed search term: the checked query, with the publication-year clause composed here
+    (`(<q>) AND <Y>:3000[dp]`, M-C2 5.3)."""
+    text = _require_checked(checked)
+    if from_year is not None:
+        if not isinstance(from_year, int) or isinstance(from_year, bool):
+            raise ValueError("from_year must be an integer year")
+        text = f"({text}) AND {from_year}:3000[dp]"
+    return providers._mint(providers.Composed, text)
+
+
+def datacite_query(checked, from_year: int | None = None) -> providers.Composed:
+    """The DataCite Lucene query (M-C2 5.3): the checked text with slashes read as spaces, then
+    escaped by the vendored `escape_lucene`; with a year, wrapped as `(<text>) AND
+    publicationYear:[Y TO *]`. The operators are added after the escape, never escaped."""
+    text = _vquery.escape_lucene(" ".join(_require_checked(checked).replace("/", " ").split()))
+    if from_year is not None:
+        if not isinstance(from_year, int) or isinstance(from_year, bool):
+            raise ValueError("from_year must be an integer year")
+        text = f"({text}) AND publicationYear:[{from_year} TO *]"
+    return providers._mint(providers.Composed, text)
+
+
 def expect_object(body) -> None:
     """Validator for a JSON answer that must be an object."""
     if not isinstance(body, dict):

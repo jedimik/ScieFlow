@@ -1,0 +1,368 @@
+{
+ "source": "opencitations",
+ "endpoint": "references/10.7717/peerj.4375",
+ "converted_from": "researcher core/tests/snapshots/opencitations/2bf00097bce82aaa8f13be8f4b60b1323bf40d5f15accd4611c4f7423fd0fc68.json",
+ "conversion": "response_body copied unchanged; the snapshot envelope (hashes, timestamps) is dropped",
+ "body": [
+  {
+   "author_sc": "no",
+   "cited": "10.14293/s2199-1006.1.sor-edu.clpdpzb.v1",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-062402364900",
+   "timespan": "P2Y5M27D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1007/s11192-015-1765-5",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-061402112342",
+   "timespan": "P4Y3M9D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.7287/peerj.preprints.3100v2",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06302735105",
+   "timespan": "P2Y3M16D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06304280939",
+   "timespan": "P7Y7M12D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.5062/f4q81b0w",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06604003489",
+   "timespan": ""
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1002/asi.22856",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-062301322028",
+   "timespan": "P6Y8M5D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1016/j.joi.2016.08.002",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06250648279",
+   "timespan": "P3Y2M"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.12688/f1000research.8460.2",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06110971208",
+   "timespan": "P3Y7M19D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.12688/f1000research.8460.3",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06110970944",
+   "timespan": "P3Y4M7D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.12688/f1000research.8460.1",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06110971377",
+   "timespan": "P3Y9M17D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.7287/peerj.preprints.3100v1",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06302735096",
+   "timespan": "P2Y6M8D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.7287/peerj.preprints.3100v3 10.7554/elife.32822",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06110834152",
+   "timespan": "P1Y10M27D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1016/j.joi.2015.11.008",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06250648347",
+   "timespan": "P3Y11M"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.3163/1536-5050.99.3.008",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-061102015528",
+   "timespan": "P8Y6M"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1371/journal.pone.0013636",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-061201521651",
+   "timespan": "P9Y3M10D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1111/ecin.12064",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06180442590",
+   "timespan": "P5Y11M8D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1080/00987913.2016.1182672",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-0660268263",
+   "timespan": "P3Y9M26D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1096/fj.11-183988",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06701248564",
+   "timespan": "P8Y9M29D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1038/nature.2016.21223",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06260365470",
+   "timespan": "P3Y0M"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1371/journal.pone.0020961",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06401541371",
+   "timespan": "P8Y7M15D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1080/19322909.2013.795426",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06120897944",
+   "timespan": "P6Y6M"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1371/journal.pone.0159614",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06801525205",
+   "timespan": "P3Y5M6D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1186/1741-7015-10-124",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06901648515",
+   "timespan": "P7Y3M6D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1002/leap.1096",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06301298555",
+   "timespan": "P2Y11M21D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1080/00987913.2008.10765150",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-0660268456",
+   "timespan": "P11Y10M"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.12688/f1000research.11366.1",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-0690982742",
+   "timespan": "P2Y9M7D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.3163/1536-5050.97.1.002",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-061102015663",
+   "timespan": "P11Y0M"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1007/s11192-016-2225-6",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-061402111914",
+   "timespan": "P3Y0M25D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1016/j.joi.2007.04.001",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06260667715",
+   "timespan": "P12Y6M"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.47678/cjhe.v39i3.479",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-062401917861",
+   "timespan": "P9Y10M19D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-062203864552",
+   "timespan": "P17Y"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.7554/elife.16800",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06130828777",
+   "timespan": "P3Y6M21D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1186/s12961-017-0235-3",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06110803053",
+   "timespan": "P2Y4M30D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1007/s11192-017-2291-4",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-061402111858",
+   "timespan": "P2Y11M12D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1126/science.352.6285.508",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06260500503",
+   "timespan": "P3Y8M30D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1241/johokanri.41.678",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-061301415885",
+   "timespan": "P22Y"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1371/journal.pone.0011273",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-061501527157",
+   "timespan": "P9Y7M5D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1002/asi.22963",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06802513818",
+   "timespan": "P6Y2M22D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1126/science.aaq1560",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06230488428",
+   "timespan": "P2Y3M22D"
+  },
+  {
+   "author_sc": "no",
+   "cited": "10.1002/leap.1021",
+   "citing": "10.24108/2658-3143-2019-2-4-228-247 10.7287/peerj.preprints.3119v1 10.7717/peerj.4375",
+   "creation": "2020-01-28",
+   "journal_sc": "no",
+   "oci": "06903910241-06301298606",
+   "timespan": "P3Y10M27D"
+  }
+ ]
+}

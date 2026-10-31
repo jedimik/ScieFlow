@@ -138,6 +138,24 @@ disable settings.
 Research templates carry their own default agent timeout (science 900s,
 keyword 600s, others 300s); set `timeout:` to override it for all interests.
 
+## Literature interests (M-C2)
+
+An interest can carry a `literature:` block instead of an agent prompt. It points at a saved monitor
+of a run (see `scieflow research monitor` in [Literature kernel](../research/literature-kernel.md#saved-searches-monitor-and-the-news-hook)):
+
+```yaml
+  - name: literature-watch
+    literature:
+      workspace: <slug>     # the run that holds the monitor
+      monitor: <name>       # a monitor saved with `scieflow research monitor add`
+```
+
+Both keys are required and must be non-empty names; anything else is a configuration error. Such an
+interest runs no agent and spends no agent quota. `scieflow news run` re-runs the monitor, and the
+report gets a `## New literature` block that lists only the papers the monitor has not seen before, as
+`- <title> (<year>) https://doi.org/<doi>`. When there is nothing new, the block says
+`No new papers since the last run.` A monitor that fails records a failure and leaves its state unchanged.
+
 ## Choosing the agent
 
 `agent`, `model`, `reasoning` and `timeout` at the top of `config/news.yml`

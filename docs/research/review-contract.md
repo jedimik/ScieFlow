@@ -233,6 +233,29 @@ an author with nothing accepted needs no letter.
 `scieflow review merge-check SLUG` exits 1 while `blockers()` is non-empty;
 every merge path should refuse on the same condition.
 
+## Identity blockers (verify-bib, M-C2)
+
+`scieflow research verify-bib <slug> --round N` checks the bibliography and records the result for
+review round N. Core owns the gates, so no agent path clears them:
+
+- The event `review.identity_checked` is what counts. It lists the refusal-grade references
+  (`mismatch`, `unresolvable`) by key and DOI only, never by title. The detail file
+  `review/round-N/identity.json` is a view of it; editing that file changes nothing.
+- Each refusal-grade reference opens one `review-blocker` gate, which is human-only. A human answers
+  `overrule` with a note to accept the risk, or `fixed` once the reference is corrected. `fixed` records
+  no event, and the blocker goes away when a later check no longer flags the reference.
+- An overrule holds for the same reference and verdict in later rounds. A different verdict blocks again.
+- `review merge-check` prints identity blockers as `round N identity: <verdict> <doi> (<key>)` and exits
+  `1` while any is open. If `references.bib` changed after the latest check, it prints a warning; the
+  warning never changes the exit code.
+- `inconclusive` never blocks. It never reaches the refusal list.
+- `service.blockers()` returns the evidence blockers first (retracted or unresolvable bundle flags) and
+  the identity blockers after them, on every path.
+
+The events are `review.identity_checked` and `review.identity_overruled`. The web review banner lists
+identity blockers, but its one link to the matrix goes to the first blocker's round, which has no matrix
+when only identity blockers are open; a per-blocker link is a follow-up.
+
 ## Fixture run
 
 `tests/fixtures/review/run/` is a complete round to build views against —

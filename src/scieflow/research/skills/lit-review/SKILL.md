@@ -81,6 +81,18 @@ the prompt file under a `PREVIOUS ATTEMPT FAILED VALIDATION:` heading and
 re-dispatch that agent once. Second failure → mark the agent `failed` in
 `status.yml`, log it, continue.
 
+Optional steps after the search (only when the brief asks for them):
+
+- Chase citations of the strongest papers: `uv run scieflow research snowball --workspace <slug> --seed <DOI> [--seed <DOI> ...] --direction backward --depth 1`
+  (or `--direction forward` for the papers that cite them). Seeds are DOIs from the search output only;
+  never type one from memory. Up to ten seeds.
+- For a living review, save the query with `uv run scieflow research monitor add <slug> <name> --query "<query>"`
+  and later re-run it with `uv run scieflow research monitor run <slug> <name>`, which reports only the
+  papers that are new since the last run.
+
+Papers from snowball and monitor output are search results like any other: every paper you report must
+come from a command result (rule 6).
+
 ## Phase 3 — cross-review
 
 Skip (mark `skipped-quorum`) if fewer than 2 agents produced valid findings;

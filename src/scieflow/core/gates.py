@@ -122,6 +122,9 @@ def answer(project: Project, ws: Path, gate_id: str, answer: str, actor: str = "
             # a refused decision leaves the gate open (docs/research/review-contract.md).
             from scieflow.core.review import decision_gates
             decision_gates.on_answer(project, ws, gate, answer, actor, rationale, note)
+            # Identity blockers (M-C2 D18): a verify-bib blocker's answer is checked here too.
+            from scieflow.core.review import identity_gates
+            identity_gates.on_answer(project, ws, gate, answer, actor, rationale, note)
         if gate["kind"] == DATA_RELEASE_KIND:
             # Only a human `release` copies a checked file out of an L2 run (M-B 5.8).
             from scieflow.core.data import release

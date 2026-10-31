@@ -22,7 +22,9 @@ from scieflow._vendor.researcher_core.model import canonical_json, sha256_hex
 from scieflow.research.lib import providers
 
 SCHEMA_VERSION = 1
-BODY_KINDS = ("json", "text")
+# "absent" (M-C2 5.2): the provider answered "no such record" with a listed client-error status.
+# Its body is null and that is the whole answer.
+BODY_KINDS = ("json", "text", "absent")
 KEYS = frozenset({"schema_version", "source", "endpoint", "url", "request_params", "request_key",
                   "body_kind", "response_body", "response_hash", "results", "retrieved_at"})
 _KEY = re.compile(r"[0-9a-f]{64}")
@@ -84,11 +86,24 @@ def ensure_writable(ws, *, provider: str, key: str) -> None:
         raise write_failed(ws, provider, key, exc) from None
 
 
+def body_matches(body_kind, body) -> bool:
+    """Whether a body has the shape its kind promises: text a string, absent null, json anything
+    but null (a null json answer is never stored; an absent status is its own kind)."""
+    if body_kind == "text":
+        return isinstance(body, str)
+    if body_kind == "absent":
+        return body is None
+    if body_kind == "json":
+        return body is not None
+    return False
+
+
 def write(ws, *, provider: str, op: str, key: str, url: str, request_params: dict,
           body_kind: str, response_body, results: int) -> dict:
     """Store one answer atomically (temp file, then rename). Returns the record written."""
-    if body_kind not in BODY_KINDS or (body_kind == "text") != isinstance(response_body, str):
-        raise ValueError("body_kind must match the body: json, or text for a string")
+    if body_kind not in BODY_KINDS or not body_matches(body_kind, response_body):
+        raise ValueError("body_kind must match the body: json (not null), text for a string, "
+                         "or absent with no body")
     target = path(ws, provider, key)
     _no_links(ws, target)
     record = {
@@ -140,8 +155,7 @@ def _verify(ws, target: Path, provider: str, key: str, request=None) -> dict:
              "its request differs from the one asked for"),
         ]
     checks += [
-        (data["body_kind"] in BODY_KINDS
-         and (data["body_kind"] == "text") == isinstance(data["response_body"], str),
+        (data["body_kind"] in BODY_KINDS and body_matches(data["body_kind"], data["response_body"]),
          "its body kind does not match its body"),
         (data["response_hash"] == digest, "its body does not match its hash"),
         (isinstance(data["results"], int) and not isinstance(data["results"], bool)

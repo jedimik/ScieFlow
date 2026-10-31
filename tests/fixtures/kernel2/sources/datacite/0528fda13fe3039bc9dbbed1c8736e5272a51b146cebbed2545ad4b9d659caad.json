@@ -1,0 +1,824 @@
+{
+  "endpoint": "dois",
+  "request_key": "0528fda13fe3039bc9dbbed1c8736e5272a51b146cebbed2545ad4b9d659caad",
+  "request_params": {
+    "page[size]": 5,
+    "query": "(self-supervised ECG) AND publicationYear:[2023 TO *]"
+  },
+  "response_body": {
+    "data": [
+      {
+        "attributes": {
+          "citationCount": 0,
+          "container": {},
+          "contentUrl": null,
+          "contributors": [],
+          "created": "2026-07-14T03:13:15Z",
+          "creators": [
+            {
+              "affiliation": [],
+              "familyName": "Feng",
+              "givenName": "Saiyang",
+              "name": "Feng, Saiyang",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Zhang",
+              "givenName": "Yuanyun",
+              "name": "Zhang, Yuanyun",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Li",
+              "givenName": "Shi",
+              "name": "Li, Shi",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            }
+          ],
+          "dates": [
+            {
+              "date": "2026-07-03T22:00:54Z",
+              "dateInformation": "v1",
+              "dateType": "Submitted"
+            },
+            {
+              "date": "2026-07-14T00:01:31Z",
+              "dateInformation": "v1",
+              "dateType": "Updated"
+            },
+            {
+              "date": "2026-07",
+              "dateInformation": "v1",
+              "dateType": "Available"
+            }
+          ],
+          "descriptions": [
+            {
+              "description": "Foundation models have recently emerged as a powerful paradigm for learning transferable representations from large scale biomedical data, yet existing approaches for physiological waveforms primarily optimize reconstruction or forecasting objectives that do not explicitly preserve clinically meaningful waveform morphology. Electrocardiograms (ECGs) and pulse oximetry (SpO2) waveforms encode rich cardiovascular and hemodynamic information through their morphological structure. In this work, we introduce MorphologyFM, a multimodal foundation model pretrained on paired ECG and SpO2 waveforms from the MIMIC critical care database using a morphology aware self supervised learning objective. MorphologyFM combines morphology guided masking, cross modal representation learning, and contrastive latent alignment to learn representations that capture clinically relevant physiological structure without requiring manual annotations. We evaluate MorphologyFM across multiple downstream prediction tasks, including arrhythmia classification, hypoxemia prediction, mortality prediction, and length of stay estimation, demonstrating consistent improvements over representative self supervised learning methods, including Masked Autoencoders (MAE), contrastive learning, Barlow Twins, and Joint Embedding Predictive Architectures (JEPA). Furthermore, we show that jointly modeling ECG and SpO2 waveforms produces more transferable representations than single modality pretraining. Our results establish waveform morphology as a powerful inductive bias for self supervised physiological representation learning and introduce MorphologyFM as a general purpose foundation model for continuous physiological monitoring.",
+              "descriptionType": "Abstract"
+            }
+          ],
+          "doi": "10.48550/arxiv.2607.09749",
+          "downloadCount": 0,
+          "formats": [],
+          "fundingReferences": [],
+          "geoLocations": [],
+          "identifiers": [
+            {
+              "identifier": "2607.09749",
+              "identifierType": "arXiv"
+            }
+          ],
+          "isActive": true,
+          "language": null,
+          "metadataVersion": 0,
+          "partCount": 0,
+          "partOfCount": 0,
+          "publicationYear": 2026,
+          "published": null,
+          "publisher": "arXiv",
+          "reason": null,
+          "referenceCount": 0,
+          "registered": "2026-07-14T03:13:15Z",
+          "relatedIdentifiers": [],
+          "relatedItems": [],
+          "rightsList": [
+            {
+              "rights": "Creative Commons Attribution 4.0 International",
+              "rightsIdentifier": "cc-by-4.0",
+              "rightsIdentifierScheme": "SPDX",
+              "rightsUri": "https://creativecommons.org/licenses/by/4.0/legalcode",
+              "schemeUri": "https://spdx.org/licenses/"
+            }
+          ],
+          "schemaVersion": "http://datacite.org/schema/kernel-4",
+          "sizes": [],
+          "source": "mds",
+          "state": "findable",
+          "subjects": [
+            {
+              "lang": "en",
+              "subject": "Signal Processing (eess.SP)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "lang": "en",
+              "subject": "Artificial Intelligence (cs.AI)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "lang": "en",
+              "subject": "Machine Learning (cs.LG)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "subject": "FOS: Electrical engineering, electronic engineering, information engineering",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            },
+            {
+              "subject": "FOS: Computer and information sciences",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            }
+          ],
+          "titles": [
+            {
+              "title": "MorphologyFM: A Foundation Model for Morphology-Aware Representation Learning from ECG and Pulse Oximetry Waveforms"
+            }
+          ],
+          "types": {
+            "bibtex": "misc",
+            "citeproc": "article",
+            "resourceType": "Article",
+            "resourceTypeGeneral": "Preprint",
+            "ris": "GEN",
+            "schemaOrg": "CreativeWork"
+          },
+          "updated": "2026-07-14T03:13:15Z",
+          "url": "https://arxiv.org/abs/2607.09749",
+          "version": "1",
+          "versionCount": 0,
+          "versionOfCount": 0,
+          "viewCount": 0
+        },
+        "id": "10.48550/arxiv.2607.09749",
+        "relationships": {
+          "client": {
+            "data": {
+              "id": "arxiv.content",
+              "type": "clients"
+            }
+          }
+        },
+        "type": "dois"
+      },
+      {
+        "attributes": {
+          "citationCount": 0,
+          "container": {
+            "identifier": "2980-9037",
+            "identifierType": "EISSN",
+            "issue": "1",
+            "title": "International Journal of Biophotonics and Biomedical Engineering (IJBBE)",
+            "type": "Series",
+            "volume": "6"
+          },
+          "contentUrl": null,
+          "contributors": [
+            {
+              "affiliation": [],
+              "contributorType": "ContactPerson",
+              "familyName": "Salimi Shahraki",
+              "givenName": "Atefeh",
+              "name": "Salimi Shahraki, Atefeh",
+              "nameIdentifiers": [
+                {
+                  "nameIdentifier": "https://orcid.org/0000-0001-7798-2928",
+                  "nameIdentifierScheme": "ORCID",
+                  "schemeUri": "https://orcid.org"
+                }
+              ],
+              "nameType": "Personal"
+            }
+          ],
+          "created": "2026-07-08T21:13:32Z",
+          "creators": [
+            {
+              "affiliation": [
+                "Department of Electrical Engineering, Isf.C., Islamic Azad University, Isfahan, Iran."
+              ],
+              "familyName": null,
+              "givenName": null,
+              "name": "Dalvandi, Sanaz",
+              "nameIdentifiers": [],
+              "nameType": null
+            },
+            {
+              "affiliation": [
+                "Department of Electrical Engineering, Laser and Biophotonics in Biotechnologies Research Center, Isf.C., Islamic Azad University, Isfahan, Iran."
+              ],
+              "familyName": "Salimi Shahraki",
+              "givenName": "Atefeh",
+              "name": "Salimi Shahraki, Atefeh",
+              "nameIdentifiers": [
+                {
+                  "nameIdentifier": "https://orcid.org/0000-0001-7798-2928",
+                  "nameIdentifierScheme": "ORCID",
+                  "schemeUri": "https://orcid.org"
+                }
+              ],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [
+                "Department of Electrical Engineering, Isf.C., Islamic Azad University, Isfahan, Iran"
+              ],
+              "familyName": null,
+              "givenName": null,
+              "name": "Azimifar, Farhad",
+              "nameIdentifiers": [],
+              "nameType": null
+            },
+            {
+              "affiliation": [
+                "Department of Electrical Engineering, Isf.C., Islamic Azad University, Isfahan, Iran."
+              ],
+              "familyName": null,
+              "givenName": null,
+              "name": "Sajadieh, Seyed Mahdi",
+              "nameIdentifiers": [],
+              "nameType": null
+            }
+          ],
+          "dates": [
+            {
+              "date": "2025-12-29",
+              "dateInformation": null,
+              "dateType": "Submitted"
+            },
+            {
+              "date": "2026-06-20",
+              "dateInformation": null,
+              "dateType": "Accepted"
+            },
+            {
+              "date": "2026-06-05",
+              "dateInformation": null,
+              "dateType": "Updated"
+            },
+            {
+              "date": "2026-06-30",
+              "dateInformation": null,
+              "dateType": "Issued"
+            }
+          ],
+          "descriptions": [
+            {
+              "description": "Given the serious risks psychological stress poses to both mental and cardiovascular health, there is a need for real-time and unobtrusive monitoring methods. We present a new deep learning framework that uses synchronized photoplethysmogram (PPG) and phonocardiogram (PCG) inputs to classify stress.  In contrast to current methods that use multimodal sensors or electrocardiography (ECG), our system uses only PCG and PPG, which are inexpensive, noninvasive, and wearable technology compatible.  The architecture incorporates a Bi-LSTM for sequential dependency modeling and a 1D U-Net encoder for multiscale temporal feature extraction.  A physiologically interpretable, self-supervised learning strategy is made possible by the automatic derivation of stress labels from PPG-based inter-beat intervals using RMSSD (root mean square of successive differences).  State-of-the-art accuracy (98.5%) and F1-scores (&gt;0.97) are demonstrated via experimental results on a public dataset, together with real-time inference capabilities (&lt;50 ms on CPU). Our approach opens the door for scalable wearable health monitoring devices by proving the feasibility of interpretable, end-to-end deep learning for stress detection using synchronized acoustic and optical cardiac inputs.",
+              "descriptionType": "Abstract",
+              "lang": null
+            }
+          ],
+          "doi": "10.57647/ijbbe.2026.0601.03",
+          "downloadCount": 0,
+          "formats": [],
+          "fundingReferences": [],
+          "geoLocations": [],
+          "identifiers": [
+            {
+              "identifier": "16-1868-18264",
+              "identifierType": "publisherId"
+            }
+          ],
+          "isActive": true,
+          "language": "en",
+          "metadataVersion": 1,
+          "partCount": 0,
+          "partOfCount": 0,
+          "publicationYear": 2026,
+          "published": null,
+          "publisher": "OICC Press (United Kingdom)",
+          "reason": null,
+          "referenceCount": 0,
+          "registered": "2026-07-08T21:13:32Z",
+          "relatedIdentifiers": [],
+          "relatedItems": [
+            {
+              "issue": "1",
+              "publicationYear": "2026",
+              "relatedItemIdentifier": {
+                "relatedItemIdentifier": "2980-9037",
+                "relatedItemIdentifierType": "EISSN"
+              },
+              "relatedItemType": "Journal",
+              "relationType": "IsPublishedIn",
+              "titles": [
+                {
+                  "title": "International Journal of Biophotonics and Biomedical Engineering (IJBBE)"
+                }
+              ],
+              "volume": "6"
+            }
+          ],
+          "rightsList": [
+            {
+              "rights": "Creative Commons Attribution 4.0 International",
+              "rightsIdentifier": "cc-by-4.0",
+              "rightsIdentifierScheme": "SPDX",
+              "rightsUri": "https://creativecommons.org/licenses/by/4.0/legalcode",
+              "schemeUri": "https://spdx.org/licenses/"
+            }
+          ],
+          "schemaVersion": "http://datacite.org/schema/kernel-4",
+          "sizes": [],
+          "source": "fabricaForm",
+          "state": "findable",
+          "subjects": [
+            {
+              "subject": "Stress detection"
+            },
+            {
+              "subject": "Deep learning"
+            },
+            {
+              "subject": "PCG"
+            },
+            {
+              "subject": "PPG"
+            },
+            {
+              "subject": "Wearable devices"
+            }
+          ],
+          "titles": [
+            {
+              "lang": "en",
+              "title": "Real-Time Stress Detection Using Combined PPG and PCG Signals with Deep Learning",
+              "titleType": null
+            }
+          ],
+          "types": {
+            "bibtex": "article",
+            "citeproc": "article-journal",
+            "resourceTypeGeneral": "JournalArticle",
+            "ris": "JOUR",
+            "schemaOrg": "ScholarlyArticle"
+          },
+          "updated": "2026-07-08T21:14:41Z",
+          "url": "https://oiccpress.com/ijbbe/article/view/18264",
+          "version": null,
+          "versionCount": 0,
+          "versionOfCount": 0,
+          "viewCount": 0
+        },
+        "id": "10.57647/ijbbe.2026.0601.03",
+        "relationships": {
+          "client": {
+            "data": {
+              "id": "qcqq.meyizt",
+              "type": "clients"
+            }
+          }
+        },
+        "type": "dois"
+      },
+      {
+        "attributes": {
+          "citationCount": 0,
+          "container": {},
+          "contentUrl": null,
+          "contributors": [],
+          "created": "2026-07-02T02:04:59Z",
+          "creators": [
+            {
+              "affiliation": [],
+              "familyName": "Kim",
+              "givenName": "Siwon",
+              "name": "Kim, Siwon",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            }
+          ],
+          "dates": [
+            {
+              "date": "2026-07-01T16:27:21Z",
+              "dateInformation": "v1",
+              "dateType": "Submitted"
+            },
+            {
+              "date": "2026-07-02T01:02:07Z",
+              "dateInformation": "v1",
+              "dateType": "Updated"
+            },
+            {
+              "date": "2026-07",
+              "dateInformation": "v1",
+              "dateType": "Available"
+            }
+          ],
+          "descriptions": [
+            {
+              "description": "Data analysis in the medical domain often encounters scenarios involving a limited target dataset and a large, unannotated dataset with a general distribution. Under such circumstances, self-supervised learning (SSL) methods are highly effective for utilizing large datasets, making them a popular choice for electrocardiogram (ECG) analysis. This work presents the Event Reconstruction Joint-Embedding Predictive Architecture (ER-JEPA), a lightweight SSL framework for multivariate time series, whose name and two-fold hierarchical structure are inspired by the diagnostic approach of cardiologists. At its core, ER-JEPA features: (1) a two-stage structure that constructs representations for each time interval and subsequently processes these representations as a univariate time series, (2) the hierarchical integration of two Joint-Embedding Predictive Architectures (JEPAs), and (3) a Vision Transformer (ViT) backbone. The structural concatenation of two JEPAs categorizes the model as a Hierarchical JEPA (H-JEPA), designed to encode multiple levels of abstract representations for enhanced prediction on complex tasks. This study reports a successful application of H-JEPA to 12-lead ECG data as a multivariate time series alongside an analysis of the sensitivity of hierarchical representation during the pretraining stage. Pretrained on approximately 180,000 10-second recordings, the model achieves state-of-the-art downstream performance on the ST-MEM benchmark, with rapid computation and minimal resource usage.",
+              "descriptionType": "Abstract"
+            },
+            {
+              "description": "25 pages, 7 figures. Code will be made publicly available soon",
+              "descriptionType": "Other"
+            }
+          ],
+          "doi": "10.48550/arxiv.2607.01145",
+          "downloadCount": 0,
+          "formats": [],
+          "fundingReferences": [],
+          "geoLocations": [],
+          "identifiers": [
+            {
+              "identifier": "2607.01145",
+              "identifierType": "arXiv"
+            }
+          ],
+          "isActive": true,
+          "language": null,
+          "metadataVersion": 0,
+          "partCount": 0,
+          "partOfCount": 0,
+          "publicationYear": 2026,
+          "published": null,
+          "publisher": "arXiv",
+          "reason": null,
+          "referenceCount": 0,
+          "registered": "2026-07-02T02:05:00Z",
+          "relatedIdentifiers": [],
+          "relatedItems": [],
+          "rightsList": [
+            {
+              "rights": "Creative Commons Attribution 4.0 International",
+              "rightsIdentifier": "cc-by-4.0",
+              "rightsIdentifierScheme": "SPDX",
+              "rightsUri": "https://creativecommons.org/licenses/by/4.0/legalcode",
+              "schemeUri": "https://spdx.org/licenses/"
+            }
+          ],
+          "schemaVersion": "http://datacite.org/schema/kernel-4",
+          "sizes": [],
+          "source": "mds",
+          "state": "findable",
+          "subjects": [
+            {
+              "lang": "en",
+              "subject": "Machine Learning (cs.LG)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "lang": "en",
+              "subject": "Signal Processing (eess.SP)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "subject": "FOS: Computer and information sciences",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            },
+            {
+              "subject": "FOS: Electrical engineering, electronic engineering, information engineering",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            }
+          ],
+          "titles": [
+            {
+              "title": "A Lightweight Self-Supervised Learning Framework for Multivariate Time Series using Hierarchical-JEPA on ECG Data"
+            }
+          ],
+          "types": {
+            "bibtex": "misc",
+            "citeproc": "article",
+            "resourceType": "Article",
+            "resourceTypeGeneral": "Preprint",
+            "ris": "GEN",
+            "schemaOrg": "CreativeWork"
+          },
+          "updated": "2026-07-02T02:05:00Z",
+          "url": "https://arxiv.org/abs/2607.01145",
+          "version": "1",
+          "versionCount": 0,
+          "versionOfCount": 0,
+          "viewCount": 0
+        },
+        "id": "10.48550/arxiv.2607.01145",
+        "relationships": {
+          "client": {
+            "data": {
+              "id": "arxiv.content",
+              "type": "clients"
+            }
+          }
+        },
+        "type": "dois"
+      },
+      {
+        "attributes": {
+          "citationCount": 0,
+          "container": {},
+          "contentUrl": null,
+          "contributors": [],
+          "created": "2026-07-02T02:01:36Z",
+          "creators": [
+            {
+              "affiliation": [],
+              "familyName": "Chemeris",
+              "givenName": "Alexander",
+              "name": "Chemeris, Alexander",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Jin",
+              "givenName": "Ming",
+              "name": "Jin, Ming",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Balestriero",
+              "givenName": "Randall",
+              "name": "Balestriero, Randall",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            }
+          ],
+          "dates": [
+            {
+              "date": "2026-07-01T13:56:21Z",
+              "dateInformation": "v1",
+              "dateType": "Submitted"
+            },
+            {
+              "date": "2026-07-02T00:52:41Z",
+              "dateInformation": "v1",
+              "dateType": "Updated"
+            },
+            {
+              "date": "2026-07",
+              "dateInformation": "v1",
+              "dateType": "Available"
+            }
+          ],
+          "descriptions": [
+            {
+              "description": "Time series are central to modern data mining applications, from industrial telemetry and server metrics to finance and physiology, yet time-series self-supervised learning often depends on view and augmentation choices that encode domain-specific invariances. We study how an SSL recipe behaves when its method-specific configuration is reused unchanged after the pretraining signal family changes, framing this as a fixed-recipe stress test rather than a comparison against optimally tuned methods. We introduce Latent Euclidean Next-Embedding Prediction Architecture (LeNEPA), a no-augmentation next-latent-token objective with a causal backbone. LeNEPA replaces the stop-gradient/EMA stabilization used by vanilla NEPA with SIGReg-based isotropy regularization and computes the predictive loss in a lightweight projected space that is discarded for evaluation. We compare LeNEPA with an ECG-tuned JEPA recipe under a fixed-horizon frozen-probe protocol on PTB-XL and Diag, a synthetic diagnostic corpus generated with Aionoscope. Both methods are retrained independently on each dataset while keeping their method-specific recipes unchanged. In this protocol, the ECG-tuned JEPA recipe is strong in-domain on PTB-XL but weaker when reused unchanged on Diag, whereas LeNEPA preserves useful frozen-probe gains on both datasets. Learning curves suggest faster early representation acquisition: LeNEPA reaches 80% of its final AUROC/AUPRC gain after 2--5k updates, compared with 5--10k updates for the faster JEPA readout. As a separate external frozen-encoder check, a CauKer-pretrained LeNEPA variant reaches 77.65% mean UCR-128 Random-Forest accuracy in a single-seed, best-checkpoint run, within 1.16 points of Mantis and within 0.24 points of MOMENT (77.89%). Overall, the results support no-augmentation latent prediction as a useful candidate recipe for low-retuning time-series SSL.",
+              "descriptionType": "Abstract"
+            },
+            {
+              "description": "9 pages, 4 figures, 6 tables; accepted by the 12th Mining and Learning from Time Series (KDD MILETS 2026); source code and artifacts: https://github.com/langotime/lenepa-milets-2026",
+              "descriptionType": "Other"
+            }
+          ],
+          "doi": "10.48550/arxiv.2607.00958",
+          "downloadCount": 0,
+          "formats": [],
+          "fundingReferences": [],
+          "geoLocations": [],
+          "identifiers": [
+            {
+              "identifier": "2607.00958",
+              "identifierType": "arXiv"
+            }
+          ],
+          "isActive": true,
+          "language": null,
+          "metadataVersion": 0,
+          "partCount": 0,
+          "partOfCount": 0,
+          "publicationYear": 2026,
+          "published": null,
+          "publisher": "arXiv",
+          "reason": null,
+          "referenceCount": 0,
+          "registered": "2026-07-02T02:01:37Z",
+          "relatedIdentifiers": [],
+          "relatedItems": [],
+          "rightsList": [
+            {
+              "rights": "Creative Commons Attribution 4.0 International",
+              "rightsIdentifier": "cc-by-4.0",
+              "rightsIdentifierScheme": "SPDX",
+              "rightsUri": "https://creativecommons.org/licenses/by/4.0/legalcode",
+              "schemeUri": "https://spdx.org/licenses/"
+            }
+          ],
+          "schemaVersion": "http://datacite.org/schema/kernel-4",
+          "sizes": [],
+          "source": "mds",
+          "state": "findable",
+          "subjects": [
+            {
+              "lang": "en",
+              "subject": "Machine Learning (cs.LG)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "subject": "FOS: Computer and information sciences",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            }
+          ],
+          "titles": [
+            {
+              "title": "LeNEPA: No-Augmentation Next-Latent Prediction for Time-Series Representation Learning"
+            }
+          ],
+          "types": {
+            "bibtex": "misc",
+            "citeproc": "article",
+            "resourceType": "Article",
+            "resourceTypeGeneral": "Preprint",
+            "ris": "GEN",
+            "schemaOrg": "CreativeWork"
+          },
+          "updated": "2026-07-02T02:01:37Z",
+          "url": "https://arxiv.org/abs/2607.00958",
+          "version": "1",
+          "versionCount": 0,
+          "versionOfCount": 0,
+          "viewCount": 0
+        },
+        "id": "10.48550/arxiv.2607.00958",
+        "relationships": {
+          "client": {
+            "data": {
+              "id": "arxiv.content",
+              "type": "clients"
+            }
+          }
+        },
+        "type": "dois"
+      },
+      {
+        "attributes": {
+          "citationCount": 0,
+          "container": {},
+          "contentUrl": null,
+          "contributors": [],
+          "created": "2026-06-23T04:45:15Z",
+          "creators": [
+            {
+              "affiliation": [],
+              "familyName": "Gui",
+              "givenName": "Yiyu",
+              "name": "Gui, Yiyu",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Chen",
+              "givenName": "Mingzhi",
+              "name": "Chen, Mingzhi",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Zhu",
+              "givenName": "Yuesheng",
+              "name": "Zhu, Yuesheng",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Luo",
+              "givenName": "Guibo",
+              "name": "Luo, Guibo",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            },
+            {
+              "affiliation": [],
+              "familyName": "Yang",
+              "givenName": "Yuchao",
+              "name": "Yang, Yuchao",
+              "nameIdentifiers": [],
+              "nameType": "Personal"
+            }
+          ],
+          "dates": [
+            {
+              "date": "2026-06-20T10:01:55Z",
+              "dateInformation": "v1",
+              "dateType": "Submitted"
+            },
+            {
+              "date": "2026-06-23T01:22:08Z",
+              "dateInformation": "v1",
+              "dateType": "Updated"
+            },
+            {
+              "date": "2026-06",
+              "dateInformation": "v1",
+              "dateType": "Available"
+            },
+            {
+              "date": "2026",
+              "dateType": "Issued"
+            }
+          ],
+          "descriptions": [
+            {
+              "description": "Physiological signals such as EEG, ECG, and PPG are widely used in clinical monitoring. Recent self-supervised learning (SSL) methods offer an attractive way to leverage unlabeled recordings, yet they still fall short in practice. In particular, current SSL methods struggle across heterogeneous datasets, often distorting clinically meaningful structures or learning shortcuts from temporal and cross-channel redundancy. Consequently, existing SSL methods often deliver limited performance under linear probing, a lightweight adaptation setting that better matches real-world medical scenarios. Moreover, most Transformer-based SSL models encode a flattened spatiotemporal token sequence, incurring high computation and memory cost, and are typically developed within a single modality. To address these limitations, we present SPOTR (Spatio-temporal Pooling One-Token Reconstruction), a compress-reconstruct pretraining framework that introduces a single-token global bottleneck for physiological signals. SPOTR compresses each waveform into a single-token representation and reconstructs the signal conditioned only on this representation. Meanwhile, SPOTR introduces an efficient spatio-temporal compaction module to reduce computation and memory cost. Pretrained on 20 datasets spanning EEG, iEEG, ECG, and PPG, SPOTR consistently outperforms the strongest baseline under linear probing, improving average AUC by 18.49%, 21.71%, 17.86%, and 4.64%, respectively. Compared with a representative general-purpose time-series foundation model, SPOTR achieves around 78% lower latency and 52% lower peak GPU memory on average. The code can be found at https://github.com/5GYYYYY/SPOTR.",
+              "descriptionType": "Abstract"
+            },
+            {
+              "description": "The paper has been accepted by IJCAI-ECAI 2026",
+              "descriptionType": "Other"
+            }
+          ],
+          "doi": "10.48550/arxiv.2606.21973",
+          "downloadCount": 0,
+          "formats": [],
+          "fundingReferences": [],
+          "geoLocations": [],
+          "identifiers": [
+            {
+              "identifier": "2606.21973",
+              "identifierType": "arXiv"
+            }
+          ],
+          "isActive": true,
+          "language": null,
+          "metadataVersion": 0,
+          "partCount": 0,
+          "partOfCount": 0,
+          "publicationYear": 2026,
+          "published": null,
+          "publisher": "arXiv",
+          "reason": null,
+          "referenceCount": 0,
+          "registered": "2026-06-23T04:45:16Z",
+          "relatedIdentifiers": [],
+          "relatedItems": [],
+          "rightsList": [
+            {
+              "rights": "Creative Commons Attribution 4.0 International",
+              "rightsIdentifier": "cc-by-4.0",
+              "rightsIdentifierScheme": "SPDX",
+              "rightsUri": "https://creativecommons.org/licenses/by/4.0/legalcode",
+              "schemeUri": "https://spdx.org/licenses/"
+            }
+          ],
+          "schemaVersion": "http://datacite.org/schema/kernel-4",
+          "sizes": [],
+          "source": "mds",
+          "state": "findable",
+          "subjects": [
+            {
+              "lang": "en",
+              "subject": "Machine Learning (cs.LG)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "lang": "en",
+              "subject": "Artificial Intelligence (cs.AI)",
+              "subjectScheme": "arXiv"
+            },
+            {
+              "subject": "FOS: Computer and information sciences",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            },
+            {
+              "schemeUri": "http://www.oecd.org/science/inno/38235147.pdf",
+              "subject": "FOS: Computer and information sciences",
+              "subjectScheme": "Fields of Science and Technology (FOS)"
+            }
+          ],
+          "titles": [
+            {
+              "title": "SPOTR: Spatio-temporal Pooling One-Token Reconstruction for Universal Physiological Signal Self-supervised Learning"
+            }
+          ],
+          "types": {
+            "bibtex": "misc",
+            "citeproc": "article",
+            "resourceType": "Article",
+            "resourceTypeGeneral": "Preprint",
+            "ris": "GEN",
+            "schemaOrg": "CreativeWork"
+          },
+          "updated": "2026-06-23T04:45:16Z",
+          "url": "https://arxiv.org/abs/2606.21973",
+          "version": "1",
+          "versionCount": 0,
+          "versionOfCount": 0,
+          "viewCount": 0
+        },
+        "id": "10.48550/arxiv.2606.21973",
+        "relationships": {
+          "client": {
+            "data": {
+              "id": "arxiv.content",
+              "type": "clients"
+            }
+          }
+        },
+        "type": "dois"
+      }
+    ],
+    "links": {
+      "next": "https://api.datacite.org/dois?page%5Bnumber%5D=2&page%5Bsize%5D=5&query=%28self-supervised+ECG%29+AND+publicationYear%3A%5B2023+TO+%2A%5D",
+      "self": "https://api.datacite.org/dois?query=%28self-supervised+ECG%29+AND+publicationYear%3A%5B2023+TO+%2A%5D&page%5Bsize%5D=5"
+    },
+    "meta": {
+      "page": 1,
+      "total": 168,
+      "totalPages": 34
+    }
+  },
+  "response_hash": "f626d8b3762f429655ded03b4e3e2c01fc42bb8c71a95658e4039033262e4ef4",
+  "retrieved_at": "2026-07-14T12:55:34Z",
+  "schema_version": "1.0",
+  "source": "datacite"
+}
