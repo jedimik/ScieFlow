@@ -16,13 +16,18 @@ DOC = ROOT / "docs" / "research" / "literature-kernel.md"
 SKILL = ROOT / "src" / "scieflow" / "research" / "skills" / "lit-review" / "SKILL.md"
 RESEARCH_AGENTS = ROOT / "src" / "scieflow" / "research" / "AGENTS.md"
 
-# The human-approved rule 6 text (plan section 3), byte for byte.
+# The human-approved rule 6 text: M-C1 plan section 3, replaced by the M-C2 plan section 3
+# (Edit 1, M-C2-D17), byte for byte.
 APPROVED_RULE_6 = """\
 6. Paper discovery uses the shared search commands (same sources for every
    agent): `scieflow research search all` (every enabled source at once,
    merged and ranked; the output names each source's status), or one source:
    `scieflow research search openalex`, `scieflow research search arxiv`,
-   `scieflow research search europepmc`, `scieflow research search crossref`.
+   `scieflow research search europepmc`, `scieflow research search crossref`,
+   `scieflow research search pubmed`, `scieflow research search semantic-scholar`,
+   `scieflow research search datacite` (PubMed and Semantic Scholar are off
+   until the user switches them on). `scieflow research snowball` follows the
+   citations of chosen seed DOIs, one or two hops.
    Never invent papers, DOIs, or citation counts — every paper you report
    must come from a search-command result. Searches run through the provider
    Gateway: exit 3 means refused (the query failed the leak check, or the
@@ -31,6 +36,11 @@ APPROVED_RULE_6 = """\
    is `replay` or `offline` and no recorded snapshot answers the request:
    nothing was sent. Report it; never change the network mode to get past
    it (you may only switch a run to `replay` or `offline`, never back).
+   `scieflow research verify-bib <slug>` checks that every reference in the
+   bibliography is the work it claims to be. A `mismatch` or `unresolvable`
+   verdict blocks merge until the reference is fixed or a human overrules
+   its `review-blocker` gate; never answer that gate. `inconclusive` never
+   blocks: it means the check could not tell.
 """
 
 
