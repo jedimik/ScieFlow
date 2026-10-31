@@ -1,7 +1,6 @@
 """The manuscript reader (M-F 5.8): tree, includes, comments, limits. Synthetic data only."""
 
 import os
-import time
 
 import pytest
 
@@ -93,17 +92,27 @@ def test_title_before_begin_document_is_read(synth):
     assert analysis.main_words == baseline.main_words
 
 
-def test_include_expansion_is_bounded_in_size(synth):
+def test_include_expansion_is_bounded_in_size(synth, monkeypatch):
     names = [f"l{i:02d}" for i in range(20)]
     for name, child in zip(names, names[1:]):
         (synth.ms / f"{name}.tex").write_text(f"\\input{{{child}}}\n\\input{{{child}}}\n", encoding="utf-8")
     (synth.ms / f"{names[-1]}.tex").write_text("Leaf text.\n", encoding="utf-8")
     synth.edit("main.tex", "\\input{methods}", f"\\input{{{names[0]}}}")
-    started = time.monotonic()
+    # Count the work instead of timing it: a wall-clock bound flakes on a loaded host.
+    # Expanding this 2-fold chain in full takes about 2**20 calls; the size limit must stop far sooner.
+    calls = 0
+    expand = tex._expand
+
+    def counting_expand(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return expand(*args, **kwargs)
+
+    monkeypatch.setattr(tex, "_expand", counting_expand)
     with pytest.raises(tex.TexError) as info:
         tex.read_tree(synth.ms)
     assert info.value.rule == "tex-limit"
-    assert time.monotonic() - started < 1.0
+    assert 0 < calls <= 2**20 // 8
 
 
 def test_file_inputted_twice_is_flattened_twice(synth):
