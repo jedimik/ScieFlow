@@ -7,6 +7,7 @@ with another point); both sides are flattened by ScieFlow (\\input followed) bef
 from __future__ import annotations
 
 import json
+import shutil
 
 import pytest
 
@@ -144,3 +145,14 @@ def test_the_point_folder_is_not_modified_by_a_diff(tiny):
     before = sorted((point_folder(tiny, "v1") / "files").rglob("*"))
     assert run_diff("--from", "v1").exit_code == 0
     assert sorted((point_folder(tiny, "v1") / "files").rglob("*")) == before
+
+
+def test_a_point_folder_that_is_a_symbolic_link_is_refused(tiny, tmp_path):
+    folder = point_folder(tiny, "v1")
+    elsewhere = tmp_path / "elsewhere"
+    shutil.copytree(folder, elsewhere)
+    shutil.rmtree(folder)
+    folder.symlink_to(elsewhere)
+    result = run_diff("--from", "v1")
+    assert result.exit_code == 1, result.output
+    assert not (tiny.run_dir / "report" / "diff").exists()

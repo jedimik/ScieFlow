@@ -239,8 +239,9 @@ def _add_package(run: Path, label: str) -> dict:
 
 def read_point(run, label: str) -> dict:
     check_label(label)
+    _refuse_links(Path(run) / "revision", points_dir(run), point_dir(run, label), point_dir(run, label) / "files")
     path = point_dir(run, label) / "point.json"
-    if path.is_symlink() or not path.is_file():
+    if not path.is_file():
         raise PointError("point-unknown", f"no point {label!r} in this run")
     try:
         return json.loads(path.read_text(encoding="utf-8"))
