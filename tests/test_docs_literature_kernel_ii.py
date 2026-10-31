@@ -131,7 +131,8 @@ def test_kernel_page_names_snowball_monitor_oa_and_the_news_hook():
 
 def test_kernel_page_states_the_gold_set_scope_and_the_no_pdf_rule():
     text = _read(KERNEL)
-    for token in ("150", "0 of 100", "50 of 50", "neurology", "never downloads"):
+    for token in ("150", "0 of 100", "Of the 50 wrong or invented", "50 of 50",
+                  "neurology", "never downloads"):
         assert token in text, f"literature-kernel.md does not state {token!r}"
 
 

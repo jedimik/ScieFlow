@@ -230,7 +230,7 @@ that link.
 The identity check is measured on researcher's recorded gold set of 150 references: 75 real
 papers, 25 real datasets, 25 references with a wrong DOI and 25 invented ones. M-C2 replays
 researcher's recorded answers offline and reproduces its verdict on every item. On the 100
-real references, 0 of 100 are refused (the false-positive target). Of the 100 wrong or invented
+real references, 0 of 100 are refused (the false-positive target). Of the 50 wrong or invented
 references, 50 of 50 are caught. Of the real ones, 71 are `verified` and 29 are `inconclusive`:
 the check could not confirm them, but it refused none. The set is mostly cardiology and AI
 references and datasets. It is not a neurology set. A neurology set needs a live recording,
