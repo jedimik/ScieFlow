@@ -14,6 +14,7 @@ from scieflow.cli import main
 from scieflow.core.gates import open_gate
 from scieflow.core.review import service
 from scieflow.research.manuscript import package as package_mod
+from tests.research.manuscript.claims.t2_support import make_inputs
 from tests.research.manuscript.conftest import RUN, SLUG, make_profile
 from tests.research.manuscript.t8_support import (
     OVERRULE, add_review, make_build, project_of, snapshot, submission,
@@ -160,3 +161,66 @@ def test_refusals_name_their_rule_in_the_message(synth):
     with pytest.raises(package_mod.PackageError) as caught:
         package_mod.package_run(project_of(synth), synth.run_dir)
     assert caught.value.rule == "build-stale"
+
+
+# ---- M-G t3: the claim check at package time (M-G 5.8) ----------------------------------------------------
+
+PLANTED_SENTENCE = "Timing changed \\cite{lee2010} as Figure~\\ref{fig:one} shows."
+
+
+def plant_wrong_number(synth) -> None:
+    """A Results sentence whose number the data package does not hold (C002), in the default article."""
+    make_inputs(synth.run_dir, [{"id": "tbl-metrics", "file": "metrics.csv",
+                                 "content": "metric,value\nSSIM,0.9134\n"}])
+    synth.edit("main.tex", PLANTED_SENTENCE,
+               PLANTED_SENTENCE + " SSIM was 0.93 in the Results. % source: [data:tbl-metrics]")
+
+
+def test_a_claim_error_refuses_the_package_and_writes_nothing(synth):
+    plant_wrong_number(synth)
+    make_build(synth)
+    before = snapshot(synth.run_dir)
+    result = invoke()
+    assert_refused(synth, result, before, "claim error", "claims check")
+
+
+def test_a_claim_check_that_cannot_run_refuses_closed(synth, monkeypatch):
+    from scieflow.research.manuscript.claims import compile as claims_compile
+    make_build(synth)
+
+    def broken(project, run, main="main.tex"):
+        raise RuntimeError("synthetic failure")
+
+    monkeypatch.setattr(claims_compile, "check_run", broken)
+    before = snapshot(synth.run_dir)
+    result = invoke()
+    assert_refused(synth, result, before, "RuntimeError", "fail closed")
+
+
+def test_an_unreadable_status_at_package_time_refuses_closed(synth, monkeypatch):
+    make_build(synth)
+    calls = {"n": 0}
+
+    def flaky(project, slug):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return []                       # the M-F blocker check reads cleanly
+        raise ValueError("bad review file")  # the claim check's status read fails
+
+    monkeypatch.setattr(service, "blockers", flaky)
+    before = snapshot(synth.run_dir)
+    result = invoke()
+    assert_refused(synth, result, before, "fail closed")
+
+
+def test_a_waived_claim_error_lets_the_package_proceed(synth):
+    from scieflow.research.manuscript.claims import waivers
+    plant_wrong_number(synth)
+    make_build(synth)
+    from scieflow.research.manuscript.claims import ledger as claims_ledger
+    claims_ledger.build(synth.run_dir)
+    claim = [r for r in claims_ledger.read(synth.run_dir) if "0.93" in r["text"]][0]["id"]
+    waivers.waive(synth.run_dir, project_of(synth), claim, "C002",
+                  "The reviewer accepted the rounding of this synthetic value.")
+    result = invoke()
+    assert result.exit_code == 0, result.output
