@@ -28,6 +28,9 @@ MINIMAL_PATH = "/usr/bin:/bin"
 LATEXDIFF_ARGV = ["latexdiff", "--encoding=utf8", "old.tex", "new.tex"]
 LATEXDIFF_TIMEOUT = 120
 LATEXDIFF_STDOUT_CAP = 20 * 1024 * 1024
+LATEXDIFF_STDERR_BYTES = 64 * 1024
+OUT_NAME = "latexdiff.out"
+ERR_NAME = "latexdiff.err"
 STDERR_LINES = 20
 EXCERPT = 60
 NOT_INSTALLED = "latexdiff-not-installed"
@@ -66,13 +69,23 @@ class _Side:
     digests: dict
 
 
+def _digests(folder: Path) -> dict:
+    return {rel: hashlib.sha256(path.read_bytes()).hexdigest() for rel, path in points.source_files(folder).items()}
+
+
 def _side(run: Path, label: str) -> _Side:
     if label == CURRENT:
         folder = run / "manuscript"
-        return _Side(label, folder, {rel: hashlib.sha256(path.read_bytes()).hexdigest() for rel, path in
-                                     points.source_files(folder).items()})
+        return _Side(label, folder, _digests(folder))
     record = points.read_point(run, label)
-    return _Side(label, points.point_dir(run, label) / "files", dict(record["files"]))
+    folder = points.point_dir(run, label) / "files"
+    if not folder.is_dir():
+        raise DiffError("point-tampered", f"point {label} has no files folder; refused")
+    digests = _digests(folder)
+    if digests != dict(record["files"]):
+        raise DiffError("point-tampered", f"point {label} does not match its point.json: a file was changed, "
+                                          "added or removed after it was pinned; refused")
+    return _Side(label, folder, digests)
 
 
 def _flatten(side: _Side, main: str, *, keep_comments: bool) -> list:
@@ -96,20 +109,37 @@ def _latexdiff(run: Path, old_lines: list, new_lines: list) -> bytes:
     state.atomic_write(scratch / "old.tex", "\n".join(old_lines).encode("utf-8"))
     state.atomic_write(scratch / "new.tex", "\n".join(new_lines).encode("utf-8"))
     env = {"PATH": MINIMAL_PATH, "HOME": str(scratch)}
+    out_path = scratch / OUT_NAME
+    err_path = scratch / ERR_NAME
     try:
-        done = subprocess.run(LATEXDIFF_ARGV, cwd=scratch, env=env, timeout=LATEXDIFF_TIMEOUT,
-                              stdin=subprocess.DEVNULL, capture_output=True, check=False)
-    except subprocess.TimeoutExpired as exc:
-        raise DiffError("latexdiff-timeout", f"latexdiff ran past {LATEXDIFF_TIMEOUT} s; refused") from exc
-    except OSError as exc:
-        raise DiffError("latexdiff-failed", "latexdiff could not be started") from exc
-    if done.returncode != 0:
-        tail = done.stderr.decode("utf-8", "replace").splitlines()[-STDERR_LINES:]
-        shown = [line[:EXCERPT] for line in tail]
-        raise DiffError("latexdiff-failed", "latexdiff failed; last stderr lines:\n" + "\n".join(shown))
-    if len(done.stdout) > LATEXDIFF_STDOUT_CAP:
-        raise DiffError("latexdiff-output", "latexdiff output is over 20 MB; refused")
-    return done.stdout
+        # stdout and stderr are files, not pipes: nothing is held in memory. The cap is checked on the file after
+        # the run; while it runs, its growth is bounded by the timeout only.
+        with out_path.open("wb") as out, err_path.open("wb") as err:
+            try:
+                done = subprocess.run(LATEXDIFF_ARGV, cwd=scratch, env=env, timeout=LATEXDIFF_TIMEOUT,
+                                      stdin=subprocess.DEVNULL, stdout=out, stderr=err, check=False)
+            except subprocess.TimeoutExpired as exc:
+                raise DiffError("latexdiff-timeout", f"latexdiff ran past {LATEXDIFF_TIMEOUT} s; refused") from exc
+            except OSError as exc:
+                raise DiffError("latexdiff-failed", "latexdiff could not be started") from exc
+        if done.returncode != 0:
+            shown = [line[:EXCERPT] for line in _stderr_tail(err_path)]
+            raise DiffError("latexdiff-failed", "latexdiff failed; last stderr lines:\n" + "\n".join(shown))
+        if out_path.stat().st_size > LATEXDIFF_STDOUT_CAP:
+            raise DiffError("latexdiff-output", "latexdiff output is over 20 MB; refused")
+        return out_path.read_bytes()
+    finally:
+        out_path.unlink(missing_ok=True)
+        err_path.unlink(missing_ok=True)
+
+
+def _stderr_tail(path: Path) -> list:
+    """The last STDERR_LINES lines of a stderr file, reading at most LATEXDIFF_STDERR_BYTES from its end."""
+    size = path.stat().st_size
+    with path.open("rb") as handle:
+        handle.seek(max(0, size - LATEXDIFF_STDERR_BYTES))
+        data = handle.read()
+    return data.decode("utf-8", "replace").splitlines()[-STDERR_LINES:]
 
 
 def diff(run, from_label: str, to_label: str = CURRENT, *, main: str = "main.tex") -> DiffResult:
