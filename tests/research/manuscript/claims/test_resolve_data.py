@@ -127,3 +127,61 @@ def test_l2_run_accepts_a_released_reference(synth):
     result = ledger.build(synth.run_dir)
     assert "data-unreleased" not in _rules(result)
     assert result.problems == []
+
+
+def test_released_file_outside_its_folder_is_unsafe(synth):
+    manuscript(synth, "Mean stride time was 0.91 s. % source: [data:rel-1]")
+    record = released_record(synth.run_dir, "rel-1", "agg.csv", ROW)
+    write(synth.run_dir / "released" / "other" / "agg.csv", ROW)
+    record["file"] = "released/other/agg.csv"
+    write_data(synth.run_dir, released=[record])
+    result = ledger.build(synth.run_dir)
+    assert "ref-unsafe" in _rules(result)
+    assert _severity(result, "ref-unsafe") == {"error"}
+    [rec] = ledger.read(synth.run_dir)
+    assert "data:rel-1" not in rec["pins"]
+
+
+def test_released_file_missing_from_the_run_is_altered(synth):
+    manuscript(synth, "Mean stride time was 0.91 s. % source: [data:rel-1]")
+    record = released_record(synth.run_dir, "rel-1", "agg.csv", ROW)
+    write_data(synth.run_dir, released=[record])
+    (synth.run_dir / "released" / "rel-1" / "agg.csv").unlink()
+    result = ledger.build(synth.run_dir)
+    assert "artifact-altered" in _rules(result)
+    assert _severity(result, "artifact-altered") == {"error"}
+
+
+def test_imported_file_missing_from_the_run_is_altered(synth):
+    manuscript(synth, "Mean stride time was 0.91 s. % source: [data:rel-1]")
+    folder = "inputs/released/src-rel-1"
+    write(synth.run_dir / folder / "agg.csv", ROW)
+    imp = {"id": "imp-9", "file": f"{folder}/agg.csv", "sha256": sha_text(ROW), "from": "src",
+           "release": "rel-1", "imported_at": "2026-10-31T00:00:00Z"}
+    write_data(synth.run_dir, imports=[imp])
+    (synth.run_dir / folder / "agg.csv").unlink()
+    result = ledger.build(synth.run_dir)
+    assert "artifact-altered" in _rules(result)
+    assert _severity(result, "artifact-altered") == {"error"}
+
+
+@pytest.mark.parametrize("content", ["artifacts: not-a-list\n", "artifacts: [\n"])
+def test_unreadable_or_listless_manifest_fails_closed(synth, content):
+    manuscript(synth, "Mean stride time was 0.91 s. % source: [data:tbl-metrics]")
+    write(synth.run_dir / "inputs" / "manifest.yml", content)
+    result = ledger.build(synth.run_dir)
+    assert "ref-unresolved" in _rules(result)
+    [rec] = ledger.read(synth.run_dir)
+    assert rec["pins"] == {}
+
+
+def test_l2_run_accepts_an_imported_reference(synth):
+    manuscript(synth, "Mean stride time was 0.91 s. % source: [data:rel-1]")
+    folder = "inputs/released/src-rel-1"
+    write(synth.run_dir / folder / "agg.csv", ROW)
+    imp = {"id": "imp-9", "file": f"{folder}/agg.csv", "sha256": sha_text(ROW), "from": "src",
+           "release": "rel-1", "imported_at": "2026-10-31T00:00:00Z"}
+    write_data(synth.run_dir, default_level="L2", imports=[imp])
+    result = ledger.build(synth.run_dir)
+    assert "data-unreleased" not in _rules(result)
+    assert result.problems == []

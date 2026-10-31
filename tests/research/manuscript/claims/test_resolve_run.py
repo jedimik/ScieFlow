@@ -8,8 +8,15 @@ from __future__ import annotations
 import json
 import os
 
+import pytest
+from click.testing import CliRunner
+
+from scieflow.cli import main
 from scieflow.research.manuscript.claims import ledger
-from tests.research.manuscript.claims.t2_support import METRIC_VALUE, make_campaign, manuscript
+from tests.research.manuscript.claims.t2_support import (
+    METRIC_VALUE, RESULT_VALUE, make_campaign, make_inputs, manuscript, write,
+)
+from tests.research.manuscript.conftest import RUN
 
 
 def _rules(result) -> set:
@@ -130,3 +137,47 @@ def test_messages_and_events_never_carry_an_evidence_value(synth):
     assert METRIC_VALUE not in text
     assert "8812.5" not in text
     assert result.problems
+
+
+def test_file_added_after_the_manifest_alters_a_campaign_reference(synth):
+    _one_run(synth)
+    manuscript(synth, "The campaign reached a stable optimum. % source: [run:denoise]")
+    write(synth.run_dir / "experiments/denoise/runs/sigma-1.5/artifacts/extra.txt", "late\n")
+    result = ledger.build(synth.run_dir)
+    assert "artifact-altered" in _rules(result)
+    assert {p["severity"] for p in result.problems if p["rule"] == "artifact-altered"} == {"error"}
+
+
+def test_a_fifo_in_run_artifacts_is_a_per_reference_finding_not_a_build_abort(synth):
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("this platform has no mkfifo")
+    _one_run(synth)
+    os.mkfifo(synth.run_dir / "experiments/denoise/runs/sigma-1.5/artifacts/pipe")
+    manuscript(synth, "Sigma 1.5 was the best setting. % source: [run:denoise/sigma-1.5]")
+    result = ledger.build(synth.run_dir)
+    unsafe = [p for p in result.problems if p["rule"] == "ref-unsafe"]
+    assert unsafe and "pipe" in unsafe[0]["message"]
+    [rec] = ledger.read(synth.run_dir)
+    assert "run:denoise/sigma-1.5" not in rec["pins"]
+
+
+def test_cli_repin_prints_and_records_no_evidence_value(synth):
+    make_campaign(synth.run_dir, "denoise",
+                  {"sigma-1.5": {"metrics": {"value": METRIC_VALUE},
+                                 "artifacts": {"plot.txt": f"series {RESULT_VALUE}\n"}}},
+                  tables={"summary.csv": f"sigma,value\n1.5,{METRIC_VALUE}\n"})
+    make_inputs(synth.run_dir, [{"id": "tbl-metrics", "file": "results/metrics.csv",
+                                 "content": f"stride,{RESULT_VALUE}\n"}])
+    manuscript(synth, "Sigma 1.5 was the best setting. % source: [run:denoise/sigma-1.5]\n"
+                      "Stride was 0.91 s in block one. % source: [data:tbl-metrics]\n"
+                      "Value nine was reported. % source: [run:nothing]")
+    write(synth.run_dir / "experiments/denoise/runs/sigma-1.5/artifacts/plot.txt", "series 2\n")
+    cli = CliRunner().invoke(main, ["manuscript", "claims", "build", RUN, "--repin"])
+    direct = ledger.build(synth.run_dir, repin=True)
+    assert direct.problems
+    texts = [cli.output, json.dumps(direct.problems, ensure_ascii=False),
+             (synth.run_dir / "report/claims/claims.jsonl").read_text(encoding="utf-8"),
+             (synth.run_dir / "events.jsonl").read_text(encoding="utf-8")]
+    for text in texts:
+        assert METRIC_VALUE not in text
+        assert RESULT_VALUE not in text

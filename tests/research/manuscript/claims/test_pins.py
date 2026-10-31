@@ -12,8 +12,9 @@ from click.testing import CliRunner
 
 from scieflow.cli import main
 from scieflow.experiments import manifest
+from scieflow.research.manuscript.claims import evidence as ev
 from scieflow.research.manuscript.claims import ledger
-from tests.research.manuscript.claims.t2_support import make_campaign, make_inputs, manuscript, write
+from tests.research.manuscript.claims.t2_support import make_campaign, make_inputs, manuscript, sha_text, write
 from tests.research.manuscript.conftest import RUN
 
 SIGMA = "Sigma 1.5 was the best setting. % source: [run:denoise/sigma-1.5]"
@@ -131,3 +132,43 @@ def test_claims_build_cli_accepts_repin_claim(pinned):
     result = CliRunner().invoke(main, ["manuscript", "claims", "build", RUN,
                                        "--repin-claim", stride], catch_exceptions=False)
     assert result.exit_code == 0, result.output
+
+
+def test_a_ref_unresolved_at_the_first_build_is_pinned_when_its_evidence_arrives(synth):
+    manuscript(synth, STRIDE)
+    first = ledger.build(synth.run_dir)
+    assert "ref-unresolved" in {p["rule"] for p in first.problems}
+    [unpinned] = ledger.read(synth.run_dir)
+    assert unpinned["pins"] == {}
+    make_inputs(synth.run_dir, [{"id": "tbl-metrics", "file": "results/metrics.csv", "content": "stride,0.91\n"}])
+    second = ledger.build(synth.run_dir)
+    assert second.problems == []
+    [pinned_rec] = ledger.read(synth.run_dir)
+    assert pinned_rec["pins"] == {"data:tbl-metrics": {"files": {TABLE: sha_text("stride,0.91\n")}}}
+    assert _repin_events(synth.run_dir) == []
+
+
+def test_carried_empty_pins_are_filled_for_refs_that_resolve(pinned):
+    path = pinned.run_dir / "report" / "claims" / "claims.jsonl"
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for record in records:
+        record["pins"] = {}
+    path.write_text("".join(json.dumps(r, sort_keys=True, ensure_ascii=False) + "\n" for r in records),
+                    encoding="utf-8")
+    ledger.build(pinned.run_dir)
+    assert all(_pins_by_id(pinned.run_dir).values())
+    assert _repin_events(pinned.run_dir) == []
+
+
+def test_each_evidence_file_is_hashed_once_per_build(synth, monkeypatch):
+    make_inputs(synth.run_dir, [{"id": "tbl-metrics", "file": "results/metrics.csv", "content": "stride,0.91\n"}])
+    manuscript(synth, "Block one was 0.91 seconds. % source: [data:tbl-metrics]\n"
+                      "Block two was 0.92 seconds. % source: [data:tbl-metrics]\n"
+                      "Block three was 0.93 seconds. % source: [data:tbl-metrics]")
+    hashed = []
+    real = ev.sha256_file
+    monkeypatch.setattr(ev, "sha256_file", lambda path: hashed.append(str(path)) or real(path))
+    result = ledger.build(synth.run_dir)
+    assert result.problems == []
+    assert len(ledger.read(synth.run_dir)) == 3
+    assert len(hashed) == 1 and hashed[0].endswith(TABLE)
