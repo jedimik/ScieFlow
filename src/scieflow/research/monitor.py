@@ -26,6 +26,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NoReturn
 
 from scieflow._vendor.researcher_core.monitor import (
     MonitorError,
@@ -53,7 +54,7 @@ class MonitorRunFailed(Exception):
         self.code = code
 
 
-def _refuse(message: str, code: int = EXIT_FAILED) -> None:
+def _refuse(message: str, code: int = EXIT_FAILED) -> NoReturn:
     print(f"refused: {message}" if code == EXIT_REFUSED else f"error: {message}", file=sys.stderr)
     sys.exit(code)
 
@@ -93,6 +94,10 @@ def _load_state(ws: Path, name: str) -> MonitorState:
     state_file, _ = _paths(ws, name)
     if not state_file.is_file():
         _refuse(f"no monitor {name!r} in this run")
+    return _read_state(state_file, name)
+
+
+def _read_state(state_file: Path, name: str) -> MonitorState:
     try:
         return MonitorState.from_json_dict(json.loads(state_file.read_text(encoding="utf-8")))
     except (MonitorError, ValueError) as exc:
@@ -100,11 +105,13 @@ def _load_state(ws: Path, name: str) -> MonitorState:
 
 
 def _save(ws: Path, state: MonitorState, new_records: list | None = None) -> None:
+    """The new papers are written before the state that marks them seen: a failure between the two
+    writes re-reports the papers on the next run (the safe direction), never loses them."""
     state_file, last_file = _paths(ws, state.monitor_id)
-    _atomic(state_file, _dump(state.to_json_dict()))
     if new_records is not None:
         _atomic(last_file, _dump({"monitor_id": state.monitor_id, "last_run": state.last_run,
                                   "new": new_records}))
+    _atomic(state_file, _dump(state.to_json_dict()))
 
 
 def _record_key(rec: dict) -> str:
@@ -144,6 +151,20 @@ def _checked_source(source: str) -> str:
     return source
 
 
+def _live_searches_are_fresh(gw) -> None:
+    """A live re-run asks each search source afresh. The Gateway would otherwise answer from its
+    search cache (cache_ttl_days.search, 7 days), so a re-run would report nothing new (M-C2 t7 review
+    r1, finding 1). Of the network modes only offline reads the cache as its answer, so an offline run
+    keeps it; replay and record never read the cache. The policy is copied into the cache, so this
+    changes this gateway only."""
+    from scieflow.core import network
+
+    modes = {network.resolve(gw.ws, fanout.MODULES[s].PROVIDER, flag=gw.network).mode
+             for s in fanout.ORDER}
+    if "offline" not in modes:
+        gw.cache.ttl_days["search"] = 0
+
+
 def _add(slug: str, name: str, queries: list, source: str, ts: str) -> dict:
     _name(name)
     _checked_source(source)
@@ -177,6 +198,7 @@ def execute(slug: str, name: str, *, ts: str, network: str | None = None) -> dic
     found: dict = {}
 
     def work(gw):
+        _live_searches_are_fresh(gw)
         return run_monitor(state, _executor(gw, statuses, found), ts=ts)
 
     rerun = registry.call(slug, work, network_mode=network)
@@ -222,7 +244,7 @@ def _listing(ws: Path) -> list:
     for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
         if path.name.endswith(".last.json"):
             continue
-        state = MonitorState.from_json_dict(json.loads(path.read_text(encoding="utf-8")))
+        state = _read_state(path, path.stem)
         rows.append({"name": state.monitor_id, "strategies": len(state.strategies),
                      "seen": len(state.seen_ids), "last_run": state.last_run,
                      "run_count": state.run_count})

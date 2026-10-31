@@ -9,14 +9,12 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from pathlib import Path
 
 import pytest
 import responses
 
 from scieflow.core import events
-from scieflow.integrations.scite.ledger import default_dir
 from scieflow.research import monitor
 
 OPENALEX_RE = re.compile(r"https://api\.openalex\.org/works.*")
@@ -82,11 +80,9 @@ def test_first_run_reports_everything_then_only_the_new_papers(cli_project, cli_
     assert code == 0 and out["new"] == 3 and out["new_dois"] == SET_A
     code, out, _ = run_once(cli_run, "2026-10-03T00:00:00Z")
     assert code == 0 and out["new"] == 0, "a rerun over the same set reports nothing new"
-    # The Gateway caches a search answer for the policy's search TTL (7 days). A rerun that must see
-    # the source's new answer therefore starts from an empty search cache. Known limitation: within
-    # the TTL a rerun repeats the cached answer (reported in the t7 result, not fixed here).
+    # Within the policy's search TTL (7 days) the Gateway would repeat its cached answer; a live
+    # re-run must read the source afresh, with the cache left alone (review r1, finding 1).
     ANSWERS[TOPIC] = list(SET_B)
-    shutil.rmtree(default_dir() / "cache", ignore_errors=True)
     code, out, _ = run_once(cli_run, "2026-10-04T00:00:00Z")
     assert code == 0 and out["new_dois"] == [P4, P5], "exactly the two new papers, in fan-out order"
     state = json.loads(state_path(cli_project).read_text(encoding="utf-8"))
@@ -137,6 +133,75 @@ def test_a_failed_source_exits_1_and_leaves_the_state_unchanged(cli_project, cli
     code, _out, _err = run_once(cli_run, "2026-10-02T00:00:00Z")
     assert code == 1
     assert state_path(cli_project).read_bytes() == before
+
+
+@responses.activate
+def test_a_replay_rerun_never_reaches_the_transport(cli_project, cli_run, fast_send):
+    responses.add_callback(responses.GET, OPENALEX_RE, callback=openalex)
+    add(cli_run)
+    run_once(cli_run, "2026-10-02T00:00:00Z")
+    before = state_path(cli_project).read_bytes()
+    sent = len(responses.calls)
+    ANSWERS[TOPIC] = list(SET_B)
+    code, _out, _err = run_once(cli_run, "2026-10-03T00:00:00Z", "alerts", "--network", "replay")
+    assert code == 6
+    assert len(responses.calls) == sent, "replay asks no source and reads no cached answer"
+    assert state_path(cli_project).read_bytes() == before
+
+
+@responses.activate
+def test_the_news_path_runs_the_real_monitor(cli_project, cli_run, fast_send):
+    from scieflow.research.monitor import MonitorRunFailed
+
+    responses.add_callback(responses.GET, OPENALEX_RE, callback=openalex)
+    add(cli_run)
+    first = monitor.run_for_news("demo", "alerts", ts="2026-10-02T00:00:00Z")
+    assert [r["doi"] for r in first] == SET_A
+    assert monitor.run_for_news("demo", "alerts", ts="2026-10-03T00:00:00Z") == []
+    with pytest.raises(MonitorRunFailed) as missing:
+        monitor.run_for_news("demo", "nope", ts="2026-10-03T00:00:00Z")
+    assert missing.value.code == 1
+    before = state_path(cli_project).read_bytes()
+    (ws_dir(cli_project) / "network.yml").write_text(
+        "version: 1\nmode: replay\nset_by: human\nset_at: '2026-10-03T00:00:00Z'\nreason: test\n",
+        encoding="utf-8")
+    ANSWERS[TOPIC] = list(SET_B)
+    with pytest.raises(MonitorRunFailed) as miss:
+        monitor.run_for_news("demo", "alerts", ts="2026-10-04T00:00:00Z")
+    assert miss.value.code == 6
+    assert state_path(cli_project).read_bytes() == before
+
+
+@responses.activate
+def test_a_failed_last_write_leaves_the_state_unchanged(cli_project, cli_run, fast_send, monkeypatch):
+    responses.add_callback(responses.GET, OPENALEX_RE, callback=openalex)
+    add(cli_run)
+    run_once(cli_run, "2026-10-02T00:00:00Z")
+    before = state_path(cli_project).read_bytes()
+    real = monitor._atomic
+
+    def failing(path, text):
+        if path.name.endswith(".last.json"):
+            raise OSError("disk full (test)")
+        real(path, text)
+
+    monkeypatch.setattr(monitor, "_atomic", failing)
+    ANSWERS[TOPIC] = list(SET_B)
+    with pytest.raises(OSError):
+        run_once(cli_run, "2026-10-03T00:00:00Z")
+    assert state_path(cli_project).read_bytes() == before, "papers are not marked seen unreported"
+    monkeypatch.setattr(monitor, "_atomic", real)
+    code, out, _ = run_once(cli_run, "2026-10-04T00:00:00Z")
+    assert code == 0 and out["new_dois"] == [P4, P5], "the next run reports them again"
+
+
+@responses.activate
+def test_list_refuses_a_corrupt_state_file_by_name(cli_project, cli_run, fast_send):
+    add(cli_run)
+    state_path(cli_project).write_text("{not json", encoding="utf-8")
+    code, _out, err = cli_run(monitor.main, ["list", "demo"])
+    assert code == 1
+    assert "alerts" in err and "unreadable" in err
 
 
 @pytest.mark.parametrize("name", ["Bad Name", "x" * 49, "UPPER"])
