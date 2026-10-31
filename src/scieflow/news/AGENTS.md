@@ -3,6 +3,9 @@
 The news module tracks what changed in the tools and topics listed in
 `config/news.yml`: each run sends one web-research prompt per interest to an
 agent CLI and stores sectioned markdown reports in `workspace/news/news.json`.
+An interest with a `literature:` block runs no agent: it re-runs a saved
+literature monitor of a run (`scieflow research monitor`) and reports only
+the papers that monitor has not seen before.
 Paths are relative to the ScieFlow repo root, which is your working directory.
 
 It is a **user-invoked tool**, not part of the research loop. Rules:
