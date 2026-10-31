@@ -37,7 +37,9 @@ interests:
 """
 
 TOP_LEVEL_KEYS = {"agent", "lookback_days", "timeout", "interests", "groups", "model", "reasoning"}
-INTEREST_KEYS = {"name", "context", "repo", "urls", "keywords", "template", "lookback_days"}
+INTEREST_KEYS = {"name", "context", "repo", "urls", "keywords", "template", "lookback_days",
+                 "literature"}
+LITERATURE_KEYS = {"workspace", "monitor"}
 
 
 class ConfigError(Exception):
@@ -60,6 +62,8 @@ class Interest:
     keywords: list[str] = field(default_factory=list)
     template: str = DEFAULT_TEMPLATE
     lookback_days: int | None = None
+    # M-C2 t7 (plan 5.7): {workspace, monitor}; such an interest runs no agent (see runner.py).
+    literature: dict | None = None
 
 
 @dataclass
@@ -71,6 +75,22 @@ class Config:
     groups: list[Group] = field(default_factory=list)
     model: str | None = None
     reasoning: str | None = None
+
+
+def _literature_block(name: str, raw) -> dict | None:
+    """The `literature:` block of an interest (M-C2 t7): exactly `workspace` and `monitor`, both
+    non-empty names. Absent means an ordinary interest."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or set(raw) != LITERATURE_KEYS:
+        raise ConfigError(f"interest {name!r}: literature needs exactly 'workspace' and 'monitor'")
+    values = {}
+    for key in sorted(LITERATURE_KEYS):
+        value = raw.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ConfigError(f"interest {name!r}: literature.{key} must be a non-empty name")
+        values[key] = value.strip()
+    return values
 
 
 def load_config(path: Path) -> Config:
@@ -142,6 +162,7 @@ def load_config(path: Path) -> Config:
                 f"interest {name!r}: lookback_days must be a positive integer, "
                 f"got {interest_lookback!r}"
             )
+        literature = _literature_block(name, item.get("literature"))
 
         interests.append(
             Interest(
@@ -152,6 +173,7 @@ def load_config(path: Path) -> Config:
                 keywords=[str(k) for k in keywords],
                 template=template,
                 lookback_days=interest_lookback,
+                literature=literature,
             )
         )
 
@@ -242,6 +264,8 @@ def save_config(config: Config, path: Path) -> None:
             item["template"] = interest.template
         if interest.lookback_days:
             item["lookback_days"] = interest.lookback_days
+        if interest.literature:
+            item["literature"] = dict(interest.literature)
         data["interests"].append(item)
 
     def dump_group(group: Group) -> dict:

@@ -31,7 +31,8 @@ DATA_EVENTS = (
     "data.released", "data.imported", "data.ingested",
 )
 # Added by M-C1 (literature kernel), additive: the run's network mode and recorded snapshots.
-KERNEL_EVENTS = ("network.set", "literature.snapshot")
+# Added by M-C2 t7 (monitor), additive: `literature.monitor`.
+KERNEL_EVENTS = ("network.set", "literature.snapshot", "literature.monitor")
 # Added by M-C2 t5 (identity blockers, D18), additive.
 IDENTITY_EVENTS = ("review.identity_checked", "review.identity_overruled")
 HUMAN_KINDS = ("review-blocker", "scite-consent")

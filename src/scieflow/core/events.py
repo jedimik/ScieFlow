@@ -40,7 +40,7 @@ TYPES = frozenset({
     "data.declared", "data.level_resolved", "data.warning",
     "data.released", "data.imported", "data.ingested",
     # Literature kernel (M-C1): the run's network mode and recorded snapshots.
-    "network.set", "literature.snapshot",
+    "network.set", "literature.snapshot", "literature.monitor",
 })
 
 

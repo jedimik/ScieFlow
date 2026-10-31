@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Callable, Sequence
 
+from scieflow.core import sanitize
+
 from . import agents
-from .config import Config, resolve_selection
+from .config import Config, Interest, resolve_selection
 from .db import Database
 from .prompts import build_prompt
 from .report import ExtractionError, extract_block
@@ -35,6 +37,35 @@ def compute_window(
     if last is not None:
         return last, today
     return today - timedelta(days=lookback_days), today
+
+
+def _literature_result(interest: Interest, today: date) -> tuple[str | None, str]:
+    """The `## New literature` block of a literature interest (M-C2 t7, plan 5.7): the papers its saved
+    monitor has not shown before, or a line saying there are none. Returns (block, "") or (None, reason).
+    The research extra is imported here, so an ordinary news run never needs it. A failure names no
+    query, title or address, and the monitor saves nothing when it fails."""
+    try:
+        from scieflow.research.monitor import MonitorRunFailed, run_for_news
+    except ImportError:
+        return None, "literature monitors need the research extra (scieflow research)"
+    link = interest.literature or {}
+    try:
+        new = run_for_news(link["workspace"], link["monitor"],
+                           ts=f"{today.isoformat()}T00:00:00Z")
+    except MonitorRunFailed as exc:
+        return None, str(exc)
+    except Exception:  # noqa: BLE001 - any other failure is reported neutrally, with no detail
+        return None, "the literature monitor failed"
+    lines = ["## New literature", ""]
+    if not new:
+        lines.append("No new papers since the last run.")
+    for rec in new:
+        title = sanitize.sanitize_string(str(rec.get("title") or "(untitled)"))
+        year = rec.get("year")
+        where = f"https://doi.org/{rec['doi']}" if rec.get("doi") else str(rec.get("url") or "")
+        suffix = f" ({year})" if year else ""
+        lines.append(f"- {title}{suffix} {where}".rstrip())
+    return "\n".join(lines) + "\n", ""
 
 
 def run_queue(
@@ -71,6 +102,17 @@ def run_queue(
             db, interest.name, today, interest.lookback_days or config.lookback_days, since, days
         )
         progress(Progress(interest.name, "running"))
+        if interest.literature is not None:
+            # M-C2 t7: no agent and no quota; the saved monitor is re-run and only its new papers stored.
+            block, error = _literature_result(interest, today)
+            if block is None:
+                db.add_failure(run_id, interest.name, error)
+                progress(Progress(interest.name, "failed", error))
+                continue
+            db.add_result(run_id, interest.name, start, end, block)
+            db.set_last_checked(interest.name, today)
+            progress(Progress(interest.name, "done"))
+            continue
         prompt = build_prompt(interest, start, end)
         timeout = config.timeout or TEMPLATES[interest.template].suggested_timeout
         error = ""

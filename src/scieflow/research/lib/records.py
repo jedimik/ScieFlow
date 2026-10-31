@@ -273,3 +273,23 @@ def opencitations_record(doi: str) -> CSLRecord:
     is a list of DOI pairs), so only the DOI is set. Hydration is the identity sources' job."""
     return CSLRecord(type="article-journal", DOI=str(doi or ""), source="opencitations",
                      source_id=str(doi or ""))
+
+
+def unpaywall_location(raw: Any) -> dict | None:
+    """The open-access location of one Unpaywall `best_oa_location` object (M-C2 t7, plan 5.7).
+
+    A reduced port of researcher's Unpaywall `to_oa_location` rule (MIT, CREDITS.md): the PDF link
+    when there is one, else the landing page, else nothing. The URL is returned as data and is never
+    requested. None when Unpaywall reports no location.
+    """
+    if not isinstance(raw, Mapping):
+        return None
+    url = str(raw.get("url_for_pdf") or raw.get("url") or raw.get("url_for_landing_page") or "")
+    if not url:
+        return None
+    out: dict = {"oa_url": url}
+    for key in ("host_type", "version", "license"):
+        value = str(raw.get(key) or "")
+        if value:
+            out[key] = value
+    return out

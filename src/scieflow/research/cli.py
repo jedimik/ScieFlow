@@ -53,6 +53,11 @@ _forward("verify-bib", "scieflow.research.verify_bib",
 _forward("snowball", "scieflow.research.search.snowball",
          "Follow the citations of seed DOIs: the papers that cite them (or that they cite), one or two hops.",
          research)
+_forward("oa", "scieflow.research.lib.oa",
+         "Open access: is a free full text available for these DOIs, and where (Unpaywall).", research)
+_forward("monitor", "scieflow.research.monitor",
+         "Saved literature searches: re-run one and report only the papers it has not shown before.",
+         research)
 _forward("check-citations", "scieflow.research.citations",
          "Check paper-draft citations against references.bib and searched DOIs.", research)
 _forward("zotero-export", "scieflow.research.zotero",
