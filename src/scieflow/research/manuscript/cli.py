@@ -17,6 +17,9 @@ from scieflow.research.manuscript import check as check_mod
 from scieflow.research.manuscript import checklist, judgement, letters as letters_mod
 from scieflow.research.manuscript import package as package_mod, render as render_mod, templates, tex
 from scieflow.research.manuscript.claims import ledger as ledger_mod
+from scieflow.research.manuscript.claims import compile as claims_compile
+from scieflow.research.manuscript.claims import report as claims_report
+from scieflow.research.manuscript.claims import waivers as claims_waivers
 
 OK, REFUSED, USAGE = 0, 1, 2
 
@@ -249,3 +252,58 @@ def claims_show(run, claim_id, as_json):
             click.echo(f"{record['id']}  {record['file']}:{record['line']}  {record['unit']}  "
                        f"{tex.excerpt(record['text'])}")
     raise SystemExit(OK)
+
+
+@claims.command("check")
+@click.argument("run")
+@click.option("--main", "main_file", default=None, help="The main TeX file (default main.tex).")
+@click.option("--json", "as_json", is_flag=True, help="Print the check document as JSON.")
+@click.option("--no-write", "no_write", is_flag=True, help="Write nothing (no report, no event).")
+def claims_check(run, main_file, as_json, no_write):
+    """Check the claim ledger of RUN against its evidence and blockers (M-G 5.6); exit 1 with any error."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        result = claims_compile.check_ledger(project, folder, main=main_file or "main.tex")
+    except ledger_mod.ClaimsError as exc:
+        _fail(f"claims refused [{exc.rule}]: {exc.message}")
+    document = result.document()
+    json_path = md_path = None
+    if not no_write:
+        try:
+            json_path, md_path = claims_report.write(folder, document)
+        except ledger_mod.ClaimsError as exc:
+            _fail(f"claims refused [{exc.rule}]: {exc.message}")
+        claims_report.note_checked(folder, document)
+    if as_json:
+        click.echo(json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False))
+    else:
+        counts = document["counts"]
+        click.echo(f"claims check: {counts['errors']} errors, {counts['warnings']} warnings, "
+                   f"{counts['waived']} waived")
+        for item in result.findings:
+            code = item["code"] or "-"
+            where = f" ({item['file']}:{item['line']})" if item["file"] else ""
+            click.echo(f"  {item['severity']} {code} {item['rule']}{where}: {item['message']}")
+        if not no_write:
+            click.echo(f"report: {json_path}")
+            click.echo(f"report: {md_path}")
+    raise SystemExit(REFUSED if result.errors else OK)
+
+
+@claims.command("waive")
+@click.argument("run")
+@click.argument("claim_id")
+@click.option("--code", "code", required=True, help="The finding code to waive: C001, C002, C003 or C006.")
+@click.option("--reason", "reason", required=True, help="Why the finding is accepted (10-500 characters).")
+def claims_waive(run, claim_id, code, reason):
+    """Waive one finding of a claim: a human decision, never inside a dispatch (M-G 5.7)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        claims_waivers.waive(folder, project, claim_id, code, reason)
+    except (claims_waivers.WaiverError, ledger_mod.ClaimsError) as exc:
+        _fail(f"waive refused [{exc.rule}]: {exc.message}")
+    click.echo(f"waived {code} for claim {claim_id} (recorded as a human action)")
+    raise SystemExit(OK)
+

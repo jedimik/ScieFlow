@@ -23,6 +23,8 @@ from scieflow.research.journal import state
 from scieflow.research.manuscript import build as build_mod
 from scieflow.research.manuscript import check as check_mod
 from scieflow.research.manuscript import checklist, letters, metadata, render, tex, ziputil
+from scieflow.research.manuscript.claims import compile as claims_compile
+from scieflow.research.manuscript.claims import ledger as ledger_mod
 
 VERSION = 1
 SUBMISSION = Path("report") / "submission"
@@ -140,6 +142,25 @@ def _no_links(folder: Path) -> None:
         build_mod._refuse_links(folder)
     except build_mod.BuildError as exc:
         raise PackageError("symlink", exc.message) from exc
+
+
+def _refuse_claims(project, run: Path) -> None:
+    """The claim check at package time (M-G 5.8): any claim error refuses; a ledger or status that cannot be
+    read refuses closed. Nothing is written by the check."""
+    try:
+        result = claims_compile.check_run(project, run)
+    except ledger_mod.ClaimsError as exc:
+        # The ledger's own refusal (a symbolic link, a limit, an unreadable evidence record): its message names no
+        # value, and the package still refuses (fail closed).
+        raise PackageError("claims", exc.message) from exc
+    except Exception as exc:  # fail closed: whatever else stops the build or the check refuses the package
+        raise PackageError("claims", f"the claim ledger could not be built ({type(exc).__name__}); "
+                                     "refused (fail closed)") from exc
+    if result.status_unreadable:
+        raise PackageError("claims", "the review status could not be read; refused (fail closed)")
+    if result.errors:
+        raise PackageError("claims", f"{len(result.errors)} claim error(s): run scieflow manuscript claims "
+                                     f"check {run.name}")
 
 
 def _source_entries(folder: Path) -> dict:
@@ -292,6 +313,7 @@ def package_run(project, run_dir, *, guidelines=()) -> PackageResult:
     report = _check(root, run, guidelines)
     pdf = _built(folder, report.manuscript_sha256)
     _no_links(folder)
+    _refuse_claims(project, run)
 
     journal_name = (prof.get("identity") or {}).get("name")
     level = _levels.run_level(run)
