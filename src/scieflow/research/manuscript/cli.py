@@ -15,6 +15,7 @@ from scieflow.research.journal import state
 from scieflow.research.manuscript import build as build_mod
 from scieflow.research.manuscript import check as check_mod
 from scieflow.research.manuscript import checklist, judgement, letters as letters_mod
+from scieflow.research.manuscript import diff as diff_mod, points as points_mod
 from scieflow.research.manuscript import package as package_mod, render as render_mod, templates, tex
 from scieflow.research.manuscript.claims import ledger as ledger_mod
 from scieflow.research.manuscript.claims import compile as claims_compile
@@ -305,5 +306,71 @@ def claims_waive(run, claim_id, code, reason):
     except (claims_waivers.WaiverError, ledger_mod.ClaimsError) as exc:
         _fail(f"waive refused [{exc.rule}]: {exc.message}")
     click.echo(f"waived {code} for claim {claim_id} (recorded as a human action)")
+    raise SystemExit(OK)
+
+
+@manuscript.group()
+def point():
+    """Provenance points: a pinned copy of the source tree (M-G 5.9)."""
+
+
+@point.command("add")
+@click.argument("run")
+@click.argument("label")
+@click.option("--from-package", "from_package", is_flag=True,
+              help="Take the source.zip of report/submission/ (refused inside a dispatch).")
+def point_add(run, label, from_package):
+    """Pin the manuscript of RUN as provenance point LABEL."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        record = points_mod.add(folder, label, from_package=from_package)
+    except points_mod.PointError as exc:
+        _fail(f"point refused [{exc.rule}]: {exc.message}")
+    click.echo(f"point {label}: {record['origin']}, {len(record['files'])} files")
+    raise SystemExit(OK)
+
+
+@point.command("list")
+@click.argument("run")
+@click.option("--json", "as_json", is_flag=True, help="Print the point records as JSON.")
+def point_list(run, as_json):
+    """List the provenance points of RUN."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        records = points_mod.list_points(folder)
+    except points_mod.PointError as exc:
+        _fail(f"point refused [{exc.rule}]: {exc.message}")
+    if as_json:
+        click.echo(json.dumps(records, indent=2, sort_keys=True, ensure_ascii=False))
+    else:
+        for record in records:
+            click.echo(f"{record['label']}  {record['origin']}  {len(record['files'])} files")
+    raise SystemExit(OK)
+
+
+@manuscript.command("diff")
+@click.argument("run")
+@click.option("--from", "from_label", required=True, help="The provenance point to compare from.")
+@click.option("--to", "to_label", default="current", show_default=True,
+              help="A provenance point, or current (the manuscript as it is now).")
+@click.option("--main", "main_file", default="main.tex", show_default=True, help="The main TeX file.")
+@click.option("--json", "as_json", is_flag=True, help="Print the diff summary as JSON.")
+def diff_command(run, from_label, to_label, main_file, as_json):
+    """Write the changes between two provenance points into report/diff/ (M-G 5.9)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        result = diff_mod.diff(folder, from_label, to_label, main=main_file)
+    except (diff_mod.DiffError, points_mod.PointError) as exc:
+        _fail(f"diff refused [{exc.rule}]: {exc.message}")
+    if as_json:
+        click.echo(json.dumps(result.to_dict(), indent=2, sort_keys=True, ensure_ascii=False))
+    else:
+        click.echo(f"diff: {result.folder}")
+        click.echo(f"  added {len(result.added)}, removed {len(result.removed)}, changed {len(result.changed)}")
+        for note in result.notes:
+            click.echo(f"note: {note}")
     raise SystemExit(OK)
 
