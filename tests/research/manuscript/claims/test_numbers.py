@@ -90,3 +90,22 @@ def test_values_are_decimal_strings_not_floats():
     assert [d["value"] for d in values] == ["0.1", "0.50"]
     assert all(isinstance(d["value"], str) for d in values)
     assert all(isinstance(d["decimals"], int) for d in values)
+
+
+# M-G t1 fix (review r1 findings 3 and 4): a sign at the start of a text is counted; a number that follows a
+# decimal point (".05") or sits inside a dotted run ("1.2.3") is not read as a plain integer.
+LEADING_AND_DOTS = [
+    ("\u22125% of the walkers", [n("\u22125", "-5", 0, True)]),
+    ("-0.5 at the start", [n("-0.5", "-0.5", 1)]),
+    ("+3 at the start", [n("+3", "3", 0)]),
+    ("-5 units", [n("-5", "-5", 0)]),
+    ("p = .05 here", []),
+    ("p = .05 and 2 here", [n("2", "2", 0)]),
+    ("n=1.2.3 here", []),
+    ("x = 0.05 here", [n("0.05", "0.05", 2)]),
+]
+
+
+@pytest.mark.parametrize("text, expected", LEADING_AND_DOTS, ids=[c[0][:40] for c in LEADING_AND_DOTS])
+def test_leading_signs_and_leading_dots(text, expected):
+    assert found(text) == expected

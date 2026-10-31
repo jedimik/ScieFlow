@@ -2,11 +2,15 @@
 
 import hashlib
 import json
+import os
+import shutil
 
+import pytest
 import yaml
 from click.testing import CliRunner
 
 from scieflow.cli import main
+from scieflow.research.manuscript.cli import REFUSED
 from scieflow.research.manuscript import tex
 from scieflow.research.manuscript.claims import ledger
 from tests.research.manuscript.conftest import RUN
@@ -158,3 +162,109 @@ def test_cli_refused_limit_exits_one(synth):
     result = CliRunner().invoke(main, ["manuscript", "claims", "build", RUN])
     assert result.exit_code == 1
     assert "claims-limit" in result.output
+
+
+# --- M-G t1 fix (review r1 findings 1, 2, 6a and 7): confinement, reads, excerpts and ids -------------
+
+def _outside(tmp_path):
+    folder = tmp_path / "outside"
+    folder.mkdir()
+    return folder
+
+
+def _write_corrupt(synth, text):
+    (_ledger_dir(synth) / "claims.jsonl").write_text(text, encoding="utf-8")
+
+
+@pytest.mark.parametrize("make_link", ["report", "claims", "ledger-file"])
+def test_build_refuses_a_symbolic_link_on_the_ledger_path_and_writes_nothing_outside(
+        claims_ms, synth, tmp_path, make_link):
+    outside = _outside(tmp_path)
+    if make_link == "report":
+        os.symlink(outside, synth.run_dir / "report")
+    elif make_link == "claims":
+        (synth.run_dir / "report").mkdir()
+        os.symlink(outside, synth.run_dir / "report" / "claims")
+    else:
+        (synth.run_dir / "report" / "claims").mkdir(parents=True)
+        os.symlink(outside / "claims.jsonl", synth.run_dir / "report" / "claims" / "claims.jsonl")
+    with pytest.raises(ledger.ClaimsError) as info:
+        ledger.build(synth.run_dir)
+    assert info.value.rule == "claims-path"
+    assert list(outside.iterdir()) == []
+
+
+def test_build_refusal_exits_refused_from_the_cli(claims_ms, synth, tmp_path):
+    os.symlink(_outside(tmp_path), synth.run_dir / "report")
+    result = CliRunner().invoke(main, ["manuscript", "claims", "build", RUN], catch_exceptions=False)
+    assert result.exit_code == REFUSED
+    assert list((tmp_path / "outside").iterdir()) == []
+
+
+def test_show_refuses_a_symbolic_link_to_the_ledger_file(claims_ms, synth, tmp_path):
+    ledger.build(synth.run_dir)
+    real = _ledger_dir(synth) / "claims.jsonl"
+    outside = tmp_path / "copy.jsonl"
+    outside.write_bytes(real.read_bytes())
+    real.unlink()
+    os.symlink(outside, real)
+    with pytest.raises(ledger.ClaimsError) as info:
+        ledger.read(synth.run_dir)
+    assert info.value.rule == "claims-path"
+
+
+def test_show_refuses_a_symbolic_link_to_the_report_folder(claims_ms, synth, tmp_path):
+    ledger.build(synth.run_dir)
+    moved = tmp_path / "report-moved"
+    shutil.move(str(synth.run_dir / "report"), str(moved))
+    os.symlink(moved, synth.run_dir / "report")
+    with pytest.raises(ledger.ClaimsError) as info:
+        ledger.read(synth.run_dir)
+    assert info.value.rule == "claims-path"
+
+
+def test_show_reports_a_corrupt_line_without_echoing_it(claims_ms, synth):
+    ledger.build(synth.run_dir)
+    _write_corrupt(synth, "SECRET-VALUE-{not json\n")
+    with pytest.raises(ledger.ClaimsError) as info:
+        ledger.read(synth.run_dir)
+    assert info.value.rule == "ledger-unreadable"
+    assert "SECRET" not in info.value.message
+
+
+@pytest.mark.parametrize("line", ["[1, 2]\n", '{"text": "no id here"}\n'])
+def test_show_reports_a_line_that_is_not_a_claim_record(claims_ms, synth, line):
+    ledger.build(synth.run_dir)
+    _write_corrupt(synth, line)
+    with pytest.raises(ledger.ClaimsError) as info:
+        ledger.read(synth.run_dir)
+    assert info.value.rule == "ledger-unreadable"
+
+
+def test_cli_show_on_a_corrupt_ledger_exits_refused_without_a_traceback(claims_ms, synth):
+    ledger.build(synth.run_dir)
+    _write_corrupt(synth, "SECRET-VALUE-{not json\n")
+    result = CliRunner().invoke(main, ["manuscript", "claims", "show", RUN], catch_exceptions=False)
+    assert result.exit_code == REFUSED
+    assert "SECRET" not in result.output
+
+
+def test_show_table_excerpt_is_at_most_60_characters(synth):
+    long_sentence = "Long words " * 30 + "with 7 items."
+    synth.write_manuscript({"main.tex": "\\begin{document}\n" + long_sentence + "\n\\end{document}\n"})
+    ledger.build(synth.run_dir)
+    shown = CliRunner().invoke(main, ["manuscript", "claims", "show", RUN], catch_exceptions=False)
+    assert shown.exit_code == 0, shown.output
+    excerpt = shown.output.strip().splitlines()[0].split("  ")[-1]
+    assert len(excerpt) == 60 and excerpt.endswith("...")
+
+
+def test_a_repeated_non_claim_sentence_does_not_shift_a_claim_id(synth):
+    # The first sentence is not a claim; the second, with a source comment, is. Its id is the base id:
+    # the -2 rule numbers repeats within the ledger (the claims), not over every unit (M-G 5.2).
+    synth.write_manuscript({"main.tex": "\\begin{document}\nRepeated sentence here.\n\n"
+                                        "Repeated sentence here. % source: [data:tbl-metrics]\n\\end{document}\n"})
+    ledger.build(synth.run_dir)
+    records = [json.loads(line) for line in _claims_lines(synth)]
+    assert len(records) == 1
+    assert records[0]["id"] == ID_1 + _sha("main.tex\nRepeated sentence here.")[:12]

@@ -40,3 +40,15 @@ def test_a_200_character_id_is_accepted():
     found, problems = refs.parse_refs("", "[data:" + "a" * 200 + "]", {})
     assert found == [{"type": "data", "id": "a" * 200, "via": "inline"}]
     assert problems == []
+
+
+def test_an_unsafe_doi_marker_is_a_problem_and_not_a_ref():
+    found, problems = refs.parse_refs("", "Value [doi:10.5555/paper.pdf] here.", {})
+    assert found == []
+    assert [p["rule"] for p in problems] == ["ref-unsafe-doi"]
+
+
+def test_a_cited_entry_with_an_unsafe_doi_is_a_problem_not_a_ref():
+    found, problems = refs.parse_refs("", r"A finding \cite{bad}.", {"bad": "10.5555/paper.pdf"})
+    assert found == []
+    assert [p["rule"] for p in problems] == ["ref-unsafe-doi"]

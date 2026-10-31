@@ -81,9 +81,14 @@ def extract(text: str) -> list[dict]:
     found = []
     for match in TOKEN.finditer(masked):
         start = match.start()
-        lead = masked[start - 1] if start > 0 else ""
+        # The start of the text counts as a space: a sign there is a sign (review r1 finding 3).
+        lead = masked[start - 1] if start > 0 else " "
         if lead.isalpha():
             continue                                # glued to a word: H2O, SF-36, 1.2e-05
+        if lead == "." or re.match(r"\.\d", masked[match.end():]):
+            # Part of a decimal or dotted run without a whole part (".05", "1.2.3"): not read as a plain
+            # integer, so a false C002 cannot follow (review r1 finding 4).
+            continue
         sign = match.group("sign")
         counted_sign = bool(sign) and not (lead.isalnum() or lead in ")]}")
         if not counted_sign:

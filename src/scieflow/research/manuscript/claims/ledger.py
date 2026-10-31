@@ -24,6 +24,7 @@ LEDGER_VERSION = 1
 PARSER_VERSION = 1
 MAX_CLAIMS = 5000
 TEXT_LIMIT = 2000
+MAX_LEDGER_BYTES = 32 * 1024 * 1024                  # `show` reads at most this much (5,000 claims fit)
 
 
 class ClaimsError(ValueError):
@@ -94,17 +95,20 @@ def build(run_folder, main: str = "main.tex") -> BuildResult:
         raise ClaimsError(exc.rule, exc.message) from exc
     bib = _bib_dois(run_folder)
     order = {name: index for index, name in enumerate(tree.files)}
-    records = []
+    claims = []
     for unit in units_mod.extract_units(tree):
         found, _problems = refs_mod.parse_refs("\n".join(unit.comments), unit.text, bib)
         keys = refs_mod.cite_keys(unit.text)
         nums = numbers_mod.extract(unit.text)
         if not (found or keys or nums):
             continue
-        records.append(_record(unit, found, keys, nums))
-    if len(records) > MAX_CLAIMS:
+        claims.append((unit, found, keys, nums))
+    if len(claims) > MAX_CLAIMS:
         raise ClaimsError("claims-limit",
-                          f"{len(records)} claims: the ledger holds at most {MAX_CLAIMS}")
+                          f"{len(claims)} claims: the ledger holds at most {MAX_CLAIMS}")
+    numbered = units_mod.number([unit for unit, _found, _keys, _nums in claims])
+    records = [_record(unit, found, keys, nums)
+               for unit, (_u, found, keys, nums) in zip(numbered, claims)]
     records.sort(key=lambda r: (order.get(r["file"], len(order)), r["line"], r["id"]))
 
     claim_lines = b"".join(
@@ -120,24 +124,68 @@ def build(run_folder, main: str = "main.tex") -> BuildResult:
     }
     ledger_bytes = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
+    _refuse_links(run_folder)
     folder = ledger_folder(run_folder)
-    folder.mkdir(parents=True, exist_ok=True)
     claims_path = folder / "claims.jsonl"
     ledger_path = folder / "ledger.json"
-    state.atomic_write(claims_path, claim_lines)
-    state.atomic_write(ledger_path, ledger_bytes)
+    try:
+        _confined(run_folder, folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        state.atomic_write(claims_path, claim_lines)
+        state.atomic_write(ledger_path, ledger_bytes)
+    except (state.StateError, OSError) as exc:
+        raise ClaimsError("claims-path", f"the claim ledger cannot be written: {exc}") from exc
     return BuildResult(count=len(records), claims_path=claims_path, ledger_path=ledger_path)
 
 
 def read(run_folder, claim_id: str | None = None) -> list[dict]:
-    """The ledger records of the run (M-G 5.3 `show`), optionally only the one with `claim_id`."""
+    """The ledger records of the run (M-G 5.3 `show`), optionally only the one with `claim_id`.
+
+    Raises ClaimsError: `claims-path` for a symbolic link or a path outside the run, `ledger-missing`
+    without a ledger, `ledger-unreadable` for a file that is not a list of claim records (its content is
+    never echoed).
+    """
+    run_folder = Path(run_folder)
+    _refuse_links(run_folder)
     path = ledger_folder(run_folder) / "claims.jsonl"
     if not path.is_file():
         raise ClaimsError("ledger-missing",
                           "no claim ledger yet: run `scieflow manuscript claims build <run>` first")
-    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    _confined(run_folder, path)
+    try:
+        if path.stat().st_size > MAX_LEDGER_BYTES:
+            raise ClaimsError("ledger-unreadable", "claims.jsonl is larger than the ledger limit")
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        raise ClaimsError("ledger-unreadable", "claims.jsonl cannot be read as UTF-8 text") from None
+    records = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            raise ClaimsError("ledger-unreadable", f"claims.jsonl line {number} is not JSON") from None
+        if not isinstance(record, dict) or not isinstance(record.get("id"), str):
+            raise ClaimsError("ledger-unreadable", f"claims.jsonl line {number} is not a claim record")
+        records.append(record)
     if claim_id is not None:
         records = [record for record in records if record["id"] == claim_id]
         if not records:
             raise ClaimsError("claim-unknown", "no claim with that id in the ledger")
     return records
+
+
+def _refuse_links(run_folder: Path) -> None:
+    """Refuse a symbolic link at report/, report/claims/ or either ledger file (M-G 5.1, 5.16)."""
+    folder = ledger_folder(run_folder)
+    for part in (Path(run_folder) / "report", folder, folder / "claims.jsonl", folder / "ledger.json"):
+        if part.is_symlink():
+            raise ClaimsError("claims-path", f"{part.relative_to(run_folder)} is a symbolic link")
+
+
+def _confined(run_folder: Path, path: Path) -> None:
+    """Refuse a path that resolves outside the run folder."""
+    if not path.resolve(strict=False).is_relative_to(Path(run_folder).resolve()):
+        raise ClaimsError("claims-path", f"{path.name} lies outside the run folder")
+

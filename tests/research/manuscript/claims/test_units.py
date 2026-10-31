@@ -73,3 +73,23 @@ def test_a_unit_keeps_its_full_text_and_the_store_limit_is_applied_by_the_ledger
     assert len(found) == 1
     assert found[0].text.endswith("with 7 items.")
     assert len(found[0].text) > 2000
+
+
+def _texts(synth, files):
+    synth.write_manuscript(files)
+    return [u.text for u in units_mod.extract_units(tex.read_tree(synth.ms, keep_comments=True))]
+
+
+def test_text_before_begin_document_and_after_end_document_is_not_body(synth):
+    body = "\\begin{document}\nBody sentence 7 times.\n\\end{document}\nAfter sentence 9 times.\n"
+    assert _texts(synth, {"main.tex": "Preamble sentence 5 times.\n" + body}) == ["Body sentence 7 times."]
+
+
+def test_the_bibliography_command_ends_the_body(synth):
+    files = {"main.tex": "\\begin{document}\nBody sentence 7 times.\n\\bibliography{references}\n"
+                         "Bib sentence 9 times.\n\\end{document}\n"}
+    assert _texts(synth, files) == ["Body sentence 7 times."]
+
+
+def test_a_file_without_begin_document_is_all_body(synth):
+    assert _texts(synth, {"main.tex": "Plain sentence 4 times.\n"}) == ["Plain sentence 4 times."]

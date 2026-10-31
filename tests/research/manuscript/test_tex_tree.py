@@ -173,3 +173,29 @@ def test_commented_input_is_not_expanded_when_comments_are_kept(synth):
     kept = tex.read_tree(synth.ms, keep_comments=True)
     assert "methods.tex" in kept.files
     assert "absent.tex" not in kept.files
+
+
+def test_default_read_tree_matches_a_hand_written_golden_tree(synth):
+    # M-G-D16: the default output is unchanged. The expected lines are written out by hand here, not
+    # derived from keep_comments output.
+    synth.write_manuscript({
+        "main.tex": "\\begin{document}\nStart text % a note\n\\input{methods} tail % cmt\n% \\input{absent}\n"
+                    "\\end{document}\n",
+        "methods.tex": "\\section{Methods}\nMethod text % note\n",
+    })
+    tree = tex.read_tree(synth.ms)
+    assert list(tree.files) == ["main.tex", "methods.tex"]
+    assert tree.files["main.tex"] == ("\\begin{document}\nStart text \n\\input{methods} tail \n\n"
+                                      "\\end{document}\n")
+    assert [(line.file, line.lineno, line.text) for line in tree.lines] == [
+        ("main.tex", 1, "\\begin{document}"),
+        ("main.tex", 2, "Start text "),
+        ("main.tex", 3, ""),
+        ("methods.tex", 1, "\\section{Methods}"),
+        ("methods.tex", 2, "Method text "),
+        ("methods.tex", 3, ""),
+        ("main.tex", 3, " tail "),
+        ("main.tex", 4, ""),
+        ("main.tex", 5, "\\end{document}"),
+        ("main.tex", 6, ""),
+    ]

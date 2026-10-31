@@ -162,11 +162,24 @@ def extract_units(tree: tex.Tree) -> list[Unit]:
             found.append(unit("sentence", start, end, section, kinds, start))
 
     found.sort(key=lambda u: u.offset)
+    return number(found)
+
+
+def base_id(file: str, text: str) -> str:
+    """The base id of a unit: `c-` and the first 12 hex digits of sha256(file, newline, text)."""
+    return "c-" + hashlib.sha256((file + "\n" + text).encode("utf-8")).hexdigest()[:12]
+
+
+def number(units: list[Unit]) -> list[Unit]:
+    """`units` (in document order) with ids: a repeat of a base id gets `-2`, `-3`, ... (M-G 5.2).
+
+    The ledger numbers its own claims with this (`ledger.build`), so a repeated non-claim sentence
+    does not shift the id of a claim.
+    """
     ids: dict[str, int] = {}
     numbered: list[Unit] = []
-    for item in found:
-        digest = hashlib.sha256((item.file + "\n" + item.text).encode("utf-8")).hexdigest()[:12]
-        base = "c-" + digest
+    for item in units:
+        base = base_id(item.file, item.text)
         ids[base] = ids.get(base, 0) + 1
         numbered.append(replace(item, id=base if ids[base] == 1 else f"{base}-{ids[base]}"))
     return numbered
