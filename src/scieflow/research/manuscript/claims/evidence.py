@@ -90,7 +90,10 @@ def folder_files(run_folder, rel: str) -> list[str] | None:
                 raise EvidenceError("ref-unsafe",
                                     f"{entry.relative_to(run_folder).as_posix()}: a symbolic link is not followed")
         for name in filenames:
-            found.append((base / name).relative_to(run_folder).as_posix())
+            entry = base / name
+            if not entry.is_file():
+                raise EvidenceError("ref-unsafe", f"{entry.relative_to(run_folder).as_posix()}: not a regular file")
+            found.append(entry.relative_to(run_folder).as_posix())
     if len(found) > MAX_FILES_PER_REF:
         raise EvidenceError("ref-unsafe", f"{rel}: more than {MAX_FILES_PER_REF} evidence files")
     return sorted(found)

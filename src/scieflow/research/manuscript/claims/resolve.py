@@ -48,6 +48,8 @@ class Context:
     selected: frozenset | None
     records: levels.DataFile | None
     _campaigns: dict = field(default_factory=dict)
+    _outcomes: dict = field(default_factory=dict)   # (type, id, key) -> Outcome, one resolution per build
+    pins: dict = field(default_factory=dict)        # "<type>:<id>" -> pin, one hashing per build
 
 
 def open_context(run_folder, bib_keys, bib_dois) -> Context:
@@ -69,6 +71,14 @@ def open_context(run_folder, bib_keys, bib_dois) -> Context:
 
 
 def resolve_ref(ctx: Context, ref: dict) -> Outcome:
+    """The outcome of one reference, resolved once per build: a file is read at most once per distinct ref."""
+    key = (ref["type"], ref["id"], ref.get("key"))
+    if key not in ctx._outcomes:
+        ctx._outcomes[key] = _resolve(ctx, ref)
+    return ctx._outcomes[key]
+
+
+def _resolve(ctx: Context, ref: dict) -> Outcome:
     try:
         if ref["type"] == "data":
             return _data(ctx, ref)

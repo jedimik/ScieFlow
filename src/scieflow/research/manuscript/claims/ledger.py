@@ -107,15 +107,24 @@ def _previous(run_folder: Path) -> dict:
         return {}
 
 
-def _pins(run_folder: Path, outcomes: list) -> dict:
-    pins = {}
+def _fill_pins(run_folder: Path, ctx: resolve_mod.Context, outcomes: list, pins: dict) -> dict:
+    """Complete `pins` for every outcome that is pinned and has no entry yet (M-G 5.3, 5.4).
+
+    An entry carried from the previous ledger is kept unchanged. A missing entry (an earlier build could not pin
+    the reference, or wrote no pins) is taken from the current evidence, once per build.
+    """
     for outcome in outcomes:
-        if outcome.pinned and outcome.files:
-            ref = outcome.ref
+        if not (outcome.pinned and outcome.files):
+            continue
+        key = f"{outcome.ref['type']}:{outcome.ref['id']}"
+        if pins.get(key):
+            continue
+        if key not in ctx.pins:
             try:
-                pins[f"{ref['type']}:{ref['id']}"] = ev.pins_for(run_folder, outcome.files)
+                ctx.pins[key] = ev.pins_for(run_folder, outcome.files)
             except (ev.EvidenceError, OSError) as exc:
                 raise ClaimsError("claims-path", "a pinned evidence file cannot be read") from exc
+        pins[key] = ctx.pins[key]
     return pins
 
 
@@ -166,9 +175,9 @@ def build(run_folder, main: str = "main.tex", *, repin: bool = False, repin_clai
         asked = repin or unit.id in repin_claims
         old = previous.get(unit.id)
         if not asked and old is not None and old.get("refs") == found:
-            record["pins"] = old.get("pins", {})
+            record["pins"] = _fill_pins(run_folder, ctx, outcomes, dict(old.get("pins", {})))
         else:
-            record["pins"] = _pins(run_folder, outcomes)
+            record["pins"] = _fill_pins(run_folder, ctx, outcomes, {})
             requested += int(asked)
         records.append(record)
     records.sort(key=lambda r: (order.get(r["file"], len(order)), r["line"], r["id"]))
