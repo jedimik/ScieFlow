@@ -58,7 +58,7 @@ def test_a_null_git_state_is_code_state_unknown_warning(synth):
     cite_run(synth, {"scieflow": {"git": None}, "pipeline": {"git": git_block(head)}})
     result = built_check(synth)
     found = of_rule(result, "code-state-unknown")
-    assert found and found[0]["severity"] == "warning" and found[0]["code"] == "C006", rules(result)
+    assert found and found[0]["severity"] == "warning" and found[0]["code"] is None, rules(result)
     assert result.errors == []
 
 
@@ -71,7 +71,7 @@ def test_git_missing_from_path_is_code_state_unknown_warning(synth, monkeypatch,
     result = built_check(synth)
     found = of_rule(result, "code-state-unknown")
     assert found and found[0]["severity"] == "warning", rules(result)
-    assert of_code(result, "C006") and all(f["severity"] == "warning" for f in of_code(result, "C006"))
+    assert of_code(result, "C006") == [], "an uncheckable state is a warning with no code"
 
 
 def test_a_malformed_sha_never_reaches_git(synth):
