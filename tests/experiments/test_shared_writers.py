@@ -73,6 +73,32 @@ def test_sweep_results_json_bytes_match_the_literal_document(project):
     assert results_path.read_bytes() == expected
 
 
+def test_sweep_results_csv_bytes_match_the_literal_csv(project):
+    """Plan 5.2 / t1 case 5: results.csv bytes, not only results.json (review r1 finding 3).
+
+    The expected text is written out here from the run folders' metrics and params; it does
+    not call tidy.write_results_csv.
+    """
+    from scieflow.experiments.sweep import run_sweep
+
+    campaign, stage = load(project)
+    run_sweep(campaign, stage, project / "experiments", mode="direct")
+    lines = ["campaign,config_id,run_id,replicate,seed,mode,status,metric,value,param.gain"]
+    for spec in campaign.expand():
+        run_dir = project / "experiments/gain-sweep/runs" / spec.run_id
+        status = yaml.safe_load((run_dir / "config.yaml").read_text())["status"]
+        metrics = json.loads((run_dir / "metrics.json").read_text())
+        for metric in campaign.metrics:
+            value = metrics.get(metric)
+            cell_value = "" if value is None else repr(value)
+            lines.append(
+                f"gain-sweep,{spec.config_id},{spec.run_id},,,direct,{status},{metric},"
+                f"{cell_value},{spec.params['gain']!r}"
+            )
+    expected = ("\n".join(lines) + "\n").encode()
+    assert (project / "experiments/gain-sweep/results.csv").read_bytes() == expected
+
+
 def test_write_results_adds_replicates_only_when_set(project, tmp_path):
     from scieflow.experiments.campaign import Replicates
     from scieflow.experiments.sweep import write_results

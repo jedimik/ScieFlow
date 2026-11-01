@@ -1,5 +1,7 @@
 """M-D3 t1: `backend: remote` campaign keys load, round-trip and refuse by key name (plan 5.1)."""
 
+import re
+
 import pytest
 import yaml
 from click.testing import CliRunner
@@ -74,28 +76,44 @@ def test_backend_remote_without_remote_block_names_remote(tmp_path):
         Campaign.load(write(tmp_path, BASE | {"backend": "remote"}))
 
 
-@pytest.mark.parametrize("extra, key", [
-    ({"remote": "meta"}, "remote"),
-    ({"remote": {"name": "meta", "dir": "/data/x", "queue": "gpu"}}, "queue"),
-    ({"remote": {"name": "a b", "dir": "/data/x"}}, "name"),
-    ({"remote": {"name": "meta", "dir": "data/x"}}, "dir"),
-    ({"remote": {"name": "meta", "dir": "/data/../x"}}, "dir"),
-    ({"remote": {"name": "meta", "dir": "/"}}, "dir"),
-    ({"remote": {"name": "meta", "dir": "/a;b"}}, "dir"),
-    ({"remote": {"name": "meta", "dir": "/data//x"}}, "dir"),
-    ({"remote": {"name": "meta", "dir": "/data/x", "jobs": "parallel"}}, "jobs"),
-    ({"resources": {"gpu": 1}}, "gpu"),
-    ({"resources": {"cpus": 0}}, "cpus"),
-    ({"resources": {"cpus": True}}, "cpus"),
-    ({"resources": {"mem_gb": "4"}}, "mem_gb"),
-    ({"resources": {"gpus": -1}}, "gpus"),
-    ({"resources": {"walltime": "1h"}}, "walltime"),
-    ({"resources": {"queue": "a b"}}, "queue"),
-    ({"resources": {"scratch_gb": -1}}, "scratch_gb"),
+@pytest.mark.parametrize("extra, fragment", [
+    ({"remote": "meta"}, "'remote' mapping"),
+    ({"remote": {"name": "meta", "dir": "/data/x", "queue": "gpu"}}, "remote: unknown key(s) queue"),
+    ({"remote": {"name": "a b", "dir": "/data/x"}}, "remote.name must be"),
+    ({"remote": {"name": "meta", "dir": "data/x"}}, "remote.dir must be"),
+    ({"remote": {"name": "meta", "dir": "/data/../x"}}, "remote.dir must be"),
+    ({"remote": {"name": "meta", "dir": "/"}}, "remote.dir must be"),
+    ({"remote": {"name": "meta", "dir": "/a;b"}}, "remote.dir must be"),
+    ({"remote": {"name": "meta", "dir": "/data//x"}}, "remote.dir must be"),
+    ({"remote": {"name": "meta", "dir": "//data/x"}}, "remote.dir must be"),
+    ({"remote": {"name": "meta", "dir": "/data/x", "jobs": "parallel"}}, "remote.jobs must be"),
+    ({"resources": {"gpu": 1}}, "resources: unknown key(s) gpu"),
+    ({"resources": {"cpus": 0}}, "resources.cpus must be"),
+    ({"resources": {"cpus": True}}, "resources.cpus must be"),
+    ({"resources": {"mem_gb": "4"}}, "resources.mem_gb must be"),
+    ({"resources": {"gpus": -1}}, "resources.gpus must be"),
+    ({"resources": {"walltime": "1h"}}, "resources.walltime must be"),
+    ({"resources": {"queue": "a b"}}, "resources.queue must be"),
+    ({"resources": {"scratch_gb": -1}}, "resources.scratch_gb must be"),
 ])
-def test_bad_remote_keys_are_refused_by_name(tmp_path, extra, key):
-    with pytest.raises(CampaignError, match=key):
+def test_bad_remote_keys_are_refused_by_name(tmp_path, extra, fragment):
+    # Match the qualified key the message states, not a bare word: a bare key such as
+    # "name" also matches the pytest tmp path and passes for any CampaignError (review r1).
+    with pytest.raises(CampaignError, match=re.escape(fragment)):
         Campaign.load(write(tmp_path, BASE | {"backend": "remote"} | REMOTE | extra))
+
+
+@pytest.mark.parametrize("name", ["my campaign", "a/b", "..", ".", 12])
+def test_remote_campaign_name_must_be_path_safe(tmp_path, name):
+    data = BASE | {"name": name, "backend": "remote"} | REMOTE
+    with pytest.raises(CampaignError, match=re.escape("campaign name")):
+        Campaign.load(write(tmp_path, data))
+
+
+def test_same_campaign_names_still_load_as_local(tmp_path):
+    for name in ("my campaign", "a/b"):
+        c = Campaign.load(write(tmp_path, BASE | {"name": name}))
+        assert c.name == name and c.backend == "local"
 
 
 def test_remote_run_ids_must_be_path_safe(tmp_path):
@@ -118,7 +136,24 @@ def test_remote_keys_without_backend_remote_are_refused(tmp_path):
         Campaign.load(write(tmp_path, BASE | REMOTE))
 
 
-def test_run_refuses_a_remote_campaign_without_running(project):
+def refuse_any_execution(*args, **kwargs):
+    raise AssertionError("a remote campaign must not execute a run locally")
+
+
+def spy_on_execution_and_spend(monkeypatch):
+    """Fail on any local execute_run; record every budget spend (plan 6 t1 case 6, review r1)."""
+    for target in ("scieflow.experiments.cli.execute_run",
+                   "scieflow.experiments.sweep.execute_run",
+                   "scieflow.experiments.runner.execute_run"):
+        monkeypatch.setattr(target, refuse_any_execution)
+    spent = []
+    monkeypatch.setattr("scieflow.core.run.actions.record_spend",
+                        lambda *a, **k: spent.append((a, k)))
+    return spent
+
+
+def test_run_refuses_a_remote_campaign_without_running(project, monkeypatch):
+    spent = spy_on_execution_and_spend(monkeypatch)
     campaign = project / "pipelines/demo/campaigns/remote-sweep.yaml"
     campaign.write_text(yaml.safe_dump(
         BASE | {"backend": "remote"} | REMOTE | {"input": str(project / "pipelines/demo/data/noisy.png")}
@@ -131,9 +166,11 @@ def test_run_refuses_a_remote_campaign_without_running(project):
     assert result.exit_code == 1
     assert "runs locally only; submit a backend: remote campaign with sweep" in result.output
     assert not (exp / "sweep" / "runs").exists()
+    assert spent == []
 
 
-def test_sweep_refuses_a_remote_campaign_without_running(project):
+def test_sweep_refuses_a_remote_campaign_without_running(project, monkeypatch):
+    spent = spy_on_execution_and_spend(monkeypatch)
     campaign = project / "pipelines/demo/campaigns/remote-sweep.yaml"
     campaign.write_text(yaml.safe_dump(
         BASE | {"backend": "remote"} | REMOTE | {"input": str(project / "pipelines/demo/data/noisy.png")}
@@ -147,3 +184,4 @@ def test_sweep_refuses_a_remote_campaign_without_running(project):
     assert "remote campaigns are submitted by sweep" in result.output
     assert not (exp / "sweep" / "runs").exists()
     assert not (exp / "sweep" / "results.json").exists()
+    assert spent == []
