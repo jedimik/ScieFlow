@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import dataclasses
 import itertools
+import posixpath
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,35 +16,113 @@ class CampaignError(ValueError):
     pass
 
 
-# Keys this loader understands (M-A-D5). `backend: local` loads; remote
-# campaigns are refused until M-D3, so their keys fail loudly, not silently.
+# Keys this loader understands (M-A-D5). `backend: remote` (M-D3) needs `remote`
+# and may carry `resources`; both are refused for a local campaign by name.
 KNOWN_KEYS = frozenset({
     "name", "pipeline", "stage", "input", "reference", "metrics", "parameters",
     "scenarios", "validation", "rank_by", "notes", "replicates", "analysis",
     "backend", "pipeline_dir",  # pipeline_dir: written by `sweep` into campaign.yaml
+    "remote", "resources",
 })
+SUPPORTED_BACKENDS = ("local", "remote")
 REMOTE_ONLY_KEYS = ("remote", "resources")
-REMOTE_REFUSAL = (
-    "remote campaigns are not run by `scieflow experiment` yet; drive them "
-    "through skills/remote-exec/SKILL.md (M-D3 makes them first-class)"
-)
+REMOTE_JOBS = ("per-run", "array")
+TOKEN_RE = re.compile(r"[\w.\-]+")
+DIR_RE = re.compile(r"[\w./\-]+")
+WALLTIME_RE = re.compile(r"\d{2}:\d{2}:\d{2}")
 MAX_REPLICATES = 1000
 MAX_SEED = 2**31 - 1
 
 
 def _check_keys(path, data: dict) -> None:
     backend = data.get("backend", "local")
-    if backend == "remote" or any(k in data for k in REMOTE_ONLY_KEYS):
-        raise CampaignError(f"{path}: {REMOTE_REFUSAL}")
-    if backend != "local":
+    if backend not in SUPPORTED_BACKENDS:
         raise CampaignError(
-            f"{path}: backend {backend!r} is not supported (supported: local)"
+            f"{path}: backend {backend!r} is not supported (supported: local, remote)"
         )
+    if backend != "remote" and any(k in data for k in REMOTE_ONLY_KEYS):
+        raise CampaignError(f"{path}: remote and resources need backend: remote")
     unknown = sorted(set(data) - KNOWN_KEYS)
     if unknown:
         raise CampaignError(
             f"{path}: unknown campaign key(s): {', '.join(unknown)}"
         )
+
+
+@dataclass(frozen=True)
+class RemoteTarget:
+    """The `remote:` block of a `backend: remote` campaign (M-D3 plan 5.1)."""
+
+    name: str  # an entry of config/remotes.yml
+    dir: str  # absolute remote folder, inside the policy's allowed_dirs
+    jobs: str = "per-run"  # per-run | array
+
+
+@dataclass(frozen=True)
+class Resources:
+    """The `resources:` block; defaults equal remote.py submit's defaults (M-D3 plan 5.1)."""
+
+    walltime: str = "01:00:00"
+    cpus: int = 1
+    mem_gb: int = 4
+    gpus: int = 0
+    queue: str = "default"
+    scratch_type: str = "none"
+    scratch_gb: int = 0
+
+
+def _parse_remote(path, value) -> RemoteTarget:
+    if not isinstance(value, dict):
+        raise CampaignError(
+            f"{path}: backend: remote needs a 'remote' mapping (name, dir, optional jobs)"
+        )
+    unknown = sorted(str(k) for k in set(value) - {"name", "dir", "jobs"})
+    if unknown:
+        raise CampaignError(f"{path}: remote: unknown key(s) {', '.join(unknown)}")
+    name = value.get("name")
+    if not isinstance(name, str) or not TOKEN_RE.fullmatch(name):
+        raise CampaignError(
+            f"{path}: remote.name must be a token of letters, digits, '.', '_' or '-'"
+        )
+    folder = value.get("dir")
+    if (not isinstance(folder, str) or not DIR_RE.fullmatch(folder)
+            or not folder.startswith("/") or folder == "/"
+            or posixpath.normpath(folder) != folder or ".." in folder.split("/")):
+        raise CampaignError(
+            f"{path}: remote.dir must be an absolute, normalized folder with no '..' "
+            "(letters, digits, '.', '_', '-', '/')"
+        )
+    jobs = value.get("jobs", "per-run")
+    if jobs not in REMOTE_JOBS:
+        raise CampaignError(f"{path}: remote.jobs must be one of per-run, array")
+    return RemoteTarget(name=name, dir=folder, jobs=jobs)
+
+
+def _parse_resources(path, value) -> Resources:
+    if not isinstance(value, dict):
+        raise CampaignError(f"{path}: resources must be a mapping")
+    fields_ = {f.name for f in dataclasses.fields(Resources)}
+    unknown = sorted(str(k) for k in set(value) - fields_)
+    if unknown:
+        raise CampaignError(f"{path}: resources: unknown key(s) {', '.join(unknown)}")
+    out = {}
+    for key, v in value.items():
+        if key == "walltime":
+            if not (isinstance(v, str) and WALLTIME_RE.fullmatch(v)):
+                raise CampaignError(
+                    f"{path}: resources.walltime must be quoted HH:MM:SS, e.g. \"01:00:00\""
+                )
+        elif key in ("queue", "scratch_type"):
+            if not (isinstance(v, str) and TOKEN_RE.fullmatch(v)):
+                raise CampaignError(
+                    f"{path}: resources.{key} must be a token of letters, digits, '.', '_' or '-'"
+                )
+        else:
+            minimum = 1 if key in ("cpus", "mem_gb") else 0
+            if isinstance(v, bool) or not isinstance(v, int) or v < minimum:
+                raise CampaignError(f"{path}: resources.{key} must be an integer >= {minimum}")
+        out[key] = v
+    return Resources(**out)
 
 
 @dataclass(frozen=True)
@@ -115,6 +196,9 @@ class Campaign:
     path: Path | None = None
     replicates: Replicates | None = None
     analysis: dict | None = None  # validated by analysis.parse_analysis (M-D2 plan 5.4)
+    backend: str = "local"  # local | remote (M-D3)
+    remote: RemoteTarget | None = None  # set for backend: remote only
+    resources: Resources | None = None  # set for backend: remote only (defaults filled)
 
     @classmethod
     def load(cls, path: str | Path) -> "Campaign":
@@ -152,6 +236,11 @@ class Campaign:
         base = path.parent
         ref = data.get("reference")
         metrics = list(data["metrics"])
+        backend = data.get("backend", "local")
+        remote = resources = None
+        if backend == "remote":
+            remote = _parse_remote(path, data.get("remote"))
+            resources = _parse_resources(path, data["resources"]) if "resources" in data else Resources()
         analysis_block = data.get("analysis")
         if analysis_block is not None:
             from . import analysis as analysis_mod  # lazy: analysis imports manifest
@@ -174,7 +263,18 @@ class Campaign:
             path=path,
             replicates=replicates,
             analysis=analysis_block,
+            backend=backend,
+            remote=remote,
+            resources=resources,
         )
+        if backend == "remote":
+            # Run ids become remote path components and ledger task names (plan 5.1).
+            for spec in campaign.expand():
+                if not TOKEN_RE.fullmatch(spec.run_id):
+                    raise CampaignError(
+                        f"{path}: run id {spec.run_id!r} is not allowed in a remote campaign "
+                        "(letters, digits, '.', '_', '-' only; rename the scenario or values)"
+                    )
         if analysis_block is not None:
             try:
                 analysis_mod.resolve_baseline(
@@ -249,6 +349,11 @@ class Campaign:
             data["replicates"] = {"n": self.replicates.n, "seed": self.replicates.seed}
         if self.analysis is not None:
             data["analysis"] = self.analysis
+        if self.backend == "remote":  # local campaign.yaml stays byte-identical (plan 5.1)
+            data["backend"] = "remote"
+            data["remote"] = {"name": self.remote.name, "dir": self.remote.dir,
+                              "jobs": self.remote.jobs}
+            data["resources"] = dataclasses.asdict(self.resources)
         return data
 
 

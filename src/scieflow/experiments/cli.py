@@ -186,6 +186,10 @@ def _guard_capacity(run_dir: Path | None, planned: int) -> None:
 def run(campaign_path, params, seed, direct, experiments_dir, pipelines_dir):
     """Run the campaign's stage once with explicit parameters."""
     campaign = Campaign.load(campaign_path)
+    if campaign.backend == "remote":
+        raise click.ClickException(
+            "remote campaign: runs locally only; submit a backend: remote campaign with sweep "
+            "(nothing was run)")
     stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
     _check_stage_seed(campaign, stage)
     if seed is not None and not stage.accepts_seed:
@@ -222,6 +226,10 @@ def run(campaign_path, params, seed, direct, experiments_dir, pipelines_dir):
 def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
     """Run every parameter combination / scenario in the campaign."""
     campaign = Campaign.load(campaign_path)
+    if campaign.backend == "remote":
+        raise click.ClickException(
+            "remote campaigns are submitted by sweep once M-D3 t3 lands "
+            "(nothing was run)")
     stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
     _check_stage_seed(campaign, stage)
     budget_run = _budget_run(experiments_dir)
