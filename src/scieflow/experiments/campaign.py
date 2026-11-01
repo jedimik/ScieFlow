@@ -86,7 +86,7 @@ def _parse_remote(path, value) -> RemoteTarget:
         )
     folder = value.get("dir")
     if (not isinstance(folder, str) or not DIR_RE.fullmatch(folder)
-            or not folder.startswith("/") or folder == "/"
+            or not folder.startswith("/") or folder == "/" or folder.startswith("//")
             or posixpath.normpath(folder) != folder or ".." in folder.split("/")):
         raise CampaignError(
             f"{path}: remote.dir must be an absolute, normalized folder with no '..' "
@@ -268,6 +268,16 @@ class Campaign:
             resources=resources,
         )
         if backend == "remote":
+            # The campaign name becomes a remote folder and a task name (plan 5.1, review r1).
+            # str-only: TOKEN_RE would raise on a non-string. '.' and '..' match the token
+            # pattern but name the parent folder itself.
+            name = campaign.name
+            if (not isinstance(name, str) or not TOKEN_RE.fullmatch(name)
+                    or set(name) <= {"."}):
+                raise CampaignError(
+                    f"{path}: campaign name {name!r} is not allowed in a remote campaign "
+                    "(letters, digits, '.', '_', '-' only; not '.' or '..')"
+                )
             # Run ids become remote path components and ledger task names (plan 5.1).
             for spec in campaign.expand():
                 if not TOKEN_RE.fullmatch(spec.run_id):
