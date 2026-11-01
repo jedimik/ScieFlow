@@ -23,6 +23,7 @@ from scieflow.research.manuscript.claims import ledger as ledger_mod
 from scieflow.research.manuscript.claims import compile as claims_compile
 from scieflow.research.manuscript.claims import report as claims_report
 from scieflow.research.manuscript.claims import waivers as claims_waivers
+from scieflow.research.manuscript import crate as crate_mod
 
 OK, REFUSED, USAGE = 0, 1, 2
 
@@ -308,6 +309,31 @@ def claims_waive(run, claim_id, code, reason):
     except (claims_waivers.WaiverError, ledger_mod.ClaimsError) as exc:
         _fail(f"waive refused [{exc.rule}]: {exc.message}")
     click.echo(f"waived {code} for claim {claim_id} (recorded as a human action)")
+    raise SystemExit(OK)
+
+
+@manuscript.command("crate")
+@click.argument("run")
+@click.option("--json", "as_json", is_flag=True, help="Print the RO-Crate document as JSON.")
+@click.option("--no-write", "no_write", is_flag=True, help="Write nothing (no crate file, no note).")
+def crate_command(run, as_json, no_write):
+    """Write report/ro-crate/ro-crate-metadata.json (RO-Crate 1.1 metadata only) for RUN (M-G 5.14)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        document = crate_mod.build(project, folder)
+        path = None
+        if not no_write:
+            path = crate_mod.write(folder, document)
+            crate_mod.note_written(folder, document)
+    except (crate_mod.CrateError, ledger_mod.ClaimsError) as exc:
+        _fail(f"crate refused [{exc.rule}]: {exc.message}")
+    if as_json:
+        click.echo(json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False))
+    elif path is not None:
+        click.echo(f"crate: {len(document['@graph'])} entities written to {path}")
+    else:
+        click.echo(f"crate: {len(document['@graph'])} entities (nothing written: --no-write)")
     raise SystemExit(OK)
 
 
