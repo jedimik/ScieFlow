@@ -16,6 +16,7 @@ from scieflow.research.manuscript import build as build_mod
 from scieflow.research.manuscript import check as check_mod
 from scieflow.research.manuscript import checklist, judgement, letters as letters_mod
 from scieflow.research.manuscript import diff as diff_mod, points as points_mod
+from scieflow.research.revision import adopt as adopt_mod, draft as draft_mod, letter as letter_mod
 from scieflow.research.manuscript import package as package_mod, render as render_mod, templates, tex
 from scieflow.research.manuscript.claims import ledger as ledger_mod
 from scieflow.research.manuscript.claims import compile as claims_compile
@@ -372,5 +373,114 @@ def diff_command(run, from_label, to_label, main_file, as_json):
         click.echo(f"  added {len(result.added)}, removed {len(result.removed)}, changed {len(result.changed)}")
         for note in result.notes:
             click.echo(f"note: {note}")
+    raise SystemExit(OK)
+
+
+@manuscript.group()
+def revision():
+    """Decision letters: ingest a letter, prompt a sub-agent, adopt its comments (M-G 5.10-5.11)."""
+
+
+@revision.command("ingest")
+@click.argument("run")
+@click.option("--letter", "letter_path", required=True, type=click.Path(dir_okay=False),
+              help="The decision letter (.txt, .md, .html or .htm), a file inside the run folder.")
+@click.option("--round", "round_", type=click.IntRange(min=1), default=None,
+              help="The round number (default: one past the highest existing round).")
+@click.option("--decision", type=click.Choice(letter_mod.DECISIONS), default=None,
+              help="The decision; wins over the letter's own wording.")
+def revision_ingest(run, letter_path, round_, decision):
+    """Store the decision letter of RUN as a round, with its blocks and the point submitted-rN."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        result = letter_mod.ingest(folder, Path(letter_path), round_=round_, decision=decision)
+    except (letter_mod.LetterError, points_mod.PointError) as exc:
+        _fail(f"ingest refused [{exc.rule}]: {exc.message}")
+    record = result["record"]
+    point = result["point"]
+    if point["note"]:
+        click.echo(f"note: {point['note']}")
+    click.echo(f"round {record['round']}: {len(record['blocks'])} blocks, {result['paragraphs']} paragraphs, "
+               f"decision {record['decision']} ({record['decision_source']})")
+    click.echo(f"point {point['label']}: {point['origin']}")
+    raise SystemExit(OK)
+
+
+@revision.command("prompt")
+@click.argument("run")
+@click.option("--round", "round_", type=click.IntRange(min=1), required=True, help="The round to structure.")
+@click.option("--agent", required=True,
+              help="The sub-agent that writes revision/round-N/draft/<agent>.json.")
+@click.option("--write", "write", is_flag=True,
+              help="Store the prompt in prompts/ and print the dispatch line instead of the prompt.")
+def revision_prompt(run, round_, agent, write):
+    """Build the structuring prompt for round N (letter fenced as untrusted data, M-G 5.11)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        text = draft_mod.build_prompt(folder, round_, agent)
+        if not write:
+            click.echo(text, nl=False)
+            raise SystemExit(OK)
+        path = draft_mod.store_prompt(folder, round_, agent, text)
+    except letter_mod.LetterError as exc:
+        _fail(f"prompt refused [{exc.rule}]: {exc.message}")
+    except state.StateError as exc:
+        _fail(f"prompt refused: {exc}")
+    click.echo(f"prompt written: {path.relative_to(folder).as_posix()}")
+    click.echo(draft_mod.dispatch_line(folder, round_, agent, path))
+    raise SystemExit(OK)
+
+
+@revision.command("adopt")
+@click.argument("run")
+@click.option("--round", "round_", type=click.IntRange(min=1), required=True, help="The round to adopt.")
+@click.option("--draft", "draft_path", required=True, type=click.Path(dir_okay=False),
+              help="The agent's draft (a file inside the run folder).")
+@click.option("--replace", "replace", is_flag=True, help="Overwrite an existing adopted.json.")
+def revision_adopt(run, round_, draft_path, replace):
+    """Check the draft against the stored letter, then write one review per block (M-G 5.11)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        adopted = adopt_mod.adopt(folder, round_, Path(draft_path), replace=replace)
+    except (letter_mod.LetterError, state.StateError) as exc:
+        rule = getattr(exc, "rule", "write")
+        _fail(f"adopt refused [{rule}]: {exc}")
+    click.echo(f"adopted round {round_}: {len(adopted['comments'])} comments, "
+               f"{len(adopted['not_comments'])} paragraphs without a comment")
+    raise SystemExit(OK)
+
+
+@revision.command("show")
+@click.argument("run")
+@click.option("--json", "as_json", is_flag=True, help="Print the round summaries as JSON.")
+def revision_show(run, as_json):
+    """Summarise the decision-letter rounds of RUN (no letter text)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    rows = []
+    for number in letter_mod.existing_rounds(folder):
+        try:
+            record = letter_mod.load(folder, number)
+        except letter_mod.LetterError as exc:
+            _fail(f"show refused [{exc.rule}]: {exc.message}")
+        adopted = letter_mod.round_dir(folder, number) / "adopted.json"
+        rows.append({
+            "round": number,
+            "decision": record["decision"],
+            "decision_source": record["decision_source"],
+            "blocks": [block["id"] for block in record["blocks"]],
+            "letter_sha256": record["letter_sha256"],
+            "adopted": adopted.is_file(),
+        })
+    if as_json:
+        click.echo(json.dumps(rows, indent=2, sort_keys=True, ensure_ascii=False))
+    else:
+        for row in rows:
+            state_text = "adopted" if row["adopted"] else "not adopted"
+            click.echo(f"round {row['round']}: decision {row['decision']} ({row['decision_source']}), "
+                       f"blocks {' '.join(row['blocks'])}, {state_text}")
     raise SystemExit(OK)
 
