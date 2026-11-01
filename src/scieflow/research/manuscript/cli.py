@@ -16,7 +16,8 @@ from scieflow.research.manuscript import build as build_mod
 from scieflow.research.manuscript import check as check_mod
 from scieflow.research.manuscript import checklist, judgement, letters as letters_mod
 from scieflow.research.manuscript import diff as diff_mod, points as points_mod
-from scieflow.research.revision import adopt as adopt_mod, draft as draft_mod, letter as letter_mod
+from scieflow.research.revision import adopt as adopt_mod, coverage as coverage_mod, draft as draft_mod
+from scieflow.research.revision import letter as letter_mod, render as revision_render, respond as respond_mod
 from scieflow.research.manuscript import package as package_mod, render as render_mod, templates, tex
 from scieflow.research.manuscript.claims import ledger as ledger_mod
 from scieflow.research.manuscript.claims import compile as claims_compile
@@ -486,5 +487,62 @@ def revision_show(run, as_json):
             state_text = "adopted" if row["adopted"] else "not adopted"
             click.echo(f"round {row['round']}: decision {row['decision']} ({row['decision_source']}), "
                        f"blocks {' '.join(row['blocks'])}, {state_text}")
+    raise SystemExit(OK)
+
+
+@revision.command("respond")
+@click.argument("run")
+@click.option("--round", "round_", type=click.IntRange(min=1), required=True, help="The round to answer.")
+@click.option("--force", "force", is_flag=True, help="Replace an existing response.md (typed text is lost).")
+def revision_respond(run, round_, force):
+    """Write the response starter of round N: one section per adopted comment (M-G 5.12)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        path = respond_mod.write(folder, round_, force=force)
+    except (letter_mod.LetterError, state.StateError) as exc:
+        rule = getattr(exc, "rule", "write")
+        _fail(f"respond refused [{rule}]: {exc}")
+    click.echo(f"response starter: {path.relative_to(folder).as_posix()}")
+    raise SystemExit(OK)
+
+
+@revision.command("coverage")
+@click.argument("run")
+@click.option("--round", "round_", type=click.IntRange(min=1), required=True, help="The round to check.")
+@click.option("--json", "as_json", is_flag=True, help="Print the coverage document as JSON.")
+def revision_coverage(run, round_, as_json):
+    """Check that every adopted comment is answered with a change or a reason; write coverage.json (M-G 5.12)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        document = coverage_mod.write(folder, round_)
+    except (letter_mod.LetterError, state.StateError) as exc:
+        rule = getattr(exc, "rule", "write")
+        _fail(f"coverage refused [{rule}]: {exc}")
+    if as_json:
+        click.echo(json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False))
+    else:
+        verdict = "ok" if document["ok"] else "not ok"
+        click.echo(f"round {round_}: {len(document['comments'])} comments, coverage {verdict}")
+        for row in document["problems"]:
+            click.echo(f"  {row['comment']}: {row['level']} {row['rule']}")
+    raise SystemExit(OK if document["ok"] else REFUSED)
+
+
+@revision.command("letter")
+@click.argument("run")
+@click.option("--round", "round_", type=click.IntRange(min=1), required=True, help="The round to write.")
+@click.option("--force", "force", is_flag=True, help="Replace an existing response letter.")
+def revision_letter(run, round_, force):
+    """Write the response to reviewers of round N into manuscript/letters/ (M-G 5.12)."""
+    project = Project.discover()
+    folder = _run_folder(project, run)
+    try:
+        path = revision_render.write(project.root, folder, round_, force=force)
+    except (letter_mod.LetterError, state.StateError) as exc:
+        rule = getattr(exc, "rule", "write")
+        _fail(f"letter refused [{rule}]: {exc}")
+    click.echo(f"letter: {path}")
     raise SystemExit(OK)
 

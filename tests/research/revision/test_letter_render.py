@@ -12,7 +12,7 @@ from scieflow._vendor import researcher_core as vendored
 from scieflow.research.manuscript import tex
 from tests.research.revision.revision_support import LETTER_SHA, review_doc
 from tests.research.revision.t6_support import (
-    adopted_round, change_methods, letter, respond, response_path, round_path,
+    adopted_round, change_methods, coverage, letter, respond, response_path, round_path,
 )
 
 TITLE = "Gait timing in synthetic cohorts"
@@ -166,9 +166,10 @@ def test_the_letter_leaves_the_source_tree_hash_unchanged(synth):
     assert tex.source_tree_hash(synth.ms) == before
 
 
-def test_the_letter_is_written_after_a_coverage_document_that_is_ok(synth):
+def test_the_letter_is_written_after_a_coverage_run_that_is_ok(synth):
     adopted_round(synth, two_comment_draft())
     answer_two(synth)
+    assert coverage(synth).exit_code == 0
     assert letter(synth).exit_code == 0
     assert (synth.ms / "letters" / "response-to-reviewers-r1.tex").is_file()
     assert "\"ok\": true" in round_path(synth, "coverage.json").read_text(encoding="utf-8")
