@@ -240,6 +240,7 @@ when to stop.
 | Run jobs on metacentrum | `skills/remote-exec/SKILL.md` |
 | Check a claim against its cited source | `skills/claim-check/SKILL.md` |
 | Research a target journal; check and package a manuscript | `skills/journal-research/SKILL.md` |
+| Check a manuscript's claims; answer a journal decision letter | `skills/journal-revision/SKILL.md` |
 
 ## Orientation
 

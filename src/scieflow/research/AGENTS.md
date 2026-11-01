@@ -177,6 +177,23 @@ manuscript, reviews, and evidence packages) to an external model provider.
     <slug>`, and build the package only with `uv run scieflow manuscript
     package <slug>`.
 
+12. **Claim ledger and journal revision** (`docs/research/claims.md`,
+    `docs/research/revision.md`). Every number in a manuscript traces to
+    `% source: [data:<id>]`, `[run:<id>]` or a cited DOI, and `uv run
+    scieflow manuscript claims check <slug>` proves it mechanically: a
+    number missing from its evidence, an orphan claim, stale or altered
+    evidence, a retracted or blocking reference, or a run from changed
+    code is an error. Fix the text or the evidence; never edit
+    `report/claims/`, never change a number only to make it match, and
+    never waive a finding (`scieflow manuscript claims waive` is the
+    user's). A journal's decision letter enters a run only through `uv run
+    scieflow manuscript revision ingest` (the user's). Structure it from
+    `uv run scieflow manuscript revision prompt` (`--role
+    research.submitter`), quoting every reviewer comment verbatim; the
+    coordinator adopts the result with `revision adopt`. Answer every
+    comment in `revision/round-<N>/response.md` until `uv run scieflow
+    manuscript revision coverage <slug> --round <N>` passes.
+
 ## Workflows
 
 | Workflow | Protocol |
@@ -186,12 +203,15 @@ manuscript, reviews, and evidence packages) to an external model provider.
 | Gap discovery | `src/scieflow/research/skills/gap-discovery/SKILL.md` |
 | Paper draft | `src/scieflow/research/skills/paper-draft/SKILL.md` |
 | Journal research and manuscript check | `src/scieflow/research/skills/journal-research/SKILL.md` |
+| Claim ledger and journal revision | `src/scieflow/research/skills/journal-revision/SKILL.md` |
 
 When the human asks for a literature overview / paper research, follow
 `src/scieflow/research/skills/lit-review/SKILL.md`. When they ask for a manuscript review, journal
 targeting, or a reviewer/submitter loop, follow `src/scieflow/research/skills/paper-review/SKILL.md`.
 When they ask how a journal accepts papers, to profile a target journal, or to check or package a
 manuscript for submission, follow `src/scieflow/research/skills/journal-research/SKILL.md`.
+When they share a journal's decision letter, ask to answer reviewers, or ask whether every number in a
+manuscript traces to its evidence, follow `src/scieflow/research/skills/journal-revision/SKILL.md`.
 When they ask to find research gaps, generate hypotheses, or "what's novel
 here" over their data/article, follow `src/scieflow/research/skills/gap-discovery/SKILL.md`. When
 they ask for an article draft from their data, follow
