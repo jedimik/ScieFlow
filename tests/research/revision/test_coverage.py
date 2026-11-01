@@ -7,7 +7,9 @@ change-path, change-not-found, unknown-comment (warning). Synthetic data only.
 from __future__ import annotations
 
 import json
+import shutil
 
+from scieflow.research.manuscript import points as points_mod
 from tests.research.revision.revision_support import events_text, read_json
 from tests.research.revision.t6_support import (
     adopted_round, change_methods, coverage, fill_all, respond, response_path, round_path,
@@ -195,3 +197,75 @@ def test_the_coverage_event_carries_counts_and_no_text(synth):
     event = next(json.loads(line) for line in text.splitlines() if "note.revision_coverage" in line)
     assert event["data"]["ok"] is True
     assert "Synthetic answer" not in text
+
+
+def test_a_heading_that_only_starts_with_an_adopted_id_is_not_that_section(synth):
+    answered(synth)
+    path = response_path(synth)
+    path.write_text(path.read_text(encoding="utf-8").replace("## E.M1 (major)", "## E.M1xyz (major)", 1),
+                    encoding="utf-8")
+    assert coverage(synth).exit_code == 1
+    assert "missing" in rules_for(synth, "E.M1")
+
+
+def test_a_heading_with_trailing_punctuation_is_ordinary_text(synth):
+    answered(synth)
+    path = response_path(synth)
+    path.write_text(path.read_text(encoding="utf-8").replace("## R1.m1 (minor)", "## R1.m1: (minor)", 1),
+                    encoding="utf-8")
+    assert coverage(synth).exit_code == 1
+    assert "missing" in rules_for(synth, "R1.m1")
+
+
+def test_a_response_of_two_paragraphs_is_one_answer(synth):
+    answered(synth)
+    path = response_path(synth)
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        "Response: Synthetic answer to the comment.\n",
+        "Response: Synthetic answer to the comment.\n\nSecond paragraph of the same answer.\n", 1),
+        encoding="utf-8")
+    assert coverage(synth).exit_code == 0
+
+
+def test_a_change_is_refused_when_its_point_is_missing(synth):
+    answered(synth)
+    shutil.rmtree(points_mod.point_dir(synth.run_dir, "submitted-r1"))
+    assert coverage(synth).exit_code == 1
+    assert "point-unknown" in rules_for(synth, "E.M1")
+
+
+def test_a_change_is_refused_when_the_pinned_point_was_altered(synth):
+    answered(synth)
+    pinned = points_mod.point_dir(synth.run_dir, "submitted-r1") / "files" / "methods.tex"
+    pinned.write_text("Altered after pinning.\n", encoding="utf-8")
+    assert coverage(synth).exit_code == 1
+    assert "point-tampered" in rules_for(synth, "E.M1")
+
+
+def test_a_duplicate_section_is_named(synth):
+    answered(synth)
+    path = response_path(synth)
+    path.write_text(path.read_text(encoding="utf-8")
+                    + "\n## E.M1 (major) \u2014 letter:7-7\n\nResponse: Second answer.\n"
+                      "Change: methods.tex \u2014 synthetic change\n", encoding="utf-8")
+    assert coverage(synth).exit_code == 1
+    assert "duplicate-section" in rules_for(synth, "E.M1")
+
+
+def test_a_symbolic_link_at_coverage_json_is_refused(synth, tmp_path):
+    answered(synth)
+    outside = tmp_path / "elsewhere.json"
+    outside.write_text("outside\n", encoding="utf-8")
+    round_path(synth, "coverage.json").symlink_to(outside)
+    result = coverage(synth)
+    assert result.exit_code == 1, result.output
+    assert "symlink" in result.output
+    assert outside.read_text(encoding="utf-8") == "outside\n"
+
+
+def test_a_bracketed_placeholder_response_is_no_response(synth):
+    starter(synth)
+    fill_all(synth, response="[see below]")
+    change_methods(synth)
+    assert coverage(synth).exit_code == 1
+    assert "no-response" in rules_for(synth, "E.M1")

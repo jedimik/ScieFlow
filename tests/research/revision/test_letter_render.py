@@ -6,6 +6,7 @@ template's head (up to and including the \\newpage after \\tableofcontents) with
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from scieflow._vendor import researcher_core as vendored
@@ -173,3 +174,71 @@ def test_the_letter_is_written_after_a_coverage_run_that_is_ok(synth):
     assert letter(synth).exit_code == 0
     assert (synth.ms / "letters" / "response-to-reviewers-r1.tex").is_file()
     assert "\"ok\": true" in round_path(synth, "coverage.json").read_text(encoding="utf-8")
+
+
+def letter_file(synth) -> str:
+    return (synth.ms / "letters" / "response-to-reviewers-r1.tex").read_text(encoding="utf-8")
+
+
+def test_every_paragraph_of_a_response_reaches_the_letter(synth):
+    adopted_round(synth, two_comment_draft())
+    answer_two(synth)
+    path = response_path(synth)
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        "Response: " + RESPONSE + "\nChange: methods.tex \u2014 we added the sample size.",
+        "Response: " + RESPONSE + "\n\nSecond paragraph unique-marker.\n"
+        "Change: methods.tex \u2014 we added the sample size.", 1), encoding="utf-8")
+    assert coverage(synth).exit_code == 0
+    assert letter(synth).exit_code == 0
+    text = letter_file(synth)
+    assert "Second paragraph unique-marker." in text
+    assert text.index("Second paragraph unique-marker.") < text.index("\\noindent\\textbf{Change:}")
+
+
+def test_the_change_text_is_escaped_in_the_letter(synth):
+    adopted_round(synth, two_comment_draft())
+    answer_two(synth)
+    path = response_path(synth)
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        "Change: methods.tex \u2014 we added the sample size.",
+        "Change: methods.tex \u2014 50% \\input{x} & p_value # $2", 1), encoding="utf-8")
+    assert coverage(synth).exit_code == 0
+    assert letter(synth).exit_code == 0
+    text = letter_file(synth)
+    assert "methods.tex \u2014 50\\% \\textbackslash{}input\\{x\\} \\& p\\_value \\# \\$2" in text
+    assert "\\input{x}" not in text
+
+
+def test_the_quoted_comment_is_escaped_in_the_letter(synth):
+    adopted_round(synth, two_comment_draft())
+    answer_two(synth)
+    path = round_path(synth, "reviews", "E.json")
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["major"][0]["problem"] = "The fit is 5% & p_value # $2 unclear."
+    path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    assert letter(synth).exit_code == 0
+    assert "\\reviewercomment{The fit is 5\\% \\& p\\_value \\# \\$2 unclear.}" in letter_file(synth)
+
+
+def test_a_review_entry_without_a_problem_is_refused_by_the_letter(synth):
+    adopted_round(synth, two_comment_draft())
+    answer_two(synth)
+    path = round_path(synth, "reviews", "E.json")
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    del doc["major"][0]["problem"]
+    path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    result = letter(synth)
+    assert result.exit_code == 1, result.output
+    assert "review-invalid" in result.output
+
+
+def test_a_symbolic_link_at_the_letters_folder_is_refused(synth, tmp_path):
+    adopted_round(synth, two_comment_draft())
+    answer_two(synth)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (synth.ms / "letters").symlink_to(outside)
+    result = letter(synth)
+    assert result.exit_code == 1, result.output
+    assert "symlink" in result.output
+    assert list(outside.iterdir()) == []

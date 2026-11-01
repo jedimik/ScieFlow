@@ -6,9 +6,12 @@ file and is never a message or an event (M-G 5.16).
 
 from __future__ import annotations
 
+import json
+
 from tests.research.revision.revision_support import events_text
 from tests.research.revision.t6_support import (
     CHANGE_PLACEHOLDER, NO_CHANGE_PLACEHOLDER, RESPONSE_PLACEHOLDER, adopted_round, respond, response_path,
+    round_path,
 )
 
 EXPECTED_RESPONSE = """# Response to reviewers, round 1
@@ -126,3 +129,41 @@ def test_no_letter_text_reaches_the_events(synth):
     assert respond(synth).exit_code == 0
     assert "The reviewers agree that the topic is relevant" not in events_text(synth)
     assert "Synthetic resolution" not in events_text(synth)
+
+
+def rewrite(path, edit_doc) -> None:
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    edit_doc(doc)
+    path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def test_a_review_entry_without_a_location_is_refused_not_a_traceback(synth):
+    adopted_round(synth)
+    rewrite(round_path(synth, "reviews", "E.json"), lambda doc: doc["major"][0].pop("location"))
+    result = respond(synth)
+    assert result.exit_code == 1, result.output
+    assert "review-invalid" in result.output
+
+
+def test_a_review_that_is_not_an_object_is_refused(synth):
+    adopted_round(synth)
+    round_path(synth, "reviews", "E.json").write_text("[]\n", encoding="utf-8")
+    result = respond(synth)
+    assert result.exit_code == 1, result.output
+    assert "review-invalid" in result.output
+
+
+def test_an_adopted_comment_that_is_not_text_is_refused(synth):
+    adopted_round(synth)
+    rewrite(round_path(synth, "adopted.json"), lambda doc: doc["comments"].__setitem__(0, 5))
+    result = respond(synth)
+    assert result.exit_code == 1, result.output
+    assert "adopted-invalid" in result.output
+
+
+def test_a_not_comment_entry_without_a_reason_is_refused(synth):
+    adopted_round(synth)
+    rewrite(round_path(synth, "adopted.json"), lambda doc: doc["not_comments"][0].pop("reason"))
+    result = respond(synth)
+    assert result.exit_code == 1, result.output
+    assert "adopted-invalid" in result.output
