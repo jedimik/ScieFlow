@@ -8,6 +8,7 @@ Messages name ids and rules, never response or letter text (M-G 5.16).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -22,7 +23,7 @@ from scieflow.research.revision.letter import LetterError
 
 VERSION = 1
 MIN_REASON = 10
-HEADING_RE = re.compile(r"^#{1,6}\s*([ERE0-9.Mm]+)")
+HEADING_TOKEN_RE = re.compile(r"^#{1,6}\s*(\S+)")
 COMMENT_RE = respond_mod.COMMENT_RE
 LABELS = (
     ("response", re.compile(r"^Response:(.*)$")),
@@ -41,6 +42,8 @@ MESSAGES = {
     "no-change-reason": f"the No change reason is shorter than {MIN_REASON} characters",
     "change-path": "the Change line must begin with a manuscript file path ending in .tex or .bib",
     "change-not-found": "the named file is unchanged from the submitted point or absent from both",
+    "point-unknown": "the submitted point for this round is not in the run; a change cannot be verified",
+    "point-tampered": "the submitted point does not match its point.json; a change cannot be verified",
     "unknown-comment": "a section names a comment that was not adopted",
 }
 
@@ -50,12 +53,16 @@ def _document_json(record: dict) -> bytes:
 
 
 def sections(text: str) -> list:
-    """(comment id, lines) for each heading that names a comment id, in document order."""
+    """(heading token, lines) for each heading whose first token has the shape of a comment id, in order.
+
+    The token is compared exactly with the adopted ids by `evaluate` (M-G 5.12, clarification C2): `E.M1xyz`
+    and `R1.m1:` are not a comment id and their text is ordinary text.
+    """
     found: list = []
     current = None
     for line in text.split("\n"):
         if line.startswith("#"):
-            match = HEADING_RE.match(line)
+            match = HEADING_TOKEN_RE.match(line)
             if match and COMMENT_RE.fullmatch(match.group(1)):
                 current = (match.group(1), [])
                 found.append(current)
@@ -68,27 +75,42 @@ def sections(text: str) -> list:
 
 
 def fields(lines: list) -> dict:
-    """The labelled fields of one section: response, change, no_change (text, or None when no line)."""
+    """The labelled fields of one section: response, change, no_change (text, or None when no line).
+
+    A field runs until the next label, a quoted line, an `Agent's reading:` line or a heading. A blank line inside
+    a field separates paragraphs ("\\n\\n" in the text); the paragraphs are kept, never dropped.
+    """
     out: dict = {"response": None, "change": None, "no_change": None}
     current = None
+    paragraph_break = False
     for raw in lines:
         line = raw.rstrip()
         if not line.strip():
-            current = None
+            if current is not None:
+                paragraph_break = True
             continue
         if line.startswith(">") or line.startswith(OTHER_LABELS):
             current = None
+            paragraph_break = False
             continue
         for key, pattern in LABELS:
             match = pattern.match(line)
             if match:
                 out[key] = match.group(1).strip()
                 current = key
+                paragraph_break = False
                 break
         else:
             if current is not None:
-                out[current] = f"{out[current]} {line.strip()}".strip()
+                out[current] = _join(out[current], line.strip(), paragraph_break)
+                paragraph_break = False
     return out
+
+
+def _join(text, line: str, paragraph: bool) -> str:
+    if not text:
+        return line
+    return f"{text}\n\n{line}" if paragraph else f"{text} {line}"
 
 
 def filled(text) -> bool:
@@ -105,18 +127,39 @@ def _current_bytes(path: Path):
     return path.read_bytes()
 
 
-def _point_bytes(run: Path, label: str, rel: str):
-    """The bytes of `rel` in the point `label`, or None; a symbolic link anywhere on the way is refused."""
-    base = points_mod.point_dir(run, label)
-    for part in (run / "revision", points_mod.points_dir(run), base, base / "files"):
-        if part.is_symlink():
-            raise LetterError("symlink", f"{part.name} is a symbolic link; refused")
-    cursor = base / "files"
+def _verified_point(run: Path, label: str) -> tuple:
+    """(rule, folder): rule is None when point `label` is intact, else point-unknown or point-tampered.
+
+    The pinned files must match point.json exactly, as diff.py checks them (M-G 5.9, 5.16): a change cannot be
+    verified against a point that is missing or altered, so it is refused, never accepted.
+    """
+    try:
+        record = points_mod.read_point(run, label)
+        folder = points_mod.point_dir(run, label) / "files"
+        if not folder.is_dir():
+            return "point-tampered", None
+        digests = {rel: hashlib.sha256(path.read_bytes()).hexdigest()
+                   for rel, path in points_mod.source_files(folder).items()}
+    except points_mod.PointError as exc:
+        if exc.rule == "symlink":
+            raise LetterError("symlink", exc.message) from exc
+        return ("point-unknown" if exc.rule == "point-unknown" else "point-tampered"), None
+    if not isinstance(record.get("files"), dict) or digests != record["files"]:
+        return "point-tampered", None
+    return None, folder
+
+
+def _point_bytes(run: Path, label: str, rel: str) -> tuple:
+    """(rule, bytes): the verified pinned copy of `rel` in point `label`, None when it has no such file."""
+    rule, folder = _verified_point(run, label)
+    if rule:
+        return rule, None
+    cursor = folder
     for part in Path(rel).parts:
         cursor = cursor / part
         if cursor.is_symlink():
             raise LetterError("symlink", f"{rel} crosses a symbolic link; refused")
-    return cursor.read_bytes() if cursor.is_file() else None
+    return None, (cursor.read_bytes() if cursor.is_file() else None)
 
 
 def change_rule(run: Path, round_: int, text: str):
@@ -134,7 +177,9 @@ def change_rule(run: Path, round_: int, text: str):
     current = _current_bytes(path)
     if current is None and path.is_file():
         return "change-path"
-    point = _point_bytes(run, f"submitted-r{round_}", rel)
+    rule, point = _point_bytes(run, f"submitted-r{round_}", rel)
+    if rule:
+        return rule
     if current is None and point is None:
         return "change-not-found"
     if current is not None and current == point:

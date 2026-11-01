@@ -38,6 +38,17 @@ def _metadata(root: Path, folder: Path) -> dict:
     return meta
 
 
+def _paragraphs(text: str) -> str:
+    """The text as LaTeX paragraphs: each blank-line-separated part escaped; the parts joined by a medskip.
+
+    A blank line inside a macro argument would be a TeX paragraph end that the argument cannot hold, so the
+    paragraph break is written as \\medskip\\noindent instead. Single-paragraph text is unchanged.
+    """
+    esc = manuscript_render.escape
+    parts = [part.strip() for part in text.split("\n\n") if part.strip()]
+    return "\n\\medskip\\noindent ".join(esc(part) for part in parts)
+
+
 def _section_title(block_id: str) -> str:
     return "Editor" if block_id.startswith("E") else f"Reviewer {block_id[1:]}"
 
@@ -80,9 +91,9 @@ def letter_text(root, run, round_: int) -> str:
             esc = manuscript_render.escape
             pieces.append(
                 f"\\subsection{{Comment {esc(comment)}}}\n"
-                f"\\reviewercomment{{{esc(quote)}}}\n\n"
-                f"\\response{{{esc(found['response'])}}}\n\n"
-                f"\\noindent\\textbf{{{label}:}} {esc(text)}\n"
+                f"\\reviewercomment{{{_paragraphs(quote)}}}\n\n"
+                f"\\response{{{_paragraphs(found['response'])}}}\n\n"
+                f"\\noindent\\textbf{{{label}:}} {_paragraphs(text)}\n"
             )
     return head + "\n" + "\n".join(pieces) + "\n\\end{document}\n"
 

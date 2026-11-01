@@ -24,7 +24,7 @@ PLACEHOLDER_NO_CHANGE = "No change: [why]"
 
 
 def load_adopted(run, round_: int) -> dict:
-    """adopted.json of an adopted round (LetterError when absent, linked or unreadable)."""
+    """adopted.json of an adopted round (LetterError when absent, linked, unreadable or malformed)."""
     letter_mod.refuse_links(run, round_, "adopted.json")
     path = letter_mod.round_dir(run, round_) / "adopted.json"
     if not path.is_file():
@@ -36,6 +36,13 @@ def load_adopted(run, round_: int) -> dict:
     if not isinstance(adopted, dict) or not isinstance(adopted.get("comments"), list) \
             or not isinstance(adopted.get("not_comments"), list):
         raise LetterError("adopted-invalid", f"round {round_}: adopted.json has no comments list")
+    if not all(isinstance(item, str) for item in adopted["comments"]):
+        raise LetterError("adopted-invalid", f"round {round_}: adopted.json has a comment id that is not text")
+    for item in adopted["not_comments"]:
+        if not isinstance(item, dict) or not isinstance(item.get("paragraph"), str) \
+                or not isinstance(item.get("reason"), str):
+            raise LetterError("adopted-invalid", f"round {round_}: adopted.json has a not_comments entry without "
+                                                 "a paragraph and a reason")
     return adopted
 
 
@@ -51,21 +58,36 @@ def load_reviews(run, round_: int, blocks: list) -> dict:
         if not path.is_file():
             raise LetterError("review-missing", f"round {round_} has no adopted review for {block}")
         try:
-            reviews[block] = json.loads(path.read_text(encoding="utf-8"))
+            review = json.loads(path.read_text(encoding="utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
             raise LetterError("review-invalid", f"round {round_}: the review for {block} is unreadable") from exc
+        if not isinstance(review, dict) or not isinstance(review.get("major"), list) \
+                or not isinstance(review.get("minor"), list):
+            raise LetterError("review-invalid", f"round {round_}: the review for {block} has no major or minor list")
+        reviews[block] = review
     return reviews
 
 
+REVIEW_FIELDS = {"major": ("location", "problem", "why_it_matters", "resolution"),
+                 "minor": ("location", "comment")}
+
+
 def comment_entry(reviews: dict, comment_id: str) -> tuple:
-    """(kind, entry) of an adopted comment id such as R1.M1: kind is major or minor."""
+    """(kind, entry) of an adopted comment id such as R1.M1: kind is major or minor.
+
+    The entry must carry every text field its kind needs; a malformed entry is refused (review-invalid).
+    """
     block, _, label = comment_id.partition(".")
     review = reviews.get(block)
     if review is None or label[:1] not in ("M", "m"):
         raise LetterError("adopted-invalid", f"{comment_id} is not an adopted comment")
     kind, group = ("major", "major") if label[:1] == "M" else ("minor", "minor")
-    for entry in review.get(group, []):
+    for entry in review[group]:
         if isinstance(entry, dict) and entry.get("id") == label:
+            missing = [key for key in REVIEW_FIELDS[kind] if not isinstance(entry.get(key), str)]
+            if missing:
+                raise LetterError("review-invalid", f"{comment_id}: the adopted review entry has no text for "
+                                                    f"{', '.join(missing)}")
             return kind, entry
     raise LetterError("adopted-invalid", f"{comment_id} is not in its review")
 
