@@ -136,6 +136,7 @@ CASES = {
     "short-reason": (lambda d: d["not_comments"][0].update({"reason": "hi"}), "not-comment-invalid"),
     "unknown-paragraph": (lambda d: d["not_comments"].append(
         {"paragraph": "R9.p1", "reason": "no such block"}), "not-comment-invalid"),
+    "extra-block": (lambda d: d["reviews"].append({"block": "R3", "review": {}}), "blocks-differ"),
 }
 
 
