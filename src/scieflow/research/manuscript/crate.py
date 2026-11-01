@@ -13,6 +13,7 @@ import json
 import re
 from pathlib import Path
 
+from scieflow._vendor.researcher_core.contributors import MetadataError, validate_orcid
 from scieflow.core import events
 from scieflow.research.journal import state
 from scieflow.research.manuscript import points
@@ -25,8 +26,6 @@ CONTEXT = "https://w3id.org/ro/crate/1.1/context"
 CONFORMS = "https://w3id.org/ro/crate/1.1"
 DESCRIPTOR = "ro-crate-metadata.json"
 OUT = Path("report") / "ro-crate" / DESCRIPTOR
-ORCID_RE = re.compile(r"\d{4}-\d{4}-\d{4}-\d{3}[\dX]")
-ORCID_PREFIX_RE = re.compile(r"^https?://orcid\.org/")
 SHA_RE = re.compile(r"[0-9a-f]{64}")
 RUN_MANIFEST_RE = re.compile(r"experiments/([^/]+)/runs/(.+)/manifest\.json")
 UNRELEASED = "data-unreleased"
@@ -67,6 +66,22 @@ def _file_entity(run: Path, rel: str) -> dict | None:
             "encodingFormat": ENCODING.get(Path(rel).suffix.lower(), "application/octet-stream")}
 
 
+def _stage_id(graph: dict, name: str, digest: str) -> str:
+    """The stage entity id of a run's script. `#stage-<name>` unless another run of that stage name already
+    recorded a different script digest; then `#stage-<name>-<sha12>`, so neither run's script is overwritten.
+    """
+    base = f"#stage-{name}"
+    identifier = f"sha256:{digest}"
+    existing = graph.get(base)
+    if existing is None or existing["identifier"] == identifier:
+        return base
+    candidate = f"{base}-{digest[:12]}"
+    other = graph.get(candidate)
+    if other is not None and other["identifier"] != identifier:
+        raise CrateError("run-manifest", f"stage {name} has script hashes that collide in the crate")
+    return candidate
+
+
 def _run_action(run: Path, outcome, graph: dict, files: dict) -> str | None:
     """The CreateAction of a run reference (its manifest names the run); None for a campaign reference."""
     for rel in outcome.files:
@@ -91,7 +106,7 @@ def _run_action(run: Path, outcome, graph: dict, files: dict) -> str | None:
     stage = doc.get("stage") if isinstance(doc.get("stage"), dict) else {}
     name, digest = stage.get("name"), stage.get("script_sha256")
     if isinstance(name, str) and name and isinstance(digest, str) and SHA_RE.fullmatch(digest):
-        stage_id = f"#stage-{name}"
+        stage_id = _stage_id(graph, name, digest)
         graph[stage_id] = {"@id": stage_id, "@type": "SoftwareApplication", "name": name,
                            "identifier": f"sha256:{digest}"}
         action["instrument"] = {"@id": stage_id}
@@ -129,6 +144,9 @@ def _claim_entity(run, record, ctx, graph: dict, files: dict) -> dict:
         outcome = _outcome(ctx, ref)
         if outcome is None:
             continue
+        unsafe = [finding for finding in outcome.findings if finding["rule"] == "ref-unsafe"]
+        if unsafe:
+            raise CrateError("ref-unsafe", f"claim {record['id']}: {unsafe[0]['message']}")
         if any(finding["rule"] == UNRELEASED for finding in outcome.findings):
             entity_id = f"#data-{ident}"
             graph[entity_id] = {"@id": entity_id, "@type": "CreativeWork", "name": ident,
@@ -190,9 +208,11 @@ def build(project, run_folder) -> dict:
             continue
         person_id = f"#person-{index}"
         person = {"@id": person_id, "@type": "Person", "name": str(author.get("name", ""))}
-        orcid = ORCID_PREFIX_RE.sub("", str(author.get("orcid") or ""))
-        if ORCID_RE.fullmatch(orcid):
-            person["identifier"] = f"https://orcid.org/{orcid}"
+        if author.get("orcid"):
+            try:
+                person["identifier"] = validate_orcid(str(author["orcid"]))
+            except MetadataError:
+                pass  # a malformed or bad-checksum ORCID is not written; the metadata check reports it
         graph[person_id] = person
         persons.append({"@id": person_id})
 
