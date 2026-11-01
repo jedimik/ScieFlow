@@ -9,9 +9,10 @@ from click.testing import CliRunner
 from scieflow.cli import main
 from scieflow.core import events
 from scieflow.research.manuscript.claims import ledger
+from tests.research.manuscript.claims.t2_support import manuscript, write
 from tests.research.manuscript.conftest import ORCID, RUN
 from tests.research.manuscript.crate.crate_support import (
-    FINISHED, STAGE_SHA, crate_json, crate_path, crate_run, invoke,
+    FINISHED, STAGE_SHA, crate_json, crate_path, crate_run, invoke, make_run,
 )
 
 EMAIL = "ada.synthetic@example.test"
@@ -169,3 +170,72 @@ def test_a_symbolic_link_on_the_output_path_is_refused(synth):
     result = CliRunner().invoke(main, ["manuscript", "crate", RUN], catch_exceptions=False)
     assert result.exit_code == 1
     assert list(target.iterdir()) == []
+
+
+TWO_RUNS = (
+    "Sigma was 1.5 in the inline run [run:denoise/sigma-1.5].\n"
+    "Sigma was 2.5 in the inline run [run:denoise/sigma-2.5]."
+)
+OTHER_STAGE_SHA = "c" * 64
+BAD_ORCID = "0000-0002-1825-0098"  # the valid iD above with its check character changed
+
+
+def test_two_runs_of_one_stage_keep_their_own_script_hash(synth):
+    manuscript(synth, TWO_RUNS)
+    make_run(synth.run_dir, rid="sigma-1.5", stage_sha=STAGE_SHA)
+    make_run(synth.run_dir, rid="sigma-2.5", stage_sha=OTHER_STAGE_SHA)
+    ledger.build(synth.run_dir, main="main.tex")
+    graph = by_id(crate_json(synth))
+    first = graph["#run-denoise-sigma-1.5"]["instrument"]["@id"]
+    second = graph["#run-denoise-sigma-2.5"]["instrument"]["@id"]
+    assert first != second
+    assert graph[first]["identifier"] == f"sha256:{STAGE_SHA}"
+    assert graph[second]["identifier"] == f"sha256:{OTHER_STAGE_SHA}"
+
+
+def test_an_orcid_that_fails_its_checksum_is_not_written(synth):
+    crate_run(synth)
+    metadata = synth.ms / "metadata.yml"
+    write(metadata, metadata.read_text(encoding="utf-8").replace(ORCID, BAD_ORCID))
+    person = by_id(crate_json(synth))["#person-0"]
+    assert person["name"] == "Ada Synthetic"
+    assert "identifier" not in person
+
+
+def test_the_note_payload_carries_counts_only(synth):
+    crate_run(synth)
+    assert invoke("crate", RUN).exit_code == 0
+    notes = events.read(synth.run_dir, types=("note.manuscript_crate",))
+    assert set(notes[0]["data"]) == {"entities", "files", "claims", "unreleased"}
+
+
+def test_a_symbolic_link_manuscript_source_is_refused(synth):
+    crate_run(synth)
+    outside = synth.root / "outside-refs.bib"
+    outside.write_text("@article{x, title={y}}\n", encoding="utf-8")
+    bib = synth.ms / "references.bib"
+    bib.unlink()
+    bib.symlink_to(outside)
+    result = CliRunner().invoke(main, ["manuscript", "crate", RUN], catch_exceptions=False)
+    assert result.exit_code == 1
+    assert not crate_path(synth).exists()
+
+
+def test_a_symbolic_link_evidence_file_is_refused(synth):
+    crate_run(synth)
+    evidence = synth.run_dir / "inputs" / "metrics.csv"
+    outside = synth.root / "outside-metrics.csv"
+    outside.write_bytes(evidence.read_bytes())
+    evidence.unlink()
+    evidence.symlink_to(outside)
+    result = CliRunner().invoke(main, ["manuscript", "crate", RUN], catch_exceptions=False)
+    assert result.exit_code == 1
+    assert not crate_path(synth).exists()
+
+
+def test_metadata_absent_gives_no_authors_and_the_run_name(synth):
+    crate_run(synth)
+    (synth.ms / "metadata.yml").unlink()
+    root = crate_json(synth)["@graph"][1]
+    assert root["author"] == []
+    assert root["name"] == RUN

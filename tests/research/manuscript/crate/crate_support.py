@@ -31,8 +31,11 @@ L2_SENTENCES = (
 )
 
 
-def make_run(run, campaign: str = "denoise", rid: str = "sigma-1.5") -> None:
-    """experiments/<campaign>/runs/<rid> with a manifest that names a stage and a finish time."""
+def make_run(run, campaign: str = "denoise", rid: str = "sigma-1.5", stage_sha: str = STAGE_SHA) -> None:
+    """experiments/<campaign>/runs/<rid> with a manifest that names a stage and a finish time.
+
+    The campaign's results.json lists every run written so far (a second call adds its run, not replaces it).
+    """
     rdir = run / "experiments" / campaign / "runs" / rid
     write(rdir / "metrics.json", json.dumps({"value": 1}, sort_keys=True))
     write(rdir / "artifacts" / "trace.txt", "synthetic trace\n")
@@ -40,15 +43,16 @@ def make_run(run, campaign: str = "denoise", rid: str = "sigma-1.5") -> None:
         "version": 1, "run_id": rid, "campaign": campaign, "config_id": "c0", "replicate": 1,
         "seed": 1, "params": {}, "mode": "direct", "status": "ok", "returncode": 0,
         "started": "2026-10-31T00:00:00Z", "finished": FINISHED, "wall_seconds": 1.0,
-        "code": {}, "stage": {"name": "denoise", "script_sha256": STAGE_SHA,
+        "code": {}, "stage": {"name": "denoise", "script_sha256": stage_sha,
                               "stage_yaml_sha256": STAGE_YAML_SHA},
         "inputs": [], "environment": {}, "packages": [], "data_level": "L0",
         "artifacts": manifest.artifact_list(rdir / "artifacts"),
         "metrics_sha256": manifest.file_sha256(rdir / "metrics.json"), "metrics_history": [],
     }
     msha = manifest.write_manifest(rdir, doc)
-    write(run / "experiments" / campaign / "results.json",
-          json.dumps({"runs": [{"run_id": rid, "manifest_sha256": msha}]}, sort_keys=True))
+    results = run / "experiments" / campaign / "results.json"
+    prior = json.loads(results.read_text(encoding="utf-8"))["runs"] if results.exists() else []
+    write(results, json.dumps({"runs": [*prior, {"run_id": rid, "manifest_sha256": msha}]}, sort_keys=True))
 
 
 def crate_run(synth) -> None:
