@@ -110,6 +110,30 @@ only when named and is refused in L2 and no-egress runs. `render` accepts
 `--class article|elsarticle|IEEEtran|svjour3`, and `--force` keeps a hand-edited
 `main.tex` as a backup first.
 
+The claim ledger and the decision-letter workflow have their own commands. See
+[Claim ledger and check](research/claims.md) and [Journal revision](research/revision.md).
+
+```bash
+uv run scieflow manuscript claims build <run> [--repin] [--repin-claim ID] [--json]
+uv run scieflow manuscript claims show <run> [--id ID] [--json]
+uv run scieflow manuscript claims check <run> [--json] [--no-write]
+uv run scieflow manuscript claims waive <run> <claim-id> --code C001 --reason "..."
+uv run scieflow manuscript point add <run> <label> [--from-package]
+uv run scieflow manuscript point list <run> [--json]
+uv run scieflow manuscript diff <run> --from <label> [--to <label>|current] [--json]
+uv run scieflow manuscript revision ingest <run> --letter <file> [--round N] [--decision D]
+uv run scieflow manuscript revision prompt <run> --round N --agent <agent> [--write]
+uv run scieflow manuscript revision adopt <run> --round N --draft <file> [--replace]
+uv run scieflow manuscript revision respond <run> --round N [--force]
+uv run scieflow manuscript revision coverage <run> --round N [--json]
+uv run scieflow manuscript revision letter <run> --round N [--force]
+uv run scieflow manuscript revision show <run> [--json]
+uv run scieflow manuscript crate <run> [--json] [--no-write]
+```
+
+`claims waive`, `revision ingest`, `revision adopt` and `point add --from-package` are the
+user's acts and are refused inside a sub-agent dispatch.
+
 ## `scieflow run`
 
 A run's state, history and lifecycle. Every subcommand needs the run's

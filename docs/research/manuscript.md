@@ -295,6 +295,13 @@ marked `word_first: true` gets the `word-first` warning and the submission
 checklist notes it. A pandoc or DOCX path is a follow-up for a journal that
 requires Word.
 
+## Claim ledger and journal revision
+
+`scieflow manuscript claims check` ties each number of the manuscript to its evidence, and
+`scieflow manuscript revision` takes a journal's decision letter through to a response to
+reviewers. Both are described in [Claim ledger and check](claims.md) and
+[Journal revision](revision.md). `package` refuses while the claim check has an error.
+
 ## Known limits
 
 - **R1. Live response shapes are untested** for journal research (see the

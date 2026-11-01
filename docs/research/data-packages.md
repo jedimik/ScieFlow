@@ -47,6 +47,13 @@ Validate manually anytime:
 uv run scieflow research validate workspace/<slug>/inputs/manifest.yml --schema manifest
 ```
 
+## Claim check
+
+`scieflow manuscript claims build` and `claims check` read `inputs/manifest.yml` and the
+released artifacts. A `[data:<id>]` marker in the manuscript must name an artifact listed
+here, and a number cited to it must appear in that artifact's file. See
+[Claim ledger and check](claims.md) for the rules and codes.
+
 ## Recommendations
 
 - **One id per claimable thing.** If a CSV holds two unrelated result sets,
