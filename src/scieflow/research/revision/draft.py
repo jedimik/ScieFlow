@@ -36,9 +36,10 @@ def check_agent(agent: str) -> str:
 
 def _stored_letter(run: Path, round_: int) -> tuple:
     """(text, record) of an ingested round, after the stored letter is checked against its record."""
+    letter_mod.refuse_links(run, round_, "letter.txt")
     record = letter_mod.load(run, round_)
     path = letter_mod.round_dir(run, round_) / "letter.txt"
-    if not path.is_file() or path.is_symlink():
+    if not path.is_file():
         raise letter_mod.LetterError("round-missing", f"round {round_} has no stored letter.txt")
     data = path.read_bytes()
     if _sha(data) != record.get("letter_sha256"):

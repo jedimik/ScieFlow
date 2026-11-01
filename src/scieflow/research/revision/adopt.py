@@ -48,6 +48,14 @@ def _collapse(text: str) -> str:
     return " ".join(unicodedata.normalize("NFC", text).split())
 
 
+def _names(values) -> str:
+    """Up to ten distinct names, each capped at 60 characters; the rest are counted, never printed."""
+    distinct = sorted(set(values))
+    shown = ", ".join(_short(name) for name in distinct[:10])
+    more = len(distinct) - 10
+    return f"[{shown}]" + (f" and {more} more" if more > 0 else "")
+
+
 def _refuse(rule: str, message: str) -> NoReturn:
     raise LetterError(rule, message)
 
@@ -89,7 +97,7 @@ def _check_review(item, block: dict, lines: list) -> tuple:
     error = decisions.schema_error("manuscript-review", review)
     if error:
         path, _, message = error.partition(": ")
-        _refuse("review-invalid", f"{where} review at {path}: {_short(message)}")
+        _refuse("review-invalid", f"{where} review at {_short(path)}: {_short(message)}")
     for key in FORBIDDEN_KEYS:
         if key in review:
             _refuse("review-invalid", f"{where} review must not set {key}")
@@ -102,8 +110,8 @@ def _check_review(item, block: dict, lines: list) -> tuple:
     for group, id_re, text_key in (("major", ID_MAJOR_RE, "problem"), ("minor", ID_MINOR_RE, "comment")):
         for entry in review[group]:
             label = f"{where}.{entry['id']}"
-            if not id_re.fullmatch(entry["id"]):
-                _refuse("review-invalid", f"{where} review: id {entry['id']!r} has the wrong form")
+            if not isinstance(entry["id"], str) or not id_re.fullmatch(entry["id"]):
+                _refuse("review-invalid", f"{where} review: id {_short(repr(entry['id']))} has the wrong form")
             ids.append(entry["id"])
             match = LOCATION_RE.fullmatch(entry["location"])
             if not match:
@@ -132,8 +140,8 @@ def _check_not_comments(draft_items, paragraphs: list) -> dict:
         if not isinstance(item, dict) or set(item) != {"paragraph", "reason"}:
             _refuse("not-comment-invalid", "a not_comments entry must have exactly paragraph and reason")
         pid, reason = item["paragraph"], item["reason"]
-        if pid not in known:
-            _refuse("not-comment-invalid", f"not_comments names an unknown paragraph {pid!r}")
+        if not isinstance(pid, str) or pid not in known:
+            _refuse("not-comment-invalid", f"not_comments names an unknown paragraph {_short(repr(pid))}")
         if pid in seen:
             _refuse("not-comment-invalid", f"paragraph {pid} is listed in not_comments more than once")
         if not isinstance(reason, str) or not (MIN_REASON <= len(reason) <= MAX_REASON):
@@ -148,6 +156,10 @@ def adopt(run, round_: int, draft_path: Path, *, replace: bool = False) -> dict:
         _refuse("dispatch", "refused: the coordinator adopts a draft; sub-agents never do (SCIEFLOW_DISPATCH is set)")
     record = letter_mod.load(run, round_)
     folder = letter_mod.round_dir(run, round_)
+    blocks_on_record = record.get("blocks")
+    review_files = ([f"reviews/{block.get('id')}.json" for block in blocks_on_record if isinstance(block, dict)]
+                    if isinstance(blocks_on_record, list) else [])
+    letter_mod.refuse_links(run, round_, "letter.txt", "adopted.json", "reviews", *review_files)
     adopted_path = folder / "adopted.json"
     if adopted_path.exists() and not replace:
         _refuse("adopted-exists", f"round {round_} already has adopted.json; use --replace to overwrite it")
@@ -166,9 +178,9 @@ def adopt(run, round_: int, draft_path: Path, *, replace: bool = False) -> dict:
 
     by_id = {b["id"]: b for b in blocks}
     drafted = [item.get("block") if isinstance(item, dict) else None for item in draft["reviews"]]
-    if len(drafted) != len(set(drafted)) or set(drafted) != set(by_id):
-        _refuse("blocks-differ", f"the draft reviews {sorted(map(str, drafted))} but the letter has "
-                                 f"{sorted(by_id)}")
+    names = [name if isinstance(name, str) else repr(name) for name in drafted]
+    if len(names) != len(set(names)) or set(names) != set(by_id):
+        _refuse("blocks-differ", f"the draft reviews {_names(names)} but the letter has {_names(by_id)}")
 
     reviews: dict = {}
     comment_ranges: list = []

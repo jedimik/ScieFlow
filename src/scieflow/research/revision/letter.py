@@ -198,20 +198,44 @@ def round_dir(run, round_: int) -> Path:
     return Path(run) / "revision" / f"round-{round_}"
 
 
+def refuse_links(run, round_: int, *names: str) -> None:
+    """Refuse a symbolic link at revision/, at revision/round-N/ or at one of `names` inside the round folder.
+
+    Links are never followed (M-G 5.16). Call before any read or write under the round folder, so a refusal
+    leaves nothing behind in the link's target.
+    """
+    run = Path(run)
+    revision = run / "revision"
+    folder = round_dir(run, round_)
+    for part in (revision, folder, revision / "points"):
+        if part.is_symlink():
+            raise LetterError("symlink", f"{part.relative_to(run).as_posix()} is a symbolic link; refused")
+    for name in names:
+        if (folder / name).is_symlink():
+            raise LetterError("symlink", f"{name} is a symbolic link; refused")
+
+
 def existing_rounds(run) -> list:
     folder = Path(run) / "revision"
+    if folder.is_symlink():
+        raise LetterError("symlink", "revision is a symbolic link; refused")
     if not folder.is_dir():
         return []
     found = []
     for child in folder.iterdir():
         match = re.fullmatch(r"round-(\d+)", child.name)
-        if match and child.is_dir():
+        if not match:
+            continue
+        if child.is_symlink():
+            raise LetterError("symlink", f"{child.name} is a symbolic link; refused")
+        if child.is_dir():
             found.append(int(match.group(1)))
     return sorted(found)
 
 
 def load(run, round_: int) -> dict:
-    """letter.json of an ingested round (LetterError when absent or unreadable)."""
+    """letter.json of an ingested round (LetterError when absent, linked or unreadable)."""
+    refuse_links(run, round_, "letter.json")
     path = round_dir(run, round_) / "letter.json"
     if not path.is_file():
         raise LetterError("round-missing", f"round {round_} has no ingested letter: run revision ingest first")
@@ -249,6 +273,7 @@ def ingest(run, letter_path: Path, *, round_: int | None = None, decision: str |
     number = round_ if round_ is not None else max(existing_rounds(run) + [0]) + 1
     if round_dir(run, number).exists() or round_dir(run, number).is_symlink():
         raise LetterError("round-exists", f"round-{number} already exists; choose another round")
+    refuse_links(run, number, "letter.txt", "letter.json")
     value, source = decide(text, blocks, decision)
     point = _point_for(run, number)
     record = {

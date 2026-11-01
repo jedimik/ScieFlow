@@ -460,8 +460,12 @@ def revision_show(run, as_json):
     """Summarise the decision-letter rounds of RUN (no letter text)."""
     project = Project.discover()
     folder = _run_folder(project, run)
+    try:
+        rounds = letter_mod.existing_rounds(folder)
+    except letter_mod.LetterError as exc:
+        _fail(f"show refused [{exc.rule}]: {exc.message}")
     rows = []
-    for number in letter_mod.existing_rounds(folder):
+    for number in rounds:
         try:
             record = letter_mod.load(folder, number)
         except letter_mod.LetterError as exc:
