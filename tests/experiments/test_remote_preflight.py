@@ -147,12 +147,10 @@ def test_an_l2_run_is_refused_unless_the_remote_is_listed(fake, tmp_path):
     assert_nothing_written(p, fake)
 
 
-def test_a_symlink_in_the_input_is_refused(fake, tmp_path):
+def test_a_symlink_in_the_stage_folder_is_refused(fake, tmp_path):
     p = rs.make_project(tmp_path)
-    data = p.root / "pipelines" / "demo" / "data"
-    (data / "real.txt").write_text("synthetic\n")
-    (data / "in.txt").unlink()
-    (data / "in.txt").symlink_to(data / "real.txt")
+    stage = p.root / "pipelines" / "demo" / "stages" / "scale"
+    (stage / "lib.py").symlink_to(p.root / "pipelines" / "demo" / "data" / "in.txt")
     result = sweep(p, "--direct")
     assert result.exit_code == 1
     assert "symlink" in result.output

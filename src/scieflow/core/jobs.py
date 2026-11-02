@@ -450,8 +450,20 @@ def run_blocking(project: Project, argv: list[str], **kw) -> Job:
     return wait(job, proc)
 
 
+class NotCancellable(ValueError):
+    """A job ScieFlow cannot stop: its work runs on a scheduler it has no cancel command for."""
+
+
+REMOTE_CANCEL_REFUSAL = (
+    "remote campaigns cannot be cancelled from ScieFlow yet (M-E-D2); the scheduler job keeps "
+    "running — ask the user"
+)
+
+
 def cancel(job: Job) -> Job:
     current = _reload(job)
+    if current.kind == "remote":  # M-D3-D10: no cancel command exists for a remote campaign yet
+        raise NotCancellable(REMOTE_CANCEL_REFUSAL)
     if current.state in FINAL:
         return current
     current.state, current.finished = "cancelled", _now()
@@ -460,6 +472,47 @@ def cancel(job: Job) -> Job:
     if current.pid:
         _kill_group(current.pid)
     return current
+
+
+def record_external(project: Project, *, kind: str, label: str, run_dir: Path | None,
+                    argv: list[str], cwd: Path) -> Job:
+    """Record a job whose work runs elsewhere (M-D3 t3): no process, pid None, state running.
+
+    The record and its events are the same shape as a started job, minus the pid, so the run page
+    and timeline list it. Nothing here starts or signals a process.
+    """
+    job_id = store.new_id()
+    directory = jobs_dir(project, run_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    job = Job(id=job_id, kind=kind, argv=list(argv), cwd=str(cwd), label=label,
+              run_dir=str(run_dir) if run_dir else None, queued=_now(),
+              log=str(directory / f"{job_id}.log"), err=str(directory / f"{job_id}.err"))
+    save(job)
+    _emit(job, "job.queued")
+    for path in (job.log, job.err):
+        Path(path).touch()
+    job.state, job.started = "running", _now()
+    save(job)
+    _emit(job, "job.started")
+    return job
+
+
+def update_external(job: Job, state: str, exit_code: int | None = None) -> Job:
+    """Finish a job recorded by record_external: done or failed, with its exit code (M-D3 t3)."""
+    if state not in ("done", "failed"):
+        raise ValueError(f"an external job finishes as done or failed, not {state!r}")
+    current = _reload(job)
+    if current.pid is not None:
+        raise ValueError(f"job {current.id} has a process; only an external job is updated here")
+    if current.state in FINAL:
+        raise ValueError(f"job {current.id} is already {current.state}")
+    return _finish(current, state, exit_code)
+
+
+def append_log(job: Job, line: str) -> None:
+    """Append one line to a job's log (counts only; never values or file contents)."""
+    with open(job.log, "a") as fh:
+        fh.write(line.rstrip("\n") + "\n")
 
 
 def reconcile(project: Project, run_dir: Path | None = None) -> list[Job]:

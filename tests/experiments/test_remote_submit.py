@@ -56,8 +56,9 @@ def test_pbs_per_run_golden_strings_three_runs(fake, tmp_path):
     ssh = fake.ssh_commands()
     assert "klist -s; then" in ssh[0]                       # the remote ticket check
     assert ssh[1] == f"mkdir -p -- {R}"
-    assert fake.calls[2] == ["rsync", "-az", "--partial", "--checksum",
-                             f"{bundle_dir(p)}/", f"u@meta.example.org:{R}/"]
+    rsyncs = [c for c in fake.calls if c[0] == "rsync"]
+    assert rsyncs == [["rsync", "-az", "--partial", "--checksum",
+                       f"{bundle_dir(p)}/", f"u@meta.example.org:{R}/"]]
     assert fake.qsubs() == [
         f"cd {R} && qsub -N sf-0 -q default -l walltime=01:00:00 "
         "-l select=1:ncpus=1:mem=4gb -v SCIEFLOW_TASK=0 job.sh",

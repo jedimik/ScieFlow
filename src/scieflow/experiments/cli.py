@@ -10,7 +10,7 @@ from scieflow.core.design import lock as design_lock
 from scieflow.core.project import Project
 from scieflow.core.run import actions, budget
 
-from . import manifest, sap
+from . import manifest, remote_campaign, sap
 from .analysis import (
     Analysis,
     AnalysisError,
@@ -173,6 +173,47 @@ def _guard_capacity(run_dir: Path | None, planned: int) -> None:
         f"{remaining} remain — propose a smaller campaign or ask the user to raise the budget")
 
 
+def _remote_refused(run_dir: Path | None, campaign, err) -> click.ClickException:
+    """A remote refusal: one job.refused (reason remote) in the run, then a message; nothing ran."""
+    if run_dir is not None:
+        events.emit(run_dir, "job.refused", "system", reason="remote", rule=err.rule,
+                    campaign=campaign.name)
+    return click.ClickException(f"{err.message} (rule {err.rule}; nothing was run)")
+
+
+def _remote_sweep(campaign, stage, experiments_dir, direct: bool) -> None:
+    """`sweep` for a backend: remote campaign (M-D3 t3): local guards, preflight, stage, push, submit once."""
+    mode = "direct" if direct else "apptainer"
+    campaign_dir = Path(experiments_dir) / campaign.name
+    budget_run = _budget_run(experiments_dir)
+    try:
+        remote_campaign.check_location(budget_run, campaign_dir)
+    except remote_campaign.RemoteError as e:
+        raise _remote_refused(budget_run, campaign, e) from e
+    _guard(budget_run)
+    _design_guard(budget_run, campaign)
+    _analysis_guard(budget_run, campaign)
+    _guard_capacity(budget_run, len(campaign.expand()))
+    try:
+        session = remote_campaign.preflight(campaign, stage, campaign_dir, budget_run, mode,
+                                            runner=remote_campaign.RUNNER)
+        outcome = remote_campaign.submit(session)
+    except remote_campaign.RemoteError as e:
+        raise _remote_refused(budget_run, campaign, e) from e
+    if direct:
+        click.echo("note: --direct runs are for development; they are recorded but not ranked "
+                   "by compare/report (pass --include-direct to rank them).", err=True)
+    if outcome.state == "staged":
+        click.echo(f"push failed: the campaign is staged in {campaign_dir} and nothing was "
+                   "submitted", err=True)
+        raise SystemExit(1)
+    click.echo(f"submitted {outcome.submitted} of {outcome.total} runs on {outcome.remote} "
+               f"({outcome.jobs}); collect with: scieflow experiment watch {campaign_dir}")
+    if outcome.exit_code:
+        click.echo("nothing could be submitted; see the remote messages above", err=True)
+        raise SystemExit(outcome.exit_code)
+
+
 @experiment.command()
 @click.option("-c", "--campaign", "campaign_path", required=True,
               type=click.Path(exists=True, dir_okay=False, path_type=Path))
@@ -226,12 +267,11 @@ def run(campaign_path, params, seed, direct, experiments_dir, pipelines_dir):
 def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
     """Run every parameter combination / scenario in the campaign."""
     campaign = Campaign.load(campaign_path)
-    if campaign.backend == "remote":
-        raise click.ClickException(
-            "remote campaigns are submitted by sweep once M-D3 t3 lands "
-            "(nothing was run)")
     stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
     _check_stage_seed(campaign, stage)
+    if campaign.backend == "remote":
+        _remote_sweep(campaign, stage, experiments_dir, direct)
+        return
     budget_run = _budget_run(experiments_dir)
     _guard(budget_run)
     _design_guard(budget_run, campaign)
