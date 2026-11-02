@@ -12,10 +12,12 @@ from __future__ import annotations
 import contextlib
 import functools
 import io
+import json
 import os
 import posixpath
 import shutil
 import sys
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,7 +32,9 @@ from scieflow.core.project import Project
 from scieflow.core.run import actions
 from scieflow.experiments import manifest, remote_bundle
 from scieflow.experiments.campaign import MAX_REPLICATES, TOKEN_RE, Campaign
-from scieflow.experiments.stage import Stage, sif_path
+from scieflow.experiments.metrics import compute_metrics, load_local_metrics
+from scieflow.experiments.stage import Stage, find_stage, sif_path
+from scieflow.experiments.sweep import run_entry, write_results
 
 RUNNER = None  # test seam: the transport runner; None is the real subprocess runner
 STATE_FILE = "remote.json"
@@ -508,13 +512,8 @@ def _validate(state: dict, campaign: Campaign, remote, runs) -> None:
         raise _invalid("budget_recorded", f"must be {len(runs)} once a task is submitted")
 
 
-def resume_submission(campaign_dir, run_dir, *, runner=None) -> Outcome:
-    """Continue a staged or running remote campaign: validate, check, push if staged, one submit pass.
-
-    `scieflow experiment watch` (M-D3 t4) builds on this pass; a crash-retry uses it directly.
-    """
-    campaign_dir = Path(campaign_dir)
-    run_dir = Path(run_dir)
+def _open(campaign_dir: Path, run_dir: Path, runner=None, *, stage: Stage | None = None):
+    """Load campaign.yaml and remote.json, validated against the policy, before any transport call."""
     campaign = Campaign.load(campaign_dir / "campaign.yaml")
     root = egress.root_of_run(run_dir)
     remote = _load_remote(root, campaign.remote.name)
@@ -525,10 +524,334 @@ def resume_submission(campaign_dir, run_dir, *, runner=None) -> Outcome:
     session = Session(campaign=campaign, campaign_dir=campaign_dir, run_dir=run_dir, root=root,
                       remote=remote, t=None, cid=state["campaign_id"],
                       remote_dir=state["remote_dir"], mode=state["mode"],
-                      python=remote_bundle.direct_python(remote.scheduler))
+                      python=remote_bundle.direct_python(remote.scheduler), stage=stage)
     session.t = R.transport.for_remote(remote, runner if runner is not None else RUNNER)
+    return session, state
+
+
+def resume_submission(campaign_dir, run_dir, *, runner=None) -> Outcome:
+    """Continue a staged or running remote campaign: validate, check, push if staged, one submit pass.
+
+    `scieflow experiment watch` (M-D3 t4) builds on this pass; a crash-retry uses it directly.
+    """
+    campaign_dir = Path(campaign_dir)
+    run_dir = Path(run_dir)
+    session, state = _open(campaign_dir, run_dir, runner)
     _ticket(session)
     if state["state"] == "staged" and not _push(session, state):
         return _outcome(session, state, None)
     stop = _submit(session, state)
     return _outcome(session, state, stop)
+
+
+# ---- M-D3 t4: watch — status, fetch, transfer check, finalize, results (plan 5.7-5.9) ----
+
+FINISHED_JOB_STATES = ("done", "failed", "cancelled")  # the states that trigger a fetch (5.7 step 5)
+WATCH_IN_PROGRESS = 4  # M-D3-D13: the same number remote.py uses for a full queue
+
+
+@dataclass
+class WatchOutcome:
+    campaign_dir: Path
+    campaign_id: str
+    remote: str
+    state: str
+    complete: bool
+    counts: dict
+    exit_code: int  # 0 complete, 4 still running (wait), 1 refused or failed
+
+
+def watch(campaign_dir, *, pipelines_dir, once: bool = False, interval: int = 60,
+          max_minutes: int = 60, runner=None, sleep=None, clock=None) -> WatchOutcome:
+    """Run watch passes until the campaign is complete, or once, or until max_minutes (5.7)."""
+    campaign_dir = Path(campaign_dir)
+    run_dir = actions.run_for_path(campaign_dir)
+    if run_dir is None:
+        raise RemoteError("no-run", "a remote campaign runs inside a run: put the campaign folder "
+                                    "under workspace/<slug>/")
+    if not (campaign_dir / "campaign.yaml").is_file():
+        raise RemoteError("remote-state-missing", f"{campaign_dir / 'campaign.yaml'} is missing")
+    campaign = Campaign.load(campaign_dir / "campaign.yaml")
+    stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    deadline = clock() + max_minutes * 60
+    while True:
+        out = _pass(campaign_dir, run_dir, stage, runner)
+        if out.complete or once or out.exit_code != WATCH_IN_PROGRESS:
+            return out
+        if clock() + interval > deadline:  # the time limit: still running, exit 4
+            return out
+        sleep(interval)
+
+
+def _pass(campaign_dir: Path, run_dir: Path, stage: Stage, runner) -> WatchOutcome:
+    session, state = _open(campaign_dir, run_dir, runner, stage=stage)
+    if state["state"] == "complete":  # nothing is sent for a complete campaign
+        return _watch_outcome(session, state, complete=True, exit_code=0)
+    _ticket(session)
+    if state["state"] == "staged" and not _push(session, state):
+        return _watch_outcome(session, state, complete=False, exit_code=1)
+    statuses = _read_statuses(session, state)
+    _settle(session, state, statuses)  # fetch and finalize the jobs that have finished
+    _submit(session, state)  # slots that finished jobs freed
+    if not any(row["state"] in ("pending", "submitted") for row in state["tasks"]):
+        _complete(session, state)
+        return _watch_outcome(session, state, complete=True, exit_code=0)
+    _log_counts(session, state)
+    return _watch_outcome(session, state, complete=False, exit_code=WATCH_IN_PROGRESS)
+
+
+def _counts(state: dict) -> dict:
+    rows = state["tasks"]
+    finalized = [row for row in rows if row["state"] == "finalized"]
+    return {
+        "pending": sum(row["state"] == "pending" for row in rows),
+        "submitted": sum(row["state"] == "submitted" for row in rows),
+        "finalized": len(finalized),
+        "submit_failed": sum(row.get("reason") == "submit-failed" for row in rows),
+        "completed": sum(row.get("status") == "completed" for row in finalized),
+        "failed": sum(row.get("status") == "failed" for row in finalized),
+    }
+
+
+def _watch_outcome(session: Session, state: dict, *, complete: bool, exit_code: int) -> WatchOutcome:
+    return WatchOutcome(campaign_dir=session.campaign_dir, campaign_id=session.cid,
+                        remote=session.remote.name, state=state["state"], complete=complete,
+                        counts=_counts(state), exit_code=exit_code)
+
+
+def _read_statuses(session: Session, state: dict) -> dict[str, str | None]:
+    """cmd_status for each distinct job of a submitted task (5.7 step 4); the ledger gives the state."""
+    R = _remote()
+    run_dir = session.run_dir
+    job_ids: list[str] = []
+    for row in state["tasks"]:
+        if row["state"] == "submitted" and row["job_id"] not in job_ids:
+            job_ids.append(row["job_id"])
+    found: dict[str, str | None] = {}
+    for job_id in job_ids:
+        buffer = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buffer):
+                rc = R.rcmd.cmd_status(session.remote, session.t, job_id, workspace=run_dir)
+        except R.policy.PolicyError as exc:
+            _relay(buffer)
+            raise _policy_error(exc) from exc
+        _relay(buffer)
+        if rc == 2:  # credentials: the pass stops here and nothing else changes
+            raise RemoteError("no-ticket", buffer.getvalue().strip()
+                              or "NO_TICKET: stop and ask the user to run `kinit`")
+        if rc != 0:  # that job is left as it is for this pass; the others are still read
+            print(f"watch: the status of job {job_id} was not read this pass", file=sys.stderr)
+            continue
+        entry = R.jobs.find(R.jobs.load_jobs(run_dir), job_id)
+        found[job_id] = entry["state"] if entry else None
+    return found
+
+
+def _linked(run: Path, campaign_dir: Path) -> bool:
+    """A planted link at the run folder or at the runs folder: nothing is read or written through it."""
+    return run.is_symlink() or (campaign_dir / "runs").is_symlink()
+
+
+def _fetch(session: Session, row: dict) -> bool:
+    """cmd_fetch of one run folder into <campaign>/runs/<run_id>/ (5.7 step 5); True on success."""
+    R = _remote()
+    dest = session.campaign_dir / "runs" / row["run_id"]
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    src = posixpath.join(session.remote_dir, "runs", row["run_id"]) + "/"
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            rc = R.rcmd.cmd_fetch(session.remote, session.t, src, str(dest),
+                                  workspace=session.run_dir, root=session.root)
+    except R.policy.PolicyError as exc:
+        _relay(buffer)
+        raise _policy_error(exc) from exc
+    _relay(buffer)
+    return rc == 0
+
+
+def _settle(session: Session, state: dict, statuses: dict) -> None:
+    """Fetch and finalize every submitted task whose job has finished (5.7 step 5)."""
+    campaign_dir = session.campaign_dir
+    for row in state["tasks"]:
+        if row["state"] != "submitted":
+            continue
+        job_state = statuses.get(row["job_id"])
+        if job_state not in FINISHED_JOB_STATES:
+            continue
+        run = campaign_dir / "runs" / row["run_id"]
+        if _linked(run, campaign_dir):
+            _finalize(session, state, row, fetched=False, job_state=job_state,
+                      reason="fetched-symlink")
+            continue
+        fetched = _fetch(session, row)
+        if not fetched:  # the task stays submitted and the next pass retries it
+            if job_state == "cancelled":
+                _finalize(session, state, row, fetched=False, job_state=job_state,
+                          reason="job-cancelled")
+            continue
+        _finalize(session, state, row, fetched=True, job_state=job_state)
+
+
+def _now_aware(text: str | None, fallback: str) -> str:
+    """A marker time usable by run_manifest (timezone-aware), else the fetch time."""
+    if text is None:
+        return fallback
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return fallback
+    return text if parsed.tzinfo is not None else fallback
+
+
+def _sums_digest(run: Path) -> str | None:
+    sums = run / "remote" / "SHA256SUMS"
+    if sums.is_file() and not sums.is_symlink():
+        return manifest.file_sha256(sums)
+    return None
+
+
+def _judge(session: Session, run: Path, job_state: str | None, now: str):
+    """(status, reason, transfer, markers) of one fetched run (plan 5.9)."""
+    markers = remote_bundle.read_markers(run, now)
+    ok, why, files = remote_bundle.verify_transfer(run)
+    transfer = {"verified": ok, "reason": why, "files": files, "sums_sha256": _sums_digest(run)}
+    if why == "fetched-symlink":
+        return "failed", why, transfer, markers
+    if markers.exit_code is None:  # a run killed at its walltime has no checksum list either
+        reason = "job-cancelled" if job_state == "cancelled" else "no-exit-marker"
+        return "failed", reason, transfer, markers
+    if not ok:
+        return "failed", why, transfer, markers
+    if markers.exit_code != 0:
+        return "failed", "exit-nonzero", transfer, markers
+    output = run / "artifacts" / session.stage.output_file
+    if output.is_symlink() or not output.is_file():
+        return "failed", "no-output", transfer, markers
+    return "completed", None, transfer, markers
+
+
+def _write_run_folder(session: Session, state: dict, row: dict, spec, run: Path, *, status: str,
+                      reason: str | None, returncode, started: str, finished: str,
+                      transfer: dict, markers) -> None:
+    """config.yaml, environment.json, metrics.json (completed only) and manifest.json (5.9)."""
+    campaign, stage, mode = session.campaign, session.stage, state["mode"]
+    remote_info = {"name": session.remote.name, "scheduler": session.remote.scheduler,
+                   "jobs": state["jobs"], "task_index": row["index"]}
+    system = markers.system if markers else None
+    machine = markers.machine if markers else None
+    runtime = markers.runtime if markers else None
+    run.mkdir(parents=True, exist_ok=True)
+
+    config = {
+        "campaign": campaign.name, "run_id": spec.run_id, "params": spec.params,
+        "input": str(campaign.input),
+        "reference": str(campaign.reference) if campaign.reference else None,
+        "output_file": stage.output_file, "metrics": campaign.metrics,
+        "pipeline_dir": str(stage.dir.parent.parent), "status": status, "started": started,
+    }
+    if spec.replicate is not None or spec.seed is not None:
+        config.update(config_id=spec.config_id, replicate=spec.replicate, seed=spec.seed)
+    config.update(returncode=returncode, finished=finished, backend="remote",
+                  remote=session.remote.name)
+    if reason:
+        config["reason"] = reason
+    manifest.atomic_write(run / "config.yaml", yaml.safe_dump(config, sort_keys=False).encode())
+
+    command = remote_bundle.task_argv(
+        stage, spec, remote_bundle.Layout("<remote>", Path(campaign.input).name), mode,
+        session.python)  # the remote folder is shown as a placeholder: it holds the user's name
+    environment = {"mode": mode, "command": command, "recorded": manifest.utc_now(),
+                   "remote": {**remote_info, "job_id": row["job_id"]},
+                   "platform": {"system": system, "machine": machine}, "runtime": runtime}
+    manifest.atomic_write(run / "environment.json",
+                          json.dumps(environment, indent=2).encode())
+
+    if status == "completed" and campaign.reference is not None:
+        load_local_metrics(stage.dir.parent.parent / "metrics")
+        metrics = compute_metrics(campaign.metrics, run / "artifacts" / stage.output_file,
+                                  campaign.reference)
+        manifest.atomic_write(run / "metrics.json", json.dumps(metrics, indent=2).encode())
+
+    doc = manifest.run_manifest(run, campaign_name=campaign.name, spec=spec, mode=mode,
+                                status=status, returncode=returncode, started=started,
+                                finished=finished, context=state["context"])
+    ctx_env = state["context"]["environment"]
+    doc["environment"] = {
+        "mode": mode, "python": runtime if mode == "direct" else None,
+        "platform": {"system": system, "machine": machine},
+        "sif": ctx_env.get("sif"), "sif_sha256": ctx_env.get("sif_sha256"),
+        "apptainer_version": runtime if mode == "apptainer" else None,
+    }
+    doc["remote"] = {**remote_info, "transfer": transfer}
+    manifest.write_manifest(run, doc)
+
+
+def _finalize(session: Session, state: dict, row: dict, *, fetched: bool, job_state: str | None,
+              reason: str | None = None) -> None:
+    """Make one task's run folder final and mark its row finalized (plan 5.9)."""
+    spec = session.campaign.expand()[row["index"]]
+    run = session.campaign_dir / "runs" / row["run_id"]
+    now = manifest.utc_now()
+    if _linked(run, session.campaign_dir):
+        row.update(state="finalized", status="failed", reason="fetched-symlink")
+    elif fetched:
+        status, why, transfer, markers = _judge(session, run, job_state, now)
+        started = _now_aware(markers.started, now)
+        finished = _now_aware(markers.finished, now)
+        _write_run_folder(session, state, row, spec, run, status=status, reason=why,
+                          returncode=markers.exit_code, started=started, finished=finished,
+                          transfer=transfer, markers=markers)
+        row.update(state="finalized", status=status, reason=why)
+    else:  # never ran (a refused submit, or a cancelled job without a transfer): an empty failed run
+        why = reason or "submit-failed"
+        transfer = {"verified": False, "reason": why, "files": 0, "sums_sha256": None}
+        _write_run_folder(session, state, row, spec, run, status="failed", reason=why,
+                          returncode=None, started=now, finished=now, transfer=transfer,
+                          markers=None)
+        row.update(state="finalized", status="failed", reason=why)
+    _save(session, state)
+
+
+def _complete(session: Session, state: dict) -> None:
+    """All tasks are finished: finalize the refused submits, write results, close the core job (5.7)."""
+    for row in state["tasks"]:
+        if row["state"] == "submit-failed":
+            _finalize(session, state, row, fetched=False, job_state=None, reason="submit-failed")
+    entries = []
+    for spec, row in zip(session.campaign.expand(), state["tasks"]):
+        run = session.campaign_dir / "runs" / row["run_id"]
+        if _linked(run, session.campaign_dir):  # nothing is read through a planted link
+            entries.append({"run_id": spec.run_id, "config_id": spec.config_id,
+                            "replicate": spec.replicate, "seed": spec.seed, "params": spec.params,
+                            "mode": state["mode"], "status": "failed", "metrics": {},
+                            "manifest_sha256": None})
+        else:
+            entries.append(run_entry(spec, run, state["mode"]))
+    write_results(session.campaign_dir, session.campaign, entries, state["mode"])
+    state["state"] = "complete"
+    _save(session, state)
+    job = _core_job(session, state)
+    if job is not None and job.state not in core_jobs.FINAL:
+        core_jobs.update_external(job, "done", 0)
+    events.emit(session.run_dir, "note.experiment_remote", "system", kind="complete",
+                campaign=session.campaign.name, campaign_id=session.cid,
+                remote=session.remote.name, counts=_counts(state))
+
+
+def _core_job(session: Session, state: dict):
+    if not state.get("core_job"):
+        return None
+    return next((j for j in core_jobs.list_jobs(Project(session.root), session.run_dir)
+                 if j.id == state["core_job"]), None)
+
+
+def _log_counts(session: Session, state: dict) -> None:
+    job = _core_job(session, state)
+    if job is not None:  # counts only: never values or file contents
+        counts = _counts(state)
+        core_jobs.append_log(job, "counts " + " ".join(f"{k}={v}" for k, v in counts.items()))
+

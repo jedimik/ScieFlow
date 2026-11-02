@@ -107,7 +107,8 @@ def watch_until_done(p, sessions) -> tuple[int, int]:
     deadline = time.monotonic() + BOUND_S
     passes = 0
     while True:
-        result = CliRunner().invoke(experiment, ["watch", str(campaign_dir), "--once"])
+        result = CliRunner().invoke(experiment, ["watch", str(campaign_dir), "--once",
+                                                 "--pipelines-dir", str(p.root / "pipelines")])
         passes += 1
         if result.exit_code != 4 or time.monotonic() > deadline:
             return result.exit_code, passes

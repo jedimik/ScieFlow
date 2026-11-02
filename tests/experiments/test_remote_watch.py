@@ -91,7 +91,8 @@ def sweep(p, *extra):
 
 
 def watch(p, *extra):
-    return CliRunner().invoke(experiment, ["watch", str(p.campaign_dir), *extra])
+    return CliRunner().invoke(experiment, ["watch", str(p.campaign_dir), "--pipelines-dir",
+                                           str(p.root / "pipelines"), *extra])
 
 
 def run_ids(p) -> list[str]:
@@ -241,6 +242,33 @@ def test_each_failure_reason_is_recorded_and_no_metrics_come_from_the_run(
 
 
 # ---- 3. planted links (5.12.5, 5.12.10) ----
+
+
+def test_a_completed_run_with_a_reference_gets_metrics_computed_locally(fake, tmp_path, monkeypatch):
+    p = rs.make_project(tmp_path, n_gains=1)
+    add_reference(p)
+    seen: list = []
+
+    def fake_metrics(names, out, ref):
+        seen.append((list(names), Path(out).name, Path(ref).name))
+        return {"score": 0.25}
+
+    monkeypatch.setattr(remote_campaign, "compute_metrics", fake_metrics)
+    assert sweep(p).exit_code == 0
+    fake.statuses = {job_id(0): "qstat-F-0.txt"}
+    rid = run_ids(p)[0]
+    remote_run(fake.fs, rid)
+
+    assert watch(p, "--once").exit_code == 0
+    assert seen == [(["score"], "result.txt", "in.txt")]
+    run = local_run(p, rid)
+    assert json.loads((run / "metrics.json").read_text()) == {"score": 0.25}
+    assert results(p)["runs"][0]["metrics"] == {"score": 0.25}
+    man = json.loads((run / "manifest.json").read_text())
+    assert man["metrics_sha256"] is not None
+
+
+# ---- 3b. planted links (5.12.5, 5.12.10) ----
 
 
 def test_a_symlink_in_the_fetched_outputs_fails_the_run_and_nothing_reads_through_it(
@@ -411,7 +439,7 @@ def test_the_loop_stops_at_the_time_limit_and_stops_at_once_when_complete(fake, 
         sleeps.append(seconds)
         now[0] += seconds
 
-    out = remote_campaign.watch(p.campaign_dir, p.ws, interval=5, max_minutes=1,
+    out = remote_campaign.watch(p.campaign_dir, pipelines_dir=p.root / "pipelines", interval=5, max_minutes=1,
                                 sleep=sleep, clock=clock)
     assert out.exit_code == 4
     assert sleeps and all(s == 5 for s in sleeps)
@@ -420,7 +448,7 @@ def test_the_loop_stops_at_the_time_limit_and_stops_at_once_when_complete(fake, 
     fake.statuses = {job_id(0): "qstat-F-0.txt"}
     remote_run(fake.fs, run_ids(p)[0])
     sleeps.clear()
-    done = remote_campaign.watch(p.campaign_dir, p.ws, interval=5, max_minutes=1,
+    done = remote_campaign.watch(p.campaign_dir, pipelines_dir=p.root / "pipelines", interval=5, max_minutes=1,
                                  sleep=sleep, clock=clock)
     assert done.exit_code == 0 and sleeps == []
 
@@ -433,7 +461,8 @@ def test_the_json_document_after_one_pass(fake, tmp_path):
 
     result = watch(p, "--once", "--json")
     assert result.exit_code == 4, result.output
-    doc = json.loads(result.output.strip().splitlines()[-1])
+    assert result.exit_code == 4, result.output
+    doc = json.loads([line for line in result.output.splitlines() if line.startswith("{")][-1])
     assert doc["campaign"] == "gain-sweep" and doc["campaign_id"] == CID
     assert doc["state"] == "running" and doc["complete"] is False
     assert doc["counts"] == {"pending": 0, "submitted": 1, "finalized": 1, "submit_failed": 0,
@@ -447,7 +476,7 @@ def test_out_of_range_options_are_refused_by_click(fake, tmp_path, args):
     assert sweep(p).exit_code == 0
     result = watch(p, "--once", *args)
     assert result.exit_code == 2
-    assert "is not in the valid range" in result.output
+    assert "is not in the range" in result.output
 
 
 def test_a_campaign_folder_outside_a_run_is_refused(fake, tmp_path):

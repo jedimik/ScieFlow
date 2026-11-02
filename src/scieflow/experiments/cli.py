@@ -293,6 +293,42 @@ def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
     click.echo(str(results_path))
 
 
+def _watch_line(out) -> str:
+    c = out.counts
+    head = f"campaign {out.campaign_dir.name} ({out.campaign_id}) on {out.remote}: {out.state}"
+    if out.complete:
+        return f"{head}; complete: results in {out.campaign_dir / 'results.json'}"
+    return (f"{head}; pending {c['pending']}, submitted {c['submitted']}, finalized "
+            f"{c['finalized']} (completed {c['completed']}, failed {c['failed']})")
+
+
+@experiment.command()
+@click.option("--once", is_flag=True,
+              help="One pass, then exit: 0 complete, 4 still running, 1 refused or failed.")
+@click.option("--interval", type=click.IntRange(5, 3600), default=60, show_default=True,
+              help="Seconds between passes.")
+@click.option("--max-minutes", type=click.IntRange(1, 1440), default=60, show_default=True,
+              help="Stop waiting after this many minutes (exit 4).")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON summary after the last pass.")
+@_pipelines_option
+@click.argument("campaign_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+def watch(campaign_dir, once, interval, max_minutes, as_json, pipelines_dir):
+    """Collect a backend: remote campaign: fetch and check finished runs, submit pending ones (M-D3)."""
+    try:
+        out = remote_campaign.watch(campaign_dir, pipelines_dir=pipelines_dir, once=once,
+                                    interval=interval, max_minutes=max_minutes)
+    except remote_campaign.RemoteError as e:
+        raise click.ClickException(f"{e.message} (rule {e.rule}; nothing was run)") from e
+    if as_json:
+        doc = {"campaign": out.campaign_dir.name, "campaign_id": out.campaign_id,
+               "state": out.state, "complete": out.complete, "counts": out.counts}
+        click.echo(json.dumps(doc, sort_keys=True))
+    else:
+        click.echo(_watch_line(out))
+    if out.exit_code:
+        raise SystemExit(out.exit_code)
+
+
 @experiment.command()
 @click.option("--include-direct", is_flag=True,
               help="Rank --direct (development) runs too.")
