@@ -27,7 +27,10 @@ def _update_status(ws: Path, fn) -> dict:
 def mark_phase(ws: Path, phase: str, state: str, actor: str = "agent") -> dict:
     st = _update_status(ws, lambda s: status.mark(s, phase, state))
     kind = "phase.started" if state == "running" else f"phase.{state}"
-    events.emit(ws, kind, actor, phase=phase, iteration=st["iteration"])
+    # Older research-module statuses have no iteration; do not invent one or
+    # fail after the phase has already been written.
+    data = {"iteration": st["iteration"]} if "iteration" in st else {}
+    events.emit(ws, kind, actor, phase=phase, **data)
     return st
 
 
@@ -74,6 +77,8 @@ def guard_budget(ws: Path, dims: tuple[str, ...]) -> None:
 
 
 def advance_iteration(ws: Path, actor: str = "agent") -> dict:
+    # Reject a cross-workflow operation before even a budget-refusal checkpoint.
+    status.require_loop(status.read_status(ws))
     path = Path(ws) / "budget.yml"
     if path.exists() and budget.is_exhausted(store.read_yaml(path), "iterations"):
         _refuse(ws, ["iterations"], "iterations exhausted")

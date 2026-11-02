@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 
 from scieflow.core.project import Project
+from scieflow.core.run import status
 
 
 def _schema(name: str) -> dict:
@@ -20,14 +21,20 @@ def _schema(name: str) -> dict:
 
 def validate_status(st: dict) -> list[str]:
     s = _schema("status")
+    workflow = st.get("workflow", "research-loop")
+    try:
+        phases = status.phases_for(workflow, s)
+    except ValueError as exc:
+        return [str(exc)]
+    identity = "run" if workflow == "research-loop" else "slug"
     errors = [f"missing key: {k}" for k in
-              ["run", "created", "approval", "iteration", "phases", "stopped"] if k not in st]
+              [identity, "created", "approval", "iteration", "phases", "stopped"] if k not in st]
     if errors:
         return errors
     if st["approval"] not in s["approval_modes"]:
         errors.append(f"bad approval: {st['approval']}")
-    if list(st["phases"]) != s["phases"]:
-        errors.append(f"phases must be exactly {s['phases']}")
+    if list(st["phases"]) != phases:
+        errors.append(f"phases must be exactly {phases}")
     for p, state in st["phases"].items():
         if state not in s["states"]:
             errors.append(f"bad state for {p}: {state}")
