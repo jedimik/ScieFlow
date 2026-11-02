@@ -173,7 +173,10 @@ def advance(slug, as_agent):
 @AGENT_FLAG
 def checkpoint(slug, reason, detail, as_agent):
     """Stop the run gracefully with resume instructions."""
-    st = actions.checkpoint_run(_ws(slug), reason, detail, _actor(as_agent))
+    try:
+        st = actions.checkpoint_run(_ws(slug), reason, detail, _actor(as_agent))
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
     click.echo(st["stopped"]["resume"])
 
 
