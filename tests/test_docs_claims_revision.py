@@ -187,6 +187,28 @@ def test_verify_gate_is_documented_as_not_yet_wired():
     assert "M-G2" in text
 
 
+# --- plan section 8 residuals (R2, R4, R5, R9) must be named in the docs ---
+
+
+def test_claims_residuals_r2_r5_r9_are_documented():
+    text = _read(CLAIMS_DOC)
+    assert "forg" in text, "R2 file-based integrity (forged files or events)"
+    assert "RO-Crate" in text and "validator" in text, "R5 structural crate check only"
+    assert "shallow" in text, "R9 shallow clones and code-not-ancestor"
+
+
+def test_revision_residuals_r2_and_r4_are_documented():
+    text = _read(REVISION_DOC)
+    assert "forg" in text, "R2 for the revision events file"
+    assert "latexdiff" in text and "not installed" in text, "R4 latexdiff not tested here"
+
+
+def test_point_source_is_documented_as_the_code_takes_it():
+    text = _read(REVISION_DOC)
+    assert "otherwise from the current manuscript" not in text
+    assert "refuses the ingest" in text
+
+
 # --- decision letter, adoption and coverage ---
 
 
@@ -241,8 +263,9 @@ def test_journal_revision_skill_names_the_commands_and_limits():
         "scieflow manuscript crate",
     ):
         assert phrase in text, phrase
-    assert "user's" in text
-    assert "never" in text.lower()
+    assert "**Never waive" in text
+    assert "Never ingest a letter or adopt a draft" in text
+    assert "Never edit `report/claims/`" in text
 
 
 def test_skills_symlink_resolves_to_the_skill():
