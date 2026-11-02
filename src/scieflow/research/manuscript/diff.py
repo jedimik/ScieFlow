@@ -13,6 +13,8 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
+import os
+import resource
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -100,6 +102,32 @@ def _latexdiff_binary() -> str | None:
     return shutil.which("latexdiff", path=MINIMAL_PATH)
 
 
+def _refuse_link(path: Path) -> None:
+    if path.is_symlink():
+        raise DiffError("symlink", f"{path.name} is a symbolic link; refused")
+
+
+def _create(path: Path):
+    """A new file for writing. A name already taken is removed first; a link is never followed (O_EXCL|O_NOFOLLOW)."""
+    _refuse_link(path)
+    path.unlink(missing_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise DiffError("symlink", f"{path.name} could not be created inside the run; refused") from exc
+    return os.fdopen(fd, "wb")
+
+
+def _limit_file_size() -> None:
+    """Runs in the child before latexdiff starts: no file it writes may grow past the output cap plus one byte."""
+    soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
+    limit = LATEXDIFF_STDOUT_CAP + 1
+    if hard != resource.RLIM_INFINITY and hard < limit:
+        limit = hard
+    resource.setrlimit(resource.RLIMIT_FSIZE, (limit, hard))
+
+
 def _latexdiff(run: Path, old_lines: list, new_lines: list) -> bytes:
     scratch = run / "scratch" / "manuscript-diff"
     for part in (run / "scratch", scratch):
@@ -111,22 +139,26 @@ def _latexdiff(run: Path, old_lines: list, new_lines: list) -> bytes:
     env = {"PATH": MINIMAL_PATH, "HOME": str(scratch)}
     out_path = scratch / OUT_NAME
     err_path = scratch / ERR_NAME
+    _refuse_link(out_path)
+    _refuse_link(err_path)
     try:
-        # stdout and stderr are files, not pipes: nothing is held in memory. The cap is checked on the file after
-        # the run; while it runs, its growth is bounded by the timeout only.
-        with out_path.open("wb") as out, err_path.open("wb") as err:
+        # stdout and stderr are files, not pipes: nothing is held in memory. Both files are created without following
+        # a link, and the child is limited (RLIMIT_FSIZE) to the cap plus one byte, so it cannot grow a file past it
+        # while it runs; the size is still checked after the run.
+        with _create(out_path) as out, _create(err_path) as err:
             try:
                 done = subprocess.run(LATEXDIFF_ARGV, cwd=scratch, env=env, timeout=LATEXDIFF_TIMEOUT,
-                                      stdin=subprocess.DEVNULL, stdout=out, stderr=err, check=False)
+                                      stdin=subprocess.DEVNULL, stdout=out, stderr=err, check=False,
+                                      preexec_fn=_limit_file_size)
             except subprocess.TimeoutExpired as exc:
                 raise DiffError("latexdiff-timeout", f"latexdiff ran past {LATEXDIFF_TIMEOUT} s; refused") from exc
             except OSError as exc:
                 raise DiffError("latexdiff-failed", "latexdiff could not be started") from exc
+        if out_path.stat().st_size > LATEXDIFF_STDOUT_CAP:
+            raise DiffError("latexdiff-output", "latexdiff output is over 20 MB; refused")
         if done.returncode != 0:
             shown = [line[:EXCERPT] for line in _stderr_tail(err_path)]
             raise DiffError("latexdiff-failed", "latexdiff failed; last stderr lines:\n" + "\n".join(shown))
-        if out_path.stat().st_size > LATEXDIFF_STDOUT_CAP:
-            raise DiffError("latexdiff-output", "latexdiff output is over 20 MB; refused")
         return out_path.read_bytes()
     finally:
         out_path.unlink(missing_ok=True)
