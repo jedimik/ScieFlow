@@ -336,10 +336,12 @@ For round N = 1..`max_review_rounds`:
 2. Citations: `uv run scieflow research check-citations --workspace workspace/<slug>`
    — INVALID lines go back to the responsible section's agent for one fix
    round, then re-run until OK or mark failed.
-3. Provenance spot-check: sample 3-5 numeric claims from
-   `sections/results.tex`; open each cited `[data:<id>]` artifact and
-   confirm the number is really there. Any miss → treat as INVALID,
-   one fix round with the discrepancy quoted.
+3. Claim check: `uv run scieflow manuscript claims build <slug>`, then
+   `uv run scieflow manuscript claims check <slug>` over the merged sections. Every number
+   in `sections/results.tex` and the other sections must match the evidence its
+   `% source:` comment cites; the check reads that evidence itself rather than sampling it.
+   Any error → treat as INVALID, one fix round to the responsible section's agent, quoting
+   the rule id and the file and line (never a value from an evidence file). Waivers are the user's.
 4. Cited-source check (optional, advisory, **opt-in**; separate from the
    Phase 4 evidence bundle — claim-check runs over NotebookLM under root
    AGENTS.md rule 12, scite under rule 17, and neither replaces the other): steps 1-3 verify the
@@ -359,7 +361,7 @@ For round N = 1..`max_review_rounds`:
 ## Phase 7 — handoff
 
 When `journal:` is set, package the submission with `uv run scieflow manuscript package <slug>`
-(refused while a review blocker is open, or when the check or build is stale; it uploads
+(refused while a review blocker is open, when the check or build is stale, or on claim errors from `scieflow manuscript claims check`; it uploads
 nothing). Figures for the journal's sizes come from
 `uv run scieflow journal style <slug>` and
 `scieflow experiment figures <campaign> --style-file journal/figure-style.yml`.

@@ -60,6 +60,10 @@ Every vendored file is byte-identical to its upstream text, except for the recor
   tested by `tests/vendor/test_vendored_excerpts.py`, the stand-ins by `tests/vendor/test_deps.py`.
   The removals in `test_researcher_sanitize.py` (the verify tests) are listed in that file's header.
 
+- Not vendored (M-G t3): `researcher_core/lineage/` (`compile.py`, `passport.py`). Its claim-check codes are
+  re-implemented in `src/scieflow/research/manuscript/claims/compile.py` (CREDITS.md). Its RO-Crate shape
+  (`passport.py`) is not copied here; the RO-Crate export is M-G t7.
+
 ## Rules
 
 - Rule: never edit a vendored file except through a recorded patch. A change goes into `patches` in

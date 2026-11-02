@@ -126,6 +126,9 @@ reading agents with the right role, and report what they return. Full reference:
     `--kind response`). The letter's content is the authors'; list the placeholders
     the package reports.
 
+When the user shares a journal's decision letter, asks to answer reviewers, or asks whether every
+number in the manuscript traces to its evidence, follow `src/scieflow/research/skills/journal-revision/SKILL.md`.
+
 ## Report to the user
 
 Give the profile slug and its source list, the check's error and warning rule ids

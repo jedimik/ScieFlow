@@ -29,6 +29,14 @@ MANUSCRIPT_SRC = ROOT / "src" / "scieflow" / "research" / "manuscript"
 
 JOURNAL_COMMANDS = ("research", "add-source", "prompt", "adopt", "show", "list", "validate", "diff", "style")
 MANUSCRIPT_COMMANDS = ("check", "checklist-prompt", "render", "build", "package", "letter")
+# M-G t9: the nested claims, point and revision subcommands and the top-level diff and crate, whose
+# flags docs/cli.md documents; the help walk below includes them (lines added, no assertion changed)
+NESTED_MANUSCRIPT_COMMANDS = (
+    ("claims", "build"), ("claims", "show"), ("claims", "check"), ("claims", "waive"),
+    ("point", "add"), ("point", "list"), ("diff",), ("revision", "ingest"), ("revision", "prompt"),
+    ("revision", "adopt"), ("revision", "respond"), ("revision", "coverage"), ("revision", "letter"),
+    ("revision", "show"), ("crate",),
+)
 
 JOURNAL_FLAGS = (
     "--journal", "--issn", "--url", "--as-of", "--slug", "--restart", "--retry-failed",
@@ -98,6 +106,10 @@ def _help_text() -> str:
             result = CliRunner().invoke(main, [group, command, "--help"], catch_exceptions=False)
             assert result.exit_code == 0, (group, command)
             chunks.append(result.output)
+    for words in NESTED_MANUSCRIPT_COMMANDS:
+        result = CliRunner().invoke(main, ["manuscript", *words, "--help"], catch_exceptions=False)
+        assert result.exit_code == 0, words
+        chunks.append(result.output)
     return "\n".join(chunks)
 
 

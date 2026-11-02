@@ -114,8 +114,9 @@ cross-section contradictions without touching any number.
 2. **Citations**: `scieflow research check-citations` — every `\cite`-family
    command resolves, no orphan bib entries, every bib DOI traces to the
    searched/imported DOI list.
-3. **Provenance spot-check**: numeric claims from Results are checked against
-   the artifact they cite.
+3. **Claim check**: `scieflow manuscript claims build` and `claims check` compare each
+   number in the sections with the evidence its `% source:` comment cites. See
+   [Claim ledger and check](../claims.md).
 4. **Cited-source check** (optional, opt-in, advisory): claims and their DOIs
    go to the claim-check module (`skills/claim-check/SKILL.md`) when
    you have allowed it for this run.
