@@ -48,6 +48,14 @@ def bundle_dir(p):
     return p.ws / "scratch" / "remote" / CID
 
 
+def test_the_push_and_submit_lines_of_remote_py_are_relayed_with_a_prefix(fake, tmp_path):
+    p = rs.make_project(tmp_path, n_gains=1)
+    result = sweep(p, "--direct")
+    assert result.exit_code == 0, result.output
+    assert "remote: PUSHED: " in result.output
+    assert "remote: SUBMITTED: " in result.output
+
+
 def test_pbs_per_run_golden_strings_three_runs(fake, tmp_path):
     p = rs.make_project(tmp_path, n_gains=3)
     result = sweep(p, "--direct")

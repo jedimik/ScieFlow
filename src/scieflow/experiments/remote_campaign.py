@@ -312,15 +312,16 @@ def _push(session: Session, state: dict) -> bool:
     try:
         with contextlib.redirect_stdout(buffer):
             rc = R.rcmd.cmd_mkdir(session.remote, session.t, session.remote_dir)
-            _relay(buffer)
-            if rc == 0:
-                buffer = io.StringIO()
+        _relay(buffer)
+        if rc == 0:
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
                 rc = R.rcmd.cmd_push(session.remote, session.t, str(session.bundle),
                                      session.remote_dir, workspace=session.run_dir,
                                      checksum=True, root=session.root)
+            _relay(buffer)
     except R.policy.PolicyError as exc:
         raise _policy_error(exc) from exc
-    _relay(buffer)
     if rc == 0:
         state["state"] = "pushed"
         _save(session, state)
