@@ -515,6 +515,9 @@ def _validate(state: dict, campaign: Campaign, remote, runs) -> None:
 def _open(campaign_dir: Path, run_dir: Path, runner=None, *, stage: Stage | None = None):
     """Load campaign.yaml and remote.json, validated against the policy, before any transport call."""
     campaign = Campaign.load(campaign_dir / "campaign.yaml")
+    if campaign.backend != "remote" or campaign.remote is None:  # a local campaign has no remote (M-D3 final r1)
+        raise RemoteError("not-remote", f"{campaign_dir} is a local campaign: watch and resume collect "
+                                        "backend: remote campaigns only")
     root = egress.root_of_run(run_dir)
     remote = _load_remote(root, campaign.remote.name)
     runs = campaign.expand()
