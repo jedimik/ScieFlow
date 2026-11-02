@@ -186,8 +186,8 @@ run, PHASE is one of the paper phases; the other research workflows are refused
 ```bash
 uv run scieflow run advance SLUG [--as-agent]
 ```
-Start the next iteration. Research-loop runs only: a paper-draft run is refused
-(exit 1, nothing written), so its phases are never reset. Refused (exit 1, run
+Start the next iteration. `advance` is research-loop only: on a paper-draft run it
+is refused (exit 1, nothing written), so its phases are never reset. Refused (exit 1, run
 checkpointed) if the `iterations` budget is spent.
 
 ```bash
