@@ -310,6 +310,9 @@ def _read_time(path: Path, fetched_at: str) -> tuple[str, bool]:
 def read_markers(run_dir, fetched_at: str) -> Markers:
     """Read the marker files of a fetched run (plan 5.3); unreadable parts become None."""
     remote = Path(run_dir) / "remote"
+    if remote.is_symlink():  # a linked remote/ folder is never read through (plan 5.12.5)
+        return Markers(exit_code=None, started=None, finished=None, times_from_fetch=True,
+                       system=None, machine=None, runtime=None)
     started, started_flag = _read_time(remote / "started", fetched_at)
     finished, finished_flag = _read_time(remote / "finished", fetched_at)
     env: dict[str, str] = {}
