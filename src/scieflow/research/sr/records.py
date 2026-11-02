@@ -35,7 +35,10 @@ def round_numbers(ws) -> list[int]:
 def _read_jsonl(path: Path) -> list[dict]:
     if path.is_symlink() or not path.is_file():
         raise SRError(f"sr/rounds/{path.parent.name}/{path.name} is missing or not a plain file")
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    try:
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise SRError(f"sr/rounds/{path.parent.name}/{path.name} is not valid JSON lines") from None
 
 
 def _round_records(ws: Path, number: int) -> list[dict]:
