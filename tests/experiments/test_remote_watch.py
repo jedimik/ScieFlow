@@ -548,6 +548,47 @@ def test_a_fetched_metrics_symlink_is_never_read_through(fake, tmp_path):
     assert not (local_run(p, rid) / "metrics.json").is_symlink()
 
 
+@pytest.mark.parametrize("planted", ["artifact", "remote-exit"])
+def test_a_fetched_link_keeps_the_manifest_hash_so_the_campaign_still_verifies(fake, tmp_path, planted):
+    # review r2 finding 1: the tool wrote a regular manifest.json, so its hash belongs in results.json
+    p = rs.make_project(tmp_path, n_gains=1)
+    assert sweep(p).exit_code == 0
+    fake.statuses = {job_id(0): "qstat-F-0.txt"}
+    rid = run_ids(p)[0]
+    run = remote_run(fake.fs, rid)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("not part of the run\n")
+    if planted == "artifact":
+        (run / "artifacts" / "link.txt").symlink_to(outside)
+    else:
+        (run / "remote" / "exit").unlink()
+        (run / "remote" / "exit").symlink_to(outside)
+
+    assert watch(p, "--once").exit_code == 0
+    local = local_run(p, rid)
+    entry = results(p)["runs"][0]
+    assert config_of(local)["reason"] == "fetched-symlink"
+    assert entry["status"] == "failed" and entry["metrics"] == {}
+    assert entry["manifest_sha256"] == manifest.file_sha256(local / "manifest.json")
+    assert CliRunner().invoke(experiment, ["verify", str(p.campaign_dir)]).exit_code == 0
+
+
+def test_a_planted_link_at_manifest_json_keeps_the_hash_null_and_verify_flags_it(fake, tmp_path):
+    p = rs.make_project(tmp_path, n_gains=1)
+    assert sweep(p).exit_code == 0
+    fake.statuses = {job_id(0): "qstat-F-0.txt"}
+    rid = run_ids(p)[0]
+    run = remote_run(fake.fs, rid)
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}\n")
+    (run / "manifest.json").symlink_to(outside)
+
+    assert watch(p, "--once").exit_code == 0
+    assert results(p)["runs"][0]["manifest_sha256"] is None  # no regular manifest was written
+    assert outside.read_text() == "{}\n"  # nothing was written through the link
+    assert CliRunner().invoke(experiment, ["verify", str(p.campaign_dir)]).exit_code == 1
+
+
 WRITE_TARGETS = ["config.yaml", "environment.json", "manifest.json", "metrics.json"]
 
 
