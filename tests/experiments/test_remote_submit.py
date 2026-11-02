@@ -182,6 +182,50 @@ def test_remote_json_is_revalidated_before_any_transport_call(tmp_path, monkeypa
     assert ok.calls == []
 
 
+def _set(*path_and_value):
+    """A mutation of remote.json: _set(key, ..., value) writes the value at the nested key path."""
+    *keys, value = path_and_value
+
+    def change(doc):
+        node = doc
+        for key in keys[:-1]:
+            node = node[key]
+        node[keys[-1]] = value
+
+    return change
+
+
+@pytest.mark.parametrize("change,field", [
+    (_set("scheduler", "slurm"), "scheduler"),
+    (_set("jobs", "array"), "jobs"),
+    (_set("campaign", "other"), "campaign"),
+    (_set("tasks", 0, "params", "gain", 9.9), "tasks"),
+    (_set("tasks", 1, "run_id", "999_x"), "tasks"),
+    (_set("tasks", 0, "job_id", "1;rm -rf"), "job_id"),
+    (_set("tasks", 0, "task", "x.0"), "tasks"),
+])
+def test_remote_json_fields_are_checked_before_any_transport_call(tmp_path, monkeypatch,
+                                                                  change, field):
+    import json
+
+    failing = rs.FakeRemote(rsync_rc=1)
+    monkeypatch.setattr(remote_campaign, "RUNNER", failing)
+    monkeypatch.setattr(remote_campaign, "stamp", lambda: rs.STAMP)
+    p = rs.make_project(tmp_path, n_gains=2)
+    assert sweep(p, "--direct").exit_code == 1
+    path = p.campaign_dir / "remote.json"
+    doc = json.loads(path.read_text())
+    change(doc)
+    path.write_text(json.dumps(doc))
+    ok = rs.FakeRemote()
+    with pytest.raises(remote_campaign.RemoteError) as caught:
+        remote_campaign.resume_submission(p.campaign_dir, p.ws, runner=ok)
+    assert caught.value.rule == "remote-state-invalid"
+    assert caught.value.message.startswith("remote-state-invalid: ")
+    assert field in caught.value.message
+    assert ok.calls == []
+
+
 def test_core_job_is_a_remote_job_that_cannot_be_cancelled(fake, tmp_path):
     p = rs.make_project(tmp_path, n_gains=2)
     assert sweep(p, "--direct").exit_code == 0
