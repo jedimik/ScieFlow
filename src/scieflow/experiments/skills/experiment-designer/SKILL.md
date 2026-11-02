@@ -61,5 +61,18 @@ analysis:                          # optional; under a locked design the SAP dec
   test: <test>                     # one name, or {<metric>: <test>}; never for SAP outcomes under a lock
   correction: holm                 # none | bonferroni | holm | hochberg | bh
   alpha: 0.05
+backend: local                     # optional: local (default) | remote
+remote:                            # required for backend: remote (docs/experiments/remote-campaigns.md)
+  name: meta                       # an entry of config/remotes.yml
+  dir: /abs/remote/folder          # absolute, inside that remote's allowed_dirs
+  jobs: per-run                    # per-run (default) | array (one job, runs in order; N runs = N budget units)
+resources:                         # optional, with backend: remote only; these are the defaults
+  walltime: "01:00:00"
+  cpus: 1
+  mem_gb: 4
+  gpus: 0
+  queue: default
+  scratch_type: none
+  scratch_gb: 0
 notes: "hypothesis and reasoning"  # required by convention
 ```
