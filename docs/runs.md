@@ -54,6 +54,9 @@ status declares `workflow: paper-draft` and `slug:`; old loop statuses keep
 their `run:` identity and their unchanged four-phase vocabulary. The same
 native `show`, `mark --as-agent`, `checkpoint` and `resume` commands below
 work with papers. `advance` is loop-only and refuses to reset paper phases.
+Native `mark` and `checkpoint` know only research-loop and paper-draft statuses;
+other research workflows (`lit-review`, `gap-discovery`, `paper-review`) keep
+their own `status.yml` protocol and are refused by both, with nothing written.
 Complete the paper protocol's intake directories separately; initialization
 does not create a manuscript, approve an outline, or authorize a dispatch.
 

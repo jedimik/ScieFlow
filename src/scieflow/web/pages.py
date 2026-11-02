@@ -201,14 +201,14 @@ def dashboard(request: Request) -> HTMLResponse:
 
 #: The workflow the form's `<select>` shows chosen when nothing else applies
 #: — a fresh visit, or a refusal that carried no workflow at all. Not "no
-#: workflow": `init_workspace` (what this wizard calls, unconditionally)
-#: always writes the loop-shaped `status.yml` `workspace.describe` reads a
-#: `kind` of "loop" from — research-loop's own phases and roles — so it is
-#: the one entry in `service.workflows()` whose skill actually matches the
-#: run this page produces. Without an explicit default here, an HTML
+#: workflow": `init_workspace` writes the loop-shaped `status.yml` that
+#: `workspace.describe` reads a `kind` of "loop" from, with research-loop's own
+#: phases and roles. A `paper-draft` submission gets native paper status
+#: instead, and every other workflow gets the loop-shaped status with the
+#: workflow recorded in `config.yml`. Without an explicit default here, an HTML
 #: `<select>` with none of its `<option>`s marked `selected` silently submits
-#: whichever one is listed first (`lit-review`) for a visitor who never
-#: touched the dropdown.
+#: whichever one is listed first (`lit-review`) for a visitor who never touched
+#: the dropdown.
 DEFAULT_WORKFLOW = "research-loop"
 
 
