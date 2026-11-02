@@ -181,7 +181,7 @@ def test_sweep_refuses_a_remote_campaign_without_running(project, monkeypatch):
         "--pipelines-dir", str(project / "pipelines"), "--direct",
     ])
     assert result.exit_code == 1
-    assert "remote campaigns are submitted by sweep" in result.output
+    assert "no-run" in result.output  # M-D3 t3: the preflight refuses outside a run (was the t1 interim text)
     assert not (exp / "sweep" / "runs").exists()
     assert not (exp / "sweep" / "results.json").exists()
     assert spent == []
