@@ -655,6 +655,20 @@ def _linked(run: Path, campaign_dir: Path) -> bool:
     return run.is_symlink() or (campaign_dir / "runs").is_symlink()
 
 
+def _drop_fetched_metrics(run: Path) -> None:
+    """Remove a fetched metrics.json and metrics.json.tmp before anything reads the run folder (5.9, 5.12.5).
+
+    A fetched metrics file is outside the checksum list, so it is never evidence: only this pass's own
+    compute_metrics may write one. os.unlink removes a link itself and never touches the link's target.
+    """
+    for name in ("metrics.json", "metrics.json.tmp"):
+        path = run / name
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+
+
 def _fetch(session: Session, row: dict) -> bool:
     """cmd_fetch of one run folder into <campaign>/runs/<run_id>/ (5.7 step 5); True on success."""
     R = _remote()
@@ -802,18 +816,37 @@ def _finalize(session: Session, state: dict, row: dict, *, fetched: bool, job_st
         status, why, transfer, markers = _judge(session, run, job_state, now)
         started = _now_aware(markers.started, now)
         finished = _now_aware(markers.finished, now)
-        _write_run_folder(session, state, row, spec, run, status=status, reason=why,
-                          returncode=markers.exit_code, started=started, finished=finished,
-                          transfer=transfer, markers=markers)
+        _drop_fetched_metrics(run)
+        status, why = _write_or_refuse(session, state, row, spec, run, status=status, reason=why,
+                                       returncode=markers.exit_code, started=started, finished=finished,
+                                       transfer=transfer, markers=markers)
         row.update(state="finalized", status=status, reason=why)
     else:  # never ran (a refused submit, or a cancelled job without a transfer): an empty failed run
         why = reason or "submit-failed"
         transfer = {"verified": False, "reason": why, "files": 0, "sums_sha256": None}
-        _write_run_folder(session, state, row, spec, run, status="failed", reason=why,
-                          returncode=None, started=now, finished=now, transfer=transfer,
-                          markers=None)
-        row.update(state="finalized", status="failed", reason=why)
+        _drop_fetched_metrics(run)
+        status, why = _write_or_refuse(session, state, row, spec, run, status="failed", reason=why,
+                                       returncode=None, started=now, finished=now, transfer=transfer,
+                                       markers=None)
+        row.update(state="finalized", status=status, reason=why)
     _save(session, state)
+
+
+def _write_or_refuse(session: Session, state: dict, row: dict, spec, run: Path, *, status: str,
+                     reason: str | None, returncode, started: str, finished: str, transfer: dict,
+                     markers) -> tuple[str, str | None]:
+    """_write_run_folder, or a refusal at a planted link (5.9, 5.12.10): the run is failed/fetched-symlink.
+
+    Nothing is written through the link and the pass goes on; the other tasks are still finalized.
+    FileExistsError is the O_EXCL create in manifest.atomic_write refusing a link planted after the check.
+    """
+    try:
+        _write_run_folder(session, state, row, spec, run, status=status, reason=reason,
+                          returncode=returncode, started=started, finished=finished,
+                          transfer=transfer, markers=markers)
+    except (manifest.UnsafeOutputError, FileExistsError):
+        return "failed", "fetched-symlink"
+    return status, reason
 
 
 def _complete(session: Session, state: dict) -> None:
@@ -824,7 +857,8 @@ def _complete(session: Session, state: dict) -> None:
     entries = []
     for spec, row in zip(session.campaign.expand(), state["tasks"]):
         run = session.campaign_dir / "runs" / row["run_id"]
-        if _linked(run, session.campaign_dir):  # nothing is read through a planted link
+        if _linked(run, session.campaign_dir) or row.get("reason") == "fetched-symlink":
+            # nothing is read through a planted link, nor from a folder whose write was refused (5.12.5)
             entries.append({"run_id": spec.run_id, "config_id": spec.config_id,
                             "replicate": spec.replicate, "seed": spec.seed, "params": spec.params,
                             "mode": state["mode"], "status": "failed", "metrics": {},

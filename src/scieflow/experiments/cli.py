@@ -32,7 +32,7 @@ from .power import solve as solve_power
 from .report import generate_report
 from .runner import execute_run, recompute_metrics
 from .scaffold import new_pipeline, new_stage
-from .stage import Stage, find_stage
+from .stage import Stage, StageError, find_stage
 from .stats import StatsUnavailable
 from .style import StyleError
 from .sweep import run_sweep
@@ -319,6 +319,12 @@ def watch(campaign_dir, once, interval, max_minutes, as_json, pipelines_dir):
                                     interval=interval, max_minutes=max_minutes)
     except remote_campaign.RemoteError as e:
         raise click.ClickException(f"{e.message} (rule {e.rule}; nothing was run)") from e
+    except (CampaignError, StageError) as e:  # M-D3 t4 fix: a broken campaign file is a message, not a crash
+        raise click.ClickException(f"{e} (rule campaign-invalid; nothing was run)") from e
+    except (yaml.YAMLError, OSError) as e:
+        raise click.ClickException(f"{e} (rule campaign-unreadable; nothing was run)") from e
+    except manifest.UnsafeOutputError as e:
+        raise click.ClickException(f"{e} (rule symlink; nothing was written through it)") from e
     if as_json:
         doc = {"campaign": out.campaign_dir.name, "campaign_id": out.campaign_id,
                "state": out.state, "complete": out.complete, "counts": out.counts}
