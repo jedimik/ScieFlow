@@ -31,11 +31,15 @@ This package vendors code from **researcher** v1.0.0 (MIT License; the licence t
 | `errors.py` (M-C2 t1, excerpt) | `core/researcher_core/connectors/base.py` | `505374780dc07bf538fecd95243d7804dbf6e72893cd0bba59fce743301505e8` | `652683a186c36a4eb194df8bef9a04ab2560239b8724ee46d906abbd32b2b7f3` | excerpt of lines 206-271 (excerpt sha256 `9086484bfea71e73f7fa1868a9aaf745026e7a29aaf3f5683391c61a20fc21fa`) with a ScieFlow header; no other change |
 | `provenance_ts.py` (M-C2 t1, excerpt) | `core/researcher_core/provenance.py` | `6c77c217333fc4eea106ae5c8edcabec975503fb214942b109539ef20c3d2002` | `03fbd217c77ed83047d2f12247c1ceab2869db62ce7d024e2bd834a099174de5` | excerpt of lines 118-224 (excerpt sha256 `2da36f1267df1d782b7ac3626e677335c8f96caca72726f22386aa57e95e6a5f`) with a ScieFlow header; no other change |
 | `schemas/verification-report.schema.json` (M-C2 t1) | `core/schemas/verification-report.schema.json` | `d2ed7d87fface8e1e61114de20c2f9237d7f39d8814ab467f713b953c654dd2d` | `d2ed7d87fface8e1e61114de20c2f9237d7f39d8814ab467f713b953c654dd2d` | none |
+| `screen.py` (M-H t1) | `core/researcher_core/screen.py` | `28072bf60184544de4c1e3d6f4f78e3c9597ffdd2ec8dfb8b181bfea4eeda01f` | `d2273df81184834bf75dbe1a61fbbbb24852131bbe4cca2a69d76ef3d7bbed88` | two import redirections: `from rapidfuzz import fuzz` -> `from ._fuzz import fuzz`; `from .provenance import ProvenanceEvent, ProvenanceLedger, RunContext` -> `from ._ledger import ProvenanceEvent, ProvenanceLedger, RunContext` |
+| `sr_prisma.py` (M-H t1) | `core/researcher_core/sr_prisma.py` | `def64bad0fcd69d132ac69df47dfe5d47fc1412a071b021e8e861490daf8d3ca` | `86c71d7f577583dc544653b779ca9cb906a68dd02ce232ba17c9bc8b0d9961cd` | one import redirection: `from .provenance import ProvenanceEvent, ProvenanceLedger, derive_prisma` -> `from ._ledger import ProvenanceEvent, ProvenanceLedger, derive_prisma` |
+| `prisma_counts.py` (M-H t1, excerpt) | `core/researcher_core/provenance.py` | `6c77c217333fc4eea106ae5c8edcabec975503fb214942b109539ef20c3d2002` | `cd75cfe6ec8ad661347493d3e307979884a8745a4006f8833738510c80efd7a8` | excerpt of lines 527-625 (`PrismaCounts`, `derive_prisma`, `_as_count`; excerpt sha256 `29ebb44a0a1c9c410f8cee341c683734b4943b422bab14dee693125d94e71836`) with a ScieFlow header; no other change |
+| `_ledger.py` (M-H t1, ScieFlow-authored) | none (not pinned) | none | `_ledger.py` is ScieFlow-authored; see the M-H t1 note below | none |
 
 Every vendored file is byte-identical to its upstream text, except for the recorded patches
-(`dedupe.py`; `verify.py`, five; `monitor.py`, one) and the ScieFlow headers that the excerpts
-(`query.py`, `contributors.py`, `errors.py`, `provenance_ts.py`) add to their pinned line ranges.
-`_fuzz.py`, `_deps.py` and `__init__.py` are ScieFlow-authored and are not pinned.
+(`dedupe.py`; `verify.py`, five; `monitor.py`, one; `screen.py`, two; `sr_prisma.py`, one) and the ScieFlow headers that the excerpts
+(`query.py`, `contributors.py`, `errors.py`, `provenance_ts.py`, `prisma_counts.py`) add to their pinned line ranges.
+`_fuzz.py`, `_deps.py`, `_ledger.py` and `__init__.py` are ScieFlow-authored and are not pinned.
 
 - `_fuzz.py` replaces `rapidfuzz.fuzz.token_sort_ratio` (M-C1-D2, not a ScieFlow dependency), and
   since M-C2 t1 also `rapidfuzz.fuzz.ratio` (M-C2-D1). It is checked against 300 cases recorded
@@ -63,6 +67,19 @@ Every vendored file is byte-identical to its upstream text, except for the recor
 - Not vendored (M-G t3): `researcher_core/lineage/` (`compile.py`, `passport.py`). Its claim-check codes are
   re-implemented in `src/scieflow/research/manuscript/claims/compile.py` (CREDITS.md). Its RO-Crate shape
   (`passport.py`) is not copied here; the RO-Crate export is M-G t7.
+
+- M-H t1 (systematic review, plan 5.4): `screen.py` (dual screening, blinded conflicts, Cohen's kappa,
+  adjudication, ranked queue) and `sr_prisma.py` (PRISMA 2020 flow and checklist) are byte copies of the
+  read-only researcher snapshot with the import redirections above. `prisma_counts.py` is the verbatim
+  PRISMA counting excerpt of `provenance.py` (`PrismaCounts`, `derive_prisma`, `_as_count`). `_ledger.py`
+  is the ScieFlow-authored interface they run on: a frozen event record, the run context, the abstract
+  ledger base (it refuses to read or write and names `scieflow.research.sr.ledger`) and `MemoryLedger`
+  (list-backed, for tests and the harness). It imports only the standard library and `prisma_counts`.
+  Not vendored: `core/researcher_core/protocol.py` (sha256 `19bd7056b2d89435d8ae9e470e30a8976aa4bd73eec872fda8d8d35e8272c5e7`);
+  the protocol is the locked `review:` block of the run's design (M-H-D1, `core/design/lock.py`). Ported
+  tests: `tests/vendor/test_researcher_screen.py` and `tests/vendor/test_researcher_sr_prisma.py`
+  (upstream `core/tests/test_screen.py`, `test_sr_prisma.py`; imports rewritten, ledger fixture `MemoryLedger`).
+  The interface and the kappa rows of plan 5.12 are tested by `tests/vendor/test_sr_ledger_interface.py`.
 
 ## Rules
 
