@@ -85,8 +85,8 @@ call is made. A refusal exits 1, and inside a run it also writes one
    with rule `resources-over-limit`, which names each resource. It is not
    silently cut down: `remote.py` would print `CLAMPED:`, and a remote campaign
    never runs a clamped request.
-7. `jobs: array` needs N at most 1000 (the replicate cap). Per-run has no N
-   limit beyond the budget.
+7. `jobs: array` needs N at most 1000, the replicate cap (rule `array-too-large`).
+   Per-run has no N limit beyond the budget.
 8. Data protection: the bundle and the input are checked against the L2 rules
    (see [Data protection](#data-protection)).
 9. The input and the stage folder contain no symlink, and apptainer needs the
