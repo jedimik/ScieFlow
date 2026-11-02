@@ -64,9 +64,10 @@ UTF-8; line ends are normalised to `\n`, and trailing spaces are removed.
   the editor block. A repeated `Rn` header is continuation text. Paragraphs are runs of
   non-blank lines with ids `R1.p1`, `R1.p2`, and so on. Paragraph ids are the unit that
   coverage checks.
-- It then pins the point `submitted-r<N>`: from `report/submission/source.zip` when the
-  package exists and checks out, otherwise from the current manuscript, with a printed note
-  that the point was not taken from a submission package. An existing point of that name is kept.
+- It then pins the point `submitted-r<N>`: from `report/submission/source.zip` when that package
+  exists (a package that fails its integrity check refuses the ingest and writes nothing); from
+  the current manuscript only when there is no package, with a printed note that the point was
+  not taken from a submission package. An existing point of that name is kept.
 - The event `note.revision_ingested` carries counts and the letter hash. It never carries the
   letter text.
 
@@ -180,3 +181,8 @@ timeout and capped output. A latexdiff failure exits 1 and shows the last 20 std
   file, not that the change answers the comment.
 - No PDF of the diff and no PDF letters. The letter is LaTeX only.
 - The verify-phase gate and the `paper-revision` workflow are not wired yet (M-G2).
+- File-based integrity (R2). The revision events (`note.revision_ingested`, `note.revision_adopted`,
+  `note.revision_coverage`) are plain lines in the run's events file, which a run's own agents can
+  write; a forged event is not caught. See [claims](claims.md#limits-and-residuals).
+- `latexdiff` is not installed on the test host. Only the mocked command line and the plain diff
+  are tested there; the real-binary test runs only where `latexdiff` is installed (R4).

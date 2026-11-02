@@ -195,3 +195,12 @@ data inside the run. The check never lets data leave it:
 - The verify-phase gate and the `paper-revision` workflow are not wired yet (M-G2). Until then
   the check runs only when you run it, and `package` is the only place that refuses on it.
 - No PROV-JSON-LD, no PDF of a diff, no web page or menu item: the CLI is complete.
+- File-based integrity (R2). The ledger, `data.yml`, the manifests and the events file are plain
+  files that a run's own agents can write. A coherent forgery (a rewritten ledger with matching
+  hashes, or a forged human-actor event) is not caught. Waivers count only from human-actor
+  events, and `waive`, `ingest` and `adopt` refuse inside a dispatch, but an events line can be
+  forged. Host-side signing is a follow-up.
+- The RO-Crate is checked structurally and offline against the RO-Crate 1.1 required properties.
+  No external validator runs (R5).
+- A shallow clone can make `code-not-ancestor` (C006) fire for a run made from a commit the clone
+  lacks. The user may waive it with a reason (R9).
