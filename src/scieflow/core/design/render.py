@@ -96,6 +96,37 @@ def _sap_lines(sap) -> list:
     return lines
 
 
+def _review_lines(review) -> list:
+    """The Review protocol section of design.md (plan 5.2): criteria, strategies, the rest."""
+    elig = review.get("eligibility") if isinstance(review.get("eligibility"), dict) else {}
+    screening = review.get("screening") if isinstance(review.get("screening"), dict) else {}
+    appraisal = review.get("appraisal") if isinstance(review.get("appraisal"), dict) else {}
+    synthesis = review.get("synthesis") if isinstance(review.get("synthesis"), dict) else {}
+    registration = review.get("registration") if isinstance(review.get("registration"), dict) else None
+    criteria = [[kind, c.get("id"), c.get("text")] for kind in ("include", "exclude")
+                for c in _as_dicts(elig.get(kind))]
+    strategies = [[s.get("id"), s.get("query"), _join(s.get("sources")), s.get("from_year"), s.get("limit")]
+                  for s in _as_dicts(review.get("strategies"))]
+    lines = ["### Eligibility criteria", ""] + _table(["kind", "id", "criterion"], criteria) + [""]
+    lines += ["### Search strategies", ""] + _table(
+        ["id", "query", "sources", "from year", "limit"], strategies) + [""]
+    lines += ["### Screening", "",
+              f"Batch size: {_cell(screening.get('batch_size', 'default 50'))}. "
+              f"Prioritise: {_cell(screening.get('prioritise', 'default false'))}.", ""]
+    lines += ["### Appraisal", "",
+              f"Risk-of-bias tool: {_cell(appraisal.get('rob_tool'))}. GRADE: {_cell(appraisal.get('grade'))}.", ""]
+    lines += ["### Synthesis", "",
+              f"Method: {_cell(synthesis.get('method'))}. Notes: {_cell(synthesis.get('notes', 'none'))}.", ""]
+    lines += ["### Registration", ""]
+    if registration is not None:
+        lines.append(f"Registry: {_cell(registration.get('registry'))}; "
+                     f"identifier {_cell(registration.get('id', 'none'))}.")
+    else:
+        lines.append("None recorded.")
+    lines += ["", f"Living review: {_cell(review.get('living', False))}."]
+    return lines
+
+
 def render(design: dict, report, digest: str, *, power=None, guidelines=None) -> str:
     """The design.md text. `guidelines` maps a checklist id to its verification status."""
     guidelines = guidelines or {}
@@ -145,6 +176,9 @@ def render(design: dict, report, digest: str, *, power=None, guidelines=None) ->
     section("## Sample size", _sample_size_lines(design.get("sample_size"), power))
     section("## Statistical analysis plan", _sap_lines(design.get("sap")))
 
+    review = design.get("review")
+    if isinstance(review, dict):
+        section("## Review protocol", _review_lines(review))
     guides = design.get("reporting_guidelines")
     guide_lines = [f"- {_cell(g)}: verification {_cell(guidelines.get(g, 'not in config/reporting'))}"
                    for g in guides if isinstance(g, str)] if isinstance(guides, list) else []

@@ -1240,6 +1240,9 @@ def test_progress_adds_no_event_type():
         "literature.monitor",
         # Added by M-C2 t5 (identity blockers), additive.
         "review.identity_checked", "review.identity_overruled",
+        # Added by M-H t2 (systematic review), additive: the sr.* ledger.
+        "sr.retrieval", "sr.dedup_decision", "sr.screening_decision", "sr.adjudication",
+        "sr.appraisal", "sr.committed",
     }), "the vocabulary is closed by design; this panel needs no new type"
 
 

@@ -35,6 +35,8 @@ DATA_EVENTS = (
 KERNEL_EVENTS = ("network.set", "literature.snapshot", "literature.monitor")
 # Added by M-C2 t5 (identity blockers, D18), additive.
 IDENTITY_EVENTS = ("review.identity_checked", "review.identity_overruled")
+SR_EVENTS = ("sr.retrieval", "sr.dedup_decision", "sr.screening_decision", "sr.adjudication",
+             "sr.appraisal", "sr.committed")  # M-H t2: additive, permitted pin (plan section 3)
 HUMAN_KINDS = ("review-blocker", "scite-consent")
 
 # The vocabulary before ticket 04 (must survive unchanged).
@@ -161,7 +163,7 @@ def test_cli_opens_every_review_kind(tmp_path, monkeypatch):
 def test_event_vocabulary_is_additive():
     assert OLD_EVENT_TYPES <= events.TYPES
     assert events.TYPES == (OLD_EVENT_TYPES | set(REVIEW_EVENTS) | set(DATA_EVENTS) | set(KERNEL_EVENTS)
-                            | set(IDENTITY_EVENTS))
+                            | set(IDENTITY_EVENTS) | set(SR_EVENTS))
 
 
 @pytest.mark.parametrize("type_", REVIEW_EVENTS)

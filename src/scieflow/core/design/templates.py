@@ -52,6 +52,24 @@ def template(study_type: str, title: str) -> str:
               "  multiplicity: {method: none, alpha: 0.05}"]
     if not comp:
         lines.append("  missing_data: {strategy: TODO}")
-        lines.append("reporting_guidelines: [TODO]")
+        guideline = "prisma-2020" if study_type == "systematic-review" else "TODO"
+        lines.append(f"reporting_guidelines: [{guideline}]")
+    if study_type == "systematic-review":
+        lines += _review_skeleton()
     lines.append("data: {levels_needed: [L0]}")
     return "\n".join(lines) + "\n"
+
+
+def _review_skeleton() -> list:
+    """The M-H review block with TODO values only (plan 5.2 template)."""
+    return ["review:", "  framework: TODO",
+            "  eligibility:",
+            "    include: [{id: i1, text: TODO}]",
+            "    exclude: [{id: e1, text: TODO}]",
+            "  strategies:",
+            "    - {id: s1, query: TODO, sources: [openalex, europepmc]}",
+            "  screening: {batch_size: 50}",
+            "  appraisal: {rob_tool: TODO, grade: true}",
+            "  synthesis: {method: TODO}",
+            "  living: false"]
+

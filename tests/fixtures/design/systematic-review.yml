@@ -1,0 +1,34 @@
+# Synthetic systematic-review design (M-H t2). No patient data; every value is a placeholder.
+version: 1
+title: "Synthetic systematic review fixture"
+study_type: systematic-review
+question: "Synthetic review question for protocol tests"
+pico:
+  population: "Synthetic adults"
+  intervention: "Synthetic exposure"
+  comparator: "Synthetic comparator"
+  outcome: "Synthetic outcome"
+  timeframe: "Synthetic timeframe"
+variables:
+  - {id: outcome_var, name: "Synthetic outcome", role: outcome, type: binary}
+sap:
+  estimands:
+    - {id: primary_estimand, outcome: primary_outcome, population: "Synthetic adults", summary_measure: "risk ratio"}
+  outcomes:
+    - {id: primary_outcome, variable: outcome_var, priority: primary, test: descriptive, metric: sr_primary}
+  multiplicity: {method: none, alpha: 0.05}
+  missing_data: {strategy: not-applicable}
+reporting_guidelines: [prisma-2020]
+data: {levels_needed: [L0]}
+review:
+  framework: pico
+  eligibility:
+    include: [{id: i1, text: "Synthetic inclusion criterion"}]
+    exclude: [{id: e1, text: "Synthetic exclusion criterion"}, {id: e2, text: "Synthetic second exclusion"}]
+  strategies:
+    - {id: s1, query: "synthetic protocol query", sources: [openalex, europepmc], from_year: 2000, limit: 200}
+  screening: {batch_size: 50, prioritise: false}
+  appraisal: {rob_tool: robins-i, grade: true}
+  synthesis: {method: narrative, notes: "synthetic"}
+  registration: {registry: prospero, id: "CRD42000000000"}
+  living: false
