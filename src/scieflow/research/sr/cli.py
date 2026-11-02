@@ -17,14 +17,16 @@ from typing import NoReturn
 
 import click
 
-from scieflow.core import events
+from scieflow.core import events, network, sanitize
 from scieflow.core.config import repo_root
 from scieflow.core.design import lock
 from scieflow.core.project import Project, ProjectError
-from scieflow.research.sr import ledger, protocol
+from scieflow.research.search import registry
+from scieflow.research.sr import ledger, protocol, records, search
 from scieflow.research.sr.errors import SRError
 
 OK, REFUSED, USAGE = 0, 1, 2
+REFUSED_QUERY = 3   # a query the leak check refuses (plan 5.5 step 2): nothing was sent
 
 
 def _fail(code: int, message: str) -> NoReturn:
@@ -134,3 +136,49 @@ def status_cmd(slug: str, as_json: bool) -> None:
         lines.append("uncommitted operations (not read): " + ", ".join(map(str, doc["uncommitted"])))
     lines += [f"problem: {p}" for p in doc["problems"]]
     _emit(as_json, doc, lines)
+
+
+@sr.command("search")
+@click.argument("slug")
+@click.option("--network", "network_mode", type=click.Choice(network.MODES), default=None,
+              help="This run's network mode for the round; a flag can tighten it, never loosen it.")
+@click.option("--as-agent", is_flag=True, help="Record the round as written by an agent.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def search_cmd(slug: str, network_mode: str | None, as_agent: bool, as_json: bool) -> None:
+    """Run the next search round of the locked protocol (exit 3 refused query, 1 refused or partial)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        outcome = search.run_round(project, ws, slug=slug, network_mode=network_mode, as_agent=as_agent)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    except registry.LeakError as exc:
+        _fail(REFUSED_QUERY, str(exc))
+    if not outcome.ok:
+        rows = [f"{row['source']}: {row['status']}" for row in outcome.summary.get("statuses", [])
+                if row["status"] != "ok"]
+        _fail(outcome.exit_code, "round not written; sources that did not answer: " + ", ".join(rows))
+    doc = sanitize.sanitize_json_strings(outcome.summary)
+    lines = [f"round {doc['round']}: identified {doc['identified']}, duplicates {doc['duplicates']}, "
+             f"new records {doc['new_records']}"]
+    lines += [f"warning: {w}" for w in doc["warnings"]]
+    _emit(as_json, doc, lines)
+
+
+@sr.command("records")
+@click.argument("slug")
+@click.option("--round", "round_no", type=int, default=None, help="Only this committed search round.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def records_cmd(slug: str, round_no: int | None, as_json: bool) -> None:
+    """The corpus: records of the committed search rounds, in round order."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        rows = sanitize.sanitize_json_strings(records.read_records(ws, round_no))
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    if as_json:
+        click.echo(json.dumps(rows, indent=2, sort_keys=True, ensure_ascii=False))
+        return
+    for row in rows:
+        click.echo(f"{row['id']}  {row.get('doi') or '-'}  {row.get('title') or ''}")
