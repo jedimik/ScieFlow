@@ -704,3 +704,60 @@ def test_a_broken_campaign_file_exits_one_with_a_rule_not_a_traceback(fake, tmp_
     assert isinstance(result.exception, SystemExit), repr(result.exception)  # a message, not a crash
     assert "rule campaign-" in result.output
     assert len(fake.calls) == calls  # refused before any transport call
+
+
+def test_a_linked_remote_folder_is_refused_before_any_marker_is_read(fake, tmp_path):
+    # M-D3 final review r1 finding 1 (plan 5.12.5): nothing reads through a fetched link, not even remote/
+    p = rs.make_project(tmp_path, n_gains=1)
+    assert sweep(p).exit_code == 0
+    fake.statuses = {job_id(0): "qstat-F-0.txt"}
+    rid = run_ids(p)[0]
+    run = remote_run(fake.fs, rid)
+    elsewhere = tmp_path / "elsewhere-remote"
+    elsewhere.mkdir()
+    (elsewhere / "exit").write_text("0\n")
+    (elsewhere / "started").write_text("2020-01-01T00:00:00+00:00\n")
+    (elsewhere / "environment.txt").write_text("system=LEAKSYS\nmachine=LEAKMACH\nruntime=LEAKRT\n")
+    shutil.rmtree(run / "remote")
+    (run / "remote").symlink_to(elsewhere)
+
+    assert watch(p, "--once").exit_code == 0
+    local = local_run(p, rid)
+    assert config_of(local)["reason"] == "fetched-symlink"
+    assert results(p)["runs"][0]["status"] == "failed"
+    written = "".join((local / name).read_text() for name in ("config.yaml", "environment.json", "manifest.json"))
+    for leaked in ("LEAKSYS", "LEAKMACH", "LEAKRT", "2020-01-01"):
+        assert leaked not in written
+
+
+def test_read_markers_does_not_read_through_a_linked_remote_folder(tmp_path):
+    # M-D3 final review r1 finding 1: the reader itself refuses a linked remote/ folder (defence in depth)
+    from scieflow.experiments import remote_bundle
+
+    elsewhere = tmp_path / "elsewhere-remote"
+    elsewhere.mkdir()
+    (elsewhere / "exit").write_text("0\n")
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "remote").symlink_to(elsewhere)
+
+    markers = remote_bundle.read_markers(run, "2026-11-02T10:00:00+00:00")
+    assert markers.exit_code is None
+    assert markers.system is None and markers.machine is None and markers.runtime is None
+
+
+def test_watch_refuses_a_local_campaign_folder_with_a_rule_not_a_traceback(fake, tmp_path):
+    # M-D3 final review r1 finding 2: a local campaign has no remote; watch refuses it, it does not crash
+    p = rs.make_project(tmp_path, n_gains=1)
+    assert sweep(p).exit_code == 0
+    doc = yaml.safe_load((p.campaign_dir / "campaign.yaml").read_text())
+    doc["backend"] = "local"
+    doc.pop("remote", None)
+    doc.pop("resources", None)
+    (p.campaign_dir / "campaign.yaml").write_text(yaml.safe_dump(doc))
+
+    result = watch(p, "--once")
+    assert result.exit_code == 1
+    assert "not-remote" in result.output
+    assert "Traceback" not in result.output
+    assert isinstance(result.exception, SystemExit)
