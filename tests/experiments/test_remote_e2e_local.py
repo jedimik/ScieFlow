@@ -47,6 +47,7 @@ def campaign_doc(name: str, *, backend: str | None, remote_name: str, remote_dir
                  replicates, jobs: str | None = None, configs: int = 2) -> dict:
     doc = {
         "name": name, "pipeline": "demo", "stage": "scale", "input": "../data/in.txt",
+        "reference": "../data/in.txt",  # metrics are computed for real on both sides (review r1 finding 4)
         "parameters": {"gain": {"grid": [0.5, 1.0, 1.5][:configs]}}, "metrics": ["score"],
         "replicates": replicates,
     }
@@ -56,6 +57,13 @@ def campaign_doc(name: str, *, backend: str | None, remote_name: str, remote_dir
             block["jobs"] = jobs
         doc = {"backend": backend, "remote": block} | doc
     return doc
+
+
+# The metric the e2e campaign asks for: a pure-Python function in the pipeline's metrics folder (5.9).
+SCORE_METRIC = ("from pathlib import Path\n"
+                "def score(output, reference):\n"
+                "    return float(len(Path(output).read_text()) - len(Path(reference).read_text()))\n"
+                "METRICS = {'score': (score, True)}\n")
 
 
 def make(tmp_path, *, replicates, jobs=None, limits=None):
@@ -70,6 +78,9 @@ def make(tmp_path, *, replicates, jobs=None, limits=None):
     stage_dir = p.root / "pipelines" / "demo" / "stages" / "scale"
     (stage_dir / "stage.yaml").write_text(STAGE_YAML)
     (stage_dir / "run.py").write_text(ACCEPTS_SEED_STAGE)
+    metrics_dir = p.root / "pipelines" / "demo" / "metrics"
+    metrics_dir.mkdir(parents=True)
+    (metrics_dir / "score.py").write_text(SCORE_METRIC)
     p.campaign.write_text(yaml.safe_dump(campaign_doc(
         "gain-sweep", backend="remote", remote_name="local", remote_dir=str(allowed),
         replicates=replicates, jobs=jobs)))
@@ -119,6 +130,13 @@ def run_entries(path: Path) -> list[dict]:
     return json.loads((path / "results.json").read_text())["runs"]
 
 
+def run_files(run: Path) -> list[str]:
+    """Every file of a run folder. The remote/ folder (SHA256SUMS, exit, markers) exists only on the
+    remote side by design (plan 5.3), so it is left out of the comparison."""
+    return sorted(f.relative_to(run).as_posix() for f in run.rglob("*")
+                  if f.is_file() and f.relative_to(run).parts[0] != "remote")
+
+
 def test_a_remote_local_adapter_campaign_has_the_same_results_shape_as_a_local_one(tmp_path, sessions):
     p, _allowed, local = make(tmp_path, replicates={"n": 2, "seed": 3})
     sessions["p"] = p
@@ -144,6 +162,15 @@ def test_a_remote_local_adapter_campaign_has_the_same_results_shape_as_a_local_o
         for name in ("artifacts/result.txt",):
             assert (remote_dir / "runs" / a["run_id"] / name).read_bytes() == \
                    (local_dir / "runs" / a["run_id"] / name).read_bytes()
+    for a in remote_runs:
+        assert set(a["metrics"]) == {"score"}, a["metrics"]  # computed on both sides, not vacuous
+        remote_run_dir = remote_dir / "runs" / a["run_id"]
+        local_run_dir = local_dir / "runs" / a["run_id"]
+        assert run_files(remote_run_dir) == run_files(local_run_dir)
+        remote_cfg = yaml.safe_load((remote_run_dir / "config.yaml").read_text())
+        local_cfg = yaml.safe_load((local_run_dir / "config.yaml").read_text())
+        assert list(remote_cfg) == list(local_cfg) + ["backend", "remote"]
+        assert (remote_run_dir / "metrics.json").read_bytes() == (local_run_dir / "metrics.json").read_bytes()
     remote_csv = (remote_dir / "results.csv").read_text().splitlines()[0]
     local_csv = (local_dir / "results.csv").read_text().splitlines()[0]
     assert remote_csv == local_csv

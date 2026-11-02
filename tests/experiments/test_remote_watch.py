@@ -461,7 +461,6 @@ def test_the_json_document_after_one_pass(fake, tmp_path):
 
     result = watch(p, "--once", "--json")
     assert result.exit_code == 4, result.output
-    assert result.exit_code == 4, result.output
     doc = json.loads([line for line in result.output.splitlines() if line.startswith("{")][-1])
     assert doc["campaign"] == "gain-sweep" and doc["campaign_id"] == CID
     assert doc["state"] == "running" and doc["complete"] is False
@@ -500,3 +499,167 @@ def test_a_tampered_remote_json_is_refused_before_any_transport_call(fake, tmp_p
     assert result.exit_code == 1
     assert "remote-state-invalid" in result.output
     assert len(fake.calls) == calls
+
+
+# ---- 8. M-D3 t4 fix (review r1): fetched metrics are never read, links are never followed (5.9, 5.12) ----
+
+
+def score_metric(p):
+    """A real registered metric (the pipeline's metrics folder, as in 5.9); reads the two files it is given."""
+    folder = p.root / "pipelines" / "demo" / "metrics"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "score.py").write_text(
+        "from pathlib import Path\n"
+        "def score(output, reference):\n"
+        "    return float(len(Path(output).read_text()) - len(Path(reference).read_text()))\n"
+        "METRICS = {'score': (score, True)}\n")
+
+
+@pytest.mark.parametrize("rc", [0, 3], ids=["completed", "failed"])
+def test_a_fetched_metrics_file_is_never_read_into_results(fake, tmp_path, rc):
+    p = rs.make_project(tmp_path, n_gains=1)
+    assert sweep(p).exit_code == 0
+    fake.statuses = {job_id(0): "qstat-F-0.txt"}
+    rid = run_ids(p)[0]
+    run = remote_run(fake.fs, rid, rc=rc)
+    (run / "metrics.json").write_text(json.dumps({"score": 999}))  # root level: outside the checksum list
+
+    assert watch(p, "--once").exit_code == 0
+    entry = results(p)["runs"][0]
+    assert entry["status"] == ("completed" if rc == 0 else "failed")
+    assert entry["metrics"] == {}
+    assert not (local_run(p, rid) / "metrics.json").exists()
+
+
+def test_a_fetched_metrics_symlink_is_never_read_through(fake, tmp_path):
+    p = rs.make_project(tmp_path, n_gains=1)
+    assert sweep(p).exit_code == 0
+    fake.statuses = {job_id(0): "qstat-F-0.txt"}
+    rid = run_ids(p)[0]
+    run = remote_run(fake.fs, rid)
+    secret = tmp_path / "secret.json"
+    secret.write_text(json.dumps({"secret": 1}))
+    (run / "metrics.json").symlink_to(secret)
+
+    assert watch(p, "--once").exit_code == 0
+    assert config_of(local_run(p, rid))["reason"] == "fetched-symlink"
+    assert results(p)["runs"][0]["metrics"] == {}
+    assert secret.read_text() == json.dumps({"secret": 1})  # the link's target is untouched
+    assert not (local_run(p, rid) / "metrics.json").is_symlink()
+
+
+WRITE_TARGETS = ["config.yaml", "environment.json", "manifest.json", "metrics.json"]
+
+
+@pytest.mark.parametrize("target", WRITE_TARGETS + [name + ".tmp" for name in WRITE_TARGETS])
+def test_a_planted_link_at_a_write_target_does_not_stop_the_pass_and_is_never_written_through(
+        fake, tmp_path, target):
+    p = rs.make_project(tmp_path, n_gains=1)
+    add_reference(p)
+    score_metric(p)
+    assert sweep(p).exit_code == 0
+    fake.statuses = {job_id(0): "qstat-F-0.txt"}
+    rid = run_ids(p)[0]
+    run = remote_run(fake.fs, rid)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep me\n")
+    (run / target).symlink_to(outside)
+
+    result = watch(p, "--once")
+    assert result.exit_code == 0, result.output
+    assert outside.read_text() == "keep me\n"
+    assert tasks(p)[0]["state"] == "finalized" and tasks(p)[0]["reason"] == "fetched-symlink"
+    entry = results(p)["runs"][0]
+    assert entry["status"] == "failed" and entry["metrics"] == {}
+    assert rs.read_remote_json(p.campaign_dir)["state"] == "complete"
+
+
+def _cancel_on_status(monkeypatch):
+    """The scheduler reports the job cancelled: cmd_status writes that state to the ledger (as for slurm)."""
+    R = remote_campaign._remote()
+
+    def cancelled(remote, t, job_id, workspace=None, **kw):
+        ledger = R.jobs.load_jobs(workspace)
+        R.jobs.set_state(ledger, job_id, "cancelled")
+        R.jobs.save_jobs(workspace, ledger)
+        return 0
+
+    monkeypatch.setattr(R.rcmd, "cmd_status", cancelled)
+
+
+@pytest.mark.parametrize("fetch_ok", [False, True], ids=["fetch-fails", "fetch-ok-no-markers"])
+def test_a_cancelled_job_without_markers_is_a_failed_run_with_its_folder(
+        fake, tmp_path, monkeypatch, fetch_ok):
+    p = rs.make_project(tmp_path, n_gains=1)
+    assert sweep(p).exit_code == 0
+    _cancel_on_status(monkeypatch)
+    rid = run_ids(p)[0]
+    remote_run(fake.fs, rid, markers=False)
+    if not fetch_ok:
+        fake.fetch_fail = {rid}
+
+    result = watch(p, "--once")
+    assert result.exit_code == 0, result.output
+    run = local_run(p, rid)
+    assert config_of(run)["status"] == "failed" and config_of(run)["reason"] == "job-cancelled"
+    assert json.loads((run / "manifest.json").read_text())["status"] == "failed"
+    assert results(p)["runs"][0]["status"] == "failed"
+    assert not (run / "metrics.json").exists()
+
+
+def test_config_yaml_has_the_local_keys_plus_backend_and_remote_and_no_user_name(fake, tmp_path):
+    p = rs.make_project(tmp_path, remote=rs.pbs_remote(user="zqremoteuser"), n_gains=1)
+    assert sweep(p).exit_code == 0
+    fake.statuses = {job_id(0): "qstat-F-0.txt"}
+    rid = run_ids(p)[0]
+    remote_run(fake.fs, rid)
+    assert watch(p, "--once").exit_code == 0
+
+    local_keys = {"campaign", "run_id", "params", "input", "reference", "output_file", "metrics",
+                  "pipeline_dir", "status", "started", "returncode", "finished"}  # runner.py:86-109
+    assert set(config_of(local_run(p, rid))) == local_keys | {"backend", "remote"}
+    for path in local_run(p, rid).rglob("*"):
+        if path.is_file():
+            assert "zqremoteuser" not in path.read_text(errors="ignore"), path.name
+            assert R not in path.read_text(errors="ignore"), path.name
+
+
+def test_the_campaign_tools_work_on_a_finished_remote_campaign_and_metrics_recompute(fake, tmp_path):
+    p = rs.make_project(tmp_path, n_gains=2)
+    add_reference(p)
+    score_metric(p)
+    assert sweep(p).exit_code == 0
+    fake.statuses = {job_id(0): "qstat-F-0.txt", job_id(1): "qstat-F-0.txt"}
+    for rid in run_ids(p):
+        remote_run(fake.fs, rid)
+    assert watch(p, "--once").exit_code == 0
+
+    for command in ("stats", "compare", "report"):
+        result = CliRunner().invoke(experiment, [command, "--include-direct", str(p.campaign_dir)])
+        assert result.exit_code == 0, (command, result.output)
+    run = local_run(p, run_ids(p)[0])
+    result = CliRunner().invoke(experiment, ["metrics", str(run)])
+    assert result.exit_code == 0, result.output
+    result = CliRunner().invoke(experiment, ["verify", str(p.campaign_dir)])
+    assert result.exit_code == 0, result.output
+    assert "note metrics-recomputed" in result.output
+
+
+@pytest.mark.parametrize("broken", ["yaml", "stage"])
+def test_a_broken_campaign_file_exits_one_with_a_rule_not_a_traceback(fake, tmp_path, broken):
+    p = rs.make_project(tmp_path, n_gains=1)
+    assert sweep(p).exit_code == 0
+    campaign_file = p.campaign_dir / "campaign.yaml"
+    if broken == "yaml":
+        campaign_file.write_text("name: [unclosed\n")
+    else:
+        doc = yaml.safe_load(campaign_file.read_text())
+        doc["stage"] = "no-such-stage"
+        campaign_file.write_text(yaml.safe_dump(doc))
+    calls = len(fake.calls)
+
+    result = watch(p, "--once")
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit), repr(result.exception)  # a message, not a crash
+    assert "rule campaign-" in result.output
+    assert len(fake.calls) == calls  # refused before any transport call
