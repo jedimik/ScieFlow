@@ -728,6 +728,14 @@ def _sums_digest(run: Path) -> str | None:
     return None
 
 
+def _written_manifest_digest(run: Path) -> str | None:
+    """The hash of the manifest.json this pass wrote as a regular file; None when it is missing or a link (5.9)."""
+    path = run / manifest.MANIFEST_FILE
+    if path.is_symlink() or not path.is_file():
+        return None
+    return manifest.file_sha256(path)
+
+
 def _judge(session: Session, run: Path, job_state: str | None, now: str):
     """(status, reason, transfer, markers) of one fetched run (plan 5.9)."""
     markers = remote_bundle.read_markers(run, now)
@@ -862,7 +870,8 @@ def _complete(session: Session, state: dict) -> None:
             entries.append({"run_id": spec.run_id, "config_id": spec.config_id,
                             "replicate": spec.replicate, "seed": spec.seed, "params": spec.params,
                             "mode": state["mode"], "status": "failed", "metrics": {},
-                            "manifest_sha256": None})
+                            "manifest_sha256": None if _linked(run, session.campaign_dir)
+                            else _written_manifest_digest(run)})
         else:
             entries.append(run_entry(spec, run, state["mode"]))
     write_results(session.campaign_dir, session.campaign, entries, state["mode"])
