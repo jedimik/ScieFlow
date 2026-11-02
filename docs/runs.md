@@ -19,11 +19,13 @@ disagree about what a run's state is.
 ## Creating a run
 
 ```bash
-uv run scieflow run init SLUG --goal FILE [--approval per-campaign|autonomous]
+uv run scieflow run init SLUG --goal FILE [--workflow research-loop|paper-draft]
+    [--approval per-campaign|autonomous]
     [--max-iterations N] [--max-experiment-runs N] [--max-wall-minutes N]
 ```
 
-Creates `workspace/<slug>/`: goal, config, status, budget and notebook — the
+By default, creates a research-loop `workspace/<slug>/`: goal, config, status,
+budget and notebook — the
 directory everything else on this page reads and writes. The browser's
 equivalent is the Start page (`/start`; see [The local web
 app](web.md#pages)) — a form for the same name, workflow, goal, approval mode
@@ -36,6 +38,68 @@ argument straight through with no check of its own, and the browser's
 guard. Either path alone now refuses the same bad names, so the two cannot
 drift apart on what a freshly created run looks like — in name, as well as
 in contents.
+
+### Native paper-draft lifecycle
+
+For a new paper workspace, name the workflow and approval mode explicitly:
+
+```bash
+uv run scieflow run init SLUG --workflow paper-draft --goal FILE --approval per-campaign
+```
+
+This creates goal/config/status, `logs/`, `tools/`, `scratch/` and a
+`run.created` event. The paper phases are `intake`, `outline`, `draft`,
+`cross-review`, `merge`, `verify`, `handoff`, initially **all pending**. Its
+status declares `workflow: paper-draft` and `slug:`; old loop statuses keep
+their `run:` identity and their unchanged four-phase vocabulary. The same
+native `show`, `mark --as-agent`, `checkpoint` and `resume` commands below
+work with papers. `advance` is loop-only and refuses to reset paper phases.
+Complete the paper protocol's intake directories separately; initialization
+does not create a manuscript, approve an outline, or authorize a dispatch.
+
+Paper creation does **not** inherit default budget limits. To create a
+budget, explicitly supply all three `--max-*` options; a partial set is
+refused. The existing budget semantics remain unchanged (including `0`
+meaning unlimited). No ledger means no budget was declared, **not** approval
+to spend, run experiments, or skip any human gate.
+
+For a prepared directory that has no native status yet, use adoption instead
+of initialization. This route never moves or replaces the workspace:
+
+```bash
+uv run scieflow run adopt SLUG --workflow paper-draft --approval per-campaign --as-agent
+# If goal.md is absent, supply an already approved source, for example:
+uv run scieflow run adopt SLUG --workflow paper-draft --approval per-campaign \
+    --goal workspace/SLUG/approval.md --as-agent
+```
+
+Adoption creates only missing `config.yml`/`goal.md` plus pending `status.yml`,
+and appends a `note.run-adopted` event. An existing goal wins even if `--goal`
+is supplied. Existing config bytes (including comments, staffing overrides
+and review settings), charter, gates/answers, inputs and budget/spend are not
+rewritten. Existing events remain a byte-identical prefix of the history.
+Status is authoritative for workflow and approval: an existing config may
+omit those keys, but contradictory values are refused. Adoption does not load
+defaults, invent a budget or accept budget-reset flags. An existing budget
+continues to gate dispatches unchanged. Choose the approval mode explicitly;
+initialization/adoption is not itself a human approval of the goal or scope.
+
+Any existing status (even empty or malformed) refuses adoption, rather than
+resetting it. Missing workspaces, conflicting config, symlinked workspace
+paths/control files and unsafe slugs are refused. Native creators/adopters
+serialize with a sibling `.<slug>.init.lock`; adoption also uses the ordinary
+control-file locks. Caught write failures attempt to roll back only newly
+created metadata and this operation's own event append, never the prepared
+directory. Unchanged history is not rewritten, and each independent cleanup
+is attempted even if another fails. A `.adoption-incomplete` retry guard is
+created before writing metadata and removed only on success or complete
+rollback. If cleanup fails, the error reports both the original failure and
+cleanup failures; the guard refuses another adoption even if no status was
+left. Inspect and reconcile partial metadata/history before manually removing
+that guard; never remove it just to bypass the refusal. Lock files may remain
+after a refusal. An uncatchable process kill or storage
+failure is not a cross-file transaction: partial metadata must be inspected,
+and an already published status stays fail-closed on retry, never auto-reset.
 
 ## The state of a run
 
