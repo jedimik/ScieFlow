@@ -9,6 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 import importlib.util
+import json
 from pathlib import Path
 
 _SUPPORT = Path(__file__).with_name("remote_support.py")
@@ -61,6 +62,17 @@ def test_pbs_per_run_golden_strings_three_runs(fake, tmp_path):
     result = sweep(p, "--direct")
     assert result.exit_code == 0, result.output
     assert fake.calls[0] == ["klist", "-s"]
+    kinds = []
+    for argv in fake.calls:
+        if argv[0] in ("klist", "rsync"):
+            kinds.append(argv[0])
+        elif "klist -s; then" in argv[-1]:
+            kinds.append("ticket")
+        elif argv[-1].startswith("mkdir -p"):
+            kinds.append("mkdir")
+        else:
+            kinds.append("qsub")
+    assert kinds == ["klist", "ticket", "mkdir", "rsync", "qsub", "qsub", "qsub"]
     ssh = fake.ssh_commands()
     assert "klist -s; then" in ssh[0]                       # the remote ticket check
     assert ssh[1] == f"mkdir -p -- {R}"
@@ -211,6 +223,12 @@ def _set(*path_and_value):
     (_set("tasks", 1, "run_id", "999_x"), "tasks"),
     (_set("tasks", 0, "job_id", "1;rm -rf"), "job_id"),
     (_set("tasks", 0, "task", "x.0"), "tasks"),
+    (_set("resources", "cpus", 4), "resources"),
+    (_set("resources", "walltime", "02:00:00"), "resources"),
+    (_set("mode", "weird"), "mode"),
+    (_set("state", "bogus"), "state"),
+    (_set("budget_recorded", 1), "budget_recorded"),
+    (_set("tasks", 0, "state", "bogus"), "tasks"),
 ])
 def test_remote_json_fields_are_checked_before_any_transport_call(tmp_path, monkeypatch,
                                                                   change, field):
@@ -232,6 +250,46 @@ def test_remote_json_fields_are_checked_before_any_transport_call(tmp_path, monk
     assert caught.value.message.startswith("remote-state-invalid: ")
     assert field in caught.value.message
     assert ok.calls == []
+
+
+def test_no_successful_submit_spends_nothing(tmp_path, monkeypatch):
+    fake = rs.FakeRemote(qsub_rc=[1, 1])
+    monkeypatch.setattr(remote_campaign, "RUNNER", fake)
+    monkeypatch.setattr(remote_campaign, "stamp", lambda: rs.STAMP)
+    p = rs.make_project(tmp_path, n_gains=2)
+    result = sweep(p, "--direct")
+    assert result.exit_code == 1, result.output
+    state = rs.read_remote_json(p.campaign_dir)
+    assert [t["state"] for t in state["tasks"]] == ["submit-failed", "submit-failed"]
+    assert state["budget_recorded"] == 0
+    assert spent(p) == 0
+    assert not [e for e in rs.read_events(p.ws) if e["type"] == "budget.recorded"]
+
+
+def test_remote_json_is_canonical_and_leaves_no_temp_file(fake, tmp_path):
+    from scieflow.experiments import manifest
+
+    p = rs.make_project(tmp_path, n_gains=1)
+    assert sweep(p, "--direct").exit_code == 0
+    raw = (p.campaign_dir / "remote.json").read_bytes()
+    assert raw == manifest.canonical_bytes(json.loads(raw))
+    assert not list(p.campaign_dir.glob("*.tmp"))
+
+
+def test_zero_budget_recorded_with_a_submitted_task_is_refused_before_any_spend(fake, tmp_path):
+    p = rs.make_project(tmp_path, n_gains=2)
+    assert sweep(p, "--direct").exit_code == 0
+    path = p.campaign_dir / "remote.json"
+    doc = json.loads(path.read_text())
+    doc["budget_recorded"] = 0  # would make a second pass spend N again
+    path.write_text(json.dumps(doc))
+    ok = rs.FakeRemote()
+    with pytest.raises(remote_campaign.RemoteError) as caught:
+        remote_campaign.resume_submission(p.campaign_dir, p.ws, runner=ok)
+    assert caught.value.rule == "remote-state-invalid"
+    assert "budget_recorded" in caught.value.message
+    assert ok.calls == []
+    assert spent(p) == 2
 
 
 def test_core_job_is_a_remote_job_that_cannot_be_cancelled(fake, tmp_path):

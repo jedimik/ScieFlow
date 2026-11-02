@@ -11,6 +11,15 @@ def post(client, path, **form):
     return client.post(path, data={auth.CSRF_FIELD: token, **form}, follow_redirects=False)
 
 
+def test_the_job_page_of_a_remote_job_renders_its_log(client, project):
+    ws = project.root / "workspace" / "r1"
+    job = jobs.record_external(project, kind="remote", label="gain-sweep on meta",
+                               run_dir=ws, argv=["scieflow", "experiment", "watch", "x"], cwd=ws)
+    jobs.append_log(job, "counts: pending=0 submitted=2")
+    body = client.get(f"/runs/r1/jobs/{job.id}").text
+    assert "counts: pending=0 submitted=2" in body
+
+
 def test_remote_job_row_shows_running_and_cancel_says_why(client, project):
     ws = project.root / "workspace" / "r1"
     job = jobs.record_external(project, kind="remote", label="gain-sweep on meta",
