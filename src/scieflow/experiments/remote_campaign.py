@@ -14,6 +14,7 @@ import functools
 import io
 import os
 import posixpath
+import shutil
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -37,6 +38,9 @@ STATE_VERSION = 1
 JOB_SCRIPT = "job.sh"
 CHECK_OPS = ("check", "mkdir", "rsync", "fetch")
 SCHEDULER_OPS = ("submit", "status")
+MODES = ("direct", "apptainer")
+CAMPAIGN_STATES = ("staged", "pushed", "submitting", "running", "complete")  # plan 5.6
+TASK_STATES = ("pending", "submitted", "submit-failed", "finalized")
 
 
 class RemoteError(Exception):
@@ -229,6 +233,7 @@ def preflight(campaign: Campaign, stage: Stage, campaign_dir: Path, run_dir: Pat
     _push_check(root, session.bundle, remote.name)
     if stage is not None:
         _refuse_links(stage.dir, "stage folder")
+    _refuse_links(campaign.input, "input")  # plan 5.4 step 9: before any write, before the ticket
     session.t = R.transport.for_remote(remote, runner if runner is not None else RUNNER)
     _ticket(session)
     return session
@@ -267,6 +272,12 @@ def _save(session: Session, state: dict) -> None:
     manifest.atomic_write(session.campaign_dir / STATE_FILE, manifest.canonical_bytes(state))
 
 
+def _discard(session: Session) -> None:
+    """Remove what _start wrote before a refusal: the campaign folder and its bundle."""
+    shutil.rmtree(session.campaign_dir, ignore_errors=True)
+    shutil.rmtree(session.bundle, ignore_errors=True)
+
+
 def _start(session: Session) -> dict:
     """Write the campaign folder, the bundle and remote.json (state staged); open the core job."""
     campaign, run_dir = session.campaign, session.run_dir
@@ -280,6 +291,7 @@ def _start(session: Session) -> dict:
                                             session.mode, session.bundle,
                                             remote_root=session.remote_dir, python=session.python)
     except remote_bundle.BundleError as exc:
+        _discard(session)  # no refusal leaves a campaign folder or a bundle behind (plan 5.5)
         raise RemoteError("bundle", str(exc)) from exc
     rows = _task_rows(campaign, session.cid)
     state = {
@@ -460,6 +472,15 @@ def _validate(state: dict, campaign: Campaign, remote, runs) -> None:
         R.policy.check_dir(remote, expected)
     except R.policy.PolicyError as exc:
         raise _invalid("remote_dir", str(exc)) from exc
+    if state.get("resources") != asdict(campaign.resources):
+        raise _invalid("resources", "do not match campaign.yaml")
+    if state.get("mode") not in MODES:
+        raise _invalid("mode", f"must be one of {', '.join(MODES)}")
+    if state.get("state") not in CAMPAIGN_STATES:
+        raise _invalid("state", f"must be one of {', '.join(CAMPAIGN_STATES)}")
+    recorded = state.get("budget_recorded")
+    if isinstance(recorded, bool) or not isinstance(recorded, int) or recorded not in (0, len(runs)):
+        raise _invalid("budget_recorded", f"must be 0 or {len(runs)}")
     rows = state.get("tasks")
     if not isinstance(rows, list) or len(rows) != len(runs):
         raise _invalid("tasks", "do not match the campaign's runs")
@@ -480,6 +501,11 @@ def _validate(state: dict, campaign: Campaign, remote, runs) -> None:
                 R.policy.check_token(job_id, "job id")
             except R.policy.PolicyError as exc:
                 raise _invalid("job_id", str(exc)) from exc
+        if row.get("state") not in TASK_STATES:
+            raise _invalid("tasks", f"row {k} state must be one of {', '.join(TASK_STATES)}")
+    submitted = any(row.get("state") == "submitted" for row in rows)
+    if submitted and recorded != len(runs):  # the spend is recorded once, at the first accepted job
+        raise _invalid("budget_recorded", f"must be {len(runs)} once a task is submitted")
 
 
 def resume_submission(campaign_dir, run_dir, *, runner=None) -> Outcome:
