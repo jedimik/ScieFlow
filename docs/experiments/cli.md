@@ -37,6 +37,41 @@ its seeds; run ids are `<config>_r<k>`, and each run records its replicate
 and seed. The budget pre-check counts configurations × replicates and refuses
 before any run starts. The sweep records its runs in the budget.
 
+With `backend: remote` in the campaign (and a `remote:` block naming a remote
+from `config/remotes.yml`), `sweep` does not run anything here. It runs the
+preflight, writes the campaign folder and a bundle, pushes them to the remote,
+submits the jobs, records the budget once (N runs, at the first accepted job)
+and exits without waiting. It prints the `scieflow experiment watch` command to
+collect the campaign. Exit `0` when at least one job was submitted or the
+concurrency limit held the rest; exit `1` when the push failed or nothing could
+be submitted. Refusals name a rule and write nothing. See
+[Remote campaigns](remote-campaigns.md).
+
+## scieflow experiment watch
+
+```bash
+scieflow experiment watch <campaign_dir> [--once] [--interval S] [--max-minutes M] [--json]
+```
+
+Collects a `backend: remote` campaign. Each pass re-validates `remote.json`,
+asks the scheduler about each job, fetches and checks each finished run
+(`SHA256SUMS`), writes its results, and submits pending runs as slots free up.
+When every run is finished, it writes `results.json` and `results.csv` and exits
+`0`.
+
+- `--once`: one pass, then exit. Exit `0` complete, exit `4` still running (wait
+  and run `watch` again), exit `1` refused or failed.
+- `--interval S`: seconds between passes, 5 to 3600 (default 60).
+- `--max-minutes M`: stop waiting after M minutes, 1 to 1440 (default 60); then
+  exit `4`.
+- `--json`: print one JSON summary after the last pass.
+
+`NO_TICKET` (exit `1`) means the Kerberos ticket is missing: ask the user to run
+`kinit`, then run `watch` again. Nothing is changed by a refused pass. Failed
+runs stay in the results with their reason; `watch` never resubmits them and
+never cancels a job. The failure reasons and the full rules are in
+[Remote campaigns](remote-campaigns.md).
+
 ## scieflow experiment metrics
 
 ```bash
