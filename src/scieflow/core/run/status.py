@@ -40,16 +40,27 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def new_status(run: str, approval: str) -> dict:
+def phases_for(workflow: str = "research-loop", schema: dict | None = None) -> list[str]:
+    """A workflow's ordered phases; absent workflow on old status means loop."""
+    schema = vocab() if schema is None else schema
+    if workflow == "research-loop":
+        return list(schema["phases"])
+    if workflow not in schema.get("workflows", {}):
+        raise ValueError(f"unknown workflow: {workflow}")
+    return list(schema["workflows"][workflow])
+
+
+def new_status(run: str, approval: str, workflow: str = "research-loop") -> dict:
     if approval not in vocab()["approval_modes"]:
         raise ValueError(f"approval must be one of {sorted(vocab()['approval_modes'])}")
     return {
-        "run": run,
+        **({"run": run} if workflow == "research-loop" else
+           {"workflow": workflow, "slug": run}),
         "id": store.new_id(),
         "created": _now(),
         "approval": approval,
         "iteration": 1,
-        "phases": {p: "pending" for p in vocab()["phases"]},
+        "phases": {p: "pending" for p in phases_for(workflow)},
         "stopped": None,
     }
 
@@ -71,7 +82,7 @@ def ensure_id(ws: Path) -> str:
 
 
 def mark(st: dict, phase: str, state: str) -> dict:
-    if phase not in vocab()["phases"]:
+    if phase not in phases_for(st.get("workflow", "research-loop")):
         raise ValueError(f"unknown phase: {phase}")
     if state not in vocab()["states"]:
         raise ValueError(f"unknown state: {state}")
@@ -81,18 +92,24 @@ def mark(st: dict, phase: str, state: str) -> dict:
 
 def next_pending(st: dict) -> str | None:
     """First phase of the current iteration not marked done; None if all done."""
-    for p in vocab()["phases"]:
+    for p in phases_for(st.get("workflow", "research-loop")):
         if st["phases"][p] != "done":
             return p
     return None
 
 
 def advance_iteration(st: dict) -> dict:
+    require_loop(st)
     if next_pending(st) is not None:
         raise ValueError("cannot advance: current iteration has unfinished phases")
     st["iteration"] += 1
     st["phases"] = {p: "pending" for p in vocab()["phases"]}
     return st
+
+
+def require_loop(st: dict) -> None:
+    if st.get("workflow", "research-loop") != "research-loop":
+        raise ValueError("only research-loop runs can advance iterations")
 
 
 def stop(st: dict, reason: str, detail: str = "", resume: str = "") -> dict:
