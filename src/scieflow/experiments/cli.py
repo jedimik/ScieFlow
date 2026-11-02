@@ -173,6 +173,14 @@ def _guard_capacity(run_dir: Path | None, planned: int) -> None:
         f"{remaining} remain — propose a smaller campaign or ask the user to raise the budget")
 
 
+def _sweep_guards(budget_run: Path | None, campaign: Campaign, planned: int) -> None:
+    """The guards every sweep passes before anything runs or spends, local and remote alike (M-D3 t3)."""
+    _guard(budget_run)
+    _design_guard(budget_run, campaign)
+    _analysis_guard(budget_run, campaign)
+    _guard_capacity(budget_run, planned)
+
+
 def _remote_refused(run_dir: Path | None, campaign, err) -> click.ClickException:
     """A remote refusal: one job.refused (reason remote) in the run, then a message; nothing ran."""
     if run_dir is not None:
@@ -190,10 +198,7 @@ def _remote_sweep(campaign, stage, experiments_dir, direct: bool) -> None:
         remote_campaign.check_location(budget_run, campaign_dir)
     except remote_campaign.RemoteError as e:
         raise _remote_refused(budget_run, campaign, e) from e
-    _guard(budget_run)
-    _design_guard(budget_run, campaign)
-    _analysis_guard(budget_run, campaign)
-    _guard_capacity(budget_run, len(campaign.expand()))
+    _sweep_guards(budget_run, campaign, len(campaign.expand()))
     try:
         session = remote_campaign.preflight(campaign, stage, campaign_dir, budget_run, mode,
                                             runner=remote_campaign.RUNNER)
@@ -273,10 +278,7 @@ def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
         _remote_sweep(campaign, stage, experiments_dir, direct)
         return
     budget_run = _budget_run(experiments_dir)
-    _guard(budget_run)
-    _design_guard(budget_run, campaign)
-    _analysis_guard(budget_run, campaign)
-    _guard_capacity(budget_run, len(campaign.expand()))
+    _sweep_guards(budget_run, campaign, len(campaign.expand()))
     results_path = run_sweep(
         campaign, stage, experiments_dir, mode="direct" if direct else "apptainer"
     )
