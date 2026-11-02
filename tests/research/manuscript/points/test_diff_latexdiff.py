@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -161,6 +162,46 @@ def test_output_over_20_mb_is_refused(pair, monkeypatch):
     found(monkeypatch)
     big = b"%" * (20 * 1024 * 1024 + 1)
     monkeypatch.setattr(diff_mod.subprocess, "run", completed(stdout=big))
+    with pytest.raises(diff_mod.DiffError) as caught:
+        diff_mod.diff(pair.run_dir, "v1", "current")
+    assert caught.value.rule == "latexdiff-output"
+    assert not (pair.run_dir / "report" / "diff" / "v1..current" / "diff.tex").exists()
+    assert not any(scratch(pair).glob("latexdiff.*"))
+
+
+@pytest.mark.parametrize("name", [diff_mod.OUT_NAME, diff_mod.ERR_NAME])
+def test_a_planted_link_at_a_latexdiff_output_is_refused_and_the_victim_is_untouched(pair, monkeypatch, tmp_path,
+                                                                                   name):
+    found(monkeypatch)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me\n", encoding="utf-8")
+    assert pair.run_dir.resolve() not in victim.resolve().parents
+    scratch(pair).mkdir(parents=True, exist_ok=True)
+    (scratch(pair) / name).symlink_to(victim)
+    monkeypatch.setattr(diff_mod.subprocess, "run", completed(stdout=b"PATCHED\n", stderr=b"PATCHED\n"))
+    with pytest.raises(diff_mod.DiffError) as caught:
+        diff_mod.diff(pair.run_dir, "v1", "current")
+    assert caught.value.rule == "symlink"
+    assert name in caught.value.message
+    assert victim.read_text(encoding="utf-8") == "keep me\n"
+    assert not (pair.run_dir / "report" / "diff" / "v1..current").exists()
+
+
+def test_latexdiff_runs_under_a_file_size_limit_of_the_output_cap_plus_one_byte(pair, monkeypatch):
+    found(monkeypatch)
+    probe = ("import resource, sys; soft = resource.getrlimit(resource.RLIMIT_FSIZE)[0]; "
+             "sys.stderr.write('FSIZE=%d' % soft); sys.exit(1)")
+    monkeypatch.setattr(diff_mod, "LATEXDIFF_ARGV", [sys.executable, "-c", probe])
+    with pytest.raises(diff_mod.DiffError) as caught:
+        diff_mod.diff(pair.run_dir, "v1", "current")
+    assert caught.value.rule == "latexdiff-failed"
+    assert f"FSIZE={diff_mod.LATEXDIFF_STDOUT_CAP + 1}" in caught.value.message
+
+
+def test_output_written_past_the_cap_while_latexdiff_runs_is_refused_and_leaves_nothing(pair, monkeypatch):
+    found(monkeypatch)
+    probe = f"import sys; sys.stdout.write('%' * {diff_mod.LATEXDIFF_STDOUT_CAP + 1024 * 1024})"
+    monkeypatch.setattr(diff_mod, "LATEXDIFF_ARGV", [sys.executable, "-c", probe])
     with pytest.raises(diff_mod.DiffError) as caught:
         diff_mod.diff(pair.run_dir, "v1", "current")
     assert caught.value.rule == "latexdiff-output"
