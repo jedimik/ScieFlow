@@ -29,6 +29,11 @@ scripts/ci-tests.sh
 
 Extra arguments go to pytest, for example `scripts/ci-tests.sh --junitxml=junit.xml`.
 
+The script makes the test process hermetic before it starts pytest. It sets
+`TMPDIR` to a fresh directory under `/var/tmp`, because the sandbox tests mount a
+private tmpfs on `/tmp`, and it removes `claude`, `codex` and `agy` from `PATH`,
+so a developer machine with agent CLIs installed runs the same as CI.
+
 ## Static checks of the gate
 
 `tests/test_ci_workflow.py` reads the workflow, the script and `pyproject.toml`

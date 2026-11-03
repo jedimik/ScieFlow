@@ -150,6 +150,13 @@ def script_violations(text: str, mode: int, pyproject_text: str) -> list[str]:
     # 7. script expression equals pyproject addopts expression
     if _marker_expression(text) != _addopts_expression(pyproject_text):
         out.append("check7: script marker expression differs from pyproject addopts")
+
+    # 8. hermetic test environment: TMPDIR outside /tmp (the sandbox mounts a
+    #    private tmpfs on /tmp) and no agent CLI on the test process PATH
+    if 'mktemp -d /var/tmp/' not in text or 'TMPDIR="$TEST_TMP"' not in text:
+        out.append("check8: script does not point TMPDIR outside /tmp")
+    if "for c in claude codex agy" not in text:
+        out.append("check8: script does not strip claude, codex and agy from PATH")
     return out
 
 
@@ -243,6 +250,16 @@ def test_negative_non_executable_script_is_detected():
 def test_negative_expression_drift_is_detected():
     bad = _sh().replace(MARKER_EXPR, "not slow and not live", 1)
     assert any("check7" in v or "check6" in v for v in script_violations(bad, 0o755, _pp()))
+
+
+def test_negative_tmpdir_inside_tmp_is_detected():
+    bad = _sh().replace('TMPDIR="$TEST_TMP"', "", 1)
+    assert any("check8" in v for v in script_violations(bad, 0o755, _pp()))
+
+
+def test_negative_agent_cli_on_path_is_detected():
+    bad = _sh().replace("for c in claude codex agy", "for c in none", 1)
+    assert any("check8" in v for v in script_violations(bad, 0o755, _pp()))
 
 
 def test_negative_unnegated_marker_is_detected():
