@@ -22,7 +22,7 @@ from scieflow.core.config import repo_root
 from scieflow.core.design import lock
 from scieflow.core.project import Project, ProjectError
 from scieflow.research.search import registry
-from scieflow.research.sr import ledger, protocol, records, search
+from scieflow.research.sr import ledger, protocol, records, screening, search
 from scieflow.research.sr.errors import SRError
 
 OK, REFUSED, USAGE = 0, 1, 2
@@ -182,3 +182,97 @@ def records_cmd(slug: str, round_no: int | None, as_json: bool) -> None:
         return
     for row in rows:
         click.echo(f"{row['id']}  {row.get('doi') or '-'}  {row.get('title') or ''}")
+
+
+@sr.group(name="screen")
+def screen_group() -> None:
+    """Dual screening: prepare a batch, import the two screeners' outputs, status."""
+
+
+@screen_group.command("prepare")
+@click.argument("slug")
+@click.option("--stage", required=True, type=click.Choice(screening.STAGES))
+@click.option("--size", type=int, default=None, help="Records in the batch (default review.screening.batch_size).")
+@click.option("--prioritise/--no-prioritise", default=None,
+              help="Reorder the queue by similarity to included records (order only, nothing dropped).")
+@click.option("--as-agent", is_flag=True, help="Record the operation as written by an agent.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def screen_prepare(slug: str, stage: str, size: int | None, prioritise: bool | None,
+                   as_agent: bool, as_json: bool) -> None:
+    """Write one batch and its two prompts (nothing is dispatched)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = screening.prepare(project, ws, stage=stage, size=size, prioritise=prioritise, as_agent=as_agent)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    lines = [f"batch {doc['batch']} ({stage}): {len(doc['record_ids'])} records for {', '.join(doc['screeners'])}"]
+    lines += [f"warning: {w}" for w in doc["warnings"]]
+    lines += [f"prompt: workspace/{slug}/{p}" for p in doc["prompts"]]
+    _emit(as_json, doc, lines)
+
+
+@screen_group.command("import")
+@click.argument("slug")
+@click.option("--stage", required=True, type=click.Choice(screening.STAGES))
+@click.option("--batch", "batch_id", required=True, help="The prepared batch id.")
+@click.option("--as-agent", is_flag=True, help="Record the operation as written by an agent.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def screen_import(slug: str, stage: str, batch_id: str, as_agent: bool, as_json: bool) -> None:
+    """Import both screeners' outputs together, after every check passes (exit 1 otherwise)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = screening.import_batch(project, ws, stage=stage, batch=batch_id, as_agent=as_agent)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    _emit(as_json, doc, [f"imported batch {doc['batch']}: {doc['decisions']} decisions committed"])
+
+
+@screen_group.command("status")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def screen_status_cmd(slug: str, as_json: bool) -> None:
+    """Per stage: decided by both, disagreements, open batches, verdict counts and kappa (derived)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = screening.screen_status(project, ws)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    doc = sanitize.sanitize_json_strings(doc)
+    lines = [f"corpus {doc['corpus']} records; screeners: {', '.join(doc['screeners'] or []) or 'none'}"]
+    if doc["problem"]:
+        lines.append(f"problem: {doc['problem']}")
+    for stage, row in doc["stages"].items():
+        lines.append(f"{stage}: decided by both {row['decided_by_both']}, disagreements {row['disagreements']}, "
+                     f"open batches {len(row['open_batches'])}, verdicts {row['verdicts']}")
+    _emit(as_json, doc, lines)
+
+
+@sr.command("kappa")
+@click.argument("slug")
+@click.option("--stage", required=True, type=click.Choice(screening.STAGES))
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def kappa_cmd(slug: str, stage: str, as_json: bool) -> None:
+    """Cohen's kappa between the two screeners, derived from the committed decisions."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = screening.kappa(ws, stage)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    lines = [f"n = {doc['n']}"]
+    if doc["table"]:
+        cats = sorted(set(doc["table"]) | {c for row in doc["table"].values() for c in row})
+        lines.append(f"rows {doc['screener_ids'][0]}, columns {doc['screener_ids'][-1]}: " + ", ".join(cats))
+        for row_cat in cats:
+            lines.append(f"  {row_cat}: " + "  ".join(str(doc["table"].get(row_cat, {}).get(c, 0)) for c in cats))
+    if doc["kappa"] is not None:
+        lines.append(f"observed {doc['observed_agreement']:.6f}, expected {doc['expected_agreement']:.6f}, "
+                     f"kappa {doc['kappa']:.6f}")
+    else:
+        lines.append("kappa undefined")
+    if doc["note"]:
+        lines.append(f"note: {doc['note']}")
+    _emit(as_json, doc, lines)
