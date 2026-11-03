@@ -43,13 +43,13 @@ def run():
 @click.argument("slug")
 @click.option("--goal", type=click.Path(exists=True, dir_okay=False, path_type=Path), required=True)
 @click.option("--approval", type=click.Choice(["per-campaign", "autonomous"]))
-@click.option("--workflow", type=click.Choice(["research-loop", "paper-draft"]),
+@click.option("--workflow", type=click.Choice(["research-loop", "paper-draft", "paper-revision"]),
               default="research-loop", show_default=True)
 @click.option("--max-iterations", type=int)
 @click.option("--max-experiment-runs", type=int)
 @click.option("--max-wall-minutes", type=int)
 def init(slug, goal, approval, workflow, max_iterations, max_experiment_runs, max_wall_minutes):
-    """Create a run. Paper drafts require explicit --approval; budgets are opt-in."""
+    """Create a run. Paper runs (paper-draft, paper-revision) require explicit --approval; budgets are opt-in."""
     from scieflow.core.run.init import init_workspace
 
     project = Project.discover()
@@ -70,7 +70,7 @@ def init(slug, goal, approval, workflow, max_iterations, max_experiment_runs, ma
 
 @run.command()
 @click.argument("slug")
-@click.option("--workflow", type=click.Choice(["paper-draft"]), required=True)
+@click.option("--workflow", type=click.Choice(["paper-draft", "paper-revision"]), required=True)
 @click.option("--approval", type=click.Choice(["per-campaign", "autonomous"]), required=True)
 @click.option("--goal", type=click.Path(exists=True, dir_okay=False, path_type=Path),
               help="Source only when goal.md is absent; an existing goal is preserved.")

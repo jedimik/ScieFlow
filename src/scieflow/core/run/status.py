@@ -50,6 +50,9 @@ def phases_for(workflow: str = "research-loop", schema: dict | None = None) -> l
     return list(schema["workflows"][workflow])
 
 
+PAPER_WORKFLOWS = ("paper-draft", "paper-revision")
+
+
 def new_status(run: str, approval: str, workflow: str = "research-loop") -> dict:
     if approval not in vocab()["approval_modes"]:
         raise ValueError(f"approval must be one of {sorted(vocab()['approval_modes'])}")
