@@ -27,10 +27,10 @@ class Clean:
     status_unreadable = False
 
 
-def post(client, path, **form):
+def post(client, path, *, follow=True, **form):
     """POST the way a browser form does: the CSRF token as a field."""
     token = client.cookies[auth.CSRF_COOKIE]
-    return client.post(path, data={auth.CSRF_FIELD: token, **form})
+    return client.post(path, data={auth.CSRF_FIELD: token, **form}, follow_redirects=follow)
 
 
 @pytest.fixture
@@ -64,7 +64,7 @@ def test_the_api_returns_the_refusal_as_json_and_keeps_the_status(client, paper)
 
 def test_the_run_page_action_redirects_with_the_refusal_and_keeps_the_status(client, paper):
     before = (paper / "status.yml").read_bytes()
-    response = post(client, "/runs/pd/act", action="phase", phase="verify", state="done")
+    response = post(client, "/runs/pd/act", follow=False, action="phase", phase="verify", state="done")
     assert response.status_code == 303
     assert "verify refused: 1 claim error(s)" in unquote(response.headers["location"])
     assert (paper / "status.yml").read_bytes() == before

@@ -96,9 +96,9 @@ def status_bytes(ws):
 
 
 def snapshot(ws):
-    """Every file of the run except its event log, by relative path (the gate may only add an event)."""
+    """Every file of the run except its event log and that log's lock file, by relative path."""
     return {p.relative_to(ws).as_posix(): p.read_bytes() for p in sorted(ws.rglob("*"))
-            if p.is_file() and p.name != "events.jsonl"}
+            if p.is_file() and not p.name.startswith("events.jsonl")}
 
 
 # --- the seam: which runs and phases reach a gate ---------------------------
