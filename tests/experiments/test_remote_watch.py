@@ -718,16 +718,34 @@ def test_a_linked_remote_folder_is_refused_before_any_marker_is_read(fake, tmp_p
     (elsewhere / "exit").write_text("0\n")
     (elsewhere / "started").write_text("2020-01-01T00:00:00+00:00\n")
     (elsewhere / "environment.txt").write_text("system=LEAKSYS\nmachine=LEAKMACH\nruntime=LEAKRT\n")
+    (elsewhere / "SHA256SUMS").write_text("0" * 64 + "  exit\n")  # M-D3 final r2 finding 1: no digest of it either
     shutil.rmtree(run / "remote")
     (run / "remote").symlink_to(elsewhere)
 
     assert watch(p, "--once").exit_code == 0
     local = local_run(p, rid)
     assert config_of(local)["reason"] == "fetched-symlink"
+    assert json.loads((local / "manifest.json").read_text())["remote"]["transfer"]["sums_sha256"] is None
     assert results(p)["runs"][0]["status"] == "failed"
     written = "".join((local / name).read_text() for name in ("config.yaml", "environment.json", "manifest.json"))
     for leaked in ("LEAKSYS", "LEAKMACH", "LEAKRT", "2020-01-01"):
         assert leaked not in written
+
+
+def test_sums_digest_never_hashes_a_file_through_a_linked_remote_folder(tmp_path):
+    # M-D3 final review r2 finding 1 (plan 5.12.5): the checksum-list digest is not read through a link either
+    elsewhere = tmp_path / "elsewhere-remote"
+    elsewhere.mkdir()
+    (elsewhere / "SHA256SUMS").write_text("0" * 64 + "  exit\n")
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "remote").symlink_to(elsewhere)
+
+    assert remote_campaign._sums_digest(run) is None
+    (run / "remote").unlink()
+    (run / "remote").mkdir()
+    (run / "remote" / "SHA256SUMS").write_text("0" * 64 + "  exit\n")
+    assert remote_campaign._sums_digest(run) == manifest.file_sha256(run / "remote" / "SHA256SUMS")
 
 
 def test_read_markers_does_not_read_through_a_linked_remote_folder(tmp_path):
