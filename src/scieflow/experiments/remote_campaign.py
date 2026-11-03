@@ -725,6 +725,8 @@ def _now_aware(text: str | None, fallback: str) -> str:
 
 
 def _sums_digest(run: Path) -> str | None:
+    if (run / "remote").is_symlink():  # a linked remote/ folder is never read through (plan 5.12.5)
+        return None
     sums = run / "remote" / "SHA256SUMS"
     if sums.is_file() and not sums.is_symlink():
         return manifest.file_sha256(sums)
