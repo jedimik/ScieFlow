@@ -148,6 +148,17 @@ def test_research_loop_runs_are_untouched(project, calls):
     assert status.read_status(ws)["phases"]["synthesize"] == "done"
 
 
+def test_a_status_without_a_workflow_is_never_gated(project, calls):
+    # A research-loop status has no workflow key; the default must be the research loop, which has no verify phase.
+    ws = make_run(project, "loop", "research-loop", manuscript=True)
+    assert "workflow" not in status.read_status(ws)
+    before = status_bytes(ws)
+    with pytest.raises(ValueError, match="unknown phase: verify"):
+        actions.mark_phase(ws, "verify", "done", "agent")
+    assert calls.claim_calls == 0 and gate_events(ws) == []
+    assert status_bytes(ws) == before
+
+
 def test_paper_revision_respond_done_runs_the_coverage_gate_only(project, calls):
     ws = make_run(project, "rv", "paper-revision", manuscript=True)
     actions.mark_phase(ws, "respond", "done", "agent")
@@ -253,6 +264,27 @@ def test_a_paper_revision_without_a_manuscript_is_refused(project, calls):
     with pytest.raises(ValueError, match="a paper-revision run needs its manuscript/ folder"):
         actions.mark_phase(ws, "verify", "done", "agent")
     assert status.read_status(ws)["phases"]["verify"] == "pending"
+
+
+def test_claim_warnings_never_refuse_verify(project, calls):
+    ws = make_run(project, "pd", "paper-draft", manuscript=True)
+    calls.claims = Result(errors=0, warnings=2)
+    actions.mark_phase(ws, "verify", "done", "agent")
+    assert status.read_status(ws)["phases"]["verify"] == "done"
+    (ev,) = gate_events(ws)
+    assert ev["data"] == {"phase": "verify", "workflow": "paper-draft", "gate": "claims", "outcome": "passed",
+                          "errors": 0, "warnings": 2}
+
+
+def test_a_human_marking_is_recorded_as_human_on_pass_and_on_refusal(project, calls):
+    passed_ws = make_run(project, "pd", "paper-draft", manuscript=True)
+    actions.mark_phase(passed_ws, "verify", "done", "human")
+    calls.claims = Result(errors=1)
+    refused_ws = make_run(project, "pd2", "paper-draft", manuscript=True)
+    with pytest.raises(ValueError, match="claim error"):
+        actions.mark_phase(refused_ws, "verify", "done", "human")
+    assert [e["actor"] for e in gate_events(passed_ws)] == ["human"]
+    assert [e["actor"] for e in gate_events(refused_ws)] == ["human"]
 
 
 def test_claim_errors_refuse_with_the_commands_to_run_and_no_other_write(project, calls):

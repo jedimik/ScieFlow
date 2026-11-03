@@ -88,6 +88,7 @@ def test_a_linked_revision_folder_is_refused(synth, tmp_path):
     with pytest.raises(ValueError, match=r"respond refused: \[symlink\]"):
         actions.mark_phase(run, "respond", "done", "agent")
     assert gate_events(run)[0]["data"]["outcome"] == "refused"
+    assert gate_events(run)[0]["data"]["rule"] == "symlink"
 
 
 def test_the_gate_leaks_no_letter_text_into_a_message_or_an_event(synth):

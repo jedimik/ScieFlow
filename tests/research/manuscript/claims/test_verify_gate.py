@@ -64,6 +64,7 @@ def test_a_planted_wrong_number_refuses_and_leaves_status_untouched(synth):
     written = (run / "events.jsonl").read_text(encoding="utf-8")
     for marker in MARKERS:
         assert marker not in msg and marker not in written
+    assert "SSIM was 0.93" not in msg and "SSIM was 0.93" not in written, "the planted wrong value never leaks"
 
 
 def test_the_same_run_passes_once_the_number_is_fixed(synth):
@@ -92,9 +93,12 @@ def test_a_blocked_reference_refuses_verify(synth, monkeypatch):
     stub_blockers(monkeypatch, [blocker("retracted", [{"doi": "https://doi.org/10.5555/SYN.2010.1"}])])
     run = start(synth)
     results_run(synth, body("The timing study \\cite{lee2010} was reported in the Results."))
-    with pytest.raises(ValueError, match=r"verify refused: \d+ claim error\(s\)"):
+    with pytest.raises(ValueError, match=r"verify refused: \d+ claim error\(s\)") as info:
         actions.mark_phase(run, "verify", "done", "agent")
     assert gate_events(run)[0]["data"]["outcome"] == "refused"
+    written = (run / "events.jsonl").read_text(encoding="utf-8")
+    title = "Another invented title"  # the title of lee2010, the retracted reference in the synthetic bib
+    assert title not in str(info.value) and title not in written, "a retracted reference's title never leaks"
 
 
 def test_a_missing_main_tex_refuses_with_the_claims_rule(synth):
