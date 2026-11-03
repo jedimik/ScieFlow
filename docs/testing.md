@@ -47,6 +47,6 @@ self-tests show that each violation is detected.
 
 ## Sealed probes
 
-The sealed probe suite under `tests/probes/` is not part of the CI gate. Its
-binding file `tests/probes/test_k_task8_binding.py` is excluded by the script,
-and the other probes run only when invoked directly.
+The sealed binding file `tests/probes/test_k_task8_binding.py` is excluded by
+the script. The other files under `tests/probes/` are not excluded and run in
+the gate.
