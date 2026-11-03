@@ -320,6 +320,16 @@ def test_oversized_line_gets_a_parse_error_and_the_next_request_is_answered(proj
     assert second == {"jsonrpc": "2.0", "id": 2, "result": {}}
 
 
+def test_undecodable_line_is_a_parse_error_and_the_server_keeps_serving(project):
+    # stdin is read with surrogateescape: an invalid UTF-8 byte arrives as a lone surrogate
+    stdout = io.StringIO()
+    Server(project).serve(io.StringIO(_lines(INIT) + "\udcff\n" + _lines(PING)), stdout)
+    responses = [json.loads(x) for x in stdout.getvalue().splitlines()]
+    assert [r.get("id") for r in responses] == [1, None, 2]
+    assert responses[1]["error"]["code"] == -32700
+    assert responses[2] == {"jsonrpc": "2.0", "id": 2, "result": {}}
+
+
 # --- static access checks (plan 6 t4 item 7) -----------------------------------------------
 
 FORBIDDEN_IMPORTS = {"socket", "http", "urllib", "requests", "httpx", "subprocess", "mcp"}

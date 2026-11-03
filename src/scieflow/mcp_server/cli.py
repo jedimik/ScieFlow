@@ -7,6 +7,7 @@ before stdin is read: a sub-agent may not read across runs.
 
 from __future__ import annotations
 
+import io
 import json
 import sys
 
@@ -50,7 +51,14 @@ def serve(slug: str | None) -> None:
     """Serve the read-only tools over stdio until stdin closes."""
     _refuse_in_dispatch()
     project = Project.discover()
-    Server(project, scope=_scope(project, slug)).serve(sys.stdin, sys.stdout)
+    # An undecodable byte must not end the session: read stdin with surrogateescape, and let
+    # the protocol layer answer such a line with a parse error (plan 5.4).
+    stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="surrogateescape",
+                             newline="\n")
+    try:
+        Server(project, scope=_scope(project, slug)).serve(stdin, sys.stdout)
+    finally:
+        stdin.detach()
 
 
 @mcp.command("tools")

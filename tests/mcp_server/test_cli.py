@@ -128,3 +128,48 @@ def test_serve_subprocess_answers_over_stdio_and_exits_zero_on_eof(project):
     responses = [json.loads(line) for line in proc.stdout.splitlines()]
     assert [r["id"] for r in responses] == [1, 2]
     assert [t["name"] for t in responses[1]["result"]["tools"]] == [t.name for t in tools.TOOLS]
+
+
+def _serve_env(extra=None):
+    env = {k: v for k, v in os.environ.items() if k not in ("SCIEFLOW_DISPATCH", "UV_CACHE_DIR")}
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(Path(scieflow.__file__).resolve().parents[1])] + [env.get("PYTHONPATH", "")])
+    env.update(extra or {})
+    return env
+
+
+def _run_mcp(project, args, data: bytes, extra_env=None):
+    return subprocess.run([sys.executable, "-m", "scieflow.cli", *args], input=data,
+                          capture_output=True, cwd=project.root, env=_serve_env(extra_env),
+                          timeout=30)
+
+
+def test_subprocess_invalid_utf8_line_is_a_parse_error_and_the_server_continues(project):
+    data = (_lines(INIT, INITIALIZED).encode() + b"\xff\xfe{\"jsonrpc\"\n"
+            + _lines(LIST).encode())
+    proc = _run_mcp(project, ["mcp", "serve"], data)
+    assert proc.returncode == 0, proc.stderr.decode()
+    responses = [json.loads(line) for line in proc.stdout.decode().splitlines()]
+    assert [r.get("id") for r in responses] == [1, None, 2]
+    assert responses[1]["error"]["code"] == -32700
+    assert proc.stderr == b""
+
+
+def test_subprocess_oversized_line_is_refused_and_the_next_request_is_answered(project):
+    big = json.dumps({"jsonrpc": "2.0", "id": 9, "method": "ping",
+                      "params": {"pad": "a" * (5 * 1024 * 1024)}}) + "\n"
+    proc = _run_mcp(project, ["mcp", "serve"], (_lines(INIT, INITIALIZED) + big + _lines(LIST)).encode())
+    assert proc.returncode == 0, proc.stderr.decode()
+    responses = [json.loads(line) for line in proc.stdout.decode().splitlines()]
+    assert [r.get("id") for r in responses] == [1, None, 2]
+    assert responses[1]["error"]["code"] == -32700
+    assert [t["name"] for t in responses[2]["result"]["tools"]] == [t.name for t in tools.TOOLS]
+
+
+@pytest.mark.parametrize("args", [["mcp", "serve"], ["mcp", "tools", "--json"]])
+def test_subprocess_dispatch_refusal_prints_nothing_on_stdout(project, args):
+    proc = _run_mcp(project, args, _lines(INIT, INITIALIZED, LIST).encode(),
+                    {"SCIEFLOW_DISPATCH": "1"})
+    assert proc.returncode == 1
+    assert REFUSAL in proc.stderr.decode()
+    assert proc.stdout == b""

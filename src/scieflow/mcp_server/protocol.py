@@ -88,12 +88,8 @@ class Server:
             if not line.endswith("\n") and len(line) >= limit:
                 self._drain(stdin, limit)
                 response = _error(None, PARSE_ERROR, "line too long")
-            elif len(line.encode("utf-8")) > MAX_LINE_BYTES:
-                response = _error(None, PARSE_ERROR, "line too long")
-            elif not line.strip():
-                continue
             else:
-                response = self.handle(line.strip())
+                response = self._frame(line)
             if response is not None:
                 stdout.write(json.dumps(response) + "\n")
                 stdout.flush()
@@ -104,6 +100,19 @@ class Server:
             chunk = stdin.readline(limit)
             if chunk == "" or chunk.endswith("\n"):
                 return
+
+    def _frame(self, line: str) -> dict | None:
+        try:
+            size = len(line.encode("utf-8"))
+        except UnicodeEncodeError:
+            # stdin is read with surrogateescape: an undecodable byte is a lone surrogate here.
+            # Such a line is not UTF-8 JSON, so it is a parse error and the server keeps going.
+            return _error(None, PARSE_ERROR, "invalid UTF-8")
+        if size > MAX_LINE_BYTES:
+            return _error(None, PARSE_ERROR, "line too long")
+        if not line.strip():
+            return None
+        return self.handle(line.strip())
 
     # --- one message -------------------------------------------------------------------
 
