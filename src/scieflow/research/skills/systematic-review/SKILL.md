@@ -99,12 +99,14 @@ uv run scieflow sr screen prepare <slug> --stage title-abstract --as-agent
 ```
 
 `prepare` writes one batch and one prompt per screener under `prompts/`; it
-dispatches nothing. Dispatch each screener with the screener role, one command
-each (sequentially or in parallel):
+dispatches nothing. `<agent-1>` and `<agent-2>` are the two different agents
+staffed in section 1 (the registry default is codex and claude; use the names
+recorded in `log.md`). Dispatch each screener with the screener role, one
+command each (sequentially or in parallel):
 
 ```bash
-uv run scieflow agent run --role research.sr-screeners codex workspace/<slug>/prompts/sr-title-abstract-<batch>-codex.md workspace/<slug>/logs/sr-title-abstract-<batch>-codex.txt
-uv run scieflow agent run --role research.sr-screeners claude workspace/<slug>/prompts/sr-title-abstract-<batch>-claude.md workspace/<slug>/logs/sr-title-abstract-<batch>-claude.txt
+uv run scieflow agent run --role research.sr-screeners <agent-1> workspace/<slug>/prompts/sr-title-abstract-<batch>-<agent-1>.md workspace/<slug>/logs/sr-title-abstract-<batch>-<agent-1>.txt
+uv run scieflow agent run --role research.sr-screeners <agent-2> workspace/<slug>/prompts/sr-title-abstract-<batch>-<agent-2>.md workspace/<slug>/logs/sr-title-abstract-<batch>-<agent-2>.txt
 ```
 
 Then import both outputs together, check the progress and the agreement, and

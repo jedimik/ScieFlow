@@ -162,3 +162,31 @@ def test_no_docs_or_skill_text_writes_patient_data_or_credentials(path):
     text = path.read_text(encoding="utf-8").lower()
     for banned in ("api_key=", "password=", "token_file:", "/home/jedimik/"):
         assert banned not in text
+
+
+def _unknown_options(tokens):
+    """The `--option` tokens of one invocation that its resolved leaf command does not declare."""
+    _, leaf = _resolve(tokens)
+    known = {opt for param in leaf.params for opt in (*param.opts, *param.secondary_opts)}
+    return [tok.split("=")[0] for tok in tokens if tok.startswith("--") and tok.split("=")[0] not in known]
+
+
+def test_the_option_check_flags_an_option_the_command_does_not_declare():
+    assert _unknown_options(["screen", "import", "r1", "--stage", "title-abstract", "--batchh", "b"]) == ["--batchh"]
+    assert _unknown_options(["screen", "import", "r1", "--stage", "x", "--batch", "b", "--as-agent"]) == []
+
+
+def test_every_sr_option_in_the_skill_and_docs_is_declared_by_its_command():
+    for path in (SKILL, DOC):
+        for line, tokens in _invocations(path.read_text(encoding="utf-8")):
+            assert _unknown_options(tokens) == [], f"{path.name}: `{line}`"
+
+
+def test_the_skill_dispatch_lines_name_the_staffed_agents_not_fixed_ones():
+    text = SKILL.read_text(encoding="utf-8")
+    lines = [line for line in text.splitlines() if "scieflow agent run" in line]
+    assert len(lines) == 2, "the skill documents the two screener dispatches"
+    for line in lines:
+        assert not re.search(r"\b(codex|claude)\b", line), line
+        assert "<agent-1>" in line or "<agent-2>" in line, line
+    assert "<agent-1>" in text and "<agent-2>" in text
