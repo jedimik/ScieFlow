@@ -1,0 +1,39 @@
+version: 1
+id: grade
+name: "GRADE: certainty of a body of evidence"
+source:
+  citation: "Guyatt GH, Oxman AD, Vist GE, et al. GRADE: an emerging consensus on rating quality of evidence and strength of recommendations. BMJ 2008;336:924-926. Balshem H, Helfand M, Schunemann HJ, et al. GRADE guidelines: 3. Rating the quality of evidence. J Clin Epidemiol 2011;64:401-406."
+  doi: null
+verification:
+  status: unverified
+  note: "Written from the citations in plan 5.10 of M-H. Domains and points are not checked against the published guidance by a person; the DOIs are left null because they were not verified."
+  verified_by: null
+  verified_at: null
+starting: {randomised: 4, non-randomised: 2}
+certainty: [very low, low, moderate, high]
+downgrade:
+  - id: risk-of-bias
+    label: "Risk of bias"
+    levels: {none: 0, serious: 1, very-serious: 2}
+  - id: inconsistency
+    label: "Inconsistency"
+    levels: {none: 0, serious: 1, very-serious: 2}
+  - id: indirectness
+    label: "Indirectness"
+    levels: {none: 0, serious: 1, very-serious: 2}
+  - id: imprecision
+    label: "Imprecision"
+    levels: {none: 0, serious: 1, very-serious: 2}
+  - id: publication-bias
+    label: "Publication bias"
+    levels: {none: 0, serious: 1, very-serious: 2}
+upgrade:
+  - id: large-effect
+    label: "Large effect"
+    levels: {none: 0, large: 1, very-large: 2}
+  - id: dose-response
+    label: "Dose-response gradient"
+    levels: {none: 0, present: 1}
+  - id: plausible-confounding
+    label: "Plausible confounding would reduce the effect"
+    levels: {none: 0, present: 1}

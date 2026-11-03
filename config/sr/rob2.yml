@@ -1,0 +1,21 @@
+version: 1
+id: rob2
+name: "RoB 2: risk of bias in randomised trials"
+source:
+  citation: "Sterne JAC, Savovic J, Page MJ, et al. RoB 2: a revised tool for assessing risk of bias in randomised trials. BMJ 2019;366:l4898."
+  doi: null
+verification:
+  status: unverified
+  note: "Written from the citation in plan 5.10 of M-H. Domains and judgements are not checked against the published tool by a person; the DOI is left null because it was not verified."
+  verified_by: null
+  verified_at: null
+domains:
+  - {id: D1, label: "Bias arising from the randomisation process"}
+  - {id: D2, label: "Bias due to deviations from the intended interventions"}
+  - {id: D3, label: "Bias due to missing outcome data"}
+  - {id: D4, label: "Bias in the measurement of the outcome"}
+  - {id: D5, label: "Bias in the selection of the reported result"}
+judgements: [low, some-concerns, high]
+overall:
+  rule: worst
+  extra: []

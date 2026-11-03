@@ -22,7 +22,7 @@ from scieflow.core.config import repo_root
 from scieflow.core.design import lock
 from scieflow.core.project import Project, ProjectError
 from scieflow.research.search import registry
-from scieflow.research.sr import adjudication, ledger, prisma, protocol, records, screening, search, verify
+from scieflow.research.sr import adjudication, appraisal, ledger, prisma, protocol, records, screening, search, verify
 from scieflow.research.sr.errors import SRError
 
 OK, REFUSED, USAGE = 0, 1, 2
@@ -365,4 +365,132 @@ def prisma_cmd(slug: str, write_files: bool, as_json: bool) -> None:
     lines += [f"written: workspace/{slug}/{path}" for path in written]
     lines += [f"warning: {w}" for w in doc.get("warnings") or []]
     _emit(as_json, doc, lines)
+
+
+@sr.group(name="rob")
+def rob_group() -> None:
+    """Risk-of-bias worksheets (single assessor): init, check, record (plan 5.10)."""
+
+
+@rob_group.command("init")
+@click.argument("slug")
+@click.option("--as-agent", is_flag=True, help="Record the operation as written by an agent.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def rob_init(slug: str, as_agent: bool, as_json: bool) -> None:
+    """One unjudged worksheet per included study; existing worksheets are never overwritten."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = appraisal.init_rob(project, ws, as_agent=as_agent)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    lines = [f"created {len(doc['created'])} worksheet(s); {len(doc['existing'])} existing, left unchanged"]
+    _emit(as_json, doc, lines)
+
+
+@rob_group.command("check")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def rob_check(slug: str, as_json: bool) -> None:
+    """Deterministic checks of every included study's worksheet (exit 1 with the errors)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = appraisal.check_rob(project, ws)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    lines = [f"{row['record_id']}: {row['status']}" for row in doc["studies"]]
+    lines += [f"error: {e}" for e in doc["errors"]]
+    _emit(as_json, doc, lines)
+    if not doc["ok"]:
+        sys.exit(REFUSED)
+
+
+@rob_group.command("record")
+@click.argument("slug")
+@click.option("--as-agent", is_flag=True, help="Record the operation as written by an agent.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def rob_record(slug: str, as_agent: bool, as_json: bool) -> None:
+    """Record every included study's appraisal and commit the worksheets (exit 1 if any check fails)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = appraisal.record_rob(project, ws, as_agent=as_agent)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    _emit(as_json, doc, [f"recorded {doc['appraisals']} risk-of-bias appraisal(s), operation {doc['op']}"])
+
+
+@sr.group(name="grade")
+def grade_group() -> None:
+    """GRADE certainty: init, check, record, table (plan 5.10). Certainty is computed, never stored."""
+
+
+@grade_group.command("init")
+@click.argument("slug")
+@click.option("--as-agent", is_flag=True, help="Record the operation as written by an agent.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def grade_init(slug: str, as_agent: bool, as_json: bool) -> None:
+    """One entry per SAP outcome of the locked design; never overwrites sr/grade.yml."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = appraisal.init_grade(project, ws, as_agent=as_agent)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    _emit(as_json, doc, [f"wrote {doc['file']} with {len(doc['outcomes'])} outcome entr(ies)"])
+
+
+@grade_group.command("check")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def grade_check(slug: str, as_json: bool) -> None:
+    """Deterministic checks and the computed certainty of each outcome (exit 1 with the errors)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = appraisal.check_grade(project, ws)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    lines = [f"{row['outcome']}: certainty {row['certainty']}" for row in doc["entries"]]
+    lines += [f"error: {e}" for e in doc["errors"]]
+    _emit(as_json, doc, lines)
+    if not doc["ok"]:
+        sys.exit(REFUSED)
+
+
+@grade_group.command("record")
+@click.argument("slug")
+@click.option("--as-agent", is_flag=True, help="Record the operation as written by an agent.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def grade_record(slug: str, as_agent: bool, as_json: bool) -> None:
+    """Record each outcome's computed certainty and commit sr/grade.yml (exit 1 if the check fails)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = appraisal.record_grade(project, ws, as_agent=as_agent)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    _emit(as_json, doc, [f"recorded {doc['outcomes']} outcome certainty(ies), operation {doc['op']}"])
+
+
+@grade_group.command("table")
+@click.argument("slug")
+@click.option("--write", "write_file", is_flag=True, help="Write sr/grade/summary-of-findings.md.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def grade_table(slug: str, write_file: bool, as_json: bool) -> None:
+    """The summary-of-findings table, derived from the check (--write renders the file)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = appraisal.table(project, ws, write=write_file)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    if as_json:
+        _emit(True, doc, [])
+    else:
+        click.echo(doc["markdown"], nl=False)
+        if doc["file"]:
+            click.echo(f"written: workspace/{slug}/{doc['file']}")
+
 
