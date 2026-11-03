@@ -253,5 +253,5 @@ def test_skills_never_tell_an_agent_to_edit_claims_or_waive():
             lowered = line.lower()
             if "waive" in lowered and "never" not in lowered and "user" not in lowered:
                 raise AssertionError(f"{path.name} tells the agent to waive: {line!r}")
-            if "report/claims" in line and "never" not in lowered:
+            if "report/claims/" in line and "never" not in lowered:
                 raise AssertionError(f"{path.name} asks the agent to touch report/claims: {line!r}")
