@@ -24,6 +24,7 @@ assignments:
   research.outline: claude
   research.draft-authors: [claude, codex]
   research.consistency: codex
+  research.sr-screeners: [claude, codex]
 """
 
 
