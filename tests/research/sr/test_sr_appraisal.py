@@ -293,3 +293,91 @@ def test_grade_record_refuses_when_check_fails_and_writes_nothing(appr):
     assert _grade("init").exit_code == 0
     assert _grade("record").exit_code == 1
     assert [r for r in _rows(ws, "sr.appraisal") if (r.get("data") or {}).get("kind") == "grade"] == []
+
+
+# --- t7 review r1 fixes (M-H t7 fix), through the CLI ------------------------------------------------------
+
+
+def test_grade_check_refuses_a_wrong_typed_study_without_a_traceback(appr):
+    _root, ws = appr
+    assert _grade("init").exit_code == 0
+    doc = _grade_doc(ws)
+    doc["outcomes"][0]["design"] = "randomised"
+    doc["outcomes"][0]["studies"] = [["R00002"]]
+    _grade_write(ws, doc)
+    result = CliRunner().invoke(sr_cli.sr, ["grade", "check", scn.SLUG])
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+def test_grade_check_never_echoes_free_text_studies(appr):
+    _root, ws = appr
+    assert _grade("init").exit_code == 0
+    secret = "SYNTHETIC-FREE-TEXT-STUDY-ENTRY-5A2B"
+    doc = _grade_doc(ws)
+    doc["outcomes"][0]["design"] = "randomised"
+    doc["outcomes"][0]["studies"] = [secret]
+    _grade_write(ws, doc)
+    result = CliRunner().invoke(sr_cli.sr, ["grade", "check", scn.SLUG])
+    assert result.exit_code == 1
+    assert secret not in result.output
+
+
+def test_rob_check_refuses_a_worksheet_whose_record_id_names_another_study(appr):
+    _root, ws = appr
+    assert _rob("init").exit_code == 0
+    _fill_rob(ws, INCLUDED)
+    path = ws / "sr" / "rob" / "R00003.yml"
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    doc["record_id"] = "R00002"
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    result = _rob("check")
+    assert result.exit_code == 1
+    assert "R00003.yml" in result.output
+    assert _rob("record").exit_code == 1
+    assert [r for r in _rows(ws, "sr.appraisal") if (r.get("data") or {}).get("kind") == "rob"] == []
+
+
+def test_grade_effect_text_reaches_the_summary_table_and_cannot_break_it(appr):
+    _root, ws = appr
+    assert _grade("init").exit_code == 0
+    doc = _grade_doc(ws)
+    entry = doc["outcomes"][0]
+    entry["design"] = "randomised"
+    entry["studies"] = list(INCLUDED)
+    entry["effect_text"] = "synthetic | effect\nmarker"
+    _grade_write(ws, doc)
+    table = CliRunner().invoke(sr_cli.sr, ["grade", "table", scn.SLUG, "--write"])
+    assert table.exit_code == 0, table.output
+    rendered = (ws / "sr" / "grade" / "summary-of-findings.md").read_text(encoding="utf-8")
+    assert "synthetic \\| effect marker" in rendered
+    rows = [line for line in rendered.splitlines() if line.startswith("| primary_outcome")]
+    assert len(rows) == 1 and rows[0].replace("\\|", "").count("|") == 8
+
+
+def test_record_reads_each_worksheet_once_and_hashes_the_bytes_it_parsed(appr, monkeypatch):
+    _root, ws = appr
+    assert _rob("init").exit_code == 0
+    _fill_rob(ws, INCLUDED)
+    monkeypatch.setattr(verify, "preflight", lambda *args, **kwargs: None)
+    reads: list[str] = []
+    real_bytes, real_text = Path.read_bytes, Path.read_text
+
+    def counting_bytes(self, *args, **kwargs):
+        if self.parent.name == "rob" and self.suffix == ".yml":
+            reads.append(self.name)
+        return real_bytes(self, *args, **kwargs)
+
+    def counting_text(self, *args, **kwargs):
+        if self.parent.name == "rob" and self.suffix == ".yml":
+            reads.append(self.name)
+        return real_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", counting_bytes)
+    monkeypatch.setattr(Path, "read_text", counting_text)
+    result = _rob("record")
+    assert result.exit_code == 0, result.output
+    assert sorted(reads) == sorted(f"{rid}.yml" for rid in INCLUDED)
+    assert verify.verify(None, ws)["ok"] is True
+

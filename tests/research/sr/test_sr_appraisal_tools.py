@@ -283,3 +283,89 @@ def test_grade_certainty_is_computed_from_levels_not_read_back():
         entry2["downgrade"][name]["reason"] = ""
     second = appraisal.grade_result(_grade_tool(), entry2, included={"R00002", "R00003"})
     assert first["certainty"] == "low" and second["certainty"] == "high"
+
+
+# --- t7 review r1 fixes (M-H t7 fix): wrong-typed values are refusals, never tracebacks -------------------
+
+
+@pytest.mark.parametrize("bad", [["R00002"], {"id": "R00002"}])
+def test_grade_study_entry_of_unhashable_type_is_refused_not_raised(bad):
+    entry = _entry("randomised")
+    entry["studies"] = [bad, "R00003"]
+    result = appraisal.grade_result(_grade_tool(), entry, included={"R00002", "R00003"})
+    assert result["errors"]
+
+
+@pytest.mark.parametrize("bad", [["serious"], {"level": "serious"}])
+def test_grade_level_of_unhashable_type_is_refused_not_raised(bad):
+    entry = _entry("randomised")
+    entry["downgrade"]["imprecision"]["level"] = bad
+    result = appraisal.grade_result(_grade_tool(), entry, included={"R00002", "R00003"})
+    assert any("imprecision" in e and "level" in e for e in result["errors"])
+
+
+@pytest.mark.parametrize("bad", [["low"], {"judgement": "low"}])
+def test_quadas2_applicability_judgement_of_unhashable_type_is_an_error_not_raised(bad):
+    tool = _tool("quadas-2")
+    doc = _worksheet(tool, _all(tool, "low"), "low")
+    doc["domains"][0]["applicability"]["judgement"] = bad
+    errors = appraisal.check_rob_worksheet(tool, doc, "x")
+    assert any("applicab" in e for e in errors)
+
+
+@pytest.mark.parametrize("bad", [["low"], {"judgement": "low"}])
+def test_rob2_domain_judgement_of_unhashable_type_is_an_error_not_raised(bad):
+    tool = _tool("rob2")
+    doc = _worksheet(tool, _all(tool, "low"), "low")
+    doc["domains"][2]["judgement"] = bad
+    assert any("D3" in e and "judgement" in e for e in appraisal.check_rob_worksheet(tool, doc, "x"))
+
+
+# finding 2: free text is never echoed back
+
+
+def test_grade_free_text_study_entry_is_refused_and_never_echoed():
+    secret = "SYNTHETIC-FREE-TEXT-STUDY-ENTRY-9C1D"
+    entry = _entry("randomised")
+    entry["studies"] = [secret, "R00002"]
+    result = appraisal.grade_result(_grade_tool(), entry, included={"R00002", "R00003"})
+    assert result["errors"]
+    assert all(secret not in e for e in result["errors"])
+
+
+# finding 3: a study counts once
+
+
+def test_grade_duplicate_study_id_is_refused():
+    entry = _entry("randomised")
+    entry["studies"] = ["R00002", "R00002"]
+    result = appraisal.grade_result(_grade_tool(), entry, included={"R00002", "R00003"})
+    assert any("R00002" in e and "more than once" in e for e in result["errors"])
+
+
+# finding 4: the worksheet's record_id is the study its file names
+
+
+def test_rob_worksheet_record_id_must_name_the_study_of_its_file():
+    tool = _tool("rob2")
+    doc = _worksheet(tool, _all(tool, "low"), "low")
+    assert appraisal.check_rob_worksheet(tool, doc, "sr/rob/R00002.yml", record_id="R00002") == []
+    errors = appraisal.check_rob_worksheet(tool, doc, "sr/rob/R00003.yml", record_id="R00003")
+    assert any("record_id" in e and "sr/rob/R00003.yml" in e for e in errors)
+
+
+# finding 5: effect text is author text; it must be text and it reaches the table
+
+
+def test_grade_effect_text_must_be_text_when_given():
+    entry = _entry("randomised")
+    entry["effect_text"] = 3
+    result = appraisal.grade_result(_grade_tool(), entry, included={"R00002", "R00003"})
+    assert any("effect_text" in e for e in result["errors"])
+
+
+def test_grade_effect_text_is_carried_to_the_result_when_valid():
+    entry = _entry("randomised")
+    entry["effect_text"] = "synthetic effect"
+    result = appraisal.grade_result(_grade_tool(), entry, included={"R00002", "R00003"})
+    assert result["errors"] == [] and result["effect_text"] == "synthetic effect"

@@ -200,8 +200,11 @@ def load_grade_tool(path: Path) -> dict:
 # ------------------------------------------------------------------ pure checks (no I/O)
 
 
-def check_rob_worksheet(tool: dict, doc, label: str) -> list[str]:
-    """Deterministic checks of one risk-of-bias worksheet (plan 5.10). Returns error strings; never support text."""
+def check_rob_worksheet(tool: dict, doc, label: str, record_id: str | None = None) -> list[str]:
+    """Deterministic checks of one risk-of-bias worksheet (plan 5.10). Returns error strings; never support text.
+
+    With record_id (the study id the file is named for) the worksheet's own record_id must equal it.
+    """
     errors: list[str] = []
 
     def err(message: str) -> None:
@@ -215,6 +218,8 @@ def check_rob_worksheet(tool: dict, doc, label: str) -> list[str]:
         err("format must be 1")
     if doc.get("tool") != tool["id"]:
         err(f"tool must be {tool['id']}")
+    if record_id is not None and doc.get("record_id") != record_id:
+        err("record_id must be the study id of this file")
     rows = doc.get("domains")
     if not isinstance(rows, list):
         err("domains must be a list")
@@ -254,7 +259,8 @@ def check_rob_worksheet(tool: dict, doc, label: str) -> list[str]:
             if not isinstance(block, dict) or set(block) - {"judgement", "support"}:
                 err(f"domain {did}: applicability judgement and support are required")
             else:
-                if block.get("judgement") not in app_judgements:
+                app_judgement = block.get("judgement")
+                if not isinstance(app_judgement, str) or app_judgement not in app_judgements:
                     err(f"domain {did}: applicability judgement must be one of the tool's judgements")
                 if not isinstance(block.get("support"), str) or not block["support"].strip():
                     err(f"domain {did}: applicability support is required")
@@ -322,7 +328,7 @@ def grade_result(tool: dict, entry, *, included, label: str = GRADE_REL) -> dict
         errors.append(f"{where}: {message}")
 
     result = {"outcome": outcome, "design": None, "studies": [], "certainty": None, "score": None,
-              "levels": {"downgrade": {}, "upgrade": {}}, "errors": errors}
+              "levels": {"downgrade": {}, "upgrade": {}}, "effect_text": "", "errors": errors}
     if not isinstance(entry, dict):
         err("the entry must be a mapping")
         return result
@@ -339,9 +345,23 @@ def grade_result(tool: dict, entry, *, included, label: str = GRADE_REL) -> dict
     if not isinstance(studies, list) or not studies:
         err("lists no study")
         studies = []
+    counted: set = set()
     for rid in studies:
+        # Free text is never echoed: only a well-formed record id may be named in a message (plan 5.13).
+        if not isinstance(rid, str) or not screening.RECORD_RE.fullmatch(rid):
+            err("studies holds an entry that is not a record id")
+            continue
+        if rid in counted:
+            err(f"study {rid} is listed more than once")
+            continue
+        counted.add(rid)
         if rid not in included:
             err(f"study {rid} is not an included study at full text")
+    effect = entry.get("effect_text", "")
+    if not isinstance(effect, str):
+        err("effect_text must be text (empty allowed)")
+        effect = ""
+    result["effect_text"] = effect
     result["design"] = design if design in DESIGNS else None
     result["studies"] = list(studies)
     downs = _levels_block(tool["downgrade"], entry.get("downgrade"), "downgrade", err)
@@ -372,7 +392,7 @@ def _levels_block(domains: list, block, name: str, err) -> dict:
             err(f"{name} {domain['id']}: level and reason are required")
             continue
         level = row.get("level")
-        if level not in domain["levels"]:
+        if not isinstance(level, str) or level not in domain["levels"]:
             err(f"{name} {domain['id']}: level must be one of the tool's levels")
             continue
         if level != "none" and not (isinstance(row.get("reason"), str) and row["reason"].strip()):
@@ -382,10 +402,6 @@ def _levels_block(domains: list, block, name: str, err) -> dict:
 
 
 # ------------------------------------------------------------------ I/O helpers (no links)
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _no_links(ws: Path, rel: str) -> Path:
@@ -398,16 +414,33 @@ def _no_links(ws: Path, rel: str) -> Path:
     return Path(ws) / rel
 
 
-def _read_worksheet(ws: Path, rel: str):
+def _parse_worksheet(path: Path, raw: bytes):
+    try:
+        return yaml.safe_load(raw.decode("utf-8"))
+    except (UnicodeDecodeError, yaml.YAMLError):
+        raise SRError(f"{path.name} cannot be read as YAML") from None
+
+
+def _read_worksheet_bytes(ws: Path, rel: str) -> tuple[bytes, object]:
+    """One read of a worksheet: the bytes, and the document parsed from those same bytes (plan 5.10)."""
     path = _no_links(ws, rel)
     if not path.is_file():
         raise SRError(f"{rel} is missing (sr rob init or sr grade init writes it)")
-    return _read_yaml_file(path)
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        raise SRError(f"{path.name} cannot be read") from None
+    return raw, _parse_worksheet(path, raw)
 
 
 def _included(ws: Path) -> list[str]:
     verdicts = screening.resolved(ws, screening.FULL_TEXT)
     return sorted(rid for rid, verdict in verdicts.items() if verdict == screening.INCLUDE)
+
+
+def _cell(text: str) -> str:
+    """One markdown table cell: whitespace collapsed and pipes escaped, so author text cannot break the table."""
+    return " ".join(text.split()).replace("|", "\\|")
 
 
 def _appraisal(locked) -> dict:
@@ -479,49 +512,65 @@ def init_rob(project, ws, *, as_agent: bool = False) -> dict:
             "as_agent": as_agent}
 
 
+def _rob_scan(ws: Path, tool: dict, included: list[str]) -> list[dict]:
+    """Each included study's worksheet read exactly once: its bytes, its parsed document and its problems."""
+    rows: list[dict] = []
+    for rid in included:
+        rel = f"{ROB_DIR}/{rid}.yml"
+        try:
+            raw, doc = _read_worksheet_bytes(ws, rel)
+            problems = check_rob_worksheet(tool, doc, rel, record_id=rid)
+        except SRError as exc:
+            raw, doc, problems = None, None, [str(exc)]
+        rows.append({"record_id": rid, "rel": rel, "raw": raw, "doc": doc, "errors": problems})
+    return rows
+
+
+def _rob_report(ws: Path, tool: dict, included: list[str], scan: list[dict]) -> dict:
+    errors: list[str] = []
+    if not included:
+        errors.append("no study is included at full text; there is nothing to appraise")
+    rows: list[dict] = []
+    for row in scan:
+        rows.append({"record_id": row["record_id"], "status": "ok" if not row["errors"] else "refused",
+                     "errors": row["errors"]})
+        errors.extend(row["errors"])
+    return {"run": ws.name, "tool": tool["id"], "studies": rows, "errors": errors, "ok": not errors}
+
+
 def check_rob(project, ws) -> dict:
     """Every included study's worksheet, checked; read-only."""
     ws = Path(ws)
     locked = protocol.require_locked(project, ws)
     tool = _rob_tool(project, locked)
     included = _included(ws)
-    rows: list[dict] = []
-    errors: list[str] = []
-    if not included:
-        errors.append("no study is included at full text; there is nothing to appraise")
-    for rid in included:
-        rel = f"{ROB_DIR}/{rid}.yml"
-        try:
-            doc = _read_worksheet(ws, rel)
-            problems = check_rob_worksheet(tool, doc, rel)
-        except SRError as exc:
-            problems = [str(exc)]
-        rows.append({"record_id": rid, "status": "ok" if not problems else "refused", "errors": problems})
-        errors.extend(problems)
-    return {"run": ws.name, "tool": tool["id"], "studies": rows, "errors": errors, "ok": not errors}
+    return _rob_report(ws, tool, included, _rob_scan(ws, tool, included))
 
 
 def record_rob(project, ws, *, as_agent: bool = False) -> dict:
-    """One sr.appraisal per included study, then one sr.committed with every worksheet's sha256 (plan 5.10)."""
+    """One sr.appraisal per included study, then one sr.committed with every worksheet's sha256 (plan 5.10).
+
+    The check, the events and the committed hashes all come from the same bytes read once per worksheet.
+    """
     ws = Path(ws)
     locked = protocol.require_locked(project, ws)
     verify.preflight(project, ws)
     tool = _rob_tool(project, locked)
-    doc = check_rob(project, ws)
+    included = _included(ws)
+    scan = _rob_scan(ws, tool, included)
+    doc = _rob_report(ws, tool, included, scan)
     if not doc["ok"]:
         raise SRError(f"rob check refuses the record: {doc['errors'][0]}")
     actor = "agent" if as_agent else "human"
     op = store.new_id()
     files: dict[str, str] = {}
     appraisals: list[tuple[str, dict, str | None]] = []
-    for row in doc["studies"]:
-        rid = row["record_id"]
-        rel = f"{ROB_DIR}/{rid}.yml"
-        sheet = _read_worksheet(ws, rel)
-        files[rel] = _sha256(_no_links(ws, rel))
+    for row in scan:
+        sheet = row["doc"]
+        files[row["rel"]] = hashlib.sha256(row["raw"]).hexdigest()
         judgements = {d["id"]: d["judgement"] for d in sheet["domains"]}
         overall = sheet["overall"].get("judgement") if isinstance(sheet.get("overall"), dict) else None
-        appraisals.append((rid, judgements, overall))
+        appraisals.append((row["record_id"], judgements, overall))
     led = ledger.EventsLedger(ws, actor=actor, op=op, extra={"protocol_version": locked.version})
     for rid, judgements, overall in appraisals:
         events.emit(ws, "sr.appraisal", actor, op=op, kind=KIND_ROB, record_id=rid, tool=tool["id"],
@@ -563,8 +612,8 @@ def init_grade(project, ws, *, as_agent: bool = False) -> dict:
     return {"run": ws.name, "file": GRADE_REL, "outcomes": outcomes, "as_agent": as_agent}
 
 
-def check_grade(project, ws) -> dict:
-    """Every outcome entry, computed; read-only. Certainty is derived here, never read from the file."""
+def _grade_check(project, ws) -> tuple[dict, bytes | None]:
+    """The GRADE check and the bytes it parsed (one read); the bytes are None when the file could not be read."""
     ws = Path(ws)
     locked = protocol.require_locked(project, ws)
     tool = _grade_tool(project)
@@ -572,15 +621,15 @@ def check_grade(project, ws) -> dict:
     errors: list[str] = []
     rows: list[dict] = []
     try:
-        doc = _read_worksheet(ws, GRADE_REL)
+        raw, sheet = _read_worksheet_bytes(ws, GRADE_REL)
     except SRError as exc:
-        return {"run": ws.name, "entries": [], "errors": [str(exc)], "ok": False}
-    if not isinstance(doc, dict) or set(doc) != GRADE_TOP_WORKSHEET or doc.get("format") != FORMAT:
+        return {"run": ws.name, "entries": [], "errors": [str(exc)], "ok": False}, None
+    if not isinstance(sheet, dict) or set(sheet) != GRADE_TOP_WORKSHEET or sheet.get("format") != FORMAT:
         errors.append(f"{GRADE_REL}: format 1 and the outcomes key are required")
-        return {"run": ws.name, "entries": [], "errors": errors, "ok": False}
+        return {"run": ws.name, "entries": [], "errors": errors, "ok": False}, raw
     sap = [o["id"] for o in (locked.design.get("sap") or {}).get("outcomes") or []]
     seen: list[str] = []
-    for entry in doc["outcomes"] if isinstance(doc.get("outcomes"), list) else []:
+    for entry in sheet["outcomes"] if isinstance(sheet.get("outcomes"), list) else []:
         oid = entry.get("outcome") if isinstance(entry, dict) else None
         if oid not in sap:
             errors.append(f"{GRADE_REL}: an entry names an outcome that is not a SAP outcome of the locked design")
@@ -591,26 +640,35 @@ def check_grade(project, ws) -> dict:
         seen.append(oid)
         result = grade_result(tool, entry, included=included, label=GRADE_REL)
         errors.extend(result["errors"])
-        rows.append({k: result[k] for k in ("outcome", "design", "studies", "certainty", "score", "levels")})
+        rows.append({k: result[k] for k in ("outcome", "design", "studies", "certainty", "score", "levels",
+                                            "effect_text")})
     for oid in sap:
         if oid not in seen:
             errors.append(f"{GRADE_REL}: SAP outcome {oid} has no entry")
-    if not isinstance(doc.get("outcomes"), list):
+    if not isinstance(sheet.get("outcomes"), list):
         errors.append(f"{GRADE_REL}: outcomes must be a list")
-    return {"run": ws.name, "entries": rows, "errors": errors, "ok": not errors}
+    return {"run": ws.name, "entries": rows, "errors": errors, "ok": not errors}, raw
+
+
+def check_grade(project, ws) -> dict:
+    """Every outcome entry, computed; read-only. Certainty is derived here, never read from the file."""
+    return _grade_check(project, ws)[0]
 
 
 def record_grade(project, ws, *, as_agent: bool = False) -> dict:
-    """One sr.appraisal per outcome (levels and certainty; no reasons), then one sr.committed (plan 5.10)."""
+    """One sr.appraisal per outcome (levels and certainty; no reasons), then one sr.committed (plan 5.10).
+
+    The committed hash is the sha256 of the same bytes the check parsed.
+    """
     ws = Path(ws)
     locked = protocol.require_locked(project, ws)
     verify.preflight(project, ws)
-    doc = check_grade(project, ws)
-    if not doc["ok"]:
+    doc, raw = _grade_check(project, ws)
+    if not doc["ok"] or raw is None:
         raise SRError(f"grade check refuses the record: {doc['errors'][0]}")
     actor = "agent" if as_agent else "human"
     op = store.new_id()
-    digest = _sha256(_no_links(ws, GRADE_REL))
+    digest = hashlib.sha256(raw).hexdigest()
     led = ledger.EventsLedger(ws, actor=actor, op=op, extra={"protocol_version": locked.version})
     for row in doc["entries"]:
         events.emit(ws, "sr.appraisal", actor, op=op, kind=KIND_GRADE, outcome=row["outcome"],
@@ -631,13 +689,13 @@ def table(project, ws, *, write: bool = False) -> dict:
         raise SRError(f"grade check refuses the table: {doc['errors'][0]}")
     lines = [f"# Summary of findings: run {ws.name}", "",
              "Certainty is computed by `sr grade check` from the recorded levels, never read from the file.", "",
-             "| Outcome | Design | Studies | Downgraded for | Upgraded for | Certainty |",
-             "|---|---|---|---|---|---|"]
+             "| Outcome | Design | Studies | Effect | Downgraded for | Upgraded for | Certainty |",
+             "|---|---|---|---|---|---|---|"]
     for row in doc["entries"]:
         down = ", ".join(f"{k} ({v})" for k, v in row["levels"]["downgrade"].items() if v != "none") or "-"
         up = ", ".join(f"{k} ({v})" for k, v in row["levels"]["upgrade"].items() if v != "none") or "-"
-        lines.append(f"| {row['outcome']} | {row['design']} | {len(row['studies'])} | {down} | {up} | "
-                     f"{row['certainty']} |")
+        lines.append(f"| {row['outcome']} | {row['design']} | {len(row['studies'])} | "
+                     f"{_cell(row['effect_text']) or '-'} | {down} | {up} | {row['certainty']} |")
     markdown = "\n".join(lines) + "\n"
     written = None
     if write:
