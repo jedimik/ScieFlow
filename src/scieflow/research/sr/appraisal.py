@@ -29,7 +29,6 @@ ROB_DIR = "sr/rob"
 GRADE_REL = "sr/grade.yml"
 SUMMARY_REL = "sr/grade/summary-of-findings.md"
 KIND_ROB, KIND_GRADE = "rob", "grade"
-RECORD_RE = re.compile(r"^R\d{5}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,63}$")
 ROB_TOP = frozenset({"version", "id", "name", "source", "verification", "domains", "judgements", "overall",
                      "applicability"})

@@ -22,9 +22,6 @@ from tests.research.sr import t6_scenario as scn
 
 REPO = Path(__file__).resolve().parents[3]
 INCLUDED = ["R00002", "R00003", "R00004", "R00005", "R00006", "R00045"]
-ROBINS_DOMAINS = ["confounding", "selection-of-participants", "classification-of-interventions",
-                  "deviations-from-intended-interventions", "missing-data", "measurement-of-outcomes",
-                  "selection-of-the-reported-result"]
 
 
 def _factory(rob_tool: str = "robins-i", grade: bool = True):
