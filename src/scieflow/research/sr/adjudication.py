@@ -75,6 +75,11 @@ def _conflicts(ws: Path, stage: str, locked, screeners: list[str]) -> list[vscre
     return [c for c in found if verdicts.get(c.record_id) == screening.PENDING]
 
 
+def _line(value) -> str:
+    """One markdown line: whitespace and line breaks collapsed, so a field cannot open a new section."""
+    return " ".join(str(value or "").split()) or "-"
+
+
 def _markdown(ws: Path, stage: str, gate_id: str, locked, conflicts: list[vscreen.Conflict]) -> str:
     """The blinded reading file: record fields and the abstract (fenced), and the locked criteria."""
     criteria = [f"- {c.get('id')}: {c.get('text')}" for c in list(locked.criteria_include)
@@ -86,10 +91,10 @@ def _markdown(ws: Path, stage: str, gate_id: str, locked, conflicts: list[vscree
     for conflict in conflicts:
         row = conflict.record if isinstance(conflict.record, dict) else {}
         lines += ["", f"## {conflict.record_id}", "",
-                  f"- Title: {row.get('title') or '-'}",
-                  f"- Year: {row.get('year') or '-'}",
-                  f"- Venue: {row.get('venue') or '-'}",
-                  f"- DOI: {row.get('doi') or '-'}", "",
+                  f"- Title: {_line(row.get('title'))}",
+                  f"- Year: {_line(row.get('year'))}",
+                  f"- Venue: {_line(row.get('venue'))}",
+                  f"- DOI: {_line(row.get('doi'))}", "",
                   "Abstract:", "",
                   fence_untrusted(str(row.get("abstract") or ""), label="systematic-review abstract"),
                   "", "Criteria (locked):", ""]
@@ -135,13 +140,21 @@ def _decisions_rel(stage: str, gate_id: str) -> str:
     return f"{_folder_rel(stage, gate_id)}/decisions.json"
 
 
-def _load_decisions(ws: Path, rel: str) -> list[dict]:
+def _read_decisions(ws: Path, rel: str) -> dict | None:
+    """The parsed decisions document (None when the file does not exist yet); rows must be objects."""
     if not (ws / rel).exists():
-        return []
+        return None
     doc, _sha = screening._parse_file(screening._plain_file(ws, rel), rel)
     if not isinstance(doc, dict) or not isinstance(doc.get("decisions"), list):
         raise SRError(f"{rel} is not a decisions file")
-    return [dict(row) for row in doc["decisions"]]
+    if not all(isinstance(row, dict) for row in doc["decisions"]):
+        raise SRError(f"{rel} is not a decisions file")
+    return doc
+
+
+def _load_decisions(ws: Path, rel: str) -> list[dict]:
+    doc = _read_decisions(ws, rel)
+    return [] if doc is None else [dict(row) for row in doc["decisions"]]
 
 
 def _open_gate_of_kind(ws: Path, gate_id: str) -> dict:
@@ -156,6 +169,28 @@ def _open_gate_of_kind(ws: Path, gate_id: str) -> dict:
     if gate["state"] != "open":
         raise SRError(f"gate {gate_id} is not open ({gate['state']})")
     return gate
+
+
+def _check_decision(stage: str, exclude_ids: set[str], record_id: str, decision, reason,
+                    rationale) -> tuple[str, str, str]:
+    """Validate one human decision (plan 5.7). Shared by sr adjudicate and the gate hook, which re-checks
+    decisions.json, a file anyone with write access to the run may have edited. Returns the normalised triple."""
+    if decision not in (INCLUDE, EXCLUDE):
+        raise SRError("the decision must be include or exclude")
+    if not isinstance(reason, str) or not isinstance(rationale, str):
+        raise SRError(f"the reason and rationale of {record_id} must be text")
+    reason = reason.strip()
+    rationale = rationale.strip()
+    if decision == INCLUDE and reason:
+        raise SRError(f"an include carries no reason ({record_id})")
+    if decision == EXCLUDE:
+        if stage == screening.FULL_TEXT and not reason:
+            raise SRError(f"a full-text exclude names one exclude criterion ({record_id})")
+        if reason and reason not in exclude_ids:
+            raise SRError(f"{record_id} names no exclude criterion of the locked protocol")
+    if not 1 <= len(rationale) <= RATIONALE_MAX:
+        raise SRError(f"the rationale must be 1 to {RATIONALE_MAX} characters")
+    return decision, reason, rationale
 
 
 def adjudicate(project, ws, *, gate_id: str, record_id: str, decision: str, reason: str = "",
@@ -173,21 +208,10 @@ def adjudicate(project, ws, *, gate_id: str, record_id: str, decision: str, reas
     ids = {row["record_id"] for row in conflicts["conflicts"]}
     if record_id not in ids:
         raise SRError(f"{record_id} is not a conflict of gate {gate_id}")
-    if decision not in (INCLUDE, EXCLUDE):
-        raise SRError("the decision must be include or exclude")
     locked = screening._preflight(project, ws)
     exclude_ids = set(screening._criteria(locked)[1])
-    reason = (reason or "").strip()
-    if decision == INCLUDE and reason:
-        raise SRError(f"an include carries no reason ({record_id})")
-    if decision == EXCLUDE:
-        if stage == screening.FULL_TEXT and not reason:
-            raise SRError(f"a full-text exclude names one exclude criterion ({record_id})")
-        if reason and reason not in exclude_ids:
-            raise SRError(f"{record_id} names no exclude criterion of the locked protocol")
-    rationale = (rationale or "").strip()
-    if not 1 <= len(rationale) <= RATIONALE_MAX:
-        raise SRError(f"the rationale must be 1 to {RATIONALE_MAX} characters")
+    decision, reason, rationale = _check_decision(stage, exclude_ids, record_id, decision, reason or "",
+                                                  rationale or "")
     rel = _decisions_rel(stage, gate["id"])
     rows = [row for row in _load_decisions(ws, rel) if row.get("record_id") != record_id]
     rows.append({"record_id": record_id, "decision": decision, "reason": reason, "rationale": rationale})
@@ -242,12 +266,34 @@ def on_answer(project, ws, gate: dict, answer: str, actor: str) -> None:
         raise gates.GateError(str(exc)) from None
     rel_dec = _decisions_rel(stage, gate_id)
     try:
-        decided = {row["record_id"]: row for row in _load_decisions(ws, rel_dec)}
+        doc = _read_decisions(ws, rel_dec)
     except SRError as exc:
         raise gates.GateError(str(exc)) from None
-    missing = [row["record_id"] for row in conflicts["conflicts"] if row["record_id"] not in decided]
+    if doc is not None and (doc.get("gate") != gate_id or doc.get("stage") != stage):
+        raise gates.GateError("decisions.json belongs to another gate or stage; nothing was recorded")
+    wanted = [row["record_id"] for row in conflicts["conflicts"]]
+    entries: dict[str, dict] = {}
+    for row in (doc or {}).get("decisions", []):
+        rid = row.get("record_id")
+        if not isinstance(rid, str) or rid not in wanted:
+            raise gates.GateError("decisions.json holds an entry for a record that is not a conflict of "
+                                  "this gate; nothing was recorded")
+        if rid in entries:
+            raise gates.GateError(f"decisions.json holds two entries for {rid}; nothing was recorded")
+        entries[rid] = row
+    missing = [rid for rid in wanted if rid not in entries]
     if missing:
         raise gates.GateError(f"{len(missing)} conflict(s) have no decision; sr adjudicate each one first")
+    # Every entry is re-validated here, not trusted from `sr adjudicate`: the file is plain JSON in the run.
+    exclude_ids = set(screening._criteria(locked)[1])
+    checked: dict[str, tuple[str, str, str]] = {}
+    for rid in wanted:
+        entry = entries[rid]
+        try:
+            checked[rid] = _check_decision(stage, exclude_ids, rid, entry.get("decision"),
+                                           entry.get("reason", ""), entry.get("rationale"))
+        except SRError as exc:
+            raise gates.GateError(str(exc)) from None
     streams = screening._stage_streams(ws, stage)
     for row in conflicts["conflicts"]:
         by = streams.get(row["record_id"], {})
@@ -260,13 +306,12 @@ def on_answer(project, ws, gate: dict, answer: str, actor: str) -> None:
     ts = screening._now()
     for row in conflicts["conflicts"]:
         rid = row["record_id"]
-        entry = decided[rid]
-        reason = str(entry.get("reason") or "") if entry["decision"] == EXCLUDE else ""
+        decision, reason, rationale = checked[rid]
         led = ledger.EventsLedger(ws, actor="human", op=op, extra={**base, "reason": reason})
         conflict = vscreen.Conflict(record_id=rid, stage=stage,
                                     decision_event_ids=tuple(row["decision_event_ids"]))
-        vscreen.record_adjudication(led, led.run_context(), decision=entry["decision"],
-                                    rationale=str(entry["rationale"]), ts=ts, conflict=conflict)
+        vscreen.record_adjudication(led, led.run_context(), decision=decision, rationale=rationale, ts=ts,
+                                    conflict=conflict)
     closing = ledger.EventsLedger(ws, actor="human", op=op, extra=base)
     files = {rel_conf: conf_sha, rel_dec: screening._sha256(ws / rel_dec)}
     closing.commit(COMMIT_KIND, stage=stage, gate=gate_id, files=files, protocol_hash=locked.content_hash,

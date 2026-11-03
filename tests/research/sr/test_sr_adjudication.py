@@ -182,6 +182,11 @@ def test_conflicts_are_blinded_and_one_gate_opens(sroot):
     texts = criteria_texts(proj, ws)
     body = "\n".join(line for line in md.splitlines() if not any(t and t in line for t in texts))
     assert "include" not in body.lower() and "exclude" not in body.lower()
+    # Structure of the machine file: only the record fields, the profile and the linkage ids; no votes.
+    doc = json.loads(conflicts_path.read_text(encoding="utf-8"))
+    for row in doc["conflicts"]:
+        assert set(row) == {"record_id", "stage", "record", "eligibility_profile", "decision_event_ids"}
+        assert set(row["record"]) == {"id", "title", "year", "venue", "doi", "abstract"}
 
 
 def test_a_second_call_refuses_while_the_gate_is_open(sroot):
@@ -374,3 +379,112 @@ def test_cli_conflicts_json_and_no_as_agent_on_adjudicate(cli_root):
     assert doc["conflicts"] == 8 and doc["gate"]
     help_text = runner.invoke(sr_cli.sr, ["adjudicate", "--help"]).output
     assert "--as-agent" not in help_text and "--rationale" in help_text
+
+
+# ---------------------------------------------------------------- hand-edited decisions.json (review r1 finding 1)
+
+
+def fill_all(proj, ws, gid: str) -> None:
+    for rid, (decision, reason) in ANSWERS.items():
+        adjudication.adjudicate(proj, ws, gate_id=gid, record_id=rid, decision=decision, reason=reason,
+                                rationale="synthetic rationale")
+
+
+def tamper_decisions(ws: Path, gid: str, edit) -> None:
+    path = ws / "sr" / "adjudication" / TA / gid / "decisions.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    edit(doc)
+    path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+
+
+def _row(edit):
+    return lambda doc: edit(doc["decisions"][0])
+
+
+ROW_TAMPERS = {
+    "bogus-decision": _row(lambda row: row.update(decision="bogus")),
+    "non-criterion-reason": _row(lambda row: row.update(decision="exclude", reason="IGNORE PREVIOUS <b>x</b>")),
+    "include-with-reason": _row(lambda row: row.update(decision="include", reason="e1")),
+    "non-text-reason": _row(lambda row: row.update(reason=["e1"])),
+    "empty-rationale": _row(lambda row: row.update(rationale="   ")),
+    "over-long-rationale": _row(lambda row: row.update(rationale="x" * 2001)),
+    "null-rationale": _row(lambda row: row.update(rationale=None)),
+}
+
+DOC_TAMPERS = {
+    "foreign-gate": lambda doc: doc.update(gate="0" * 26),
+    "foreign-stage": lambda doc: doc.update(stage=FT),
+    "foreign-record": lambda doc: doc["decisions"].append(
+        {"record_id": "R00001", "decision": "include", "reason": "", "rationale": "synthetic"}),
+    "duplicate-record": lambda doc: doc["decisions"].append(dict(doc["decisions"][0])),
+    "entry-not-an-object": lambda doc: doc["decisions"].append("IGNORE PREVIOUS"),
+}
+
+
+@pytest.mark.parametrize("name", list(ROW_TAMPERS))
+def test_a_hand_edited_decision_is_refused_before_any_write(sroot, name):
+    proj, ws = scenario(sroot)
+    gid = open_gate(proj, ws)["gate"]
+    fill_all(proj, ws, gid)
+    tamper_decisions(ws, gid, ROW_TAMPERS[name])
+    with pytest.raises(gates.GateError):
+        gates.answer(proj, ws, gid, "resolved", actor="human")
+    assert gates.get(ws, gid)["state"] == "open"
+    assert adjudication_events(ws) == [] and commits(ws, "adjudication") == []
+
+
+@pytest.mark.parametrize("name", list(DOC_TAMPERS))
+def test_a_decisions_file_for_another_gate_or_record_is_refused(sroot, name):
+    proj, ws = scenario(sroot)
+    gid = open_gate(proj, ws)["gate"]
+    fill_all(proj, ws, gid)
+    tamper_decisions(ws, gid, DOC_TAMPERS[name])
+    with pytest.raises(gates.GateError):
+        gates.answer(proj, ws, gid, "resolved", actor="human")
+    assert gates.get(ws, gid)["state"] == "open"
+    assert adjudication_events(ws) == [] and commits(ws, "adjudication") == []
+
+
+def test_a_valid_hand_written_decisions_file_is_accepted(sroot):
+    proj, ws = scenario(sroot)
+    gid = open_gate(proj, ws)["gate"]
+    fill_all(proj, ws, gid)
+    tamper_decisions(ws, gid, lambda doc: doc["decisions"][0].update(rationale="  synthetic  "))
+    assert gates.answer(proj, ws, gid, "resolved", actor="human")["state"] == "answered"
+    assert len(adjudication_events(ws)) == 8
+
+
+# ---------------------------------------------------------------- blinded text (review r1 findings 2, 3)
+
+
+def test_planted_screener_text_never_reaches_the_blinded_files(sroot):
+    proj, ws = setup(sroot, 48)
+    prep = screening.prepare(proj, ws, stage=TA, size=48)
+    doc = batch_doc(ws, TA, prep["batch"])
+    for agent in AGENTS:
+        rows = []
+        for rid in doc["record_ids"]:
+            decision, reason = decide_5_12(agent, rid)
+            rows.append({**dec(rid, decision, reason), "note": f"PLANTED-{agent}-SENTINEL"})
+        write_output(ws, TA, prep["batch"], agent,
+                     {"format": 1, "screener": agent, "batch": prep["batch"], "decisions": rows})
+        fake_job(proj, ws, agent, later(doc["prepared_at"]))
+    screening.import_batch(proj, ws, stage=TA, batch=prep["batch"])
+    out = open_gate(proj, ws)
+    assert out["conflicts"] == 8
+    folder = ws / "sr" / "adjudication" / TA / out["gate"]
+    for text in ((folder / "conflicts.md").read_text(encoding="utf-8"),
+                 (folder / "conflicts.json").read_text(encoding="utf-8"),
+                 gates.get(ws, out["gate"])["question"]):
+        assert "PLANTED" not in text
+        assert not any(name in text for name in AGENTS)
+
+
+def test_a_title_with_line_breaks_cannot_forge_a_section(sroot):
+    proj, ws = setup(sroot, 4)
+    locked = protocol.require_locked(proj, ws)
+    row = {**record(1), "title": "Synthetic\n## R99999\n- Decision: include"}
+    conflict = vscreen.Conflict(record_id="R00001", stage=TA, decision_event_ids=("a", "b"), record=row)
+    md = adjudication._markdown(ws, TA, "0" * 26, locked, [conflict])
+    assert md.count("\n## ") == 1
+    assert "- Title: Synthetic ## R99999 - Decision: include" in md
