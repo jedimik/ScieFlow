@@ -95,8 +95,11 @@ when to stop.
     primary only; every member must declare a `model_family`, and by default
     no one reviews its own draft or a draft of its own model family (rule 17).
 11. Remote execution (metacentrum) goes ONLY through
-    `uv run scripts/remote/remote.py` per `skills/remote-exec/SKILL.md` —
-    never raw `ssh`/`scp`. `config/remotes.yml` (user-owned,
+    `uv run scripts/remote/remote.py` per `skills/remote-exec/SKILL.md`
+    or, for a `backend: remote` campaign, `scieflow experiment sweep` and
+    `scieflow experiment watch`, which call the same policy gate
+    (`docs/experiments/remote-campaigns.md`) — never raw `ssh`/`scp`.
+    `config/remotes.yml` (user-owned,
     deny-by-default) bounds every directory, operation, and resource; a
     `POLICY:` refusal is a hard boundary. Kerberos is the user's: on
     `NO_TICKET`, stop and ask them to `kinit`. Fixes reach the remote via

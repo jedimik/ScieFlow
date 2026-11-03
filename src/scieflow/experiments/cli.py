@@ -10,7 +10,7 @@ from scieflow.core.design import lock as design_lock
 from scieflow.core.project import Project
 from scieflow.core.run import actions, budget
 
-from . import manifest, sap
+from . import manifest, remote_campaign, sap
 from .analysis import (
     Analysis,
     AnalysisError,
@@ -32,7 +32,7 @@ from .power import solve as solve_power
 from .report import generate_report
 from .runner import execute_run, recompute_metrics
 from .scaffold import new_pipeline, new_stage
-from .stage import Stage, find_stage
+from .stage import Stage, StageError, find_stage
 from .stats import StatsUnavailable
 from .style import StyleError
 from .sweep import run_sweep
@@ -173,6 +173,52 @@ def _guard_capacity(run_dir: Path | None, planned: int) -> None:
         f"{remaining} remain — propose a smaller campaign or ask the user to raise the budget")
 
 
+def _sweep_guards(budget_run: Path | None, campaign: Campaign, planned: int) -> None:
+    """The guards every sweep passes before anything runs or spends, local and remote alike (M-D3 t3)."""
+    _guard(budget_run)
+    _design_guard(budget_run, campaign)
+    _analysis_guard(budget_run, campaign)
+    _guard_capacity(budget_run, planned)
+
+
+def _remote_refused(run_dir: Path | None, campaign, err) -> click.ClickException:
+    """A remote refusal: one job.refused (reason remote) in the run, then a message; nothing ran."""
+    if run_dir is not None:
+        events.emit(run_dir, "job.refused", "system", reason="remote", rule=err.rule,
+                    campaign=campaign.name)
+    return click.ClickException(f"{err.message} (rule {err.rule}; nothing was run)")
+
+
+def _remote_sweep(campaign, stage, experiments_dir, direct: bool) -> None:
+    """`sweep` for a backend: remote campaign (M-D3 t3): local guards, preflight, stage, push, submit once."""
+    mode = "direct" if direct else "apptainer"
+    campaign_dir = Path(experiments_dir) / campaign.name
+    budget_run = _budget_run(experiments_dir)
+    try:
+        remote_campaign.check_location(budget_run, campaign_dir)
+    except remote_campaign.RemoteError as e:
+        raise _remote_refused(budget_run, campaign, e) from e
+    _sweep_guards(budget_run, campaign, len(campaign.expand()))
+    try:
+        session = remote_campaign.preflight(campaign, stage, campaign_dir, budget_run, mode,
+                                            runner=remote_campaign.RUNNER)
+        outcome = remote_campaign.submit(session)
+    except remote_campaign.RemoteError as e:
+        raise _remote_refused(budget_run, campaign, e) from e
+    if direct:
+        click.echo("note: --direct runs are for development; they are recorded but not ranked "
+                   "by compare/report (pass --include-direct to rank them).", err=True)
+    if outcome.state == "staged":
+        click.echo(f"push failed: the campaign is staged in {campaign_dir} and nothing was "
+                   "submitted", err=True)
+        raise SystemExit(1)
+    click.echo(f"submitted {outcome.submitted} of {outcome.total} runs on {outcome.remote} "
+               f"({outcome.jobs}); collect with: scieflow experiment watch {campaign_dir}")
+    if outcome.exit_code:
+        click.echo("nothing could be submitted; see the remote messages above", err=True)
+        raise SystemExit(outcome.exit_code)
+
+
 @experiment.command()
 @click.option("-c", "--campaign", "campaign_path", required=True,
               type=click.Path(exists=True, dir_okay=False, path_type=Path))
@@ -186,6 +232,10 @@ def _guard_capacity(run_dir: Path | None, planned: int) -> None:
 def run(campaign_path, params, seed, direct, experiments_dir, pipelines_dir):
     """Run the campaign's stage once with explicit parameters."""
     campaign = Campaign.load(campaign_path)
+    if campaign.backend == "remote":
+        raise click.ClickException(
+            "remote campaign: runs locally only; submit a backend: remote campaign with sweep "
+            "(nothing was run)")
     stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
     _check_stage_seed(campaign, stage)
     if seed is not None and not stage.accepts_seed:
@@ -224,11 +274,11 @@ def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
     campaign = Campaign.load(campaign_path)
     stage = find_stage(pipelines_dir, campaign.pipeline, campaign.stage)
     _check_stage_seed(campaign, stage)
+    if campaign.backend == "remote":
+        _remote_sweep(campaign, stage, experiments_dir, direct)
+        return
     budget_run = _budget_run(experiments_dir)
-    _guard(budget_run)
-    _design_guard(budget_run, campaign)
-    _analysis_guard(budget_run, campaign)
-    _guard_capacity(budget_run, len(campaign.expand()))
+    _sweep_guards(budget_run, campaign, len(campaign.expand()))
     results_path = run_sweep(
         campaign, stage, experiments_dir, mode="direct" if direct else "apptainer"
     )
@@ -241,6 +291,48 @@ def sweep(campaign_path, direct, experiments_dir, pipelines_dir):
     if budget_run is not None:
         actions.record_spend(budget_run, experiment_runs=len(campaign.expand()))
     click.echo(str(results_path))
+
+
+def _watch_line(out) -> str:
+    c = out.counts
+    head = f"campaign {out.campaign_dir.name} ({out.campaign_id}) on {out.remote}: {out.state}"
+    if out.complete:
+        return f"{head}; complete: results in {out.campaign_dir / 'results.json'}"
+    return (f"{head}; pending {c['pending']}, submitted {c['submitted']}, finalized "
+            f"{c['finalized']} (completed {c['completed']}, failed {c['failed']})")
+
+
+@experiment.command()
+@click.option("--once", is_flag=True,
+              help="One pass, then exit: 0 complete, 4 still running, 1 refused or failed.")
+@click.option("--interval", type=click.IntRange(5, 3600), default=60, show_default=True,
+              help="Seconds between passes.")
+@click.option("--max-minutes", type=click.IntRange(1, 1440), default=60, show_default=True,
+              help="Stop waiting after this many minutes (exit 4).")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON summary after the last pass.")
+@_pipelines_option
+@click.argument("campaign_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+def watch(campaign_dir, once, interval, max_minutes, as_json, pipelines_dir):
+    """Collect a backend: remote campaign: fetch and check finished runs, submit pending ones (M-D3)."""
+    try:
+        out = remote_campaign.watch(campaign_dir, pipelines_dir=pipelines_dir, once=once,
+                                    interval=interval, max_minutes=max_minutes)
+    except remote_campaign.RemoteError as e:
+        raise click.ClickException(f"{e.message} (rule {e.rule}; nothing was run)") from e
+    except (CampaignError, StageError) as e:  # M-D3 t4 fix: a broken campaign file is a message, not a crash
+        raise click.ClickException(f"{e} (rule campaign-invalid; nothing was run)") from e
+    except (yaml.YAMLError, OSError) as e:
+        raise click.ClickException(f"{e} (rule campaign-unreadable; nothing was run)") from e
+    except manifest.UnsafeOutputError as e:
+        raise click.ClickException(f"{e} (rule symlink; nothing was written through it)") from e
+    if as_json:
+        doc = {"campaign": out.campaign_dir.name, "campaign_id": out.campaign_id,
+               "state": out.state, "complete": out.complete, "counts": out.counts}
+        click.echo(json.dumps(doc, sort_keys=True))
+    else:
+        click.echo(_watch_line(out))
+    if out.exit_code:
+        raise SystemExit(out.exit_code)
 
 
 @experiment.command()

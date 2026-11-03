@@ -29,6 +29,12 @@ The user has approved a campaign YAML. If not, stop — use
    `scieflow experiment verify` on the campaign folder (re-checks the recorded hashes).
 
 ## Rules
+- A campaign with `backend: remote`: run `scieflow experiment sweep` (it submits and
+  returns at once), then `scieflow experiment watch <campaign_dir>` until it exits 0.
+  Exit 4 means still running: wait, then run `watch` again. Exit 1 means refused or
+  failed: report the rule; `NO_TICKET` means stop and ask the user to run `kinit`.
+  Never resubmit a failed run or cancel a job by hand. Then run `scieflow experiment
+  verify`. Details: `docs/experiments/remote-campaigns.md`.
 - Recorded runs are containerized. `--direct` exists for developing a new
   stage script and for the test suite — never for results you will report.
   `compare`/`report` do not rank `--direct` runs.

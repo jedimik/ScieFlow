@@ -11,17 +11,19 @@ evaluator). Campaign runs are recorded under `workspace/<slug>/experiments/`.
 
 ## Backend selection
 
-The campaign YAML may set `backend: local` (default). `backend: remote` (with
-`remote: meta` and per-task resource requests) is refused by `scieflow experiment`
-(M-A-D5), so a remote campaign is driven by the coordinator, not the loader.
-`local` → dispatch to the experiments module as below. Remote → drive the
-campaign's tasks yourself via
-`skills/remote-exec/SKILL.md` (pull, snakemake dry-run gate, submit,
-monitor, fix, fetch), then write the same results-summary contract to
+The campaign YAML may set `backend: local` (default) or `backend: remote`, with a
+`remote:` block naming a remote from `config/remotes.yml` and a folder on it, and
+an optional `resources:` block. A remote campaign is an ordinary campaign that
+runs elsewhere, so dispatch it like a local one: the sub-agent runs
+`scieflow experiment sweep` (it submits and returns at once), then
+`scieflow experiment watch <campaign_dir>` until it exits `0`. Exit `4` means
+still running: wait, then run `watch` again. Exit `1` means refused or failed:
+report the rule. Details are in `docs/experiments/remote-campaigns.md`. Then write
+the same results-summary contract to
 `workspace/<slug>/iterations/<n>/results-summary.md` (campaign name, runs
-count, failed count, metrics table, best configuration, anomalies) so the
-rest of the loop is backend-agnostic. Budget: each real remote job counts
-as one experiment run.
+count, failed count, metrics table, best configuration, anomalies) so the rest
+of the loop is backend-agnostic. Budget: the sweep records the campaign's runs
+(a remote array job of N tasks counts as N runs).
 
 ## Per-campaign mode (two dispatches)
 
@@ -89,7 +91,7 @@ A refusal runs nothing and spends nothing. Report the rule id to the user.
 
 - Verify the summary exists and states run counts. Do not record the runs in
   the budget again: a sweep records its own runs after it returns, and the
-  coordinator's ledger reads them from there. Only work the runner cannot see
-  (remote jobs driven by the coordinator, one unit per real job/array task)
-  goes through `scieflow run spend`.
+  coordinator's ledger reads them from there. Only work driven by hand through
+  `remote.py`, which is not a campaign, goes through `scieflow run spend`:
+  one unit per real job or array task.
 - Retry-once rule on failure (ScieFlow AGENTS.md rule 7).

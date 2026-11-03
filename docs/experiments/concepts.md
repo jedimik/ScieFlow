@@ -48,6 +48,10 @@ Two optional keys add analysis (see [Analysis and Statistics](analysis.md)):
 - `analysis:` names the baseline, the test per metric, the correction, alpha,
   the confidence level and the bootstrap settings.
 
+`backend: remote` (with a `remote:` block and an optional `resources:` block)
+runs the same campaign on a remote host. It is collected with `scieflow
+experiment watch`; see [Remote campaigns](remote-campaigns.md).
+
 ## Run
 
 One stage execution with one parameter set:
@@ -55,6 +59,7 @@ One stage execution with one parameter set:
 ```
 workspace/<slug>/experiments/<campaign>/
 ├── campaign.yaml       # resolved copy (absolute paths)
+├── remote.json         # remote campaigns only: state, tasks, job ids (tool-written)
 ├── results.json        # all runs: params, status, metrics
 ├── results.csv         # one row per run and metric (written by sweep and stats)
 ├── comparison.json     # ranking + validation (scieflow experiment compare)
@@ -66,6 +71,7 @@ workspace/<slug>/experiments/<campaign>/
 └── runs/<run-id>/
     ├── config.yaml         # resolved params, paths, status, timestamps
     ├── logs/               # stdout.log, stderr.log
+    ├── remote/             # remote campaigns only: started, finished, exit, SHA256SUMS
     ├── artifacts/          # stage outputs
     ├── metrics.json        # computed metrics
     ├── manifest.json       # sha256 of artifacts and metrics, git state, data level

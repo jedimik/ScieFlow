@@ -19,21 +19,32 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def build_command(
-    stage: Stage, spec: RunSpec, input_path: Path, artifacts_dir: Path, mode: str
+def stage_argv(
+    stage_dir: str, script: str, spec: RunSpec, input_path: str, artifacts_dir: str,
+    python: str = "python",
 ) -> list[str]:
+    """The inner argv of a stage run (plan 5.2): shared by local and remote runs."""
     inner = [
-        "python",
-        str(stage.dir / stage.script),
+        python,
+        str(Path(stage_dir) / script),
         "--input",
-        str(input_path),
+        input_path,
         "--output",
-        str(artifacts_dir),
+        artifacts_dir,
     ]
     for key in sorted(spec.params):
         inner += [f"--{key}", str(spec.params[key])]
     if spec.seed is not None:
         inner += ["--seed", str(spec.seed)]
+    return inner
+
+
+def build_command(
+    stage: Stage, spec: RunSpec, input_path: Path, artifacts_dir: Path, mode: str
+) -> list[str]:
+    inner = stage_argv(
+        str(stage.dir), stage.script, spec, str(input_path), str(artifacts_dir)
+    )
     if mode == "direct":
         return [sys.executable] + inner[1:]
     if mode == "apptainer":
