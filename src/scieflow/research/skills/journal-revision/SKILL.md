@@ -130,6 +130,33 @@ report what the commands return. Full reference: `docs/research/claims.md` and
 
     The diff goes to `report/diff/`. The crate goes to `report/ro-crate/`. Neither leaves the run.
 
+## Paper-revision workflow
+
+Use a `paper-revision` run when the user wants a decision letter tracked through six phases.
+Otherwise revise in place in the draft run with Phases A to D above; that route has no phase tracking.
+
+Start one with `uv run scieflow run init <slug> --workflow paper-revision --goal <file> --approval <mode>`,
+or with `uv run scieflow run adopt <slug> --workflow paper-revision --approval <mode> --as-agent` for a
+prepared folder. The approval mode is the user's: ask, never default. Copy nothing from another run; the
+user brings the manuscript and its evidence in.
+
+The phases, in order, are `intake`, `structure`, `revise`, `respond`, `verify` and `resubmit`. Mark each
+with `uv run scieflow run mark <slug> <phase> <state> --as-agent`.
+
+| Phase | What happens | Commands |
+|---|---|---|
+| `intake` | The user brings the manuscript as submitted into `manuscript/`, and its evidence (a data package, or `scieflow data import` of a release). The user stores the letter with `scieflow manuscript revision ingest`. | the user's |
+| `structure` | Dispatch the structuring draft with `--role research.submitter`, then adopt it. | `scieflow manuscript revision prompt`, `scieflow manuscript revision adopt` |
+| `revise` | The starter is written; the authors change the manuscript. | `scieflow manuscript revision respond` |
+| `respond` | Every comment is answered in `response.md`. | `scieflow manuscript revision coverage`, then `uv run scieflow run mark <slug> respond done --as-agent` |
+| `verify` | The claim check runs. | `scieflow manuscript build`, `scieflow manuscript claims build`, `scieflow manuscript claims check`, then `uv run scieflow run mark <slug> verify done --as-agent` |
+| `resubmit` | The response letter and the package are written. | `scieflow manuscript revision letter`, `scieflow manuscript package` |
+
+`respond done` is refused until coverage passes for the highest round, and `verify done` is refused while
+the claim check has errors. A refusal names the command to run and leaves the phase as it was. Do not work
+around a refusal; never edit `status.yml` by hand, and never edit `report/claims/`. The package refuses on
+claim errors itself. Show the response letter to the user before anyone submits it.
+
 ## Report to the user
 
 Give the claim check's error and warning counts by rule id, every waiver the user recorded,

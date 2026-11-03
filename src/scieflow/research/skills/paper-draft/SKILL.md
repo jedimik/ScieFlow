@@ -11,14 +11,20 @@ description: Multi-agent LaTeX article drafting from a
 
 # Paper Draft Protocol
 
-You are the **coordinator**. Phases run in order; each is resumable via
-`status.yml`. `<slug>` = `YYYY-MM-<kebab-topic>`.
+You are the **coordinator**. Phases run in order; each is resumable. On entry run `uv run scieflow run show <slug>` and continue
+from the first phase not `done`. Mark each phase `running` when it starts and `done` or `failed` when
+it ends, with `uv run scieflow run mark <slug> <phase> <state> --as-agent`; never edit `status.yml` by hand.
+`<slug>` = `YYYY-MM-<kebab-topic>`.
 
 ## Phase 1 — intake
 
-1. Create `workspace/<slug>/` with `inputs/results/`, `prompts/`, `logs/`,
-   `outline/`, `debate/`, `manuscript/drafts/`, `manuscript/sections/`,
-   `review/`, `report/`.
+1. Create the run first. When the user gave a goal file, run
+   `uv run scieflow run init <slug> --workflow paper-draft --goal <file> --approval <mode>`;
+   otherwise create `workspace/<slug>/` with `goal.md` (the user's request in their words) and run
+   `uv run scieflow run adopt <slug> --workflow paper-draft --approval <mode> --as-agent`. The approval mode is the user's: ask, never
+   default. Then create the intake folders `inputs/results/`, `prompts/`, `logs/`, `outline/`,
+   `debate/`, `manuscript/drafts/`, `manuscript/sections/`, `review/`, `report/`. Do this before the
+   run configuration gate (step 3): `agent run` refuses a folder with `config.yml` but no `status.yml`.
 2. A data package is REQUIRED — a draft with no data grounding is out of
    scope; refuse politely and point at gap-discovery/lit-review otherwise.
    Build and validate `inputs/manifest.yml` exactly as gap-discovery
@@ -83,8 +89,7 @@ You are the **coordinator**. Phases run in order; each is resumable via
    selected papers. Then run
    `uv run scieflow research zotero-export --workspace workspace/<slug>` and copy
    `report/references.bib` → `manuscript/references.bib`.
-6. `status.yml`: workflow `paper-draft`; phases `intake`, `outline`,
-   `draft`, `cross-review`, `merge`, `verify`, `handoff`.
+6. The status was created in step 1; do not write it.
 
 ## Phase 2 — outline
 
@@ -170,7 +175,8 @@ BIB KEYS: <paste bibkey list extracted from manuscript/references.bib>
 Dispatch every author (parallel if the harness allows). Then check every
 expected `drafts/<agent>/<section>.tex` exists and is non-empty;
 missing/empty → re-dispatch that author once with the gap named; second
-failure → mark that author `failed` in `status.yml` and ask the user (a
+failure → log it with `uv run scieflow run log <slug> note.draft_author_failed --data author=<name>`
+and ask the user (a
 `staffing` gate) whether to continue with the surviving authors; on their
 yes, record it with `uv run scieflow agent configure --workspace <slug>
 --assign research.draft-authors=<survivors> --yes` and log it. (An
@@ -278,13 +284,15 @@ For round N = 1..`max_review_rounds`:
    dispatch it with `--role research.draft-authors`, then **coverage**:
    `uv run scieflow review coverage <slug> --round <N> --author <author>`.
    Missing ids → re-dispatch that author once with them listed; still
-   missing → mark the round `incomplete` in `status.yml`, log it, and
+   missing → log the round as incomplete with `uv run scieflow run log <slug> note.cross_review_round
+   --data round=<N> --data status=incomplete`, and
    continue (the merge phase must prefer another draft for affected
    sections). Verify the draft files actually changed when the response
    claims edits (`git diff --stat` if tracked, else content comparison) —
    discrepancy → re-dispatch once with it stated.
-10. Update `status.yml` (`cross_review_rounds: {1: {<author>: major-revision,
-    ...}, ...}`), log, next round. After `max_review_rounds` without
+10. Log each round's recommendations with `uv run scieflow run log <slug> note.cross_review_round
+    --data round=<N> --data <author>=<recommendation>`; the run's status file is not used for this.
+    Then the next round. After `max_review_rounds` without
     ACCEPT, proceed to merge anyway and record the open recommendations and
     deferred clusters in the handoff report.
 
@@ -339,7 +347,10 @@ For round N = 1..`max_review_rounds`:
 3. Claim check: `uv run scieflow manuscript claims build <slug>`, then
    `uv run scieflow manuscript claims check <slug>` over the merged sections. Every number
    in `sections/results.tex` and the other sections must match the evidence its
-   `% source:` comment cites; the check reads that evidence itself rather than sampling it.
+   `% source:` comment cites; the check reads that evidence itself rather than sampling it. Then mark the phase with
+   `uv run scieflow run mark <slug> verify done --as-agent`: it refuses while the claim check has errors.
+   Fix them (one fix round per step 3); never edit `report/claims/` or `status.yml`, and never waive a
+   finding; the user decides any waiver.
    Any error → treat as INVALID, one fix round to the responsible section's agent, quoting
    the rule id and the file and line (never a value from an evidence file). Waivers are the user's.
 4. Cited-source check (optional, advisory, **opt-in**; separate from the
