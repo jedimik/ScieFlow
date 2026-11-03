@@ -351,7 +351,10 @@ def prisma_cmd(slug: str, write_files: bool, as_json: bool) -> None:
         doc = prisma.build(project, ws)
     except SRError as exc:
         _fail(REFUSED, str(exc))
-    written = prisma.write(project, ws, doc) if write_files else []
+    try:
+        written = prisma.write(project, ws, doc) if write_files else []
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
     flow = doc["flow"]
     lines = [f"identified {flow['identified']} ({', '.join(f'{k} {v}' for k, v in flow['identified_by_source'].items())}); "
              f"duplicates {flow['duplicates_removed']}; after duplicates {flow['records_after_dedup']}",
@@ -360,5 +363,6 @@ def prisma_cmd(slug: str, write_files: bool, as_json: bool) -> None:
              f"assessed {flow['reports_assessed']}; excluded {flow['reports_excluded']}; "
              f"included {flow['studies_included']}"]
     lines += [f"written: workspace/{slug}/{path}" for path in written]
+    lines += [f"warning: {w}" for w in doc.get("warnings") or []]
     _emit(as_json, doc, lines)
 

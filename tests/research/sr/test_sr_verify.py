@@ -12,8 +12,10 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from scieflow.core import events
+from scieflow._vendor.researcher_core.sr_prisma import derive_prisma_flow
+from scieflow.core import events, gates
 from scieflow.core.project import Project
+from scieflow.research.sr import adjudication, ledger, prisma
 from scieflow.research.sr import cli as sr_cli
 from scieflow.research.sr import screening, search, verify
 from scieflow.research.sr.errors import SRError
@@ -170,19 +172,10 @@ def test_a_gap_in_the_corpus_ids_is_an_error(run):
 
 def test_uncommitted_detail_events_are_a_warning_not_an_error(run):
     proj, ws = run
-    rows = _rows(ws)
-    kept = []
-    dropped = False
-    for row in rows:
-        if not dropped and row.get("type") == "sr.committed" and row["data"].get("kind") == "screening":
-            dropped = True
-            continue
-        kept.append(row)
-    assert dropped
-    _write_rows(ws, kept)
+    events.emit(ws, "sr.retrieval", "human", op="ghost-operation", record_ids=[])
     doc = _verify(ws)
     assert doc["errors"] == [], doc["errors"]
-    assert any("uncommitted" in w for w in doc["warnings"]), doc["warnings"]
+    assert any("ghost-operation" in w for w in doc["warnings"]), doc["warnings"]
 
 
 def test_cli_exits_0_when_clean_and_1_with_the_errors(run, monkeypatch):
@@ -205,3 +198,147 @@ def test_verify_changes_no_file(run):
     before = digest()
     _verify(ws)
     assert digest() == before
+
+
+def _set_committed(ws: Path, kind: str, key: str, value) -> None:
+    rows = _rows(ws)
+    for row in rows:
+        if row.get("type") == "sr.committed" and row["data"].get("kind") == kind:
+            row["data"][key] = value
+            break
+    _write_rows(ws, rows)
+
+
+def _tamper_records(ws: Path) -> None:
+    path = ws / "sr" / "rounds" / "1" / "records.jsonl"
+    path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("value", ["x", 0, True])
+def test_a_malformed_round_fails_closed_and_every_writer_refuses(run, value):
+    proj, ws = run
+    _set_committed(ws, "search", "round", value)
+    doc = _verify(ws)
+    assert any("no valid round number" in e for e in doc["errors"]), doc["errors"]
+    with pytest.raises(SRError, match=r"^sr-ledger-invalid: "):
+        search.run_round(proj, ws, slug=scn.SLUG)
+
+
+@pytest.mark.parametrize("key,value", [("stage", "bogus-stage"), ("batch", "../../escape")])
+def test_a_malformed_screening_stage_or_batch_fails_closed(run, key, value):
+    proj, ws = run
+    _set_committed(ws, "screening", key, value)
+    doc = _verify(ws)
+    assert any("no valid stage or batch" in e for e in doc["errors"]), doc["errors"]
+
+
+@pytest.mark.parametrize("kind", ["search", "screening", "adjudication"])
+def test_a_commit_without_protocol_fields_is_an_error(run, kind):
+    proj, ws = run
+    rows = _rows(ws)
+    for row in rows:
+        if row.get("type") == "sr.committed" and row["data"].get("kind") == kind:
+            row["data"].pop("protocol_version", None)
+            row["data"].pop("protocol_hash", None)
+    _write_rows(ws, rows)
+    doc = _verify(ws)
+    assert any("names no protocol version or hash" in e for e in doc["errors"]), doc["errors"]
+
+
+def test_removing_a_screening_commit_changes_the_flow_and_is_reported(run):
+    proj, ws = run
+    before = prisma.build(proj, ws)["flow"]
+    assert before["records_screened"] == 48
+    kept, dropped = [], False
+    for row in _rows(ws):
+        if not dropped and row.get("type") == "sr.committed" and row["data"].get("kind") == "screening":
+            dropped = True
+            continue
+        kept.append(row)
+    assert dropped
+    _write_rows(ws, kept)
+    doc = _verify(ws)
+    assert any("resolves screening decisions that are not committed" in e for e in doc["errors"]), doc["errors"]
+    assert any("uncommitted" in w for w in doc["warnings"]), doc["warnings"]
+    # Hand-derived: the title-abstract batch no longer counts, so only the eight adjudications remain
+    # (records screened 8; four includes R00041/43/45/47 sought; four excludes R00042/44/46/48).
+    after = derive_prisma_flow(list(ledger.view(ws).iter_events()), run_id=ws.name).to_json_dict()
+    assert (after["records_screened"], after["records_excluded"], after["reports_sought_for_retrieval"]) == (8, 4, 4)
+    result = CliRunner().invoke(sr_cli.sr, ["prisma", scn.SLUG, "--json"])
+    assert result.exit_code == 1, result.output
+    assert "sr-ledger-invalid:" in result.output
+
+
+def test_verify_warnings_are_shown_in_the_prisma_output(run):
+    proj, ws = run
+    events.emit(ws, "sr.retrieval", "human", op="ghost-operation", record_ids=[])
+    result = CliRunner().invoke(sr_cli.sr, ["prisma", scn.SLUG, "--json"])
+    assert result.exit_code == 0, result.output
+    assert any("ghost-operation" in w for w in json.loads(result.output)["warnings"])
+    text = CliRunner().invoke(sr_cli.sr, ["prisma", scn.SLUG]).output
+    assert "warning: uncommitted detail events for operation ghost-operation" in text
+    assert CliRunner().invoke(sr_cli.sr, ["prisma", scn.SLUG, "--write"]).exit_code == 0
+    for name in ("flow.md", "checklist.md"):
+        text = (ws / "sr" / "prisma" / name).read_text(encoding="utf-8")
+        assert "uncommitted detail events for operation ghost-operation" in text, name
+
+
+@pytest.fixture
+def ran(tmp_path, monkeypatch):
+    """Plan 5.12 round one searched and title-abstract screened and imported; no conflict gate yet."""
+    root = scn.make_root(tmp_path)
+    proj, ws = scn.lock_protocol(root)
+    box = scn.install_sources(monkeypatch)
+    box.answers = scn.ROUND_1
+    assert search.run_round(proj, ws, slug=scn.SLUG).ok
+    scn.screen(proj, ws, stage=scn.TA, size=48, decide=scn.decide_title_abstract)
+    return proj, ws
+
+
+@pytest.fixture
+def conflict_gate(ran):
+    proj, ws = ran
+    return proj, ws, adjudication.open_conflicts(proj, ws, stage=scn.TA)["gate"]
+
+
+def test_import_batch_refuses_an_invalid_ledger(tmp_path, monkeypatch):
+    root = scn.make_root(tmp_path)
+    proj, ws = scn.lock_protocol(root)
+    box = scn.install_sources(monkeypatch)
+    box.answers = scn.ROUND_1
+    assert search.run_round(proj, ws, slug=scn.SLUG).ok
+    prep = screening.prepare(proj, ws, stage=scn.TA, size=48)
+    _tamper_records(ws)
+    before = len(events.read(ws))
+    with pytest.raises(SRError, match=r"^sr-ledger-invalid: "):
+        screening.import_batch(proj, ws, stage=scn.TA, batch=prep["batch"])
+    assert len(events.read(ws)) == before
+
+
+def test_open_conflicts_refuses_an_invalid_ledger(ran):
+    proj, ws = ran
+    _tamper_records(ws)
+    with pytest.raises(SRError, match=r"^sr-ledger-invalid: "):
+        adjudication.open_conflicts(proj, ws, stage=scn.TA)
+    assert gates.list_gates(ws, "open") == []
+
+
+def test_adjudicate_refuses_an_invalid_ledger_and_writes_nothing(conflict_gate):
+    proj, ws, gate = conflict_gate
+    _tamper_records(ws)
+    with pytest.raises(SRError, match=r"^sr-ledger-invalid: "):
+        adjudication.adjudicate(proj, ws, gate_id=gate, record_id="R00041", decision="include",
+                                rationale="synthetic")
+    assert not (ws / "sr" / "adjudication" / scn.TA / gate / "decisions.json").exists()
+    assert gates.get(ws, gate)["state"] == "open"
+
+
+def test_the_gate_hook_refuses_an_invalid_ledger_and_the_gate_stays_open(conflict_gate):
+    proj, ws, gate = conflict_gate
+    _tamper_records(ws)
+    with pytest.raises(gates.GateError, match=r"sr-ledger-invalid: "):
+        gates.answer(proj, ws, gate, "resolved", actor="human")
+    assert gates.get(ws, gate)["state"] == "open"
+    assert events.read(ws, types=("sr.adjudication",)) == []
+    assert not any((r.get("data") or {}).get("kind") == "adjudication"
+                   for r in events.read(ws, types=("sr.committed",)))

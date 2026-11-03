@@ -20,7 +20,7 @@ from scieflow._vendor.researcher_core import screen as vscreen
 from scieflow.core import events, gates, jobs, service, store
 from scieflow.core.design import lock
 from scieflow.core.project import Project
-from scieflow.research.sr import adjudication, ledger, protocol, screening
+from scieflow.research.sr import adjudication, ledger, protocol, screening, verify
 from scieflow.research.sr import cli as sr_cli
 from scieflow.research.sr.errors import SRError
 
@@ -276,7 +276,7 @@ def test_resolved_with_a_missing_decision_is_refused(sroot):
     assert adjudication_events(ws) == []
 
 
-def test_a_changed_screening_is_refused_and_the_gate_stays_open(sroot):
+def test_a_changed_screening_is_refused_and_the_gate_stays_open(sroot, monkeypatch):
     proj, ws = scenario(sroot)
     gid = open_gate(proj, ws)["gate"]
     for rid, (decision, reason) in ANSWERS.items():
@@ -289,9 +289,10 @@ def test_a_changed_screening_is_refused_and_the_gate_stays_open(sroot):
                                       stage=TA, decision="exclude", ts=screening._now(), reason="e1")
     led.commit("screening", stage=TA, batch="synthetic", files={}, jobs={}, protocol_hash="synthetic",
                decisions=1)
-    # t6: the injected commit is not a valid screening operation (no batch file, synthetic hash), so sr verify
-    # refuses the gate first with sr-ledger-invalid (fail closed); either refusal leaves the gate open.
-    with pytest.raises(gates.GateError, match="sr-ledger-invalid|screening changed"):
+    # The injected commit is not a valid screening operation, so sr verify would refuse first. Hold verify
+    # neutral for this test only, so the hook's own changed-screening check is the branch that refuses.
+    monkeypatch.setattr(verify, "preflight", lambda project, root: {})
+    with pytest.raises(gates.GateError, match="screening changed"):
         gates.answer(proj, ws, gid, "resolved", actor="human")
     assert gates.get(ws, gid)["state"] == "open"
     assert adjudication_events(ws) == []

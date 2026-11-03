@@ -25,6 +25,9 @@ SEARCH, SCREENING, ADJUDICATION = "search", "screening", "adjudication"
 DETAIL = frozenset({"sr.retrieval", "sr.dedup_decision", "sr.screening_decision", "sr.adjudication",
                     "sr.appraisal"})
 GATE_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+BATCH_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+STAGE_NAMES = frozenset({"title-abstract", "full-text"})  # screening.STAGES; screening imports this module
+PROTOCOL_KINDS = frozenset({SEARCH, SCREENING, ADJUDICATION})
 ADJUDICATION_KIND = "sr-adjudication"
 
 
@@ -81,12 +84,25 @@ def _check_files(ws: Path, op, data: dict, errors: list[str]) -> None:
             errors.append(f"{rel} differs from its committed sha256")
 
 
-def _check_protocol(op, data: dict, lock_records: list[dict], errors: list[str]) -> None:
+def _check_protocol(op, kind, data: dict, lock_records: list[dict], errors: list[str]) -> None:
     version, digest = data.get("protocol_version"), data.get("protocol_hash")
     if version is None and digest is None:
+        if kind in PROTOCOL_KINDS:  # every writer of these kinds stamps both (plan 5.3): absence is tampering
+            errors.append(f"commit {op} names no protocol version or hash")
         return
     if not any(rec.get("seq") == version and rec.get("content_hash") == digest for rec in lock_records):
         errors.append(f"commit {op} names a protocol that matches no design ledger record")
+
+
+def _round_number(value) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 1:
+        return value
+    return None
+
+
+def _op(row: dict) -> str | None:
+    op = (row.get("data") or {}).get("op")
+    return op if isinstance(op, str) else None
 
 
 def _check_search(ws: Path, op, number, data: dict, rows: list[dict], errors: list[str]) -> None:
@@ -141,7 +157,7 @@ def _check_screening(ws: Path, op, data: dict, rows: list[dict], errors: list[st
         errors.append(f"committed screening decisions of batch {batch} differ from its output files")
 
 
-def _check_adjudication(ws: Path, op, data: dict, rows: list[dict], errors: list[str],
+def _check_adjudication(ws: Path, op, data: dict, rows: list[dict], decided: set[str], errors: list[str],
                         warnings: list[str]) -> None:
     gate_id = data.get("gate")
     dec_rel = next((rel for rel in (data.get("files") or {}) if str(rel).endswith("/decisions.json")), None)
@@ -154,13 +170,19 @@ def _check_adjudication(ws: Path, op, data: dict, rows: list[dict], errors: list
     expected = Counter((row.get("record_id"), row.get("decision"), str(row.get("reason") or ""),
                         row.get("rationale")) for row in doc["decisions"] if isinstance(row, dict))
     actual: Counter = Counter()
+    dangling = False
     for row in rows:
         detail = row.get("data") or {}
         if row.get("type") == "sr.adjudication" and detail.get("op") == op:
             actual[(detail.get("record_id"), detail.get("decision"), str(detail.get("reason") or ""),
                     detail.get("rationale"))] += 1
+            resolves = detail.get("resolves")
+            if not isinstance(resolves, list) or not resolves or any(str(e) not in decided for e in resolves):
+                dangling = True
     if actual != expected:
         errors.append(f"committed adjudications of gate {gate_id} differ from decisions.json")
+    if dangling:  # removing the screening commit a resolution rests on must not publish a changed flow silently
+        errors.append(f"adjudication commit {op} resolves screening decisions that are not committed")
     if not isinstance(gate_id, str) or not GATE_RE.match(gate_id):
         errors.append(f"commit {op} names no gate id")
         return
@@ -187,6 +209,27 @@ def _lock_records(ws: Path, errors: list[str]) -> list[dict]:
     return list(state.records)
 
 
+def _check_commit(ws: Path, data: dict, rows: list[dict], lock_records: list[dict], decided: set[str],
+                  errors: list[str], warnings: list[str]) -> None:
+    op, kind = data.get("op"), data.get("kind")
+    _check_files(ws, op, data, errors)
+    _check_protocol(op, kind, data, lock_records, errors)
+    if kind == SEARCH:
+        number = _round_number(data.get("round"))
+        if number is None:
+            errors.append(f"commit {op} names no valid round number")
+            return
+        _check_search(ws, op, number, data, rows, errors)
+    elif kind == SCREENING:
+        if data.get("stage") not in STAGE_NAMES or not isinstance(data.get("batch"), str) \
+                or not BATCH_RE.match(data["batch"]):
+            errors.append(f"commit {op} names no valid stage or batch")
+            return
+        _check_screening(ws, op, data, rows, errors)
+    elif kind == ADJUDICATION:
+        _check_adjudication(ws, op, data, rows, decided, errors, warnings)
+
+
 def verify(project, ws) -> dict:
     """Every committed operation of the run, checked against its files, its events and the design ledger."""
     ws = Path(ws)
@@ -200,31 +243,33 @@ def verify(project, ws) -> dict:
             continue
         data = dict(row.get("data") or {})
         op = data.get("op")
+        if not isinstance(op, str):
+            errors.append("a commit names no operation id")
+            continue
         if op in commits:
             errors.append(f"duplicate sr.committed for op {op}: the sr ledger is invalid")
             continue
         commits[op] = data
         ordered.append(data)
+    screening_ops = {op for op, data in commits.items() if data.get("kind") == SCREENING}
+    decided = {str(row.get("id")) for row in rows
+               if row.get("type") == "sr.screening_decision" and _op(row) in screening_ops}
     lock_records = _lock_records(ws, errors)
-    for data in ordered:
-        op, kind = data.get("op"), data.get("kind")
-        _check_files(ws, op, data, errors)
-        _check_protocol(op, data, lock_records, errors)
-        if kind == SEARCH:
-            _check_search(ws, op, data.get("round"), data, rows, errors)
-        elif kind == SCREENING:
-            _check_screening(ws, op, data, rows, errors)
-        elif kind == ADJUDICATION:
-            _check_adjudication(ws, op, data, rows, errors, warnings)
-    rounds = sorted(int(d["round"]) for d in ordered if d.get("kind") == SEARCH and "round" in d)
+    for index, data in enumerate(ordered, start=1):
+        try:
+            _check_commit(ws, data, rows, lock_records, decided, errors, warnings)
+        except (TypeError, ValueError, AttributeError, KeyError):  # fail closed, never a traceback
+            errors.append(f"commit number {index} holds data that cannot be checked")
+    rounds = sorted(n for n in (_round_number(d.get("round")) for d in ordered if d.get("kind") == SEARCH)
+                    if n is not None)
     ids: list[str] = []
     for number in rounds:
         new_rows = _jsonl(ws, f"sr/rounds/{number}/records.jsonl", errors)
         ids.extend(str(row.get("id")) for row in (new_rows or []) if isinstance(row, dict))
     if ids != [f"R{i:05d}" for i in range(1, len(ids) + 1)]:
         errors.append(f"corpus ids are not a gapless sequence over the committed rounds ({len(ids)} records)")
-    pending = sorted({str((row.get("data") or {}).get("op")) for row in rows
-                      if row.get("type") in DETAIL and (row.get("data") or {}).get("op") not in commits})
+    pending = sorted({str(_op(row)) for row in rows
+                      if row.get("type") in DETAIL and _op(row) not in commits})
     for op in pending:
         warnings.append(f"uncommitted detail events for operation {op} (not read)")
     counts = Counter(str(d.get("kind")) for d in ordered)
@@ -232,8 +277,11 @@ def verify(project, ws) -> dict:
             "ok": not errors}
 
 
-def preflight(project, ws) -> None:
-    """Refuse a write or a PRISMA derivation while the run's sr ledger does not verify (plan 5.8)."""
+def preflight(project, ws) -> dict:
+    """Refuse a write or a PRISMA derivation while the run's sr ledger does not verify (plan 5.8).
+
+    Returns the verify document, warnings included, when the ledger verifies."""
     doc = verify(project, ws)
     if doc["errors"]:
         raise SRError(f"{PREFIX}: {doc['errors'][0]}")
+    return doc

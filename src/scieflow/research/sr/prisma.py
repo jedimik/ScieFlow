@@ -89,19 +89,23 @@ def _kappa(ws: Path) -> dict:
     return out
 
 
-def _statement(project, ws: Path) -> str | None:
-    try:
-        screeners, _warnings = screening._screeners(project, ws)
-    except SRError:
+def _statement(ws: Path) -> str | None:
+    """The screening statement, named from the committed screening decisions (not the current assignment)."""
+    names: list[str] = []
+    for event in ledger.view(ws).iter_events(type="screening_decision"):
+        name = event.payload.get("screener_id")
+        if isinstance(name, str) and name not in names:
+            names.append(name)
+    if len(names) != 2:
         return None
-    return (f"two independent agent screeners: {screeners[0]}, {screeners[1]}; conflicts adjudicated by a "
-            "human; screener independence is procedural (docs)")
+    return (f"two independent agent screeners: {names[0]}, {names[1]}; conflicts adjudicated by a human; "
+            "screener independence is procedural (docs)")
 
 
 def build(project, ws) -> dict:
     """The PRISMA flow, checklist and the derived counts of the run (refused on an invalid sr ledger)."""
     ws = Path(ws)
-    verify.preflight(project, ws)
+    verified = verify.preflight(project, ws)
     evs = list(ledger.view(ws).iter_events())
     flow = derive_prisma_flow(evs, run_id=ws.name)
     checklist = derive_prisma_checklist(evs, run_id=ws.name, flow=flow)
@@ -112,8 +116,9 @@ def build(project, ws) -> dict:
         "checklist": checklist.to_json_dict(),
         "rounds": _rounds(ws),
         "kappa": _kappa(ws),
-        "screening_statement": _statement(project, ws),
+        "screening_statement": _statement(ws),
         "protocol_trail": state.trail,
+        "warnings": list(verified["warnings"]),
         "derived_from": _derived_from(ws, len(evs)),
     }
 
@@ -178,22 +183,38 @@ def _checklist_md(project, doc: dict) -> str:
         evidence = (got["evidence"] if got else "not covered by the vendored checklist; author-supplied")
         topic = str(item.get("topic", "")).replace("|", "/")
         rows.append(f"| {key} | {topic} | {status} | {str(evidence).replace('|', '/')} |")
-    stamp = doc["derived_from"]
-    head = [f"# PRISMA 2020 checklist: run {doc['run']}", "",
-            f"Derived from {stamp['events']} committed sr events (sha256 {stamp['sha256'][:12]}, at {stamp['at']}). "
-            "Nothing here is read back as a source of counts.", "",
+    head = [f"# PRISMA 2020 checklist: run {doc['run']}", "", _stamp_line(doc), "",
+            "Nothing here is read back as a source of counts.", *_warning_lines(doc), "",
             "| Item | Topic | Status | Evidence |", "|---|---|---|---|"]
     return "\n".join(head + rows) + "\n"
+
+
+def _stamp_line(doc: dict) -> str:
+    stamp = doc["derived_from"]
+    return (f"Derived from {stamp['events']} ledger events read (protocol_locked and amendment events, committed "
+            f"sr detail events; sr.committed excluded) (sha256 {stamp['sha256'][:12]}, at {stamp['at']}).")
+
+
+def _warning_lines(doc: dict) -> list[str]:
+    warnings = doc.get("warnings") or []
+    return ["", "Warnings from sr verify:", *[f"- {w}" for w in warnings]] if warnings else []
+
+
+def _links_refused(ws: Path) -> None:
+    """Refuse before any write when the folder or a target is a symbolic link (plan 5.16)."""
+    for rel in (Path("sr"), OUT_DIR, OUT_DIR / "flow.json", OUT_DIR / "flow.md", OUT_DIR / "checklist.md"):
+        if (ws / rel).is_symlink():
+            raise SRError(f"{rel.as_posix()} is a symbolic link; nothing was written")
 
 
 def write(project, ws, doc: dict) -> list[str]:
     """Write sr/prisma/flow.json, flow.md and checklist.md, each stamped with derived_from."""
     ws = Path(ws)
+    _links_refused(ws)
     out = ws / OUT_DIR
     screening._write_text(out / "flow.json", json.dumps(doc, indent=2, sort_keys=True, default=str) + "\n")
     flow_md = (f"# PRISMA 2020 flow: run {doc['run']}\n\n"
-               f"Derived from {doc['derived_from']['events']} committed sr events "
-               f"(sha256 {doc['derived_from']['sha256'][:12]}, at {doc['derived_from']['at']}).\n\n"
+               f"{_stamp_line(doc)}\n" + "".join(f"{line}\n" for line in _warning_lines(doc)) + "\n"
                "```mermaid\n" + _mermaid(doc) + "\n```\n\n```text\n" + _text(doc) + "```\n")
     screening._write_text(out / "flow.md", flow_md)
     screening._write_text(out / "checklist.md", _checklist_md(project, doc))

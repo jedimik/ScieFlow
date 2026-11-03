@@ -13,7 +13,10 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+from scieflow.core import service
+from scieflow.core.design import lock
 from scieflow.research.sr import cli as sr_cli
+from scieflow.research.sr import prisma, search
 from tests.research.sr import t6_scenario as scn
 
 GOLD = yaml.safe_load((scn.REPO / "tests" / "fixtures" / "sr" / "prisma-scenario.yml").read_text(encoding="utf-8"))
@@ -99,3 +102,81 @@ def test_prisma_refuses_an_invalid_ledger_with_the_named_rule(run):
     result = _prisma("--json")
     assert result.exit_code == 1
     assert "sr-ledger-invalid:" in result.output
+
+
+@pytest.mark.parametrize("link", ["sr/prisma", "sr/prisma/flow.json", "sr/prisma/flow.md", "sr/prisma/checklist.md"])
+def test_write_refuses_a_linked_output_and_writes_nothing(run, tmp_path, link):
+    root, ws = run
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = ws / link
+    if link == "sr/prisma":
+        target.symlink_to(outside, target_is_directory=True)
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(outside / "elsewhere.txt")
+    result = _prisma("--write")
+    assert result.exit_code == 1, result.output
+    assert "symbolic link" in result.output
+    assert list(outside.iterdir()) == []
+
+
+def test_round_identification_and_kappa_equal_the_hand_values(run):
+    root, ws = run
+    doc = json.loads(_prisma("--json").output)
+    rounds = [(r["round"], r["identified"], r["duplicates"], r["new_records"]) for r in doc["rounds"]]
+    assert rounds == [(1, 60, 12, 48)]
+    assert doc["rounds"][0]["capped"] == []
+    assert doc["kappa"]["title-abstract"]["kappa"] == pytest.approx(GOLD["kappa"]["title-abstract"], abs=1e-6)
+    assert doc["kappa"]["full-text"]["kappa"] == pytest.approx(GOLD["kappa"]["full-text"], abs=1e-6)
+
+
+STATEMENT = ("two independent agent screeners: codex, claude; conflicts adjudicated by a human; "
+             "screener independence is procedural (docs)")
+
+
+@pytest.mark.parametrize("assigned", ["[claude, codex]", "[claude]"])
+def test_screening_statement_names_the_agents_that_screened(run, assigned):
+    root, ws = run
+    config = root / "config" / "defaults.yml"
+    text = config.read_text(encoding="utf-8")
+    config.write_text(text.replace("research.sr-screeners: [codex, claude]",
+                                   f"research.sr-screeners: {assigned}"), encoding="utf-8")
+    doc = json.loads(_prisma("--json").output)
+    assert doc["screening_statement"] == STATEMENT
+
+
+def test_checklist_derives_24a_and_leaves_24b_author_supplied_before_an_amendment(run):
+    root, ws = run
+    assert _prisma("--write").exit_code == 0
+    checklist = (ws / "sr" / "prisma" / "checklist.md").read_text(encoding="utf-8")
+    assert re.search(r"\| 24a \|[^\n]*\| derived \|", checklist)
+    assert re.search(r"\| 24b \|[^\n]*\| author-supplied \|", checklist)
+
+
+def test_24b_and_the_protocol_trail_after_a_design_amendment_and_round_two(tmp_path, monkeypatch):
+    proj, ws, box = scn.scenario(tmp_path, monkeypatch)
+    monkeypatch.setattr(sr_cli, "_root", lambda: tmp_path)
+    design = ws / "design" / "design.yml"
+    doc = yaml.safe_load(design.read_text(encoding="utf-8"))
+    doc["review"]["strategies"][0]["limit"] = 150
+    design.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    amendment = lock.amend(proj, ws, summary="synthetic limit change", rationale="synthetic")
+    service.answer_gate(proj, scn.SLUG, amendment["id"], "approve")
+    box.answers = scn.ROUND_2
+    second = search.run_round(proj, ws, slug=scn.SLUG)
+    assert second.ok, second.summary
+    assert _prisma("--write").exit_code == 0
+    checklist = (ws / "sr" / "prisma" / "checklist.md").read_text(encoding="utf-8")
+    assert re.search(r"\| 24b \|[^\n]*\| derived \|", checklist)
+    built = json.loads(_prisma("--json").output)
+    assert [entry["seq"] for entry in built["protocol_trail"]] == [1, 2]
+    assert built["flow"]["identified"] == GOLD["round2"]["identified"]
+
+
+def test_flow_stamp_states_what_the_event_count_counts(run):
+    root, ws = run
+    assert _prisma("--write").exit_code == 0
+    flow_md = (ws / "sr" / "prisma" / "flow.md").read_text(encoding="utf-8")
+    assert re.search(r"Derived from \d+ ledger events read \(protocol_locked and amendment events, "
+                     r"committed sr detail events; sr\.committed excluded\)", flow_md)
