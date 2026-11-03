@@ -22,6 +22,15 @@ PAPER_DRAFT_DOC = ROOT / "docs" / "research" / "workflows" / "paper-draft.md"
 SKILLS = ROOT / "src" / "scieflow" / "research" / "skills"
 PAPER_DRAFT_SKILL = SKILLS / "paper-draft" / "SKILL.md"
 JOURNAL_REVISION_SKILL = SKILLS / "journal-revision" / "SKILL.md"
+RESEARCH_AGENTS = ROOT / "src" / "scieflow" / "research" / "AGENTS.md"
+AGENTS_RULE_5 = (
+    "5. Track progress in `workspace/<slug>/status.yml` and append notable events "
+    "(dispatches, failures, retries, timings) to `workspace/<slug>/log.md`. "
+    "A `paper-draft` or `paper-revision` run has native status: create it with "
+    "`uv run scieflow run init` or `run adopt`, change its phases only with `uv run "
+    "scieflow run mark <slug> <phase> <state> --as-agent`, and never edit its "
+    "`status.yml` by hand."
+)
 
 PAPER_REVISION_HEADING = "### Paper-revision runs and phase gates"
 PL_D6_SENTENCE = (
@@ -46,6 +55,14 @@ def _run_section(text):
     rest = text[start + 1 :]
     end = rest.find("\n## ")
     return text[start : start + 1 + end] if end != -1 else text[start:]
+
+
+def _synopsis_block(section, name):
+    """The fenced synopsis that starts with `uv run scieflow run NAME `, not any prose mention."""
+    blocks = re.findall(r"```bash\n(.*?)```", section, re.S)
+    matches = [b for b in blocks if b.startswith(f"uv run scieflow run {name} ")]
+    assert len(matches) == 1, f"run {name} has no single synopsis block in docs/cli.md"
+    return matches[0]
 
 
 def _run_command(name):
@@ -117,6 +134,21 @@ def test_runs_doc_pl_d6_sentence_names_paper_revision():
     assert PL_D6_SENTENCE in _read(RUNS_DOC)
 
 
+def test_runs_doc_gate_refusals_do_not_overclaim_the_review_status():
+    section = " ".join(_runs_section(_read(RUNS_DOC), PAPER_REVISION_HEADING).split())
+    assert "a missing or unreadable review status" not in section
+    assert "an unreadable review status" in section
+    assert "cannot discover" in section
+
+
+# --- research/AGENTS.md: the protected rule-5 edit of plan 3.3, pinned here ---
+
+
+def test_research_agents_rule_5_pins_the_native_paper_status_sentence():
+    text = " ".join(_read(RESEARCH_AGENTS).split())
+    assert AGENTS_RULE_5 in text
+
+
 # --- docs/cli.md: the run section lists every --workflow choice; mark names the gates ---
 
 
@@ -126,8 +158,18 @@ def test_cli_run_init_and_adopt_list_every_workflow_choice():
         command = _run_command(name)
         assert command is not None, f"run {name} is not a command"
         workflow = next(p for p in command.params if p.name == "workflow")
+        block = _synopsis_block(section, name)
         for choice in workflow.type.choices:
-            assert choice in section, f"run {name} --workflow {choice} missing from docs/cli.md"
+            assert choice in block, f"run {name} --workflow {choice} missing from its synopsis"
+
+
+def test_cli_run_init_and_adopt_prose_names_paper_revision():
+    paragraphs = _run_section(_read(CLI_DOC)).split("\n\n")
+    init_prose = [p for p in paragraphs if "loads no defaults" in p]
+    adopt_prose = [p for p in paragraphs if "Give a prepared paper folder" in p]
+    assert len(init_prose) == 1 and len(adopt_prose) == 1
+    assert "paper-revision" in init_prose[0], "run init prose must name paper-revision"
+    assert "paper-revision" in adopt_prose[0], "run adopt prose must name paper-revision"
 
 
 def test_cli_run_mark_entry_names_the_gates_and_links_the_runs_section():
@@ -229,6 +271,8 @@ def test_journal_revision_skill_has_the_paper_revision_section_before_the_report
         "uv run scieflow run adopt <slug> --workflow paper-revision",
         "uv run scieflow run mark <slug> respond done --as-agent",
         "uv run scieflow run mark <slug> verify done --as-agent",
+        "The user stores the letter with `scieflow manuscript revision ingest`",
+        "never its `experiments/` or `inputs/`",
         "scieflow manuscript revision ingest",
         "scieflow manuscript revision adopt",
         "scieflow manuscript revision coverage",
