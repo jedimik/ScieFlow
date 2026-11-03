@@ -1,0 +1,49 @@
+# Synthetic screening calibration sample (M-H plan 5.12): 40 records, 10 include / 30 exclude.
+# Screener A = codex, screener B = claude. Hand-counted, never derived from the code under test.
+format: 1
+stage: title-abstract
+screeners: [codex, claude]
+expected:
+  A: {tp: 9, fn: 1, fp: 3, tn: 27}
+  B: {tp: 10, fn: 0, fp: 6, tn: 24}
+records:
+  - {id: R00001, gold: include, codex: include, claude: include}
+  - {id: R00002, gold: include, codex: include, claude: include}
+  - {id: R00003, gold: include, codex: include, claude: include}
+  - {id: R00004, gold: include, codex: include, claude: include}
+  - {id: R00005, gold: include, codex: include, claude: include}
+  - {id: R00006, gold: include, codex: include, claude: include}
+  - {id: R00007, gold: include, codex: include, claude: include}
+  - {id: R00008, gold: include, codex: include, claude: include}
+  - {id: R00009, gold: include, codex: include, claude: include}
+  - {id: R00010, gold: include, codex: exclude, claude: include}
+  - {id: R00011, gold: exclude, codex: include, claude: include}
+  - {id: R00012, gold: exclude, codex: include, claude: include}
+  - {id: R00013, gold: exclude, codex: include, claude: include}
+  - {id: R00014, gold: exclude, codex: exclude, claude: include}
+  - {id: R00015, gold: exclude, codex: exclude, claude: include}
+  - {id: R00016, gold: exclude, codex: exclude, claude: include}
+  - {id: R00017, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00018, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00019, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00020, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00021, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00022, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00023, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00024, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00025, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00026, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00027, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00028, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00029, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00030, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00031, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00032, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00033, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00034, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00035, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00036, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00037, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00038, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00039, gold: exclude, codex: exclude, claude: exclude}
+  - {id: R00040, gold: exclude, codex: exclude, claude: exclude}

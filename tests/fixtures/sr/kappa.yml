@@ -1,0 +1,11 @@
+# Hand-computed Cohen's kappa tables of M-H plan section 5.12 (synthetic gold, no patient data).
+# Cells: a = both include, b = A include / B exclude, c = A exclude / B include, d = both exclude.
+# kappa is the exact fraction (string) or null when pe = 1 (undefined; the vendored code reports
+# the same). Typed by hand from the plan, never derived from the code under test.
+format: 1
+rows:
+  - {id: 1, a: 20, b: 5, c: 10, d: 15, kappa: "2/5"}
+  - {id: 2, a: 40, b: 10, c: 5, d: 45, kappa: "7/10"}
+  - {id: 3, a: 10, b: 5, c: 3, d: 30, kappa: "95/159"}
+  - {id: 4, a: 5, b: 1, c: 1, d: 6, kappa: "29/42"}
+  - {id: 5, a: 10, b: 0, c: 0, d: 0, kappa: null}

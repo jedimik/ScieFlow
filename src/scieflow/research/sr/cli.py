@@ -22,7 +22,7 @@ from scieflow.core.config import repo_root
 from scieflow.core.design import lock
 from scieflow.core.project import Project, ProjectError
 from scieflow.research.search import registry
-from scieflow.research.sr import adjudication, appraisal, ledger, prisma, protocol, records, screening, search, verify
+from scieflow.research.sr import adjudication, appraisal, calibration, ledger, prisma, protocol, records, screening, search, verify
 from scieflow.research.sr.errors import SRError
 
 OK, REFUSED, USAGE = 0, 1, 2
@@ -279,6 +279,22 @@ def kappa_cmd(slug: str, stage: str, as_json: bool) -> None:
     if doc["note"]:
         lines.append(f"note: {doc['note']}")
     _emit(as_json, doc, lines)
+
+
+@sr.command("eval")
+@click.argument("slug")
+@click.option("--gold", required=True, help="Human-labelled gold file (format 1), inside the run.")
+@click.option("--stage", required=True, type=click.Choice(screening.STAGES))
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def eval_cmd(slug: str, gold: str, stage: str, as_json: bool) -> None:
+    """Screener and resolved confusions against gold labels, with Wilson intervals (read-only)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = calibration.evaluate(project, ws, gold=gold, stage=stage)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    _emit(as_json, doc, calibration.render(doc))
 
 
 @sr.command("conflicts")
