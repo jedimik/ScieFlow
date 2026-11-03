@@ -1,5 +1,8 @@
 # Vocabulary for workspace/<slug>/status.yml. status.py and validate.py load this.
 phases: [hypothesize, experiment, literature, synthesize]
+# The legacy phases above remain the research-loop vocabulary, not a union.
+workflows:
+  paper-draft: [intake, outline, draft, cross-review, merge, verify, handoff]
 states: [pending, running, done, failed]
 stop_reasons: [low-budget, max-iterations, converged, anomaly, user]
 approval_modes: [per-campaign, autonomous]

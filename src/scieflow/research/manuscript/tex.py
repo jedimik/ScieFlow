@@ -87,6 +87,7 @@ class Tree:
     lines: list = field(default_factory=list)
     expanded_chars: int = 0
     expanded_lines: int = 0
+    keep_comments: bool = False
 
     def flat_text(self) -> str:
         return "\n".join(line.text for line in self.lines)
@@ -199,10 +200,15 @@ def strip_comments(text: str) -> str:
     return "\n".join(strip_line(line) for line in text.split("\n"))
 
 
-def read_tree(folder, main: str = "main.tex") -> Tree:
-    """The flattened manuscript: `main` and everything it inputs, within the limits of M-F 5.8."""
+def read_tree(folder, main: str = "main.tex", keep_comments: bool = False) -> Tree:
+    """The flattened manuscript: `main` and everything it inputs, within the limits of M-F 5.8.
+
+    With `keep_comments` the lines keep their `%` comments (M-G-D16: the claim ledger reads the
+    `% source:` lines); an \\\\input inside a comment is still not expanded. The default output is
+    unchanged.
+    """
     folder = Path(folder)
-    tree = Tree(folder=folder, main=_tex_name(main))
+    tree = Tree(folder=folder, main=_tex_name(main), keep_comments=keep_comments)
     _expand(tree, tree.main, depth=0, stack=[])
     return tree
 
@@ -215,7 +221,8 @@ def _expand(tree: Tree, name: str, depth: int, stack: list) -> None:
     if name not in tree.files:
         if len(tree.files) >= MAX_FILES:
             raise TexError("tex-limit", name, f"{excerpt(name)}: more than {MAX_FILES} files")
-        tree.files[name] = strip_comments(read_regular_text(tree.folder, name))
+        raw_text = read_regular_text(tree.folder, name)
+        tree.files[name] = raw_text if tree.keep_comments else strip_comments(raw_text)
     text = tree.files[name]
     tree.expanded_chars += len(text)
     tree.expanded_lines += text.count("\n") + 1
@@ -223,8 +230,11 @@ def _expand(tree: Tree, name: str, depth: int, stack: list) -> None:
         raise TexError("tex-limit", name, f"{excerpt(name)}: the flattened manuscript is over the size limit")
     stack.append(name)
     for lineno, raw in enumerate(text.split("\n"), start=1):
+        # The include search runs on the code part of the line only, so a commented-out \\input is never
+        # expanded; the kept text is the raw line (equal to the code part when comments are stripped).
+        code = strip_line(raw) if tree.keep_comments else raw
         position = 0
-        for match in INCLUDE_RE.finditer(raw):
+        for match in INCLUDE_RE.finditer(code):
             tree.lines.append(Line(name, lineno, raw[position:match.start()]))
             _expand(tree, _tex_name(match.group(1)), depth + 1, stack)
             position = match.end()

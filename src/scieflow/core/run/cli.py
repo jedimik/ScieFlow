@@ -43,17 +43,20 @@ def run():
 @click.argument("slug")
 @click.option("--goal", type=click.Path(exists=True, dir_okay=False, path_type=Path), required=True)
 @click.option("--approval", type=click.Choice(["per-campaign", "autonomous"]))
+@click.option("--workflow", type=click.Choice(["research-loop", "paper-draft"]),
+              default="research-loop", show_default=True)
 @click.option("--max-iterations", type=int)
 @click.option("--max-experiment-runs", type=int)
 @click.option("--max-wall-minutes", type=int)
-def init(slug, goal, approval, max_iterations, max_experiment_runs, max_wall_minutes):
-    """Create a research-loop run workspace."""
+def init(slug, goal, approval, workflow, max_iterations, max_experiment_runs, max_wall_minutes):
+    """Create a run. Paper drafts require explicit --approval; budgets are opt-in."""
     from scieflow.core.run.init import init_workspace
 
     project = Project.discover()
     try:
         ws = init_workspace(slug, goal, project.workspace_root,
-                            {"approval": approval, "max_iterations": max_iterations,
+                            {"approval": approval, "workflow": workflow,
+                             "max_iterations": max_iterations,
                              "max_experiment_runs": max_experiment_runs,
                              "max_wall_minutes": max_wall_minutes}, project.root)
     except FileExistsError as e:
@@ -63,6 +66,26 @@ def init(slug, goal, approval, max_iterations, max_experiment_runs, max_wall_min
     except ValueError as e:
         raise click.ClickException(str(e)) from e
     click.echo(f"initialized {ws}")
+
+
+@run.command()
+@click.argument("slug")
+@click.option("--workflow", type=click.Choice(["paper-draft"]), required=True)
+@click.option("--approval", type=click.Choice(["per-campaign", "autonomous"]), required=True)
+@click.option("--goal", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Source only when goal.md is absent; an existing goal is preserved.")
+@AGENT_FLAG
+def adopt(slug, workflow, approval, goal, as_agent):
+    """Initialize native state in a prepared paper workspace, without resetting it."""
+    from scieflow.core.run.init import adopt_workspace
+
+    try:
+        ws = adopt_workspace(slug, Project.discover().workspace_root,
+                             workflow=workflow, approval=approval, goal_file=goal,
+                             actor=_actor(as_agent))
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"adopted {ws}; all phases pending")
 
 
 @run.command()
@@ -150,7 +173,10 @@ def advance(slug, as_agent):
 @AGENT_FLAG
 def checkpoint(slug, reason, detail, as_agent):
     """Stop the run gracefully with resume instructions."""
-    st = actions.checkpoint_run(_ws(slug), reason, detail, _actor(as_agent))
+    try:
+        st = actions.checkpoint_run(_ws(slug), reason, detail, _actor(as_agent))
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
     click.echo(st["stopped"]["resume"])
 
 

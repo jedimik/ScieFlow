@@ -110,6 +110,30 @@ only when named and is refused in L2 and no-egress runs. `render` accepts
 `--class article|elsarticle|IEEEtran|svjour3`, and `--force` keeps a hand-edited
 `main.tex` as a backup first.
 
+The claim ledger and the decision-letter workflow have their own commands. See
+[Claim ledger and check](research/claims.md) and [Journal revision](research/revision.md).
+
+```bash
+uv run scieflow manuscript claims build <run> [--repin] [--repin-claim ID] [--json]
+uv run scieflow manuscript claims show <run> [--id ID] [--json]
+uv run scieflow manuscript claims check <run> [--json] [--no-write]
+uv run scieflow manuscript claims waive <run> <claim-id> --code C001 --reason "..."
+uv run scieflow manuscript point add <run> <label> [--from-package]
+uv run scieflow manuscript point list <run> [--json]
+uv run scieflow manuscript diff <run> --from <label> [--to <label>|current] [--json]
+uv run scieflow manuscript revision ingest <run> --letter <file> [--round N] [--decision D]
+uv run scieflow manuscript revision prompt <run> --round N --agent <agent> [--write]
+uv run scieflow manuscript revision adopt <run> --round N --draft <file> [--replace]
+uv run scieflow manuscript revision respond <run> --round N [--force]
+uv run scieflow manuscript revision coverage <run> --round N [--json]
+uv run scieflow manuscript revision letter <run> --round N [--force]
+uv run scieflow manuscript revision show <run> [--json]
+uv run scieflow manuscript crate <run> [--json] [--no-write]
+```
+
+`claims waive`, `revision ingest`, `revision adopt` and `point add --from-package` are the
+user's acts and are refused inside a sub-agent dispatch.
+
 ## `scieflow run`
 
 A run's state, history and lifecycle. Every subcommand needs the run's
@@ -121,13 +145,30 @@ uv run scieflow run list [--json]
 Every run: kind, phase and state. `--json` for machine-readable output.
 
 ```bash
-uv run scieflow run init SLUG --goal FILE [--approval per-campaign|autonomous]
+uv run scieflow run init SLUG --goal FILE [--workflow research-loop|paper-draft]
+    [--approval per-campaign|autonomous]
     [--max-iterations N] [--max-experiment-runs N] [--max-wall-minutes N]
 ```
-Create a research-loop run workspace. `--goal` must be an existing file
-(copied to `goal.md`); unset options fall back to `config/defaults.yml`. The
-browser has the same thing as a form — the Start page, `/start` (see [The
-local web app](web.md#pages)) — with an optional coordinator hand-off besides.
+Create a run workspace; `--workflow` defaults to `research-loop`. `--goal` must
+be an existing file (copied to `goal.md`); a research-loop run takes unset
+options from `config/defaults.yml`. The browser has the same thing as a form —
+the Start page, `/start` (see [The local web app](web.md#pages)) — with an
+optional coordinator hand-off besides.
+
+A paper draft (`--workflow paper-draft`) needs an explicit `--approval` and
+loads no defaults: give all three `--max-*` limits or none (a partial set is
+refused). It gets no notebook and no `iterations/` directory. See [the native
+paper-draft lifecycle](runs.md#native-paper-draft-lifecycle).
+
+```bash
+uv run scieflow run adopt SLUG --workflow paper-draft --approval per-campaign|autonomous
+    [--goal FILE] [--as-agent]
+```
+Give a prepared paper folder native paper-draft status without moving or
+resetting anything. It writes only a missing `config.yml` or `goal.md`, a new
+`status.yml` and one `note.run-adopted` event, and it refuses if a `status.yml`
+already exists. Adopting a run does not approve its goal. See [the native
+paper-draft lifecycle](runs.md#native-paper-draft-lifecycle).
 
 ```bash
 uv run scieflow run show SLUG [--json]
@@ -138,19 +179,24 @@ Status, budget and what to do next.
 uv run scieflow run mark SLUG PHASE STATE [--as-agent]
 ```
 Set a phase's state (`pending`/`running`/`done`/`failed`). `--as-agent`
-records the change as made by an agent — agents must pass it.
+records the change as made by an agent — agents must pass it. On a paper-draft
+run, PHASE is one of the paper phases; the other research workflows are refused
+(exit 1, nothing written).
 
 ```bash
 uv run scieflow run advance SLUG [--as-agent]
 ```
-Start the next iteration. Refused (exit 1, run checkpointed) if the
-`iterations` budget is spent.
+Start the next iteration. `advance` is research-loop only: on a paper-draft run it
+is refused (exit 1, nothing written), so its phases are never reset. Refused (exit 1, run
+checkpointed) if the `iterations` budget is spent.
 
 ```bash
 uv run scieflow run checkpoint SLUG --reason low-budget|max-iterations|converged|anomaly|user
     [--detail TEXT] [--as-agent]
 ```
-Stop the run gracefully and record resume instructions.
+Stop the run gracefully and record resume instructions. On a paper-draft run the
+resume text names the paper phase; other research workflows are refused (exit 1,
+nothing written).
 
 ```bash
 uv run scieflow run resume SLUG [--as-agent]
