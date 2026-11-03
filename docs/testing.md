@@ -8,9 +8,13 @@ real scite service, and never builds apptainer containers.
 
 The GitHub workflow `.github/workflows/tests.yml` runs on pull requests, on
 pushes to `main` and on manual dispatch. It runs on `ubuntu-24.04` only, with a
-read-only token (`contents: read`) and no secrets. The job installs the locked
-environment with `uv sync --frozen --python 3.12 --all-extras --group dev` and
-then runs `scripts/ci-tests.sh`, and nothing else.
+read-only token (`contents: read`) and no secrets. Before the tests, the job installs the system tools the sandbox tests need
+(`bubblewrap` and `rsync`), sets `kernel.apparmor_restrict_unprivileged_userns=0`
+(the documented Ubuntu 24.04 setting for unprivileged user namespaces) and
+proves that `bwrap` works. Sandbox tests therefore run in CI and are never
+skipped; that is why the job needs `sudo` on the runner. It then installs the
+locked environment with `uv sync --frozen --python 3.12 --all-extras --group dev`
+and runs `scripts/ci-tests.sh`.
 
 `scripts/ci-tests.sh` runs pytest on `tests` with the marker expression
 `not slow and not live and not scite_live`, and it ignores the sealed probe
@@ -19,6 +23,14 @@ declared in `pyproject.toml` (`addopts`); a static test keeps the two equal.
 
 The gate does not wait for live agent calls or scite requests: those tests are
 excluded, and no secret is available to the job.
+
+## Merge and CI
+
+The operator's publish step merges right after the final review passes, so
+merge does not wait for CI. The pre-merge evidence is a local reproduction of
+the exact CI command in a clean, shallow clone with a fresh offline environment
+and an empty home folder. The first real GitHub run happens on the pull request
+itself.
 
 ## Running the same gate locally
 

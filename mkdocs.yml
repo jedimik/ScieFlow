@@ -59,9 +59,9 @@ nav:
   - Sandbox: sandbox.md
   - Remote execution: remote.md
   - Data protection: data-protection.md
+  - MCP server: mcp.md
   - Architecture: architecture.md
   - CLI reference: cli.md
-  - MCP server: mcp.md
   - Testing: testing.md
   - Experiments:
       - Overview: experiments/index.md

@@ -167,7 +167,9 @@ def doc_gate_violations(text: str) -> list[str]:
         MARKER_EXPR,
         "tests/probes/test_k_task8_binding.py",
         "ubuntu-24.04",
-        "does not wait",
+        "merge does not wait for CI",
+        "bubblewrap",
+        "kernel.apparmor_restrict_unprivileged_userns=0",
     ):
         if needle not in text:
             out.append(f"doc: testing.md does not name {needle!r}")
