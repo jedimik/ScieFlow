@@ -247,6 +247,9 @@ def screen_status_cmd(slug: str, as_json: bool) -> None:
     for stage, row in doc["stages"].items():
         lines.append(f"{stage}: decided by both {row['decided_by_both']}, disagreements {row['disagreements']}, "
                      f"open batches {len(row['open_batches'])}, verdicts {row['verdicts']}")
+        if row["stale_batches"]:
+            lines.append(f"  stale batches (protocol changed; they block nothing, import refuses them): "
+                         f"{', '.join(row['stale_batches'])}")
     _emit(as_json, doc, lines)
 
 

@@ -21,6 +21,7 @@ from scieflow.core.project import Project
 from scieflow.core.run import status
 from scieflow.research.sr import cli as sr_cli
 from scieflow.research.sr import ledger, screening
+from scieflow.research.sr import protocol
 from scieflow.research.sr.errors import SRError
 
 REPO = Path(__file__).resolve().parents[3]
@@ -399,3 +400,181 @@ def test_cli_refuses_with_exit_1_on_an_unlocked_protocol(cli_root):
     result = CliRunner().invoke(sr_cli.sr, ["screen", "prepare", SLUG, "--stage", TA])
     assert result.exit_code == 1
     assert "lock the protocol first" in result.output
+
+
+# ---------------------------------------------------------------- t4 review r1 fixes (M-H t4 fix)
+
+
+def setup_titled(root: Path, titles: dict[int, str]):
+    """As setup(): twelve synthetic records, with the given titles for some of them, locked."""
+    ws = root / "workspace" / SLUG
+    rows = [dict(record(i), title=titles.get(i, f"Synthetic title {i}")) for i in range(1, 13)]
+    path = ws / "sr" / "rounds" / "1" / "records.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows),
+                    encoding="utf-8")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    events.emit(ws, "sr.committed", "human", op=store.new_id(), kind="search", round=1,
+                files={"sr/rounds/1/records.jsonl": digest}, protocol_version=1, protocol_hash="synthetic")
+    proj = Project(root)
+    gate = lock.lock(proj, ws)
+    service.answer_gate(proj, SLUG, gate["id"], "approve")
+    return proj, ws
+
+
+def ta_include_first_four(proj, ws) -> None:
+    """Title-abstract: R00001-R00004 included by both screeners, the rest excluded; reports for the four."""
+    screen(proj, ws, stage=TA, size=12,
+           decide=lambda agent, rid: ("include", "") if int(rid[1:]) <= 4 else ("exclude", "e1"))
+    reports = ws / "sr" / "reports"
+    reports.mkdir(parents=True)
+    for n in range(1, 5):
+        (reports / f"R{n:05d}.md").write_text(f"synthetic report {n}", encoding="utf-8")
+
+
+def test_prioritise_puts_the_record_most_like_an_included_one_first(sroot):
+    proj, ws = setup_titled(sroot, {1: "alpha beta gamma delta", 5: "alpha beta gamma delta"})
+    screen(proj, ws, stage=TA, size=4,
+           decide=lambda agent, rid: ("include", "") if rid == "R00001" else ("exclude", "e1"))
+    prep = screening.prepare(proj, ws, stage=TA, prioritise=True)
+    assert prep["record_ids"][0] == "R00005"
+    assert sorted(prep["record_ids"]) == [f"R{i:05d}" for i in range(5, 13)]
+
+
+def test_full_text_queue_skips_title_abstract_excluded_and_pending_records(sroot):
+    proj, ws = setup(sroot)
+
+    def decide(agent, rid):
+        if rid == "R00002":
+            return ("include", "") if agent == "codex" else ("exclude", "e1")
+        if rid == "R00003":
+            return ("exclude", "e1")
+        return ("include", "")
+
+    screen(proj, ws, stage=TA, size=12, decide=decide)
+    reports = ws / "sr" / "reports"
+    reports.mkdir(parents=True)
+    for n in range(1, 5):
+        (reports / f"R{n:05d}.md").write_text(f"synthetic report {n}", encoding="utf-8")
+    prep = screening.prepare(proj, ws, stage=FT, size=10)
+    assert prep["record_ids"] == ["R00001", "R00004"]
+
+
+@pytest.mark.parametrize("bad_reason", ["", "zz9"])
+def test_full_text_import_refuses_a_bad_exclude_reason_and_writes_nothing(sroot, bad_reason):
+    proj, ws = setup(sroot)
+    ta_include_first_four(proj, ws)
+    before, n_commits = len(decision_events(ws)), len(commits(ws))
+    with pytest.raises(SRError, match="exclude criterion"):
+        screen(proj, ws, stage=FT, size=4,
+               decide=lambda agent, rid: ("include", "") if rid == "R00001" else ("exclude", bad_reason))
+    assert len(decision_events(ws)) == before
+    assert len(commits(ws)) == n_commits
+
+
+def test_full_text_import_of_a_valid_pair_commits_and_resolves(sroot):
+    proj, ws = setup(sroot)
+    ta_include_first_four(proj, ws)
+    result, prep = screen(proj, ws, stage=FT, size=4,
+                          decide=lambda agent, rid: ("include", "") if rid in ("R00001", "R00003")
+                          else ("exclude", "e2"))
+    assert prep["stage"] == FT
+    assert result["decisions"] == 8
+    assert screening.resolved(ws, FT) == {"R00001": "include", "R00002": "exclude",
+                                          "R00003": "include", "R00004": "exclude"}
+
+
+TAMPERS = {
+    "non-corpus": "not in the corpus",
+    "duplicate": "unique",
+    "decided": "already decided",
+    "screeners": "assignment",
+    "full-text-not-included": "title-abstract include",
+}
+
+
+@pytest.mark.parametrize("case", sorted(TAMPERS))
+def test_import_refuses_a_tampered_batch_file_and_writes_nothing(sroot, case):
+    proj, ws = setup(sroot)
+    stage = FT if case == "full-text-not-included" else TA
+    if case == "decided":
+        screen(proj, ws, stage=TA, size=4)
+    if stage == FT:
+        ta_include_first_four(proj, ws)
+    prep = screening.prepare(proj, ws, stage=stage, size=4)
+    doc = batch_doc(ws, stage, prep["batch"])
+    if case == "non-corpus":
+        doc["record_ids"][-1] = "R00077"
+    elif case == "duplicate":
+        doc["record_ids"][1] = doc["record_ids"][0]
+    elif case == "decided":
+        doc["record_ids"][0] = "R00001"
+    elif case == "screeners":
+        doc["screeners"] = ["codex", "codex-review"]
+    elif case == "full-text-not-included":
+        doc["record_ids"][0] = "R00005"
+    (ws / "sr" / "screening" / stage / prep["batch"] / "batch.json").write_text(
+        json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    for agent in AGENTS:
+        rows = [dec(rid, "include") for rid in doc["record_ids"]]
+        write_output(ws, stage, prep["batch"], agent,
+                     {"format": 1, "screener": agent, "batch": prep["batch"], "decisions": rows})
+        fake_job(proj, ws, agent, later(doc["prepared_at"]))
+    before, n_commits = len(decision_events(ws)), len(commits(ws))
+    with pytest.raises(SRError, match=TAMPERS[case]):
+        screening.import_batch(proj, ws, stage=stage, batch=prep["batch"])
+    assert len(decision_events(ws)) == before
+    assert len(commits(ws)) == n_commits
+
+
+def test_a_stale_open_batch_does_not_block_prepare_and_cannot_be_imported(sroot, monkeypatch):
+    import dataclasses
+
+    proj, ws = setup(sroot)
+    old = screening.prepare(proj, ws, stage=TA, size=4)
+    amended = dataclasses.replace(protocol.require_locked(proj, ws), content_hash="amended-synthetic")
+    monkeypatch.setattr(protocol, "require_locked", lambda project, path: amended)
+    new = screening.prepare(proj, ws, stage=TA, size=4)
+    assert new["batch"] != old["batch"]
+    assert new["record_ids"] == old["record_ids"]
+    with pytest.raises(SRError, match="prepared but not committed"):
+        screening.prepare(proj, ws, stage=TA, size=4)
+    with pytest.raises(SRError, match="prepare the batch again"):
+        screening.import_batch(proj, ws, stage=TA, batch=old["batch"])
+    assert old["batch"] in screening.screen_status(proj, ws)["stages"][TA]["stale_batches"]
+
+
+def test_a_failed_prompt_write_leaves_no_open_batch(sroot, monkeypatch):
+    proj, ws = setup(sroot)
+    real = screening._write_text
+
+    def failing(path, text):
+        if path.parent.name == "prompts":
+            raise OSError("synthetic write failure")
+        return real(path, text)
+
+    monkeypatch.setattr(screening, "_write_text", failing)
+    with pytest.raises(OSError):
+        screening.prepare(proj, ws, stage=TA, size=4)
+    monkeypatch.setattr(screening, "_write_text", real)
+    assert screening.prepare(proj, ws, stage=TA, size=4)["record_ids"] == ["R00001", "R00002", "R00003", "R00004"]
+
+
+def test_no_record_title_or_abstract_reaches_the_event_log(sroot):
+    proj, ws = setup(sroot)
+    screen(proj, ws, stage=TA, size=4)
+    text = (ws / events.EVENTS_FILE).read_text(encoding="utf-8")
+    assert "sr.screening_decision" in text
+    for n in range(1, 13):
+        assert f"Synthetic title {n}" not in text
+        assert f"Synthetic abstract {n}." not in text
+
+
+def test_committed_hashes_are_the_hashes_of_the_bytes_that_were_validated(sroot):
+    proj, ws = setup(sroot)
+    result, prep = screen(proj, ws, stage=TA, size=3)
+    files = commits(ws)[-1]["data"]["files"]
+    output = f"sr/screening/{TA}/{prep['batch']}/codex.json"
+    assert files[output] == hashlib.sha256((ws / output).read_bytes()).hexdigest()
+    batch_rel = f"sr/screening/{TA}/{prep['batch']}/batch.json"
+    assert files[batch_rel] == hashlib.sha256((ws / batch_rel).read_bytes()).hexdigest()

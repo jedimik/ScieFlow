@@ -197,9 +197,26 @@ def _batch_docs(ws: Path, stage: str) -> list[dict]:
     return docs
 
 
-def _open_batches(ws: Path, stage: str) -> list[dict]:
+def _locked_or_none(project, ws: Path):
+    try:
+        return protocol.require_locked(project, ws)
+    except SRError:
+        return None
+
+
+def _split_open(ws: Path, stage: str, locked) -> tuple[list[dict], list[dict]]:
+    """Uncommitted batches of a stage: (open, stale). A batch prepared under another protocol identity is
+    stale: it blocks nothing, its records stay in the queue, and import refuses it (review r1 finding 1)."""
     done = _commits(ws)
-    return [doc for doc in _batch_docs(ws, stage) if doc.get("batch") not in done]
+    open_now: list[dict] = []
+    stale: list[dict] = []
+    for doc in _batch_docs(ws, stage):
+        if doc.get("batch") in done:
+            continue
+        same = locked is None or (doc.get("protocol_version") == locked.version
+                                  and doc.get("protocol_hash") == locked.content_hash)
+        (open_now if same else stale).append(doc)
+    return open_now, stale
 
 
 def _report(ws: Path, record_id: str) -> str | None:
@@ -309,7 +326,7 @@ def prepare(project, ws, *, stage: str, size: int | None = None, prioritise: boo
     _stage(stage)
     locked = _preflight(project, ws)
     screeners, warnings = _screeners(project, ws)
-    open_now = _open_batches(ws, stage)
+    open_now, _stale = _split_open(ws, stage, locked)
     if open_now:
         raise SRError(f"batch {open_now[0].get('batch')} of {stage} is prepared but not committed; "
                       "import its two outputs first")
@@ -343,7 +360,6 @@ def prepare(project, ws, *, stage: str, size: int | None = None, prioritise: boo
     doc = {"batch": batch, "stage": stage, "record_ids": chosen, "screeners": screeners,
            "protocol_version": locked.version, "protocol_hash": locked.content_hash,
            "prepared_at": _now()}
-    _write_text(folder / "batch.json", json.dumps(doc, indent=2, sort_keys=True) + "\n")
     rows = []
     for rid in chosen:
         row = corpus_by_id[rid]
@@ -355,6 +371,8 @@ def prepare(project, ws, *, stage: str, size: int | None = None, prioritise: boo
         rel = f"prompts/sr-{stage}-{batch}-{agent}.md"
         _write_text(ws / rel, _prompt(ws, locked, stage, batch, agent, rows))
         prompts.append(rel)
+    # batch.json is written last: it is what marks a batch open, so a failed prompt write leaves no open batch.
+    _write_text(folder / "batch.json", json.dumps(doc, indent=2, sort_keys=True) + "\n")
     return {"batch": batch, "stage": stage, "record_ids": chosen, "screeners": screeners,
             "warnings": warnings, "prompts": prompts, "protocol_version": locked.version,
             "protocol_hash": locked.content_hash, "actor": "agent" if as_agent else "human"}
@@ -363,18 +381,54 @@ def prepare(project, ws, *, stage: str, size: int | None = None, prioritise: boo
 # ---------------------------------------------------------------- import
 
 
-def _read_batch(ws: Path, stage: str, batch: str) -> dict:
+def _parse_file(path: Path, rel: str) -> tuple[object, str]:
+    """Parse a JSON file from one read; return (parsed, sha256 of those same bytes) (review r1 finding 6)."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        raise SRError(f"{rel} cannot be read") from None
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise SRError(f"{rel} is not valid JSON") from None
+    return parsed, hashlib.sha256(raw).hexdigest()
+
+
+def _read_batch(ws: Path, stage: str, batch: str) -> tuple[dict, str]:
     folder = _batch_dir(ws, stage, batch)
     if folder.is_symlink() or not folder.is_dir():
         raise SRError(f"batch {batch} of {stage} was not prepared")
-    path = _plain_file(ws, f"sr/screening/{stage}/{batch}/batch.json")
-    try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        raise SRError(f"sr/screening/{stage}/{batch}/batch.json is not valid JSON") from None
-    if doc.get("batch") != batch or doc.get("stage") != stage:
-        raise SRError(f"sr/screening/{stage}/{batch}/batch.json does not match its folder")
-    return doc
+    rel = f"sr/screening/{stage}/{batch}/batch.json"
+    doc, sha = _parse_file(_plain_file(ws, rel), rel)
+    if not isinstance(doc, dict) or doc.get("batch") != batch or doc.get("stage") != stage:
+        raise SRError(f"{rel} does not match its folder")
+    return doc, sha
+
+
+def _check_batch_scope(project, ws: Path, stage: str, doc: dict, screeners: list[str]) -> list[str]:
+    """The batch file's record ids and screeners are checked before any output is read (review r1 finding 2)."""
+    record_ids = doc.get("record_ids")
+    if not isinstance(record_ids, list) or not record_ids:
+        raise SRError("the batch names no records")
+    if not all(isinstance(rid, str) and RECORD_RE.match(rid) for rid in record_ids):
+        raise SRError("the batch record ids must each be R followed by five digits")
+    if len(set(record_ids)) != len(record_ids):
+        raise SRError("the batch record ids must be unique")
+    corpus = {row["id"] for row in records.load_corpus(ws)}
+    if any(rid not in corpus for rid in record_ids):
+        raise SRError("the batch names records that are not in the corpus")
+    streams = _stage_streams(ws, stage)
+    if any(all(name in streams.get(rid, {}) for name in screeners) for rid in record_ids):
+        raise SRError(f"the batch names records already decided by both screeners at {stage}")
+    if stage == FULL_TEXT:
+        verdicts = resolved(ws, TITLE_ABSTRACT, screeners)
+        if any(verdicts.get(rid) != INCLUDE for rid in record_ids):
+            raise SRError("the batch names records that are not a title-abstract include; "
+                          "full-text decisions are only for those")
+    if sorted(screeners) != sorted(_screeners(project, ws)[0]):
+        raise SRError(f"the batch screeners do not match the run's {ROLE} assignment; prepare the batch again")
+    return record_ids
+
 
 
 def _check_output(out, *, agent: str, batch: str, record_ids: list[str], stage: str,
@@ -448,7 +502,7 @@ def import_batch(project, ws, *, stage: str, batch: str, as_agent: bool = False)
     if not BATCH_RE.match(str(batch)):
         raise SRError("the batch id is not a batch id")
     locked = _preflight(project, ws)
-    doc = _read_batch(ws, stage, batch)
+    doc, batch_sha = _read_batch(ws, stage, batch)
     if batch in _commits(ws):
         raise SRError(f"batch {batch} is already committed; it cannot be imported again")
     if doc.get("protocol_version") != locked.version or doc.get("protocol_hash") != locked.content_hash:
@@ -456,21 +510,18 @@ def import_batch(project, ws, *, stage: str, batch: str, as_agent: bool = False)
     screeners = list(doc.get("screeners") or [])
     if len(screeners) != 2 or len(set(screeners)) != 2 or not all(AGENT_RE.match(a) for a in screeners):
         raise SRError("the batch does not name two distinct screeners")
-    record_ids = list(doc.get("record_ids") or [])
+    record_ids = _check_batch_scope(project, ws, stage, doc, screeners)
     _include_ids, exclude_list = _criteria(locked)
     exclude_ids = set(exclude_list)
     prepared_at = _parse_stamp(doc.get("prepared_at"))
     if prepared_at is None:
         raise SRError("the batch has no valid prepared_at time")
     outputs: dict[str, dict] = {}
+    output_sha: dict[str, str] = {}
     for agent in screeners:
         rel = f"sr/screening/{stage}/{batch}/{agent}.json"
-        path = _plain_file(ws, rel)
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            raise SRError(f"{rel} is not valid JSON") from None
-        outputs[agent] = _check_output(raw, agent=agent, batch=batch, record_ids=record_ids, stage=stage,
+        parsed, output_sha[rel] = _parse_file(_plain_file(ws, rel), rel)
+        outputs[agent] = _check_output(parsed, agent=agent, batch=batch, record_ids=record_ids, stage=stage,
                                        exclude_ids=exclude_ids, label=rel)
     dispatched: dict[str, str] = {}
     for agent in screeners:
@@ -479,13 +530,12 @@ def import_batch(project, ws, *, stage: str, batch: str, as_agent: bool = False)
             raise SRError(f"no finished dispatch of {agent} since the batch was prepared; "
                           f"dispatch it with scieflow agent run --role {ROLE}")
         dispatched[agent] = job_id
-    files: dict[str, str] = {f"sr/screening/{stage}/{batch}/batch.json": _sha256(_plain_file(
-        ws, f"sr/screening/{stage}/{batch}/batch.json"))}
+    files: dict[str, str] = {f"sr/screening/{stage}/{batch}/batch.json": batch_sha}
     for agent in screeners:
         prompt = f"prompts/sr-{stage}-{batch}-{agent}.md"
         files[prompt] = _sha256(_plain_file(ws, prompt))
         output = f"sr/screening/{stage}/{batch}/{agent}.json"
-        files[output] = _sha256(_plain_file(ws, output))
+        files[output] = output_sha[output]
     op = store.new_id()
     led = ledger.EventsLedger(ws, actor="agent" if as_agent else "human", op=op,
                               extra={"batch": batch, "protocol_version": locked.version})
@@ -516,6 +566,7 @@ def screen_status(project, ws) -> dict:
     except SRError as exc:
         screeners, problem = None, str(exc)
     corpus = records.load_corpus(ws)
+    locked = _locked_or_none(project, ws)
     stages = {}
     for stage in STAGES:
         streams = _stage_streams(ws, stage)
@@ -524,8 +575,10 @@ def screen_status(project, ws) -> dict:
         disagree = [rid for rid in both if streams[rid][pair[0]].decision != streams[rid][pair[1]].decision]
         verdicts = resolved(ws, stage, pair) if pair else {}
         counts = {v: sum(1 for x in verdicts.values() if x == v) for v in (INCLUDE, EXCLUDE, PENDING)}
+        open_now, stale = _split_open(ws, stage, locked)
         stages[stage] = {"decided_by_both": len(both), "disagreements": len(disagree),
-                         "open_batches": [doc.get("batch") for doc in _open_batches(ws, stage)],
+                         "open_batches": [doc.get("batch") for doc in open_now],
+                         "stale_batches": [doc.get("batch") for doc in stale],
                          "verdicts": counts, "kappa": kappa(ws, stage)}
     return {"run": ws.name, "corpus": len(corpus), "screeners": screeners, "problem": problem,
             "stages": stages, "uncommitted": list(ledger.view(ws).uncommitted_ops)}
