@@ -15,11 +15,11 @@ import yaml
 from click.testing import CliRunner
 
 from scieflow._vendor.researcher_core.sr_prisma import derive_prisma_flow
-from scieflow.core import events, jobs, service, store
+from scieflow.core import events, gates, jobs, service, store
 from scieflow.core.design import lock
 from scieflow.core.project import Project
 from scieflow.core.run import status
-from scieflow.research.sr import cli as sr_cli
+from scieflow.research.sr import adjudication, cli as sr_cli
 from scieflow.research.sr import ledger, screening
 from scieflow.research.sr import protocol
 from scieflow.research.sr.errors import SRError
@@ -452,6 +452,11 @@ def test_full_text_queue_skips_title_abstract_excluded_and_pending_records(sroot
         return ("include", "")
 
     screen(proj, ws, stage=TA, size=12, decide=decide)
+    # M-H t5: a title-abstract conflict is adjudicated by a human before full-text screening (R00002 is one).
+    opened = adjudication.open_conflicts(proj, ws, stage=TA)
+    adjudication.adjudicate(proj, ws, gate_id=opened["gate"], record_id="R00002", decision="exclude",
+                            reason="e1", rationale="synthetic adjudication of the one conflict")
+    gates.answer(proj, ws, opened["gate"], "resolved", actor="human")
     reports = ws / "sr" / "reports"
     reports.mkdir(parents=True)
     for n in range(1, 5):

@@ -279,6 +279,14 @@ def resolved(ws, stage: str, screeners: list[str] | None = None) -> dict[str, st
     return {rid: _verdict(by, pair, adjudications.get(rid, [])) for rid, by in streams.items()}
 
 
+def unadjudicated(ws, stage: str, screeners: list[str]) -> list[str]:
+    """Records both screeners decided at this stage whose disagreement no committed adjudication resolves."""
+    streams = _stage_streams(Path(ws), stage)
+    verdicts = resolved(ws, stage, screeners)
+    return sorted(rid for rid, by in streams.items()
+                  if all(name in by for name in screeners) and verdicts.get(rid) == PENDING)
+
+
 def kappa(ws, stage: str) -> dict:
     """Cohen's kappa between the two streams of one stage, derived from the committed decisions."""
     ws = Path(ws)
@@ -346,6 +354,10 @@ def prepare(project, ws, *, stage: str, size: int | None = None, prioritise: boo
         reports: dict[str, str | None] = {}
     else:
         verdicts = resolved(ws, TITLE_ABSTRACT, screeners)
+        blocked = unadjudicated(ws, TITLE_ABSTRACT, screeners)
+        if blocked:
+            raise SRError(f"{len(blocked)} title-abstract conflict(s) lack a committed adjudication; "
+                          "run sr conflicts, then sr adjudicate and the gate answer, before full-text screening")
         pool = [row["id"] for row in corpus if verdicts.get(row["id"]) == INCLUDE]
         reports = {rid: _report(ws, rid) for rid in pool}
     queue = [rid for rid in pool if rid not in done and (stage == TITLE_ABSTRACT or reports.get(rid))]

@@ -22,7 +22,7 @@ from scieflow.core.config import repo_root
 from scieflow.core.design import lock
 from scieflow.core.project import Project, ProjectError
 from scieflow.research.search import registry
-from scieflow.research.sr import ledger, protocol, records, screening, search
+from scieflow.research.sr import adjudication, ledger, protocol, records, screening, search
 from scieflow.research.sr.errors import SRError
 
 OK, REFUSED, USAGE = 0, 1, 2
@@ -279,3 +279,45 @@ def kappa_cmd(slug: str, stage: str, as_json: bool) -> None:
     if doc["note"]:
         lines.append(f"note: {doc['note']}")
     _emit(as_json, doc, lines)
+
+
+@sr.command("conflicts")
+@click.argument("slug")
+@click.option("--stage", required=True, type=click.Choice(screening.STAGES))
+@click.option("--as-agent", is_flag=True, help="Record the gate as opened by an agent.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def conflicts_cmd(slug: str, stage: str, as_agent: bool, as_json: bool) -> None:
+    """Blinded conflicts of a stage: write them and open the human adjudication gate (exit 1 if refused)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = adjudication.open_conflicts(project, ws, stage=stage, as_agent=as_agent)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    if doc["gate"] is None:
+        lines = ["no conflicts"]
+    else:
+        lines = [f"{doc['conflicts']} blinded {stage} conflicts; gate {doc['gate']} is open for a human answer"]
+        lines += [f"file: workspace/{slug}/{path}" for path in doc["files"]]
+    _emit(as_json, doc, lines)
+
+
+@sr.command("adjudicate")
+@click.argument("slug")
+@click.argument("gate_id")
+@click.argument("record_id")
+@click.option("--decision", required=True, type=click.Choice(("include", "exclude")))
+@click.option("--reason", default="", help="An exclude criterion id (a title-abstract exclude may leave it blank).")
+@click.option("--rationale", required=True, help="Why, in 1 to 2000 characters.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def adjudicate_cmd(slug: str, gate_id: str, record_id: str, decision: str, reason: str, rationale: str,
+                   as_json: bool) -> None:
+    """Record a human decision on one blinded conflict (human only; refused inside a dispatch)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = adjudication.adjudicate(project, ws, gate_id=gate_id, record_id=record_id, decision=decision,
+                                      reason=reason, rationale=rationale)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    _emit(as_json, doc, [f"{record_id}: {decision} recorded; {doc['remaining']} conflict(s) remain undecided"])

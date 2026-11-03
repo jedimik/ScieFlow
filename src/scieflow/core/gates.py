@@ -33,6 +33,8 @@ REVIEW_GATE_KINDS = frozenset({"review-decision", "review-blocker"})
 DATA_RELEASE_KIND = "data-release"
 # A design lock or amendment is recorded only by a human answer (core/design/lock.py, M-D1 5.5).
 DESIGN_LOCK_KIND = "design-lock"
+# A blinded screening conflict is adjudicated only by a human answer (research/sr/adjudication.py, M-H 5.7).
+SR_ADJUDICATION_KIND = "sr-adjudication"
 
 
 class GateError(ValueError):
@@ -133,6 +135,14 @@ def answer(project: Project, ws: Path, gate_id: str, answer: str, actor: str = "
             # Only a human approval writes the design ledger (M-D1 5.5); the hook refuses others itself.
             from scieflow.core.design import lock
             lock.on_answer(project, ws, gate, answer, actor)
+        if gate["kind"] == SR_ADJUDICATION_KIND:
+            # Only a human answer records adjudications (research/sr/adjudication.py, M-H 5.7). The hook
+            # runs before the gate is marked answered; without the research code the gate stays open.
+            try:
+                from scieflow.research.sr import adjudication
+            except ImportError as exc:
+                raise GateError("answering sr-adjudication gates needs the research extra") from exc
+            adjudication.on_answer(project, ws, gate, answer, actor)
         gate.update(state="answered", answer=answer, answered=_now(), answered_by=actor,
                     rationale=rationale, note=note)
         path = _path(ws, gate_id)
