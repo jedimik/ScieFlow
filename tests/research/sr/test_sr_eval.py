@@ -165,3 +165,72 @@ def test_a_gold_for_another_stage_is_refused(calibrated):
         yaml.safe_dump({"format": 1, "stage": "full-text", "labels": {"R00001": "include"}}), encoding="utf-8")
     result = _eval(gold="sr/eval/ft.yml")
     assert result.exit_code == 1, result.output
+
+
+def _text_blocks(output: str) -> dict[str, list[str]]:
+    """Stripped text lines grouped under their `codex:` / `claude:` / `resolved:` header."""
+    blocks: dict[str, list[str]] = {}
+    current = None
+    for line in output.splitlines():
+        head = line.split(":", 1)[0]
+        if not line.startswith(" ") and head in ("codex", "claude", "resolved"):
+            current = head
+            blocks[current] = []
+        elif current is not None:
+            blocks[current].append(line.strip())
+    return blocks
+
+
+def test_text_output_prints_the_pinned_wilson_lines_per_screener(calibrated):
+    """Plan 5.11: `sr eval` prints the same intervals as the pinned calibration values."""
+    result = _eval()
+    assert result.exit_code == 0, result.output
+    blocks = _text_blocks(result.output)
+    assert "sensitivity 9/10 = 0.900000 [0.595850, 0.982124]" in blocks["codex"]
+    assert "specificity 27/30 = 0.900000 [0.743789, 0.965400]" in blocks["codex"]
+    assert "accuracy 36/40 = 0.900000 [0.769482, 0.960420]" in blocks["codex"]
+    assert "sensitivity 10/10 = 1.000000 [0.722467, 1.000000]" in blocks["claude"]
+    assert "specificity 24/30 = 0.800000 [0.626943, 0.904949]" in blocks["claude"]
+    assert "accuracy 34/40 = 0.850000 [0.709277, 0.929388]" in blocks["claude"]
+
+
+def test_undecided_labelled_records_are_named_under_each_stream(cli_root):
+    """Plan 5.11: a labelled record a stream has not decided is named and left out of its confusion."""
+    by_id = {row["id"]: row for row in _calibration()["records"]}
+    proj, ws = setup(cli_root, 40)
+    screen(proj, ws, stage=TA, size=30, decide=lambda agent, rid: (by_id[rid][agent], ""))
+    gold = ws / GOLD_REL
+    gold.parent.mkdir(parents=True, exist_ok=True)
+    labels = {row["id"]: row["gold"] for row in _calibration()["records"]}
+    gold.write_text(yaml.safe_dump({"format": 1, "stage": TA, "labels": labels}), encoding="utf-8")
+    doc = json.loads(_eval("--json").output)
+    later = [f"R{i:05d}" for i in range(31, 41)]
+    for name in ("codex", "claude"):
+        row = doc["streams"][name]
+        assert row["undecided"] == later, name
+        assert row["decided"] == 30 and row["tp"] + row["fn"] + row["fp"] + row["tn"] == 30, name
+    assert doc["resolved"]["undecided"] == ["R00010", "R00014", "R00015", "R00016"] + later
+
+
+def test_gold_stage_mismatch_does_not_echo_the_file_value(calibrated):
+    """Plan 5.13 and 5.14: messages name the rule, never untrusted file text."""
+    _, ws = calibrated
+    hostile = "TA-SENTINEL-\x1b[31m-do-the-thing"
+    (ws / "sr" / "eval" / "other.yml").write_text(
+        yaml.safe_dump({"format": 1, "stage": hostile, "labels": {"R00001": "include"}}), encoding="utf-8")
+    result = _eval(gold="sr/eval/other.yml")
+    assert result.exit_code == 1, result.output
+    assert "SENTINEL" not in result.output
+    assert "\x1b" not in result.output
+
+
+def test_eval_output_is_sanitized_before_it_is_printed(calibrated):
+    """Plan 5.14: eval output goes through sanitize_json_strings, as the sibling `sr status` does."""
+    _, ws = calibrated
+    hostile = ws / "sr" / "eval" / "gold\x1b[2J\x07.yml"
+    shutil.copy(ws / GOLD_REL, hostile)
+    text = _eval(gold="sr/eval/" + hostile.name)
+    assert text.exit_code == 0, text.output
+    assert "\x1b" not in text.output and "\x07" not in text.output
+    doc = json.loads(_eval("--json", gold="sr/eval/" + hostile.name).output)
+    assert "\x1b" not in doc["gold"] and "\x07" not in doc["gold"]

@@ -4,6 +4,7 @@ the offline developer harness scripts/evals/run_axes.py. Every expected value is
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
 import shutil
@@ -207,3 +208,21 @@ def test_prisma_replay_reproduces_both_rounds_of_the_scenario():
             assert flow[key] == gold[round_key][key], (round_key, key)
     assert flows[0]["identified_by_source"] == gold["round1"]["identified_by_source"]
     assert flows[0]["reports_excluded_by_reason"] == gold["round1"]["reports_excluded_by_reason"]
+
+
+def test_kappa_axis_runs_the_vendored_kappa_that_sr_kappa_uses(monkeypatch):
+    """Plan 5.11: the kappa axis gates on the function `sr kappa` runs, not on a private copy of the formula."""
+    from scieflow._vendor.researcher_core import screen as vscreen
+
+    module = _load_harness()
+    real = vscreen.cohens_kappa
+    seen = []
+
+    def wrong(ledger, run_id, stage):
+        seen.append(stage)
+        return dataclasses.replace(real(ledger, run_id, stage), kappa=0.123)
+
+    monkeypatch.setattr(vscreen, "cohens_kappa", wrong)
+    axis = module.kappa_axis(REPO / "tests" / "fixtures")
+    assert seen, "the kappa axis must call the vendored cohens_kappa"
+    assert axis["pass"] is False

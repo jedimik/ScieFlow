@@ -294,6 +294,7 @@ def eval_cmd(slug: str, gold: str, stage: str, as_json: bool) -> None:
         doc = calibration.evaluate(project, ws, gold=gold, stage=stage)
     except SRError as exc:
         _fail(REFUSED, str(exc))
+    doc = sanitize.sanitize_json_strings(doc)
     _emit(as_json, doc, calibration.render(doc))
 
 

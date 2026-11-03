@@ -56,7 +56,7 @@ def load_gold(ws: Path, gold: str, stage: str) -> dict[str, str]:
     if not isinstance(doc, dict) or doc.get("format") != GOLD_FORMAT:
         raise SRError(f"gold file must be a mapping with format: {GOLD_FORMAT}")
     if doc.get("stage") != stage:
-        raise SRError(f"gold file is for stage {doc.get('stage')!r}, not {stage!r}")
+        raise SRError("gold file is for a different stage than the one requested")
     labels = doc.get("labels")
     if not isinstance(labels, dict) or not labels:
         raise SRError("gold file has no labels mapping")

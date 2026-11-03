@@ -6,7 +6,8 @@ tests/fixtures/sr/*), imports scieflow from this checkout and never touches the 
 
 Axes:
   dedup      the 210-pair gold set through the vendored dedupe (110 same must merge, 100 different must not)
-  kappa      the 2x2 tables of tests/fixtures/sr/kappa.yml reproduce their exact kappa values
+  kappa      the 2x2 tables of tests/fixtures/sr/kappa.yml replayed through the vendored cohens_kappa that
+              `sr kappa` runs; they reproduce their kappa values (exact fraction printed as a cross-check)
   prisma     the round-1 and round-2 scenario of plan 5.12 replayed on a MemoryLedger through the vendored
              PRISMA derivation, compared with tests/fixtures/sr/prisma-scenario.yml
   screening  the calibration sample: sensitivity, specificity, accuracy of screeners A and B, with Wilson
@@ -31,6 +32,7 @@ sys.path.insert(0, str(REPO / "src"))
 import yaml  # noqa: E402
 
 from scieflow._vendor.researcher_core._ledger import MemoryLedger, ProvenanceEvent  # noqa: E402
+from scieflow._vendor.researcher_core import screen as vscreen  # noqa: E402
 from scieflow._vendor.researcher_core.dedupe import dedupe  # noqa: E402
 from scieflow._vendor.researcher_core.model import CSLRecord  # noqa: E402
 from scieflow._vendor.researcher_core.sr_prisma import prisma_flow  # noqa: E402
@@ -76,20 +78,59 @@ def dedup_axis(fixtures: Path) -> dict:
 
 # ------------------------------------------------------------------ kappa
 
+KAPPA_STAGE = TA
+
+
+def _screen_event(ledger: MemoryLedger, record_id: str, verdict: str, screener: str) -> None:
+    """A screening decision in the shape the vendored reader (screen.ScreeningDecision.from_event) expects."""
+    ledger.append(ProvenanceEvent(run_id=RUN_ID, type="screening_decision", ts=REPLAY_TS,
+                                  payload={"record_id": record_id, "stage": KAPPA_STAGE, "decision": verdict,
+                                           "screener_id": screener}))
+
+
+def _kappa_ledger(row: dict) -> MemoryLedger:
+    """Decisions of two screeners whose 2x2 table is the row's: A is the first screener, B the second."""
+    ledger = MemoryLedger()
+    cells = (("include", "include", row["a"]), ("include", "exclude", row["b"]),
+             ("exclude", "include", row["c"]), ("exclude", "exclude", row["d"]))
+    number = 0
+    for a_verdict, b_verdict, count in cells:
+        for _ in range(count):
+            number += 1
+            _screen_event(ledger, f"k{number}", a_verdict, "A")
+            _screen_event(ledger, f"k{number}", b_verdict, "B")
+    return ledger
+
+
 def kappa_axis(fixtures: Path) -> dict:
+    """Each table is replayed through the vendored cohens_kappa (what `sr kappa` runs); the exact fraction is
+    printed beside it as a cross-check. The gate is the vendored value and the table it derives."""
     rows = yaml.safe_load((fixtures / "sr" / "kappa.yml").read_text(encoding="utf-8"))["rows"]
     details, failing = [], []
     for row in rows:
-        value = cohens_kappa_2x2(row["a"], row["b"], row["c"], row["d"])
+        result = vscreen.cohens_kappa(_kappa_ledger(row), RUN_ID, KAPPA_STAGE)
+        table = result.table
+        table_ok = ((table.get("include", {}).get("include", 0), table.get("include", {}).get("exclude", 0),
+                     table.get("exclude", {}).get("include", 0), table.get("exclude", {}).get("exclude", 0))
+                    == (row["a"], row["b"], row["c"], row["d"]))
         expected = None if row["kappa"] is None else Fraction(row["kappa"])
-        if value != expected:
+        if expected is None:
+            value_ok = result.kappa is None
+        else:
+            value_ok = result.kappa is not None and abs(result.kappa - float(expected)) < 1e-9
+        ok = table_ok and value_ok
+        if not ok:
             failing.append(row["id"])
-        shown = "undefined" if value is None else f"{value} = {float(value):.6f}"
+        shown = "undefined" if result.kappa is None else f"{result.kappa:.6f}"
+        exact = cohens_kappa_2x2(row["a"], row["b"], row["c"], row["d"])
+        exact_shown = "undefined" if exact is None else str(exact)
         details.append(f"  kappa row {row['id']} (a={row['a']} b={row['b']} c={row['c']} d={row['d']}): "
-                       f"{shown}, expected {row['kappa'] or 'undefined'}: {_status(value == expected)}")
+                       f"vendored {shown}, exact cross-check {exact_shown}, expected {row['kappa'] or 'undefined'}: "
+                       f"{_status(ok)}")
     ok = not failing
-    summary = (f"kappa: {len(rows) - len(failing)} of {len(rows)} tables reproduce exactly: {_status(ok)}")
+    summary = f"kappa: {len(rows) - len(failing)} of {len(rows)} tables reproduce exactly: {_status(ok)}"
     return {"axis": "kappa", "pass": ok, "lines": [summary, *details]}
+
 
 
 # ------------------------------------------------------------------ prisma
