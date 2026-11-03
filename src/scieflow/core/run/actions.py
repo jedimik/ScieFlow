@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from scieflow.core import events, store
-from scieflow.core.run import budget, status
+from scieflow.core.run import budget, phase_gates, status
 
 
 class BudgetExhausted(RuntimeError):
@@ -25,6 +25,7 @@ def _update_status(ws: Path, fn) -> dict:
 
 
 def mark_phase(ws: Path, phase: str, state: str, actor: str = "agent") -> dict:
+    phase_gates.check(ws, phase, state, actor)
     st = _update_status(ws, lambda s: status.mark(s, phase, state))
     kind = "phase.started" if state == "running" else f"phase.{state}"
     # Older research-module statuses have no iteration; do not invent one or

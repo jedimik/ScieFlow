@@ -68,6 +68,10 @@ research flow ([Target journals](../journals.md)): the adopted profile's limits
 and structure then shape the outline, and the manuscript is checked against it
 in Phase 6 and packaged in Phase 7.
 
+The run is created with `scieflow run init --workflow paper-draft` (give the slug, the goal file and the
+approval mode) or with `scieflow run adopt --workflow paper-draft` for a prepared folder. Its phases are
+marked with `run mark`; see [the native paper-draft lifecycle](../../runs.md#native-paper-draft-lifecycle).
+
 ## Phase 2 — Outline
 
 `research.outline` outlines every section as claims-with-evidence (each
@@ -115,7 +119,9 @@ cross-section contradictions without touching any number.
    command resolves, no orphan bib entries, every bib DOI traces to the
    searched/imported DOI list.
 3. **Claim check**: `scieflow manuscript claims build` and `claims check` compare each
-   number in the sections with the evidence its `% source:` comment cites. See
+   number in the sections with the evidence its `% source:` comment cites. Then mark the phase with `uv run scieflow run mark <slug> verify done --as-agent`: it is refused
+   while the claim check has errors, so fix them first (see
+   [the paper-revision gates](../../runs.md#paper-revision-runs-and-phase-gates)). See
    [Claim ledger and check](../claims.md).
 4. **Cited-source check** (optional, opt-in, advisory): claims and their DOIs
    go to the claim-check module (`skills/claim-check/SKILL.md`) when
