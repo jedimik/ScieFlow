@@ -540,8 +540,8 @@ uv run scieflow mcp tools [--json]
 
 - `serve` — runs the stdio server until stdin closes. `--workspace SLUG` serves
   only that run; without it, the server serves every run the access rules allow.
-- `tools` — lists the twelve tools with their titles and input schemas.
-  `--json` prints the full list.
+- `tools` — lists the twelve tools by name and title. `--json` prints the full
+  list with descriptions and input schemas.
 
 Both refuse inside a ScieFlow dispatch (exit 1) before they read stdin. The
 server writes nothing and opens no network port.

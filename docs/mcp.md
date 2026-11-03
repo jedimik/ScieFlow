@@ -54,12 +54,15 @@ service function.
   slug is refused. Without the option, it serves every run the rules allow.
 - Cloud agent rule (the data decision): before a per-run tool reads a run, the
   run's data declaration is checked with the same decision a cloud agent
-  dispatch gets. A run that the check refuses is neither read nor named.
+  dispatch gets. A run that the check refuses is not read by a per-run tool, and
+  the aggregated `open_gates` neither reads nor names it.
 - L2 runs are hidden: a run declared `L2` is refused, and `list_runs` and
-  `open_gates` leave it out and only count it.
+  `open_gates` leave it out and only count it. `list_runs` names the other runs
+  by status metadata only, even when the check would refuse one of them.
 - `open_gates` without a slug reads the open gates of every run the rules allow,
-  and never reads a refused run. A slug is always passed as a list, so a missing
-  slug never means "all runs".
+  and never reads a refused run. The runs it may read are always passed as a
+  list, also when that list is empty, so a refused or empty set never means
+  "all runs". With a slug, the tool applies the same check to that one run.
 - Sanitiser: all text the server returns passes the same sanitiser as literature
   search output before it is serialised. It strips dangerous control characters
   and redacts text that looks like a prompt injection. The structure of the
@@ -78,7 +81,7 @@ service function.
 ```bash
 uv run scieflow mcp serve                 # all runs the access rules allow
 uv run scieflow mcp serve --workspace SLUG
-uv run scieflow mcp tools                 # names, titles and input schemas
+uv run scieflow mcp tools                 # names and titles; --json adds schemas
 uv run scieflow mcp tools --json
 ```
 
