@@ -1,0 +1,29 @@
+# Documented form of a job record (scieflow.core.records, M-I t2; plan 5.2).
+# tests/core/test_records.py checks these values against scieflow.core.jobs.
+version: 1
+fields:
+  id: "string matching patterns.job_id"
+  kind: "string matching patterns.job_kind"
+  argv: "list of strings"
+  cwd: "string"
+  label: "string"
+  run_dir: "string or null"
+  state: "one of states"
+  pid: "integer (not bool) or null"
+  queued: "string"
+  started: "string or null"
+  finished: "string or null"
+  exit_code: "integer (not bool) or null"
+  timeout_s: "finite number >= 0 or null"
+  log: "string"
+  err: "string"
+  sandboxed: "bool"
+  turn_audit: "object or null (content validated by Job.__post_init__)"
+patterns:
+  job_id: "[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+  job_kind: "[a-z][a-z0-9_-]{0,31}"
+states_source: scieflow.core.jobs.STATES
+states: [queued, running, done, failed, timeout, cancelled, lost]
+final_states_source: scieflow.core.jobs.FINAL
+final_states: [done, failed, timeout, cancelled, lost]
+final_rule: "a state in final_states has finished set; checked on save, not by the read checks"

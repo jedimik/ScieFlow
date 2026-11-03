@@ -59,10 +59,25 @@ def test_run_page_escapes_a_malicious_event_type_server_side(client, project):
     events.jsonl line controls it too. The server-rendered half of the
     timeline table relies on Jinja autoescaping; pin that it actually
     escapes markup rather than passing it through."""
-    from scieflow.core import events
+    from datetime import datetime, timezone
+
+    from scieflow.core import events, store
+    from scieflow.core.run import status
 
     payload = "note.<img src=x onerror=alert(1)>"
-    events.emit(project.run_dir("r1"), payload, "human")
+    ws = project.run_dir("r1")
+    # events.emit refuses this type name (M-I-D6), so the hostile line is appended
+    # directly, with the same keys an emitted event has: the rendering must still
+    # escape a hand-edited line, which is what this test is about.
+    store.append_jsonl(ws / events.EVENTS_FILE, {
+        "id": store.new_id(),
+        "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "run": status.read_status(ws)["id"],
+        "slug": ws.name,
+        "type": payload,
+        "actor": "human",
+        "data": {},
+    })
     body = client.get("/runs/r1").text
     assert "<img src=x onerror=alert(1)>" not in body
     assert "&lt;img src=x onerror=alert(1)&gt;" in body

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import stat
 
-from scieflow.core import events, sandbox, store
+from scieflow.core import events, records, sandbox, store
 from scieflow.core.project import Project
 from scieflow.core.turn_artifacts import ArtifactError, ArtifactRoot, open_run_artifact, pin_artifact_root
 
@@ -283,7 +283,9 @@ def _record_path(job: Job) -> Path:
 
 
 def save(job: Job) -> None:
-    store.write_text(_record_path(job), json.dumps(asdict(job), indent=2))
+    record = asdict(job)
+    records.check_job(record)
+    store.write_text(_record_path(job), json.dumps(record, indent=2))
 
 
 def load(path: Path) -> Job:

@@ -20,6 +20,7 @@ import click
 import yaml
 
 from scieflow.core import config as config_mod
+from scieflow.core import records
 
 MODULE_DIRS = {"news", "chats"}
 LOOP_FILES = ("goal.md", "config.yml", "status.yml", "budget.yml", "notebook.md")
@@ -287,6 +288,8 @@ def doctor(slug: str, root: Path | None = None) -> dict:
     legacy = [k for k in (*agent_config.LEGACY_ROLE_KEYS, "agent", "journal_profiler",
                           *agent_config.LEGACY_UNMAPPED_KEYS) if k in config]
     logs_scripts = len(list((path / "logs").glob("*.py"))) if (path / "logs").is_dir() else 0
+    bad_events = records.check_event_lines(path / "events.jsonl")
+    bad_jobs = records.check_job_files(path / "jobs")
     return {
         "slug": slug,
         "kind": run.kind,
@@ -297,6 +300,10 @@ def doctor(slug: str, root: Path | None = None) -> dict:
         "absolute_self_links": self_links,
         "scripts_in_logs": logs_scripts,
         "per_file_dvc_pointer": (ws / f"{slug}.dvc").exists(),
+        "invalid_events": bad_events[:20],
+        "invalid_events_total": len(bad_events),
+        "invalid_jobs": bad_jobs[:20],
+        "invalid_jobs_total": len(bad_jobs),
         "scite": _scite_report(root),
     }
 
@@ -436,7 +443,23 @@ def doctor_cmd(slug, as_json):
     if report["per_file_dvc_pointer"]:
         click.echo(f"  per-file DVC pointer workspace/{slug}.dvc — untrack it, "
                    "then push as a zip (docs/DVC_STORAGE.md)")
+    echo_problems("events", report["invalid_events"], report["invalid_events_total"], "line")
+    echo_problems("jobs", report["invalid_jobs"], report["invalid_jobs_total"], "file")
     echo_scite(report.get("scite"))
+
+
+def echo_problems(label: str, problems: list[dict], total: int, key: str) -> None:
+    """One header line for an invalid-record count, then one line per rule with its first places."""
+    if not total:
+        return
+    click.echo(f"  invalid {label}: {total}")
+    by_rule: dict[str, list] = {}
+    for problem in problems:
+        by_rule.setdefault(problem["rule"], []).append(problem[key])
+    for rule, places in by_rule.items():
+        shown = ", ".join("whole file" if p is None else str(p) for p in places[:3])
+        more = " …" if len(places) > 3 else ""
+        click.echo(f"    rule {rule}: {key}s {shown}{more}")
 
 
 def echo_scite(scite: dict | None) -> None:
