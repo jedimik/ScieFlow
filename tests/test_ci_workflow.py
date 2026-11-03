@@ -153,8 +153,8 @@ def script_violations(text: str, mode: int, pyproject_text: str) -> list[str]:
 
     # 8. hermetic test environment: TMPDIR outside /tmp (the sandbox mounts a
     #    private tmpfs on /tmp) and no agent CLI on the test process PATH
-    if 'mktemp -d /var/tmp/' not in text or 'TMPDIR="$TEST_TMP"' not in text:
-        out.append("check8: script does not point TMPDIR outside /tmp")
+    if 'mktemp -d "$HOME/.cache/' not in text or 'TMPDIR="$TEST_TMP"' not in text:
+        out.append("check8: script does not point TMPDIR under the home cache")
     if "for c in claude codex agy" not in text:
         out.append("check8: script does not strip claude, codex and agy from PATH")
     return out

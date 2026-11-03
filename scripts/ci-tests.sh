@@ -6,10 +6,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONDONTWRITEBYTECODE=1
 # Hermetic test environment (M-I t1 reproduction finding). The sandbox tests need temp
-# directories outside /tmp (the sandbox mounts a private tmpfs on /tmp), and no agent CLI
+# directories outside /tmp (the sandbox mounts a private tmpfs on /tmp) and under the
+# user's home, where test_s2 expects /home to be an ancestor of the test homes; no agent CLI
 # (claude, codex, agy) may be on the test process PATH. uv is resolved before PATH changes.
 UV=$(command -v uv)
-TEST_TMP=$(mktemp -d /var/tmp/scieflow-ci.XXXXXX)
+mkdir -p "$HOME/.cache"
+TEST_TMP=$(mktemp -d "$HOME/.cache/scieflow-ci.XXXXXX")
 TEST_PATH=$(echo "$PATH" | tr ':' '\n' | while IFS= read -r d; do
   [ -n "$d" ] || continue
   for c in claude codex agy; do [ -e "$d/$c" ] && continue 2; done
