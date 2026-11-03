@@ -22,7 +22,7 @@ from scieflow._vendor.researcher_core._ledger import ProvenanceEvent
 from scieflow.core import agent_config as ac
 from scieflow.core import config, events, jobs, store
 from scieflow.core.sanitize import fence_untrusted
-from scieflow.research.sr import ledger, protocol, records
+from scieflow.research.sr import ledger, protocol, records, verify
 from scieflow.research.sr.errors import SRError
 
 TITLE_ABSTRACT = "title-abstract"
@@ -133,6 +133,7 @@ def _plain_file(ws: Path, rel: str) -> Path:
 def _preflight(project, ws: Path):
     """The locked protocol, the round files and the ledger must all verify before any write (5.8 part)."""
     locked = protocol.require_locked(project, ws)
+    verify.preflight(project, ws)     # sr verify refuses first, before any write (plan 5.8)
     records.check_round_files(ws)
     ledger.view(ws)
     return locked

@@ -53,12 +53,14 @@ def setup(root: Path, n: int = 12, *, locked: bool = True):
     path.write_text("".join(json.dumps(record(i), ensure_ascii=False, sort_keys=True) + "\n"
                             for i in range(1, n + 1)), encoding="utf-8")
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    events.emit(ws, "sr.committed", "human", op=store.new_id(), kind="search", round=1,
-                files={"sr/rounds/1/records.jsonl": digest}, protocol_version=1, protocol_hash="synthetic")
     proj = Project(root)
     if locked:
         gate = lock.lock(proj, ws)
         service.answer_gate(proj, SLUG, gate["id"], "approve")
+    # t6: the commit names the in-force lock hash (sr verify refuses a hash that matches no lock record).
+    events.emit(ws, "sr.committed", "human", op=store.new_id(), kind="search", round=1,
+                files={"sr/rounds/1/records.jsonl": digest}, protocol_version=1,
+                protocol_hash=lock.state(proj, ws).in_force_hash if locked else "synthetic")
     return proj, ws
 
 
@@ -414,11 +416,13 @@ def setup_titled(root: Path, titles: dict[int, str]):
     path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows),
                     encoding="utf-8")
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    events.emit(ws, "sr.committed", "human", op=store.new_id(), kind="search", round=1,
-                files={"sr/rounds/1/records.jsonl": digest}, protocol_version=1, protocol_hash="synthetic")
     proj = Project(root)
     gate = lock.lock(proj, ws)
     service.answer_gate(proj, SLUG, gate["id"], "approve")
+    # t6: the commit names the in-force lock hash (sr verify refuses a hash that matches no lock record).
+    events.emit(ws, "sr.committed", "human", op=store.new_id(), kind="search", round=1,
+                files={"sr/rounds/1/records.jsonl": digest}, protocol_version=1,
+                protocol_hash=lock.state(proj, ws).in_force_hash)
     return proj, ws
 
 

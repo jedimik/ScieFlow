@@ -52,11 +52,13 @@ def setup(root: Path, n: int = 12):
     path.write_text("".join(json.dumps(record(i), ensure_ascii=False, sort_keys=True) + "\n"
                             for i in range(1, n + 1)), encoding="utf-8")
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    events.emit(ws, "sr.committed", "human", op=store.new_id(), kind="search", round=1,
-                files={"sr/rounds/1/records.jsonl": digest}, protocol_version=1, protocol_hash="synthetic")
     proj = Project(root)
     gate = lock.lock(proj, ws)
     service.answer_gate(proj, SLUG, gate["id"], "approve")
+    # t6: the commit names the in-force lock hash (sr verify refuses a hash that matches no lock record).
+    events.emit(ws, "sr.committed", "human", op=store.new_id(), kind="search", round=1,
+                files={"sr/rounds/1/records.jsonl": digest}, protocol_version=1,
+                protocol_hash=lock.state(proj, ws).in_force_hash)
     return proj, ws
 
 
@@ -287,7 +289,9 @@ def test_a_changed_screening_is_refused_and_the_gate_stays_open(sroot):
                                       stage=TA, decision="exclude", ts=screening._now(), reason="e1")
     led.commit("screening", stage=TA, batch="synthetic", files={}, jobs={}, protocol_hash="synthetic",
                decisions=1)
-    with pytest.raises(gates.GateError, match="screening changed"):
+    # t6: the injected commit is not a valid screening operation (no batch file, synthetic hash), so sr verify
+    # refuses the gate first with sr-ledger-invalid (fail closed); either refusal leaves the gate open.
+    with pytest.raises(gates.GateError, match="sr-ledger-invalid|screening changed"):
         gates.answer(proj, ws, gid, "resolved", actor="human")
     assert gates.get(ws, gid)["state"] == "open"
     assert adjudication_events(ws) == []

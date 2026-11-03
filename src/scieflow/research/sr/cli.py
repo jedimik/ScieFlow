@@ -22,7 +22,7 @@ from scieflow.core.config import repo_root
 from scieflow.core.design import lock
 from scieflow.core.project import Project, ProjectError
 from scieflow.research.search import registry
-from scieflow.research.sr import adjudication, ledger, protocol, records, screening, search
+from scieflow.research.sr import adjudication, ledger, prisma, protocol, records, screening, search, verify
 from scieflow.research.sr.errors import SRError
 
 OK, REFUSED, USAGE = 0, 1, 2
@@ -321,3 +321,44 @@ def adjudicate_cmd(slug: str, gate_id: str, record_id: str, decision: str, reaso
     except SRError as exc:
         _fail(REFUSED, str(exc))
     _emit(as_json, doc, [f"{record_id}: {decision} recorded; {doc['remaining']} conflict(s) remain undecided"])
+
+
+@sr.command("verify")
+@click.argument("slug")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def verify_cmd(slug: str, as_json: bool) -> None:
+    """Read-only integrity check of the committed sr ledger (exit 1 with errors; warnings never fail)."""
+    project = _project()
+    ws = _run(project, slug)
+    doc = verify.verify(project, ws)
+    state = "valid" if doc["ok"] else "INVALID"
+    lines = [f"sr ledger {state}: {len(doc['errors'])} error(s), {len(doc['warnings'])} warning(s)"]
+    lines += [f"error: {e}" for e in doc["errors"]] + [f"warning: {w}" for w in doc["warnings"]]
+    _emit(as_json, doc, lines)
+    if not doc["ok"]:
+        sys.exit(REFUSED)
+
+
+@sr.command("prisma")
+@click.argument("slug")
+@click.option("--write", "write_files", is_flag=True, help="Write sr/prisma/flow.json, flow.md and checklist.md.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def prisma_cmd(slug: str, write_files: bool, as_json: bool) -> None:
+    """PRISMA 2020 flow and checklist, derived from the committed ledger (sr verify runs first)."""
+    project = _project()
+    ws = _run(project, slug)
+    try:
+        doc = prisma.build(project, ws)
+    except SRError as exc:
+        _fail(REFUSED, str(exc))
+    written = prisma.write(project, ws, doc) if write_files else []
+    flow = doc["flow"]
+    lines = [f"identified {flow['identified']} ({', '.join(f'{k} {v}' for k, v in flow['identified_by_source'].items())}); "
+             f"duplicates {flow['duplicates_removed']}; after duplicates {flow['records_after_dedup']}",
+             f"screened {flow['records_screened']}; excluded {flow['records_excluded']}; "
+             f"reports sought {flow['reports_sought_for_retrieval']}, not retrieved {flow['reports_not_retrieved']}, "
+             f"assessed {flow['reports_assessed']}; excluded {flow['reports_excluded']}; "
+             f"included {flow['studies_included']}"]
+    lines += [f"written: workspace/{slug}/{path}" for path in written]
+    _emit(as_json, doc, lines)
+

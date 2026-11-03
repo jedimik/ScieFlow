@@ -22,7 +22,7 @@ from scieflow._vendor.researcher_core.dedupe import dedupe
 from scieflow.core import store
 from scieflow.research.lib import kernel
 from scieflow.research.search import fanout, registry
-from scieflow.research.sr import ledger, protocol, records
+from scieflow.research.sr import ledger, protocol, records, verify
 from scieflow.research.sr.errors import SRError
 
 EXIT_OK = 0
@@ -83,7 +83,8 @@ def run_round(project, ws, *, slug: str, network_mode: str | None = None,
     """Run search round n = committed search rounds + 1 for the locked protocol (plan 5.5)."""
     ws = Path(ws)
     locked = protocol.require_locked(project, ws)
-    records.check_round_files(ws)                       # the search part of sr verify (t6 adds the rest)
+    verify.preflight(project, ws)                       # sr verify refuses first (plan 5.8)
+    records.check_round_files(ws)
     committed = records.committed_search_rounds(ws)
     number = len(committed) + 1
     if committed and not locked.review.get("living") \
