@@ -155,16 +155,16 @@ options from `config/defaults.yml`. The browser has the same thing as a form —
 the Start page, `/start` (see [The local web app](web.md#pages)) — with an
 optional coordinator hand-off besides.
 
-A paper draft (`--workflow paper-draft`) needs an explicit `--approval` and
-loads no defaults: give all three `--max-*` limits or none (a partial set is
-refused). It gets no notebook and no `iterations/` directory. See [the native
+A paper draft (`--workflow paper-draft`) or a paper revision (`--workflow paper-revision`) needs an
+explicit `--approval` and loads no defaults: give all three `--max-*` limits or none (a partial set is
+refused). A paper run gets no notebook and no `iterations/` directory. See [the native
 paper-draft lifecycle](runs.md#native-paper-draft-lifecycle).
 
 ```bash
 uv run scieflow run adopt SLUG --workflow paper-draft|paper-revision --approval per-campaign|autonomous
     [--goal FILE] [--as-agent]
 ```
-Give a prepared paper folder native paper-draft status without moving or
+Give a prepared paper folder native paper-draft or paper-revision status without moving or
 resetting anything. It writes only a missing `config.yml` or `goal.md`, a new
 `status.yml` and one `note.run-adopted` event, and it refuses if a `status.yml`
 already exists. Adopting a run does not approve its goal. See [the native

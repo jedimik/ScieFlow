@@ -137,7 +137,7 @@ Otherwise revise in place in the draft run with Phases A to D above; that route 
 
 Start one with `uv run scieflow run init <slug> --workflow paper-revision --goal <file> --approval <mode>`,
 or with `uv run scieflow run adopt <slug> --workflow paper-revision --approval <mode> --as-agent` for a
-prepared folder. The approval mode is the user's: ask, never default. Copy nothing from another run; the
+prepared folder. The approval mode is the user's: ask, never default. Copy nothing from another run, and never its `experiments/` or `inputs/`; the
 user brings the manuscript and its evidence in.
 
 The phases, in order, are `intake`, `structure`, `revise`, `respond`, `verify` and `resubmit`. Mark each

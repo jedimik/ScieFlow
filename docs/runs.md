@@ -128,8 +128,9 @@ A refusal names the command to run, leaves `status.yml` byte-identical, and appe
 `note.phase_gate` event. The messages start `respond refused:` and `verify refused:`; they give
 counts and a rule id, never text from the manuscript or the letter.
 
-The gates fail closed. A linked `manuscript/` or `revision/` folder, a missing or unreadable review
-status, an import error, or any other exception during the check refuses the phase. A paper-draft run
+The gates fail closed. A linked `manuscript/` or `revision/` folder, an unreadable review
+status, a project the check cannot discover, an import error, or any other exception during the check
+refuses the phase. A paper-draft run
 without a `manuscript/` folder passes `verify` (outcome `no-manuscript`), so the paper-draft lifecycle
 above is unchanged. A paper-revision run without one is refused. Every gate run appends one
 `note.phase_gate` event with counts, rule ids and the round. Neither a message nor an event carries
