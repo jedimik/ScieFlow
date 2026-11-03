@@ -303,6 +303,24 @@ uv run scieflow run preview SLUG SOURCE --compile
 Without `--compile`, report whether a draft's PDF preview is available and where
 it is. With `--compile`, start the compile as a job (it needs `latexmk`).
 
+### Read-only views
+
+Four terminal views of what the web app shows. Each calls one service function,
+the same one the web app and the [MCP server](mcp.md) use. None writes anything.
+
+```bash
+uv run scieflow run overview SLUG [--json]
+uv run scieflow run budgets [--json]
+uv run scieflow run workflows [--json]
+```
+
+- `run overview` — one line per panel of the run's overview, with its reason
+  or `ok`.
+- `run budgets` — every run: its kind, its state and the smallest remaining
+  budget fraction.
+- `run workflows` — the workflows the Start wizard offers, with their roles.
+- `--json` prints the same data as JSON.
+
 ## `scieflow gate`
 
 Approvals the protocols require, stored as data under `gates/` and
@@ -383,6 +401,12 @@ writes without confirming. See
 [Agent configuration](agents.md) for the `--assign` shorthand and what each
 field means.
 
+```bash
+uv run scieflow agent conversational [--json]
+```
+The agents that can hold a run's conversation: enabled, with a session and
+a resume command. One name per line; `--json` prints a JSON list.
+
 ## `scieflow review`
 
 Draft review: settings, reviewer assignment, status and decisions. The file
@@ -462,6 +486,12 @@ Read-only health report for one run, including scite readiness (configured,
 SDK group installed, token exposed to dispatches, harness MCP registrations
 by name).
 
+The report also lists, as `invalid_events` and `invalid_jobs`, each line of
+`events.jsonl` and each job record that is unreadable or fails the record
+rules, with its line number or file and the rule it breaks. It never shows the
+content of a record. Reading an old log never fails; these findings are reported
+only here, by `doctor`. See [Architecture](architecture.md#records-are-checked-when-written).
+
 ```bash
 uv run scieflow workspace index
 ```
@@ -495,6 +525,26 @@ uv run scieflow serve [--port N] [--host HOST] [--no-browser]
 The printed URL carries a one-time token that becomes a session cookie on
 first open; it is generated fresh each time you run `serve` and stops being
 valid when that process exits.
+
+## `scieflow mcp`
+
+The read-only MCP server for an interactive coordinator (Hermes, Claude
+Desktop, Codex). It serves the twelve read-only tools over stdio. The tools,
+the access rules and how to register the server are in
+[The MCP server](mcp.md).
+
+```bash
+uv run scieflow mcp serve [--workspace SLUG]
+uv run scieflow mcp tools [--json]
+```
+
+- `serve` — runs the stdio server until stdin closes. `--workspace SLUG` serves
+  only that run; without it, the server serves every run the access rules allow.
+- `tools` — lists the twelve tools with their titles and input schemas.
+  `--json` prints the full list.
+
+Both refuse inside a ScieFlow dispatch (exit 1) before they read stdin. The
+server writes nothing and opens no network port.
 
 ## Module CLIs
 
