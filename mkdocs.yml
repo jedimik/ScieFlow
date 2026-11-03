@@ -61,6 +61,7 @@ nav:
   - Data protection: data-protection.md
   - Architecture: architecture.md
   - CLI reference: cli.md
+  - Testing: testing.md
   - Experiments:
       - Overview: experiments/index.md
       - Quickstart: experiments/quickstart.md
