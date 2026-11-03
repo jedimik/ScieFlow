@@ -285,3 +285,27 @@ def configure(slug, news, assigns, sets, promotes, demotes, unsets, yes):
             return
     acf.write(plan)
     click.echo("written: " + ", ".join(str(c.path.relative_to(root)) for c in plan.changes))
+
+
+@agent.command("conversational")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def conversational(as_json):
+    """Agents that can hold a run's conversation: enabled, with a session and resume command."""
+    import json
+
+    from scieflow.core import service
+    from scieflow.core.project import Project, ProjectError
+
+    try:
+        project = Project.discover()
+    except ProjectError as exc:
+        raise click.ClickException(str(exc)) from exc
+    try:
+        names = service.conversational_agents(project)
+    except service.ServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(names, indent=2))
+        return
+    for name in names:
+        click.echo(name)
