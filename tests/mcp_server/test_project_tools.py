@@ -102,18 +102,21 @@ PER_RUN = ["run_detail", "run_events", "run_charter", "conversation", "run_overv
            "workbench", "curation_history"]
 
 
+# M-I t5 completed the per-run tools (tests/mcp_server/test_run_tools.py). These t4 placeholder
+# assertions ("not available yet until t5") are replaced by the t5 behaviour: a missing run is a
+# plain tool error, never the placeholder text.
 @pytest.mark.parametrize("name", PER_RUN)
-def test_per_run_tools_are_not_available_yet_until_t5(project, name):
-    arguments = {"slug": "r1"}
-    resp = tool_call(ready(project), name, arguments)
+def test_per_run_tools_on_a_missing_run_are_plain_tool_errors(project, name):
+    resp = tool_call(ready(project), name, {"slug": "nope"})
     assert resp["result"]["isError"] is True
-    assert "not available yet" in resp["result"]["content"][0]["text"]
+    assert "no run workspace/nope" in resp["result"]["content"][0]["text"]
 
 
-def test_agent_settings_with_a_run_is_not_available_yet_until_t5(project):
+def test_agent_settings_with_a_run_is_served_by_t5(project):
     resp = tool_call(ready(project), "agent_settings", {"slug": "r1"})
-    assert resp["result"]["isError"] is True
-    assert "not available yet" in resp["result"]["content"][0]["text"]
+    assert resp["result"]["isError"] is False
+    assert json.loads(resp["result"]["content"][0]["text"]) == {
+        "result": json.loads(json.dumps(service.agent_settings(project, "r1"), default=str))}
 
 
 def test_agent_settings_uses_the_scoped_run_when_no_slug_is_given(project):
@@ -121,5 +124,6 @@ def test_agent_settings_uses_the_scoped_run_when_no_slug_is_given(project):
     server.handle({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": INITIALIZE})
     server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
     resp = tool_call(server, "agent_settings")
-    assert resp["result"]["isError"] is True
-    assert "not available yet" in resp["result"]["content"][0]["text"]
+    assert resp["result"]["isError"] is False
+    assert json.loads(resp["result"]["content"][0]["text"]) == {
+        "result": json.loads(json.dumps(service.agent_settings(project, "r1"), default=str))}

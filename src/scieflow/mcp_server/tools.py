@@ -1,19 +1,22 @@
 """MCP tool registry (plan 5.5).
 
-Every tool names the one service function it calls, and calls it through the
-`scieflow.core.service` module at call time. A tool's `run` returns the whole payload
-(`{"result": ...}` plus any extra keys); the protocol layer sanitises it and bounds its size.
-Per-run tools are declared here with their final names, titles, schemas and annotations;
-their bodies answer "not available yet" until t5 adds them.
+Every tool names the one service function it calls, and calls it through the `scieflow.core.service`
+module at call time. A tool's `run` returns the whole payload (`{"result": ...}` plus any extra
+keys); the protocol layer sanitises it and bounds its size.
+
+Per-run tools pass the scope (`--workspace`, plan 5.6 item 2) and the data decision (5.6 item 4,
+in `access.py`) before their service function is called. A refused run is never read.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from scieflow.core import service
-from scieflow.core.project import Project
+from scieflow.core.project import Project, ProjectError
+from scieflow.mcp_server import access
 
 ANNOTATIONS = {"readOnlyHint": True, "destructiveHint": False,
                "idempotentHint": True, "openWorldHint": False}
@@ -60,11 +63,90 @@ def payload(value: Any) -> dict:
     return {"result": value}
 
 
-def _not_yet(name: str) -> Callable[[Context, dict], dict]:
+def _served(value: Any, findings: tuple | list = (), **extra: Any) -> dict:
+    """The payload of a served read: the value, `hidden_runs`/`truncated` etc. when given, and
+    `data_warnings` (rule and path only; never the finding's detail) when the decision had any."""
+    body = payload(value)
+    body.update(extra)
+    if findings:
+        body["data_warnings"] = [{"rule": f.rule, "path": f.path} for f in findings]
+    return body
+
+
+def _run_dir(ctx: Context, slug: str) -> Path:
+    """The run's directory, after the scope check (plan 5.6 item 2)."""
+    if ctx.scope is not None and slug != ctx.scope:
+        raise ToolError(f"this server serves only run {ctx.scope}")
+    try:
+        ws = ctx.project.run_dir(slug)
+    except ProjectError as exc:
+        raise ToolError(str(exc)) from None
+    if not ws.is_dir():
+        raise ToolError(f"no run workspace/{slug}")
+    return ws
+
+
+def _gated(ctx: Context, slug: str) -> tuple:
+    """Scope, then the data decision (plan 5.6 item 4): (warnings) or a ToolError."""
+    ws = _run_dir(ctx, slug)
+    try:
+        return access.check_run(ctx.project, ws)
+    except access.Refused as exc:
+        raise ToolError(str(exc)) from None
+
+
+def _per_run(service_name: str) -> Callable[[Context, dict], dict]:
     def run(ctx: Context, args: dict) -> dict:
-        raise ToolError(f"tool {name!r} is not available yet")
+        slug = args["slug"]
+        warnings = _gated(ctx, slug)
+        return _served(getattr(service, service_name)(ctx.project, slug), warnings)
 
     return run
+
+
+def _run_detail(ctx: Context, args: dict) -> dict:
+    return _per_run("run_detail")(ctx, args)
+
+
+def _run_events(ctx: Context, args: dict) -> dict:
+    slug = args["slug"]
+    warnings = _gated(ctx, slug)
+    types = tuple(args.get("types") or ())
+    events = service.run_events(ctx.project, slug, since=args.get("since"), types=types)
+    limit = args.get("limit", LIMIT["default"])
+    return _served(events[-limit:], warnings, truncated=len(events) > limit)
+
+
+def _list_runs(ctx: Context, args: dict) -> dict:
+    rows = service.list_runs_with_budget(ctx.project)
+    shown, hidden = access.visible_runs(ctx.project, rows, ctx.scope)
+    return {"result": shown, "hidden_runs": hidden}
+
+
+def _open_gates(ctx: Context, args: dict) -> dict:
+    slug = args.get("slug")
+    if slug is not None:
+        findings = _gated(ctx, slug)
+        return _served(service.open_gates(ctx.project, slug), findings)
+    slugs = [row["slug"] for row in service.list_runs(ctx.project)]
+    if ctx.scope is not None:
+        slugs = [name for name in slugs if name == ctx.scope]
+    kept, warnings, hidden = access.served_runs(ctx.project, slugs)
+    # Always a list, also when empty: never `slugs=None`, which would read every run (5.6 item 4b).
+    gates = service.open_gates(ctx.project, slugs=kept)
+    body = _served(gates, hidden_runs=hidden)
+    if warnings:
+        body["data_warnings"] = [{"slug": name, "rule": f.rule, "path": f.path}
+                                 for name, f in warnings]
+    return body
+
+
+def _agent_settings(ctx: Context, args: dict) -> dict:
+    slug = args.get("slug") or ctx.scope
+    if slug:
+        warnings = _gated(ctx, slug)
+        return _served(service.agent_settings(ctx.project, slug), warnings)
+    return payload(service.agent_settings(ctx.project))
 
 
 def _workflows(ctx: Context, args: dict) -> dict:
@@ -75,12 +157,6 @@ def _conversational_agents(ctx: Context, args: dict) -> dict:
     return payload(service.conversational_agents(ctx.project))
 
 
-def _agent_settings(ctx: Context, args: dict) -> dict:
-    if args.get("slug") or ctx.scope:
-        raise ToolError("tool 'agent_settings' for a run is not available yet")
-    return payload(service.agent_settings(ctx.project))
-
-
 _SLUG_ONLY = schema({"slug": SLUG}, ("slug",))
 _OPTIONAL_SLUG = schema({"slug": SLUG})
 _NO_ARGS = schema({})
@@ -88,33 +164,33 @@ _NO_ARGS = schema({})
 TOOLS: tuple[Tool, ...] = (
     Tool("list_runs", "List runs",
          "Runs with their status and budget. Metadata only; runs at data level L2 are hidden.",
-         _NO_ARGS, "list_runs_with_budget", _not_yet("list_runs")),
+         _NO_ARGS, "list_runs_with_budget", _list_runs),
     Tool("run_detail", "Run detail",
          "One run's status, configuration and workspace summary.",
-         _SLUG_ONLY, "run_detail", _not_yet("run_detail")),
+         _SLUG_ONLY, "run_detail", _run_detail),
     Tool("run_events", "Run events",
          "The most recent event records of one run, optionally filtered by time and type.",
          schema({"slug": SLUG, "since": SINCE, "types": TYPES, "limit": LIMIT}, ("slug",)),
-         "run_events", _not_yet("run_events")),
+         "run_events", _run_events),
     Tool("open_gates", "Open gates",
          "Open approval gates: of one run when a slug is given, otherwise of every run that "
          "the data rules allow the MCP client to read.",
-         _OPTIONAL_SLUG, "open_gates", _not_yet("open_gates")),
+         _OPTIONAL_SLUG, "open_gates", _open_gates),
     Tool("run_charter", "Run charter",
          "The standing goal of one run and its version history.",
-         _SLUG_ONLY, "run_charter", _not_yet("run_charter")),
+         _SLUG_ONLY, "run_charter", _per_run("run_charter")),
     Tool("conversation", "Run conversation",
          "The conversation state of one run: its agent, turns in flight and recent messages.",
-         _SLUG_ONLY, "conversation_state", _not_yet("conversation")),
+         _SLUG_ONLY, "conversation_state", _per_run("conversation_state")),
     Tool("run_overview", "Run overview",
          "The four read-only panels of one run's overview.",
-         _SLUG_ONLY, "run_overview", _not_yet("run_overview")),
+         _SLUG_ONLY, "run_overview", _per_run("run_overview")),
     Tool("workbench", "Run workbench",
          "The workbench view of one run: its curation blocks and sources.",
-         _SLUG_ONLY, "workbench", _not_yet("workbench")),
+         _SLUG_ONLY, "workbench", _per_run("workbench")),
     Tool("curation_history", "Curation history",
          "The version history of one run's curation.",
-         _SLUG_ONLY, "curation_history", _not_yet("curation_history")),
+         _SLUG_ONLY, "curation_history", _per_run("curation_history")),
     Tool("agent_settings", "Agent settings",
          "The agent registry, or the settings resolved for one run when a slug is given.",
          _OPTIONAL_SLUG, "agent_settings", _agent_settings),
