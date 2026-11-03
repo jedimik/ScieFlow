@@ -145,7 +145,7 @@ uv run scieflow run list [--json]
 Every run: kind, phase and state. `--json` for machine-readable output.
 
 ```bash
-uv run scieflow run init SLUG --goal FILE [--workflow research-loop|paper-draft]
+uv run scieflow run init SLUG --goal FILE [--workflow research-loop|paper-draft|paper-revision]
     [--approval per-campaign|autonomous]
     [--max-iterations N] [--max-experiment-runs N] [--max-wall-minutes N]
 ```
@@ -161,7 +161,7 @@ refused). It gets no notebook and no `iterations/` directory. See [the native
 paper-draft lifecycle](runs.md#native-paper-draft-lifecycle).
 
 ```bash
-uv run scieflow run adopt SLUG --workflow paper-draft --approval per-campaign|autonomous
+uv run scieflow run adopt SLUG --workflow paper-draft|paper-revision --approval per-campaign|autonomous
     [--goal FILE] [--as-agent]
 ```
 Give a prepared paper folder native paper-draft status without moving or
@@ -181,7 +181,9 @@ uv run scieflow run mark SLUG PHASE STATE [--as-agent]
 Set a phase's state (`pending`/`running`/`done`/`failed`). `--as-agent`
 records the change as made by an agent — agents must pass it. On a paper-draft
 run, PHASE is one of the paper phases; the other research workflows are refused
-(exit 1, nothing written).
+(exit 1, nothing written). On a paper run, `verify done` is refused until the claim check has no
+errors; on a paper-revision run, `respond done` is also refused until the revision coverage passes.
+A refusal leaves the status unchanged and names the command to run. See [the paper-revision gates](runs.md#paper-revision-runs-and-phase-gates).
 
 ```bash
 uv run scieflow run advance SLUG [--as-agent]

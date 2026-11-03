@@ -11,9 +11,13 @@ and no evidence value is printed in a message or an event. The journal decision
 letter, the response to reviewers and the provenance points and diffs are in
 [Journal revision](revision.md).
 
-Status: the check is a command, not a lifecycle gate. The verify phase does not run
-it yet, and the `paper-revision` workflow is not wired (M-G2). `scieflow manuscript
-package` already refuses when the check has an error (see [Package refusal](#package-refusal)).
+Status: the verify phase of a paper run (`paper-draft` or `paper-revision`) runs the check as a
+gate. `uv run scieflow run mark <slug> verify done --as-agent` is refused while the check has an
+error, when the check cannot run, or when `manuscript/` is a link. The gate fails closed: the
+phase stays as it was, and it writes nothing under `report/claims/`. The check is also a command
+you can run at any time. `scieflow manuscript package` already refuses when the check has an error
+(see [Package refusal](#package-refusal)). The gate is described in
+[Paper-revision runs and phase gates](../runs.md#paper-revision-runs-and-phase-gates).
 
 ## Commands
 
@@ -192,8 +196,12 @@ data inside the run. The check never lets data leave it:
 - A cross-run `run:` reference is not supported.
 - Retraction status is only as fresh as the last evidence round or identity check.
 - C004 is reserved and never emitted.
-- The verify-phase gate and the `paper-revision` workflow are not wired yet (M-G2). Until then
-  the check runs only when you run it, and `package` is the only place that refuses on it.
+- Gate residuals (R1 to R3). R1: a `paper-draft` run without a `manuscript/` folder passes
+  `verify` (outcome `no-manuscript`), since there is nothing to check; a `paper-revision` run
+  without one is refused. R2: the gate checks, and then `run mark` writes the phase, so a
+  check-then-write window remains; a change made inside it is not seen. R3: a hand-edited
+  `status.yml` bypasses the gate; the research AGENTS.md rule 5 forbids it, and `run mark` is
+  the only checked route.
 - No PROV-JSON-LD, no PDF of a diff, no web page or menu item: the CLI is complete.
 - File-based integrity (R2). The ledger, `data.yml`, the manifests and the events file are plain
   files that a run's own agents can write. A coherent forgery (a rewritten ledger with matching
