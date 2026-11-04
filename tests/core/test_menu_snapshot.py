@@ -64,6 +64,25 @@ def test_static_menu_json_reads_no_config_no_run_and_no_path(monkeypatch):
     assert menu.static_menu_json() == expected
 
 
+def test_static_menu_json_is_unchanged_by_a_changed_repo_config(tmp_path, monkeypatch):
+    # F-2 t3 review r1 finding 2: plan 6 t3 RED 1 asks for a changed config/agents.yml in a temp repo.
+    from scieflow.core import config as config_mod
+
+    expected = menu.static_menu_json()
+    repo = tmp_path / 'repo'
+    (repo / 'config').mkdir(parents=True)
+    (repo / 'config' / 'agents.yml').write_text(
+        'agents:\n  claude:\n    menu:\n      models: [changed-model-9]\n', encoding='utf-8')
+    (repo / 'config' / 'defaults.yml').write_text('defaults: {}\n', encoding='utf-8')
+    (repo / 'workspace' / 'demo').mkdir(parents=True)
+    (repo / 'workspace' / 'demo' / 'config.yml').write_text('agent_overrides: {}\n', encoding='utf-8')
+    (repo / 'workspace' / 'demo' / 'status.yml').write_text('phase: changed\n', encoding='utf-8')
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(menu, '_root', lambda: repo)
+    assert config_mod.repo_root() == repo
+    assert menu.static_menu_json() == expected
+
+
 # ---- dynamic composition and byte identity (t3 RED 2) --------------------------------------
 
 def test_menu_json_is_the_static_part_plus_the_dynamic_part(monkeypatch):
@@ -122,6 +141,13 @@ def test_skill_effort_sentence_states_the_conversation_rule():
     assert 'reasoning: extended-thinking' in text
     assert 'MAX_THINKING_TOKENS=32000' in text
     assert 'session_cmd' in text and 'resume_cmd' in text
+
+
+def test_skill_effort_sentence_is_written_once_and_well_formed():
+    # F-2 t3 review r1 finding 1: the effort clause must not be duplicated or broken across lines.
+    text = _skill_text()
+    assert text.count("Claude's effort is") == 1
+    assert '`default` or\nClaude' not in text
 
 
 def test_every_scieflow_command_the_skill_names_exists_in_the_click_tree():
