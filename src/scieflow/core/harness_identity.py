@@ -122,6 +122,14 @@ def _real_dir(path: Path) -> None:
         raise _Bad
 
 
+def _real_parents(root: Path, rel: str) -> None:
+    """Every folder between root and the file rel is a real folder, so no link leads out of root."""
+    folder = root
+    for part in Path(rel).parent.parts:
+        folder = folder / part
+        _real_dir(folder)
+
+
 def _home_settings(home_claude: Path) -> dict:
     try:
         mode = os.lstat(home_claude).st_mode
@@ -208,9 +216,12 @@ def read_settings(cwd) -> dict | None:
         commands = [h['command'] for grp in hooks.values() for e in grp for h in e['hooks']]
         if commands != list(KNOWN_HOOK_COMMANDS):
             return None
-        files = {rel: _file_sha(root / rel) for rel in SETTINGS_FILES}
+        files = {}
+        for rel in SETTINGS_FILES:
+            _real_parents(root, rel)
+            files[rel] = _file_sha(root / rel)
         return None if None in files.values() else {'files': files}
-    except (_Bad, OSError, ValueError, UnicodeError, TypeError, KeyError, AttributeError):
+    except (_Bad, OSError, ValueError, UnicodeError, TypeError, KeyError, AttributeError, RecursionError):
         return None
 
 
@@ -227,16 +238,19 @@ def executable_digest(executable, facts) -> str | None:
         fd = os.open(path, _OPEN_FLAGS)
     except OSError:
         return None
-    with os.fdopen(fd, 'rb') as handle:
-        st = os.fstat(handle.fileno())
-        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_EXECUTABLE_BYTES or _fd_key(handle.fileno()) != expected:
-            return None
-        digest = hashlib.sha256()
-        for block in iter(lambda: handle.read(_CHUNK), b''):
-            digest.update(block)
-        if _fd_key(handle.fileno()) != expected:
-            return None
-    return digest.hexdigest()
+    try:
+        with os.fdopen(fd, 'rb') as handle:
+            st = os.fstat(handle.fileno())
+            if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_EXECUTABLE_BYTES or _fd_key(handle.fileno()) != expected:
+                return None
+            digest = hashlib.sha256()
+            for block in iter(lambda: handle.read(_CHUNK), b''):
+                digest.update(block)
+            if _fd_key(handle.fileno()) != expected:
+                return None
+            return digest.hexdigest()
+    except OSError:
+        return None
 
 
 def derive(*, agent, family, executable, executable_sha256, version, session_template, resume_template,
