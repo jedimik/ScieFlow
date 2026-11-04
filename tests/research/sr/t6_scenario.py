@@ -122,7 +122,8 @@ def batch_doc(ws: Path, stage: str, batch: str) -> dict:
 def fake_job(proj: Project, ws: Path, agent: str, started: str) -> None:
     jid = store.new_id()
     jobs.save(jobs.Job(id=jid, kind="agent", argv=["synthetic"], cwd=str(ws), label=agent,
-                       run_dir=str(ws), state="done", started=started, log=str(ws / "jobs" / f"{jid}.log")))
+                       run_dir=str(ws), state="done", started=started, finished=started,
+                       log=str(ws / "jobs" / f"{jid}.log")))
 
 
 def screen(proj, ws, *, stage: str, size: int | None, decide):

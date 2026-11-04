@@ -79,6 +79,7 @@ def fake_job(proj: Project, ws: Path, agent: str, started: str, state: str = "do
     jobs_dir = ws / "jobs"
     jobs.save(jobs.Job(id=jid, kind="agent", argv=["synthetic"], cwd=str(ws), label=agent,
                        run_dir=str(ws), state=state, started=started,
+                       finished=started if state in jobs.FINAL else None,
                        log=str(jobs_dir / f"{jid}.log")))
 
 

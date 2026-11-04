@@ -74,7 +74,7 @@ def write_output(ws: Path, stage: str, batch: str, agent: str, doc: dict) -> Non
 def fake_job(proj: Project, ws: Path, agent: str, started: str) -> None:
     jid = store.new_id()
     jobs.save(jobs.Job(id=jid, kind="agent", argv=["synthetic"], cwd=str(ws), label=agent,
-                       run_dir=str(ws), state="done", started=started,
+                       run_dir=str(ws), state="done", started=started, finished=started,
                        log=str(ws / "jobs" / f"{jid}.log")))
 
 
