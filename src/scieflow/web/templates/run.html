@@ -224,6 +224,7 @@
     {% else %}
     <span class="mode-badge">chat</span>
     {% endif %}
+    {% if turn.composition %}<span class="dim">composition:</span> <span class="mode-badge">{{ turn.composition }}</span>{% endif %}
     {% if turn.state and turn.state != "done" %}
     <span class="state-failed">({{ turn.state }})</span>
     {% endif %}

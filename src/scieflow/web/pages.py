@@ -147,6 +147,26 @@ def _submission_from_form(form, *, marked_requires_revision=False):
         raise _FormError(str(exc)) from exc
 
 
+#: Shown on the page, and returned by the API, when a marked send is
+#: delivered as ordinary chat (plan 5.7; the web/API never run a marked turn).
+HARNESS_COMMAND_NOTICE = ('harness-command capability is not certified on this deployment; '
+                          'your message was sent as ordinary chat')
+
+COMPOSITION_ORDERS = ('command-first', 'charter-first')
+
+
+def composition_label(audit):
+    """The composition order a turn audit records, for display only.
+
+    None when the audit records none. A stored value other than the two
+    known orders shows as `unknown`; it is never echoed.
+    """
+    if not isinstance(audit, dict) or 'composition_order' not in audit:
+        return None
+    value = audit['composition_order']
+    return value if type(value) is str and value in COMPOSITION_ORDERS else 'unknown'
+
+
 def _as_chat(submission):
     """The same message as an ordinary chat submission: a marked send on a
     deployment with no certified policies runs as charter-first chat, with
@@ -446,6 +466,10 @@ def run_page(request: Request, slug: str, error: str = "") -> HTMLResponse:
     try:
         state = service.conversation_state(project, slug)
         conversation_view = presentation.conversation_view(state)
+        for turn, raw in zip(conversation_view.get('turns', []), state.get('turns', [])):
+            composition = composition_label(raw.get('audit'))
+            if composition is not None:
+                turn['composition'] = composition
         # The canonical decimal token both forms render, and the page's
         # integrity verdict for a malformed stored generation.
         revision_token = str(state['selection_generation'])
@@ -733,9 +757,7 @@ def say(request: Request, slug: str, action: str = Form("say"),
                 # is not certified. Never a silent enablement.
                 service.say(project, slug, submission.message, "human",
                            human_submission=_as_chat(submission))
-                return _back(slug, 'harness-command capability is not certified '
-                                   'on this deployment; your message was sent as '
-                                   'ordinary chat')
+                return _back(slug, HARNESS_COMMAND_NOTICE)
             service.say(project, slug, submission.message, "human",
                        human_submission=submission)
             return _back(slug)
@@ -838,6 +860,7 @@ def job_page(request: Request, slug: str, job_id: str) -> HTMLResponse:
         "job_raw": presentation.verified_raw_url(ws, slug, f'jobs/{job_id}.json'),
         "live": job.state == "running",
         "turn_mode": presentation.text(turn_mode),
+        "turn_composition": composition_label(audit),
     })
 
 

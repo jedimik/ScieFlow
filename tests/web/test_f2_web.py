@@ -14,7 +14,7 @@ import yaml
 
 from scieflow.core import jobs, service
 from scieflow.core.run import conversation
-from scieflow.web import auth, presentation
+from scieflow.web import auth, pages, presentation
 
 NOTICE = ('harness-command capability is not certified on this deployment; '
           'your message was sent as ordinary chat')
@@ -89,7 +89,7 @@ def test_api_ordinary_send_response_has_no_harness_key(project, client, monkeypa
     ('command-first', None),
 ])
 def test_composition_label_mapping(audit_value, expected):
-    assert presentation.composition_label(audit_value) == expected
+    assert pages.composition_label(audit_value) == expected
 
 
 def test_web_package_never_imports_harness_commands():
