@@ -4,9 +4,11 @@ Hermetic: every filesystem input is a synthetic tree under tmp_path. The only ev
 r14 fixture (tests/fixtures/harness_identity_r14.json). No host home, no probe tree, no subprocess.
 """
 import dataclasses
+import errno
 import hashlib
 import json
 import os
+import shutil
 import stat
 from dataclasses import fields, replace
 from pathlib import Path
@@ -456,3 +458,111 @@ def test_module_source_has_no_process_or_write_entry_points():
 def test_module_stays_within_the_production_line_budget():
     lines = [line for line in Path(hi.__file__).read_text(encoding='utf-8').splitlines() if line.strip()]
     assert len(lines) <= 260, len(lines)
+
+
+# ---- F-2 t1 review r1 fixes (reviews/f-2-t1-review-r1.md findings 1-4) -----------------------
+
+def test_deeply_nested_settings_yields_none_not_an_exception(tmp_path):
+    root = _project(tmp_path / 'proj')
+    (root / '.claude' / 'settings.json').write_bytes(b'[' * 900000)
+    assert hi.read_settings(root) is None
+
+
+def test_deeply_nested_settings_gives_an_incomplete_identity(tmp_path, monkeypatch):
+    root, _, kwargs = _capture_fixture(tmp_path, monkeypatch)
+    (root / '.claude' / 'settings.json').write_bytes(b'[' * 900000)
+    identity = hi.capture(**kwargs)
+    assert identity.settings_sha256 is None and identity.effects_pinned is False
+
+
+class _ReadFails:
+    """Stands in for the handle os.fdopen returns: every read raises an I/O error."""
+
+    def __init__(self, handle):
+        self._handle = handle
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._handle.close()
+        return False
+
+    def fileno(self):
+        return self._handle.fileno()
+
+    def read(self, size=-1):
+        raise OSError(errno.EIO, 'injected read error')
+
+
+def _reads_fail(monkeypatch):
+    real_fdopen = os.fdopen
+    monkeypatch.setattr(hi.os, 'fdopen', lambda fd, mode: _ReadFails(real_fdopen(fd, mode)))
+
+
+def test_executable_digest_read_error_returns_none(tmp_path, monkeypatch):
+    exe, _ = _executable(tmp_path / 'bin')
+    facts = sandbox._capture_path_facts([exe])
+    _reads_fail(monkeypatch)
+    assert hi.executable_digest(str(exe), facts) is None
+
+
+def test_capture_survives_an_executable_read_error(tmp_path, monkeypatch):
+    _, _, kwargs = _capture_fixture(tmp_path, monkeypatch)
+    _reads_fail(monkeypatch)
+    identity = hi.capture(**kwargs)
+    assert identity.executable_sha256 is None and identity.version is None
+    assert identity.effects_pinned is False
+
+
+@pytest.mark.parametrize('folder', ['scripts', 'scripts/hooks', 'config'])
+def test_settings_linked_directory_component_voids_the_record(tmp_path, folder):
+    root = _project(tmp_path / 'proj')
+    moved = tmp_path / ('moved-' + folder.replace('/', '-'))
+    shutil.move(str(root / folder), str(moved))
+    os.symlink(moved, root / folder)
+    assert hi.read_settings(root) is None
+
+
+def test_home_settings_listing_bound(tmp_path):
+    root = _project(tmp_path / 'proj')
+    home = tmp_path / 'agent-home' / '.claude'
+    home.mkdir(parents=True)
+    for i in range(hi.MAX_DIR_ENTRIES):
+        (home / f'note-{i}.txt').write_bytes(b'x')
+    assert hi.read_discovery(root, tmp_path / 'agent-home') is not None
+    (home / 'one-more.txt').write_bytes(b'x')
+    assert hi.read_discovery(root, tmp_path / 'agent-home') is None
+
+
+def test_skill_folder_listing_bound(tmp_path):
+    root = _project(tmp_path / 'proj')
+    folder = _symlink_skill_dir(root)
+    for i in range(hi.MAX_DIR_ENTRIES - 1):  # SKILL.md is already one of the 64 entries
+        (folder / f'extra-{i}.md').write_bytes(b'x')
+    assert hi.read_extensions(root) is not None
+    (folder / 'one-more.md').write_bytes(b'x')
+    assert hi.read_extensions(root) is None
+
+
+def test_unreadable_settings_file_voids_the_record(tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip('root reads mode-000 files')
+    root = _project(tmp_path / 'proj')
+    (root / '.claude' / 'settings.json').chmod(0)
+    try:
+        assert hi.read_settings(root) is None
+    finally:
+        (root / '.claude' / 'settings.json').chmod(0o644)
+
+
+def test_unreadable_skill_file_voids_the_extensions_record(tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip('root reads mode-000 files')
+    root = _project(tmp_path / 'proj')
+    skill = _symlink_skill_dir(root) / 'SKILL.md'
+    skill.chmod(0)
+    try:
+        assert hi.read_extensions(root) is None
+    finally:
+        skill.chmod(0o644)
