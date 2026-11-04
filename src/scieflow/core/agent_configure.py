@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import difflib
 import io
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +67,8 @@ def coerce(field_name: str, raw: str):
             number = float(raw)
         except ValueError as exc:
             raise ConfigureError(f"{field_name} must be a number, got {raw!r}") from exc
+        if not math.isfinite(number):
+            raise ConfigureError(f"{field_name} must be a finite number, got {raw!r}")
         return int(number) if number.is_integer() else number
     if field_name in BOOL_FIELDS:
         lowered = raw.strip().lower()

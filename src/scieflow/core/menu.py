@@ -22,11 +22,12 @@ from pathlib import Path
 
 import click
 
+from scieflow.core import agent_config as ac
 from scieflow.core import config as config_mod
+from scieflow.core.agent_config import EXTENDED_THINKING  # noqa: F401 (re-exported)
 
 BACK = object()
 COORDINATORS = ("claude", "codex")  # primary tier; agy is support-only (rule 10)
-from scieflow.core.agent_config import EXTENDED_THINKING  # noqa: F401 (re-exported)
 
 
 # -- option tree (single source for the TUI and `--json`) --------------------
@@ -388,17 +389,12 @@ def continue_run(ui: UI) -> None:
 
 
 # -- agent settings ---------------------------------------------------------
-DEFAULT_LEVELS = ["low", "medium", "high"]
+DEFAULT_LEVELS = list(ac.DEFAULT_LEVELS)
 
 
 def effort_levels(eff, name: str) -> list[str]:
-    """Effort choices for an agent — the same list for the TUI and `--json`."""
-    menu = eff.menus.get(name) or {}
-    cmd = eff.agents.get(name, {}).get("cmd")
-    if cmd and "{reasoning}" in str(cmd.value):
-        levels = (menu.get("reasoning") or {}).get("levels")
-        return [str(level) for level in levels] if levels else list(DEFAULT_LEVELS)
-    return ["default", "extended-thinking"]
+    """Effort choices for an agent — the same list for the TUI and `--json` (T-12 T12-D2/D3)."""
+    return ac.effort_levels_for(eff.effort_cfg(name), eff.menus.get(name) or {})
 
 
 def _agent_label(name: str, eff) -> str:
@@ -579,11 +575,10 @@ def _pick_model(ui: UI, eff, name: str, attempt) -> None:
 def _pick_effort(ui: UI, eff, name: str, attempt) -> None:
     from scieflow.core import agent_configure as acf
 
-    menu = eff.menus.get(name) or {}
-    reasoning = menu.get("reasoning") or {}
-    cmd = eff.agents[name].get("cmd")
-    cmd_value = str(cmd.value) if cmd else ""
-    if "{reasoning}" in cmd_value:
+    menu_cfg = eff.menus.get(name) or {}
+    reasoning = menu_cfg.get("reasoning") or {}
+    mode = ac.effort_mode(eff.effort_cfg(name))
+    if mode == "placeholder":
         levels = effort_levels(eff, name)
         current = eff.agents[name].get("reasoning")
         level = ui.select(f"{name}: effort", [
@@ -592,29 +587,26 @@ def _pick_effort(ui: UI, eff, name: str, attempt) -> None:
         if level is not BACK:
             attempt([acf.Op("set", f"{name}.reasoning", level)])
         return
-    # Claude has no reasoning flag: extended thinking is an env prefix on cmd.
-    on = cmd_value.startswith(EXTENDED_THINKING)
+    if mode == "none":
+        click.echo("  this agent has no effort setting")
+        return
+    # Claude (T-12 T12-D4): the choice is the stored `reasoning`; the env prefix is
+    # added at dispatch, so the menu never edits `cmd`.
+    stored = eff.agents[name].get("reasoning")
+    if stored is not None:
+        on = stored.value == "extended-thinking"
+    else:
+        on = str(eff.effort_cfg(name).get("cmd") or "").startswith(EXTENDED_THINKING)
     if reasoning.get("how"):
         click.echo(f"  how: {reasoning['how']}")
     level = ui.select(f"{name}: effort", [
         ("default" + ("" if on else "  (current)"), "default"),
-        ("extended thinking (32k thinking tokens)" + ("  (current)" if on else ""), "extended"),
+        ("extended thinking (32k thinking tokens)" + ("  (current)" if on else ""),
+         "extended-thinking"),
     ])
     if level is BACK:
         return
-    ops = []
-    for field_name in ("cmd", "stdin_cmd"):
-        setting = eff.agents[name].get(field_name)
-        if not setting:
-            continue
-        plain = str(setting.value).removeprefix(EXTENDED_THINKING)
-        value = EXTENDED_THINKING + plain if level == "extended" else plain
-        if value != str(setting.value):
-            ops.append(acf.Op("set", f"{name}.{field_name}", value))
-    if ops:
-        attempt(ops)
-    else:
-        click.echo("  already set")
+    attempt([acf.Op("set", f"{name}.reasoning", level)])
 
 
 def _news_settings(ui: UI, root: Path) -> None:

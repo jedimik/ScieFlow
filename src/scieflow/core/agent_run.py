@@ -306,6 +306,9 @@ def prepare(project: Project, agent: str, prompt_file: Path,
         raise DispatchError(f"invalid owning run configuration: {exc}") from exc
     if override:
         agent_cfg = {**agent_cfg, **override}
+    # T-12 (A-D4): a Claude effort setting becomes the env prefix here, before any role
+    # override, so precedence is registry -> run -> agent effort -> role effort.
+    agent_cfg = agent_config.apply_effort(agent_cfg)
     if role is None and run_dir is not None and not conversational:
         # M-A A-5: a dispatch inside a run must name the role it performs, so the
         # role's model/effort and the "wrong agent for this role" rule always apply.

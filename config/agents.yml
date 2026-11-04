@@ -10,7 +10,9 @@
 # Each `menu:` block is what a coordinator presents to the user when settling
 # run staffing (research module AGENTS.md, run configuration gate): available
 # models, reasoning levels, and how a choice maps to `agent_overrides:` in the
-# run's workspace config.yml. `menu:` is read by coordinators, not by code.
+# run's workspace config.yml. The `models` and `reasoning.levels` lists are also
+# the choices the Agents page, the menu and `agent configure` offer (suggestions,
+# not a live check of your account); list the effort names your subscription uses.
 # `model_family:` is the model vendor reviews are separated by (no reviewer
 # reviews a draft of its own family by default; agent_config.model_family,
 # falling back to `family:`). It is not `family:`, the output dialect
@@ -37,10 +39,10 @@ agents:
       reasoning:
         levels: [default, extended-thinking]
         how: >-
-          No CLI reasoning flag; the model choice carries capability. For
-          extended thinking, override the whole cmd in agent_overrides, e.g.
-          cmd: 'env MAX_THINKING_TOKENS=32000 claude -p
-          --dangerously-skip-permissions --model {model} {prompt}'
+          No CLI reasoning flag. Set `reasoning: extended-thinking` (or
+          `default`); ScieFlow then adds MAX_THINKING_TOKENS=32000 itself, as
+          the env prefix of a one-shot dispatch and in a conversation turn's
+          environment. The cmd is not edited.
   codex:
     model_family: openai
     cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
@@ -101,8 +103,8 @@ agents:
         levels: [default, extended-thinking]
         how: >-
           Extended thinking is the default here (MAX_THINKING_TOKENS=32000 in
-          cmd). For default effort, drop the env prefix from cmd in
-          agent_overrides.
+          cmd). Set `reasoning: default` to turn it off for the defaults or one
+          run; `reasoning: extended-thinking` keeps it on. The cmd is not edited.
   codex-review:
     model_family: openai
     cmd: "codex exec --sandbox workspace-write --model {model} -c model_reasoning_effort={reasoning} {prompt}"
