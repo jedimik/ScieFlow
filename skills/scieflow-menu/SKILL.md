@@ -65,7 +65,7 @@ Ask **where the change applies** before anything else, and say what it writes:
 Then role → agent, or agent → model / effort, using only the values listed in
 `agent_settings.agents.<name>.models` / `effort_levels` (a model outside the
 list only if the user names it). Claude's effort is `default` or
-Claude's effort is `default` or `extended-thinking`. For a one-shot dispatch,
+`extended-thinking`. For a one-shot dispatch,
 `extended-thinking` means prefixing its `cmd`/`stdin_cmd` with
 `env MAX_THINKING_TOKENS=32000 `. For a conversation turn, `reasoning: extended-thinking`
 (or that `cmd` prefix when `reasoning` is unset) makes ScieFlow add
