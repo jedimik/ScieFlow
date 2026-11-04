@@ -7,13 +7,14 @@ home, probe tree or agent CLI is read or launched.
 import hashlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
-from scieflow.core import agent_run, harness_commands, harness_identity, sandbox, service
+from scieflow.core import agent_run, events, harness_commands, harness_identity, jobs, sandbox, service
 from scieflow.core.run import charter, conversation
 from scieflow.core.turn_input import accept_human_submission
 
@@ -34,7 +35,7 @@ def _credentials(root: Path, agents) -> None:
 
 
 def _add_claude_agent(project, tmp_path, monkeypatch, *, reasoning='extended-thinking',
-                      prefix=False):
+                      prefix=False, family='claude', name=CLAUDE_AGENT):
     """A claude-family turn agent; its launcher is the versioned file versions/9.9.9 (F2-D4)."""
     versions = (tmp_path / 'claude-home' / '.local' / 'share' / 'claude' / 'versions').resolve()
     launcher = versions / '9.9.9'
@@ -47,7 +48,7 @@ def _add_claude_agent(project, tmp_path, monkeypatch, *, reasoning='extended-thi
     cfg = {'cmd': f'{launcher} first {{prompt}}',
            'session_cmd': f'{launcher} first {{prompt}}',
            'resume_cmd': f'{launcher} --resume {{session}} resume {{prompt}}',
-           'family': 'claude', 'enabled': True, 'timeout_min': 1,
+           'family': family, 'enabled': True, 'timeout_min': 1,
            'model': 'fixture'}
     if prefix:   # the legacy shape: extended thinking as an env prefix on cmd only, no reasoning key
         cfg['cmd'] = f'env MAX_THINKING_TOKENS=32000 {launcher} first {{prompt}}'
@@ -55,8 +56,8 @@ def _add_claude_agent(project, tmp_path, monkeypatch, *, reasoning='extended-thi
         cfg['reasoning'] = reasoning
     block = ''.join('    ' + line + '\n' for line in yaml.safe_dump(cfg).splitlines())
     path = project.root / 'config' / 'agents.yml'
-    path.write_text(path.read_text() + f'  {CLAUDE_AGENT}:\n{block}')
-    _credentials(project.root, ['k-protocol-fixture', CLAUDE_AGENT])
+    path.write_text(path.read_text() + f'  {name}:\n{block}')
+    _credentials(project.root, ['k-protocol-fixture', name])
     return launcher
 
 
@@ -68,6 +69,12 @@ def _complete_claude_tree(root: Path) -> None:
         {'hooks': {'Stop': [{'hooks': [{'type': 'command', 'command': KNOWN_HOOK}]}]}}))
     (root / 'scripts' / 'hooks').mkdir(parents=True)
     (root / 'scripts' / 'hooks' / 'dvc-sync-reminder.py').write_text('print("synthetic")\n')
+    # One in-project skill link (plan 5.2): a symlink under .claude/skills to a folder of regular files.
+    skill = root / 'skills' / 'fixture-skill'
+    skill.mkdir(parents=True)
+    (skill / 'SKILL.md').write_text('synthetic skill\n')
+    os.symlink(os.path.relpath(skill, root / '.claude' / 'skills'),
+               root / '.claude' / 'skills' / 'fixture-skill')
 
 
 def _tree_digest(root: Path) -> dict:
@@ -107,7 +114,9 @@ def test_marked_claude_turn_captures_the_full_identity(k_conversational_project,
                         identity.settings_sha256)
     assert identity.effects_pinned is True
     # The production tuple does not match this synthetic identity: support stays disabled.
-    assert harness_commands.support_for(identity).enabled is False
+    support = harness_commands.support_for(identity)
+    assert support.enabled is False
+    assert support.reason == 'No exact certified /scieflow-menu policy for this harness identity'
     marked = accept_human_submission('/scieflow-menu', 'harness-command', '0')
     with pytest.raises(agent_run.DispatchError):
         agent_run.prepare_turn(resolved, marked)
@@ -215,3 +224,125 @@ def test_service_say_passes_the_capture_flag_only_for_marked_submissions(
             errors.append(repr(exc)[:300])
     assert seen[:1] == [True], errors
     assert seen[1:] == [False], errors
+
+
+def test_marked_turn_prepares_once_the_captured_identity_is_bound(k_conversational_project,
+                                                                  offline_k_support):
+    project, ws, _ = k_conversational_project
+    _complete_claude_tree(project.root)
+    resolved = agent_run.resolve_turn(project, 'k-protocol-fixture', run_dir=ws, session=None,
+                                      capture_identity=True)
+    identity = resolved.harness_identity
+    assert identity.agent == 'k-protocol-fixture' and identity.extensions_sha256 is not None
+    support = harness_commands.support_for(identity)
+    assert support.enabled is False and support.reason
+    marked = accept_human_submission('/scieflow-menu', 'harness-command', '0')
+    with pytest.raises(agent_run.DispatchError, match=re.escape(support.reason)):
+        agent_run.prepare_turn(resolved, marked)
+    offline_k_support(identity)
+    prepared = agent_run.prepare_turn(resolved, marked)
+    assert prepared.policy_revision == 'fixture-only'
+    assert prepared.composition_order == 'command-first'
+    assert not any('MAX_THINKING_TOKENS' in str(token) for token in prepared.argv)
+
+
+def test_sandboxed_turn_launch_carries_effort_in_env_only(k_conversational_project, monkeypatch):
+    project, ws, _ = k_conversational_project
+    path = project.root / 'config' / 'agents.yml'
+    assert path.read_text().count('reasoning: high') == 1
+    path.write_text(path.read_text().replace('reasoning: high', 'reasoning: extended-thinking'))
+    monkeypatch.setenv('MAX_THINKING_TOKENS', '999')
+    service.set_conversation_agent(project, 'r1', 'k-protocol-fixture')
+    launches = []
+    real_start = jobs.start
+
+    def start(*args, **kwargs):
+        launches.append((list(args[1]), dict(kwargs)))
+        return real_start(*args, **kwargs)
+
+    monkeypatch.setattr(jobs, 'start', start)
+    chat = accept_human_submission('hello', 'chat',
+                                   conversation.selection_revision(conversation.read(ws)))
+    service.say(project, 'r1', 'hello', human_submission=chat)
+    assert len(launches) == 1
+    argv, kwargs = launches[0]
+    assert kwargs['env']['MAX_THINKING_TOKENS'] == '32000'
+    assert not any('MAX_THINKING_TOKENS' in str(token) for token in argv)
+
+
+def test_unsandboxed_turn_gets_effort_only_from_the_setting(k_conversational_project, tmp_path,
+                                                            monkeypatch):
+    project, ws, _ = k_conversational_project
+    _add_claude_agent(project, tmp_path, monkeypatch)
+    (project.root / 'config' / 'sandbox.yml').write_text(
+        'unsandboxed_runs:\n  - slug: r1\n    reason: human\n')
+    monkeypatch.setenv('MAX_THINKING_TOKENS', '999')
+    resolved = agent_run.resolve_turn(project, CLAUDE_AGENT, run_dir=ws, session=None,
+                                      capture_identity=True)
+    assert resolved.protection.sandbox_enabled is False
+    assert dict(resolved.env_items)['MAX_THINKING_TOKENS'] == '32000'
+    assert resolved.harness_identity.reasoning == 'env:MAX_THINKING_TOKENS=32000'
+
+
+@pytest.mark.parametrize('family', ['codex', 'agy'])
+def test_non_claude_family_adds_no_effort_even_with_a_host_value(k_conversational_project,
+                                                                 tmp_path, monkeypatch, family):
+    project, ws, _ = k_conversational_project
+    name = 'k-other-fixture'
+    _add_claude_agent(project, tmp_path, monkeypatch, family=family, name=name)
+    monkeypatch.setenv('MAX_THINKING_TOKENS', '999')
+    resolved = agent_run.resolve_turn(project, name, run_dir=ws, session=None)
+    assert 'MAX_THINKING_TOKENS' not in dict(resolved.env_items)
+    assert resolved.harness_identity.reasoning == 'extended-thinking'
+
+
+def test_marked_and_ordinary_turns_record_the_same_audit_and_job_shape(
+        k_conversational_project, offline_k_support, monkeypatch):
+    project, ws, _ = k_conversational_project
+    service.set_conversation_agent(project, 'r1', 'k-protocol-fixture')
+    real_resolve = agent_run.resolve_turn
+
+    def resolve(*args, **kwargs):
+        value = real_resolve(*args, **kwargs)
+        if kwargs.get('capture_identity'):
+            offline_k_support(value.harness_identity)
+        return value
+
+    def finish(prepared, job, *, artifacts):
+        records = [json.loads(line) for line in Path(job.log).read_text().splitlines()]
+        assert job.exit_code == 0
+        assert records[-1]['input_sha256'] == hashlib.sha256(prepared.composed_bytes).hexdigest()
+        return service._TurnCompletion(records[0]['session_id'], records[-1]['result'], True, '')
+
+    monkeypatch.setattr(agent_run, 'resolve_turn', resolve)
+    monkeypatch.setattr(service, '_complete_marked_turn', finish)
+    spans = []
+    real_start = jobs.start
+
+    def start(*args, **kwargs):
+        spans.append(sorted(kwargs))
+        return real_start(*args, **kwargs)
+
+    monkeypatch.setattr(jobs, 'start', start)
+
+    def revision():
+        return conversation.selection_revision(conversation.read(ws))
+
+    before = len(events.read(ws))
+    service.say(project, 'r1', 'hello',
+                human_submission=accept_human_submission('hello', 'chat', revision()))
+    middle = len(events.read(ws))
+    service.say(project, 'r1', '/scieflow-menu',
+                human_submission=accept_human_submission('/scieflow-menu', 'harness-command',
+                                                         revision()))
+    everything = events.read(ws)
+    chat_types = [event['type'] for event in everything[before:middle]]
+    marked_types = [event['type'] for event in everything[middle:]]
+    human = [turn for turn in conversation.read(ws)['turns'] if turn['role'] == 'human']
+    assert [turn['audit']['input_kind'] for turn in human] == ['chat', 'harness-command']
+    assert set(human[0]['audit']) == set(human[1]['audit'])
+    assert len(spans) == 2 and spans[0] == spans[1]
+    assert marked_types == chat_types
+    identity_keys = {'harness_identity', 'reasoning', 'discovery_sha256', 'executable_sha256'}
+    assert not any(identity_keys & set(turn['audit']) for turn in human)
+
