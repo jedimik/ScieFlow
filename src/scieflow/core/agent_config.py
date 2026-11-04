@@ -52,6 +52,7 @@ ROLES: dict[str, Role] = {
     "research.draft-authors": Role(True, False, "paper-draft independent draft authors"),
     "research.draft-reviewers": Role(True, False, "paper-draft reviewer pool (default: the draft authors)"),
     "research.consistency": Role(False, False, "paper-draft consistency pass"),
+    "research.sr-screeners": Role(True, False, "systematic-review dual screeners (exactly two primary agents)"),
 }
 
 #: Roles whose members are compared by model family (no reviewer reviews a

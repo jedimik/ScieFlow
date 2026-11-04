@@ -33,6 +33,7 @@ ID_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,40}")
 OUTCOME_ROLES = ("outcome", "index-test", "reference-standard")
 POWER_TOLERANCE_ABS = 1e-8
 POWER_TOLERANCE_REL = 1e-6
+SR_STUDY = "systematic-review"
 
 
 @dataclass(frozen=True)
@@ -430,7 +431,151 @@ def check(project, ws, design: dict) -> Report:
          warnings)
     _guidelines(design, project, study, computational, errors, warnings)
     _data(design, ws, enums, keys, errors, warnings)
+    _review(design, study, schema, errors, warnings)
     return report
+
+
+def _whole(value, low: int, high: int) -> bool:
+    """A whole number in [low, high]; None and TODO placeholders are not judged here."""
+    if value is None or _is_todo(value):
+        return True
+    return isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
+
+
+def _flag(value) -> bool:
+    return value is None or _is_todo(value) or isinstance(value, bool)
+
+
+def _ident(item: dict, where: str, seen: set, errors: list) -> None:
+    """A criterion or strategy id: the id pattern, unique within the review block (plan 5.2 ids)."""
+    value = item.get("id")
+    if value is None or _is_todo(value):
+        return
+    if not (isinstance(value, str) and ID_PATTERN.fullmatch(value)):
+        errors.append(Problem("ids", _at(where, "id"), "must match ^[a-z][a-z0-9_-]{0,40}$"))
+    elif value in seen:
+        errors.append(Problem("ids", _at(where, "id"), "repeats an id in this review block"))
+    else:
+        seen.add(value)
+
+
+def _text_bound(value, where: str, high: int, errors: list, rule: str) -> None:
+    if value is None or _is_todo(value):
+        return
+    if not isinstance(value, str) or not value.strip() or len(value) > high:
+        errors.append(Problem(rule, where, f"must be text of 1 to {high} characters"))
+
+
+def _review_eligibility(block: dict, keys: dict, errors: list) -> None:
+    elig = _mapping(block, "review", "eligibility", errors)
+    if elig is None:
+        return
+    _keys(elig, "review.eligibility", keys["eligibility"], errors)
+    seen: set = set()
+    for name in ("include", "exclude"):
+        where = f"review.eligibility.{name}"
+        value = elig.get(name)
+        if value is None:
+            continue
+        if not isinstance(value, list) or not value:
+            errors.append(Problem("criteria", where, "must be a non-empty list of criteria"))
+            continue
+        for index, crit in enumerate(value):
+            here = _idx(where, index)
+            if not isinstance(crit, dict):
+                errors.append(Problem("shape", here, "must be a mapping"))
+                continue
+            _keys(crit, here, keys["criterion"], errors)
+            _ident(crit, here, seen, errors)
+            _text_bound(crit.get("text"), _at(here, "text"), 500, errors, "criteria")
+
+
+def _review_strategies(block: dict, enums: dict, keys: dict, errors: list) -> None:
+    value = block.get("strategies")
+    if value is None:
+        return
+    if not isinstance(value, list) or not value:
+        errors.append(Problem("strategies", "review.strategies", "must be a non-empty list of strategies"))
+        return
+    seen: set = set()
+    for index, strat in enumerate(value):
+        here = _idx("review.strategies", index)
+        if not isinstance(strat, dict):
+            errors.append(Problem("shape", here, "must be a mapping"))
+            continue
+        _keys(strat, here, keys["strategy"], errors)
+        _ident(strat, here, seen, errors)
+        _text_bound(strat.get("query"), _at(here, "query"), 1000, errors, "strategies")
+        sources = strat.get("sources")
+        if sources is not None and not _is_todo(sources):
+            if not isinstance(sources, list) or not sources:
+                errors.append(Problem("strategies", _at(here, "sources"),
+                                      "must be a non-empty list of review sources"))
+            else:
+                names = [s for s in sources if not _is_todo(s)]
+                if not all(isinstance(s, str) and s in enums["review_sources"] for s in names):
+                    errors.append(Problem("strategies", _at(here, "sources"),
+                                          "names a source that is not in schemas/design.yml review_sources"))
+                elif len(set(names)) != len(names):
+                    errors.append(Problem("strategies", _at(here, "sources"), "repeats a source"))
+        if not _whole(strat.get("from_year"), 1900, 2100):
+            errors.append(Problem("strategies", _at(here, "from_year"), "must be a whole year from 1900 to 2100"))
+        if not _whole(strat.get("limit"), 1, 200):
+            errors.append(Problem("strategies", _at(here, "limit"), "must be a whole number from 1 to 200"))
+
+
+def _review(design: dict, study, schema: dict, errors: list, warnings: list) -> None:
+    """The `review:` block of a systematic-review design (M-H plan 5.2). Refused for other types."""
+    enums, keys = schema["enums"], schema["item_keys"]
+    block = design.get("review")
+    if study != SR_STUDY:
+        if block is not None:
+            errors.append(Problem("review", "review", "only a systematic-review design holds a review block"))
+        return
+    if block is None:
+        errors.append(Problem("review", "review", "a systematic review needs a review block"))
+        return
+    if not isinstance(block, dict):
+        errors.append(Problem("shape", "review", "must be a mapping"))
+        return
+    _keys(block, "review", keys["review"], errors)
+    _enum(block.get("framework"), enums["frameworks"], "review.framework", errors, rule="review")
+    _review_eligibility(block, keys, errors)
+    _review_strategies(block, enums, keys, errors)
+    screening = _mapping(block, "review", "screening", errors)
+    if screening is not None:
+        _keys(screening, "review.screening", keys["screening"], errors)
+        if not _whole(screening.get("batch_size"), 1, 500):
+            errors.append(Problem("screening", "review.screening.batch_size", "must be a whole number from 1 to 500"))
+        if not _flag(screening.get("prioritise")):
+            errors.append(Problem("screening", "review.screening.prioritise", "must be true or false"))
+    appraisal = _mapping(block, "review", "appraisal", errors)
+    if appraisal is not None:
+        _keys(appraisal, "review.appraisal", keys["appraisal"], errors)
+        _enum(appraisal.get("rob_tool"), enums["rob_tools"], "review.appraisal.rob_tool", errors, rule="appraisal")
+        if not _flag(appraisal.get("grade")):
+            errors.append(Problem("appraisal", "review.appraisal.grade", "must be true or false"))
+    synthesis = _mapping(block, "review", "synthesis", errors)
+    if synthesis is not None:
+        _keys(synthesis, "review.synthesis", keys["synthesis"], errors)
+        method = synthesis.get("method")
+        _enum(method, enums["synthesis_methods"], "review.synthesis.method", errors, rule="synthesis")
+        if method == "meta-analysis":
+            warnings.append(Problem("synthesis", "review.synthesis.method", "M-H computes no pooled effect"))
+        _text(synthesis, "review.synthesis", ("notes",), errors)
+    registration = _mapping(block, "review", "registration", errors)
+    if registration is not None:
+        _keys(registration, "review.registration", keys["registration"], errors)
+        _enum(registration.get("registry"), enums["registries"], "review.registration.registry",
+              errors, rule="registration")
+        _text(registration, "review.registration", ("id",), errors)
+    if not _flag(block.get("living")):
+        errors.append(Problem("living", "review.living", "must be true or false"))
+    guides = design.get("reporting_guidelines")
+    names = guides if isinstance(guides, list) else []
+    if "prisma-2020" not in names:
+        warnings.append(Problem("guideline-sr", "reporting_guidelines",
+                                "a systematic review should name prisma-2020"))
 
 
 def _top_level(design: dict, schema: dict, errors: list) -> None:

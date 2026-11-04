@@ -1,0 +1,33 @@
+# Hand-computed PRISMA 2020 numbers of M-H plan section 5.12 (synthetic gold, no patient data).
+# Typed by hand from the plan's scenario text. Never derived from the code under test.
+format: 1
+round1:
+  identified: 60
+  identified_by_source: {openalex: 30, europepmc: 20, crossref: 10}
+  duplicates_removed: 12
+  records_after_dedup: 48
+  records_screened: 48
+  records_excluded: 34
+  reports_sought_for_retrieval: 14
+  reports_not_retrieved: 1
+  reports_assessed: 13
+  reports_excluded: 7
+  reports_excluded_by_reason: {e1: 4, e2: 3}
+  studies_included: 6
+round2:
+  # Living round 2 adds identification only; the screening numbers of round 1 stay as they are.
+  identified: 65
+  duplicates_removed: 14
+  records_after_dedup: 51
+  records_screened: 48
+  records_excluded: 34
+  reports_sought_for_retrieval: 14
+  reports_not_retrieved: 1
+  reports_assessed: 13
+  reports_excluded: 7
+  studies_included: 6
+mermaid_counts_round1: [60, 12, 48, 48, 34, 14, 1, 13, 7, 6]
+# Cohen's kappa of plan 5.12 rows 3-4 (95/159 and 58/84), hand-computed from the 2x2 tables.
+kappa:
+  title-abstract: 0.597484
+  full-text: 0.690476

@@ -5,7 +5,7 @@ format_version: 1
 top_keys:
   required: [version, title, study_type, question, variables, sap]
   optional: [pico, groups, timeline, sampling, randomisation, blinding, sample_size,
-             reporting_guidelines, data, notes]
+             reporting_guidelines, data, notes, review]
 sap_keys:
   required: [estimands, outcomes]
   optional: [missing_data, multiplicity, sensitivity, interim, exploratory]
@@ -31,6 +31,14 @@ item_keys:
   split: {required: [fraction, seed, stratify_by], optional: []}
   data: {required: [levels_needed], optional: [sources]}
   source: {required: [path, level], optional: []}
+  review: {required: [eligibility, strategies, screening, appraisal, synthesis], optional: [framework, registration, living]}
+  eligibility: {required: [include, exclude], optional: []}
+  criterion: {required: [id, text], optional: []}
+  strategy: {required: [id, query, sources], optional: [from_year, limit]}
+  screening: {required: [], optional: [batch_size, prioritise]}
+  appraisal: {required: [rob_tool, grade], optional: []}
+  synthesis: {required: [method], optional: [notes]}
+  registration: {required: [registry], optional: [id]}
 enums:
   study_types: [rct, cohort, case-control, cross-sectional, diagnostic-accuracy,
                 prediction-model, systematic-review, animal, economic-evaluation, computational]
@@ -49,3 +57,8 @@ enums:
   sample_size_methods: [power, fixed, not-applicable]
   data_levels: [L0, L1, L2]
   fdr: [bh]
+  review_sources: [openalex, crossref, europepmc, arxiv, pubmed, semantic-scholar, datacite]
+  rob_tools: [rob2, robins-i, quadas-2, none]
+  synthesis_methods: [narrative, meta-analysis]
+  registries: [prospero, osf, inplasy, other, none]
+  frameworks: [pico, pecos, spider, other]

@@ -77,6 +77,12 @@ GROUPS = {
         None,
         "Study design and analysis plan: check, lock, amend.",
     ),
+    "sr": (
+        "scieflow.research.sr.cli",
+        "sr",
+        "research",
+        "Systematic review: protocol, search, dual screening, adjudication, PRISMA, appraisal.",
+    ),
     "mcp": (
         "scieflow.mcp_server.cli",
         "mcp",

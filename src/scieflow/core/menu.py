@@ -78,6 +78,11 @@ WORKFLOWS: dict[str, dict] = {
         "ask": "What the experiment campaign should test",
         "roles": ["loop.experiment"],
     },
+    "systematic-review": {
+        "skill": "src/scieflow/research/skills/systematic-review/SKILL.md",
+        "ask": "Review question for the systematic review",
+        "roles": ["research.sr-screeners"],
+    },
 }
 
 TREE: list[Section] = [

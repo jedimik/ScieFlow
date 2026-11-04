@@ -220,6 +220,11 @@ When they ask to find research gaps, generate hypotheses, or "what's novel
 here" over their data/article, follow `src/scieflow/research/skills/gap-discovery/SKILL.md`. When
 they ask for an article draft from their data, follow
 `src/scieflow/research/skills/paper-draft/SKILL.md`.
+When they ask for a systematic or living review (a locked protocol, dual screening by two agents,
+blinded adjudication, a PRISMA flow and checklist, risk-of-bias and GRADE worksheets), follow
+`src/scieflow/research/skills/systematic-review/SKILL.md`. Its counts, Cohen's kappa and PRISMA
+numbers come only from the `uv run scieflow sr` commands; never write `sr/` files or `sr.*` events
+yourself, and never adjudicate a screening conflict (a human answers the `sr-adjudication` gate).
 
 ## status.yml format
 

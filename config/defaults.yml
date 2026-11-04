@@ -71,3 +71,4 @@ assignments:
   # purpose: it then follows research.draft-authors here and in every run, so
   # the authors review each other. Name it to staff a different pool.
   research.consistency: codex-review
+  research.sr-screeners: [codex, claude]

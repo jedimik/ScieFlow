@@ -1,0 +1,24 @@
+version: 1
+id: robins-i
+name: "ROBINS-I: risk of bias in non-randomised studies of interventions"
+source:
+  citation: "Sterne JA, Hernan MA, Reeves BC, et al. ROBINS-I: a tool for assessing risk of bias in non-randomised studies of interventions. BMJ 2016;355:i4919."
+  doi: null
+verification:
+  status: unverified
+  note: "Written from the citation in plan 5.10 of M-H. Domains and judgements are not checked against the published tool by a person; the DOI is left null because it was not verified."
+  verified_by: null
+  verified_at: null
+domains:
+  - {id: confounding, label: "Bias due to confounding"}
+  - {id: selection-of-participants, label: "Bias in selection of participants into the study"}
+  - {id: classification-of-interventions, label: "Bias in classification of interventions"}
+  - {id: deviations-from-intended-interventions, label: "Bias due to deviations from intended interventions"}
+  - {id: missing-data, label: "Bias due to missing data"}
+  - {id: measurement-of-outcomes, label: "Bias in measurement of outcomes"}
+  - {id: selection-of-the-reported-result, label: "Bias in selection of the reported result"}
+judgements: [low, moderate, serious, critical]
+overall:
+  rule: worst
+  extra: [no-information]
+  extra_requires: {domain: no-information, none_of: [serious, critical]}

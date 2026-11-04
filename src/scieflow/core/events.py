@@ -41,6 +41,9 @@ TYPES = frozenset({
     "data.released", "data.imported", "data.ingested",
     # Literature kernel (M-C1): the run's network mode and recorded snapshots.
     "network.set", "literature.snapshot", "literature.monitor",
+    # Added by M-H (systematic review), additive: the sr.* ledger (research/sr/ledger.py).
+    "sr.retrieval", "sr.dedup_decision", "sr.screening_decision", "sr.adjudication",
+    "sr.appraisal", "sr.committed",
 })
 
 

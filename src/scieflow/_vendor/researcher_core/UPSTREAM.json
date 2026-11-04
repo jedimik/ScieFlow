@@ -155,6 +155,44 @@
       "header": "\"\"\"Provenance normalisers: a verbatim excerpt of researcher v1.0.0 provenance.py,\nlines 118-224 (MIT; see VENDORED.md). The ledger itself is not vendored.\"\"\"\n\nfrom __future__ import annotations\n\nimport re\nfrom datetime import datetime\nfrom typing import Any\n\n\n",
       "sha256": "03fbd217c77ed83047d2f12247c1ceab2869db62ce7d024e2bd834a099174de5",
       "patches": []
+    },
+    "screen.py": {
+      "upstream": "core/researcher_core/screen.py",
+      "upstream_sha256": "28072bf60184544de4c1e3d6f4f78e3c9597ffdd2ec8dfb8b181bfea4eeda01f",
+      "sha256": "d2273df81184834bf75dbe1a61fbbbb24852131bbe4cca2a69d76ef3d7bbed88",
+      "patches": [
+        {
+          "old": "from rapidfuzz import fuzz",
+          "new": "from ._fuzz import fuzz"
+        },
+        {
+          "old": "from .provenance import ProvenanceEvent, ProvenanceLedger, RunContext",
+          "new": "from ._ledger import ProvenanceEvent, ProvenanceLedger, RunContext"
+        }
+      ]
+    },
+    "sr_prisma.py": {
+      "upstream": "core/researcher_core/sr_prisma.py",
+      "upstream_sha256": "def64bad0fcd69d132ac69df47dfe5d47fc1412a071b021e8e861490daf8d3ca",
+      "sha256": "86c71d7f577583dc544653b779ca9cb906a68dd02ce232ba17c9bc8b0d9961cd",
+      "patches": [
+        {
+          "old": "from .provenance import ProvenanceEvent, ProvenanceLedger, derive_prisma",
+          "new": "from ._ledger import ProvenanceEvent, ProvenanceLedger, derive_prisma"
+        }
+      ]
+    },
+    "prisma_counts.py": {
+      "upstream": "core/researcher_core/provenance.py",
+      "upstream_sha256": "6c77c217333fc4eea106ae5c8edcabec975503fb214942b109539ef20c3d2002",
+      "lines": [
+        527,
+        625
+      ],
+      "excerpt_sha256": "29ebb44a0a1c9c410f8cee341c683734b4943b422bab14dee693125d94e71836",
+      "header": "\"\"\"PRISMA counts: a verbatim excerpt of researcher v1.0.0 provenance.py, lines 527-625 (MIT; see VENDORED.md).\nThe ledger itself is not vendored: ScieFlow's ledger interface is _ledger.py. Nothing else from\nprovenance.py is vendored here.\"\"\"\n\nfrom __future__ import annotations\n\nfrom collections.abc import Iterable, Sequence\nfrom dataclasses import dataclass, field\nfrom typing import Any\n\n\n",
+      "sha256": "cd75cfe6ec8ad661347493d3e307979884a8745a4006f8833738510c80efd7a8",
+      "patches": []
     }
   }
 }

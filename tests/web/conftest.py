@@ -60,7 +60,8 @@ def project(tmp_path):
         "  research.submitter: stub2\n"
         "  research.outline: stub\n"
         "  research.draft-authors: [stub]\n"
-        "  research.consistency: stub\n")
+        "  research.consistency: stub\n"
+        "  research.sr-screeners: [stub, stub2]\n")
     (tmp_path / "schemas").mkdir()
     _fixture_credentials(tmp_path, ["stub", "stub2", "sleepy", "stub_disabled"])
     for name in ("status", "gates", "status-research"):

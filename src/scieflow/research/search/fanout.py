@@ -52,10 +52,13 @@ def _status(name: str, status: str, count: int = 0, error: str | None = None) ->
     return out
 
 
-def run_all(gw, query, *, sources=None, limit: int = 25, from_year: int | None = None,
-            top: int | None = None) -> dict:
-    """The fan-out payload for one query. `sources` may list any subset of ORDER in any order; the
-    output always follows the canonical order. `None` means `default_sources(gw.policy)`."""
+def collect(gw, query, *, sources=None, limit: int = 25, from_year: int | None = None) -> tuple:
+    """Ask each chosen source once, in canonical order, and return `(chosen, statuses, answers)`.
+
+    The query is checked before any source is asked (M-H-D13: this is the loop `run_all` used to
+    hold, moved here unchanged so the systematic-review rounds can reuse it). `chosen` lists the
+    source names asked, `statuses` one status row per chosen source, `answers` the paper records
+    of each source that answered."""
     checked = registry.check_query(query)            # refused here, before any source is asked
     wanted = default_sources(gw.policy) if sources is None else sources
     chosen = [name for name in ORDER if name in wanted]
@@ -84,7 +87,14 @@ def run_all(gw, query, *, sources=None, limit: int = 25, from_year: int | None =
         else:
             answers[name] = found
             statuses.append(_status(name, "ok", count=len(found)))
+    return chosen, statuses, answers
 
+
+def run_all(gw, query, *, sources=None, limit: int = 25, from_year: int | None = None,
+            top: int | None = None) -> dict:
+    """The fan-out payload for one query. `sources` may list any subset of ORDER in any order; the
+    output always follows the canonical order. `None` means `default_sources(gw.policy)`."""
+    chosen, statuses, answers = collect(gw, query, sources=sources, limit=limit, from_year=from_year)
     csl_records = []
     originals: dict[str, dict] = {}
     for name in chosen:

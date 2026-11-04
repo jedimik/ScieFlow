@@ -1,0 +1,23 @@
+version: 1
+id: quadas-2
+name: "QUADAS-2: quality of diagnostic accuracy studies"
+source:
+  citation: "Whiting PF, Rutjes AW, Westwood ME, et al. QUADAS-2: a revised tool for the quality assessment of diagnostic accuracy studies. Ann Intern Med 2011;155:529-536."
+  doi: null
+verification:
+  status: unverified
+  note: "Written from the citation in plan 5.10 of M-H. Domains and judgements are not checked against the published tool by a person; the DOI is left null because it was not verified."
+  verified_by: null
+  verified_at: null
+domains:
+  - {id: patient-selection, label: "Patient selection"}
+  - {id: index-test, label: "Index test(s)"}
+  - {id: reference-standard, label: "Reference standard"}
+  - {id: flow-and-timing, label: "Flow and timing"}
+judgements: [low, high, unclear]
+overall:
+  rule: none
+  extra: []
+applicability:
+  domains: [patient-selection, index-test, reference-standard]
+  judgements: [low, high, unclear]

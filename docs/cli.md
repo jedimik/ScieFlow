@@ -59,6 +59,39 @@ uv run scieflow design amend <slug> --summary "..." --rationale "..."
 uv run scieflow design guidelines --check
 ```
 
+## `scieflow sr`
+
+The systematic-review commands: the locked protocol, search rounds, dual screening,
+blinded adjudication, verification, PRISMA and the appraisal worksheets. Every read
+accepts `--json`. Exit codes: `0` ok, `1` refused or invalid (the message names the rule
+and an id or path), `2` usage, `3` a search query refused by the leak check (nothing was
+sent). Writers take `--as-agent`, except `adjudicate`, which is human only. Method, files,
+events and residual limits: [Systematic and living reviews](research/systematic-review.md).
+
+```bash
+uv run scieflow sr protocol show <slug> --json
+uv run scieflow sr protocol check <slug>
+uv run scieflow sr status <slug> --json
+uv run scieflow sr search <slug> --as-agent
+uv run scieflow sr records <slug> --round 1
+uv run scieflow sr screen prepare <slug> --stage title-abstract --as-agent
+uv run scieflow sr screen import <slug> --stage title-abstract --batch <batch> --as-agent
+uv run scieflow sr screen status <slug>
+uv run scieflow sr kappa <slug> --stage title-abstract
+uv run scieflow sr conflicts <slug> --stage title-abstract --as-agent
+uv run scieflow sr adjudicate <slug> <gate-id> <record-id> --decision include --rationale "..."
+uv run scieflow sr verify <slug>
+uv run scieflow sr prisma <slug> --write
+uv run scieflow sr rob init <slug> --as-agent
+uv run scieflow sr rob check <slug>
+uv run scieflow sr rob record <slug> --as-agent
+uv run scieflow sr grade init <slug> --as-agent
+uv run scieflow sr grade check <slug>
+uv run scieflow sr grade record <slug> --as-agent
+uv run scieflow sr grade table <slug> --write
+uv run scieflow sr eval <slug> --gold <file> --stage title-abstract
+```
+
 ## `scieflow journal`
 
 Target journals: research a journal's author guidelines, approve the pages (a

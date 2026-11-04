@@ -6,4 +6,5 @@ workflows:
   paper-draft: [intake, outline, draft, cross-review, merge, verify, handoff]
   paper-revision: [intake, structure, revise, respond, verify, resubmit]
   paper-review: []          # tracked by `rounds:`, no fixed phases
+  systematic-review: [protocol, search, screen-title-abstract, screen-full-text, appraise, report]
 states: [pending, running, done, failed, skipped, skipped-quorum, incomplete, not_requested]

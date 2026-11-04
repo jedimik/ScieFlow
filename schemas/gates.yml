@@ -27,4 +27,6 @@ kinds:
   # Journal guidelines (M-F 5.4): the human chooses which author-guideline pages a run may fetch;
   # only that answer lets the Gateway reach their hosts.
   journal-sources:     {requires_human: true,  help: "Fetch these author-guideline pages for a journal run"}
+  # Systematic review (M-H 5.7): blinded screening conflicts are adjudicated by a human only.
+  sr-adjudication:     {requires_human: true,  help: "Adjudicate blinded screening conflicts of a systematic review"}
 states: [open, answered, withdrawn]

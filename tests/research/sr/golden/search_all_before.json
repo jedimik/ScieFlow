@@ -1,0 +1,201 @@
+{
+  "kernel": 1,
+  "sources": [
+    {
+      "source": "openalex",
+      "status": "ok",
+      "count": 2
+    },
+    {
+      "source": "crossref",
+      "status": "ok",
+      "count": 2
+    },
+    {
+      "source": "europepmc",
+      "status": "failed",
+      "count": 0,
+      "error": "ERROR"
+    },
+    {
+      "source": "arxiv",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "source": "pubmed",
+      "status": "failed",
+      "count": 0,
+      "error": "ERROR"
+    },
+    {
+      "source": "semantic-scholar",
+      "status": "failed",
+      "count": 0,
+      "error": "ERROR"
+    }
+  ],
+  "records": [
+    {
+      "doi": "10.1/a",
+      "title": "Alpha study of synthetic markers",
+      "year": 2020,
+      "venue": "Synthetic Journal",
+      "cited_by": null,
+      "abstract": "Synthetic abstract of Alpha study of synthetic markers.",
+      "url": "https://x.test/10.1/a",
+      "source": "openalex",
+      "signals": {
+        "kernel": {
+          "sources": [
+            "openalex",
+            "crossref"
+          ],
+          "ids": {
+            "openalex": "https://x.test/10.1/a",
+            "crossref": "https://x.test/10.1/a"
+          },
+          "score": 0.66,
+          "rank": 0
+        }
+      }
+    },
+    {
+      "doi": null,
+      "title": "Delta study of synthetic signals",
+      "year": 2022,
+      "venue": "Synthetic Journal",
+      "cited_by": null,
+      "abstract": "Synthetic abstract of Delta study of synthetic signals.",
+      "url": null,
+      "source": "arxiv",
+      "signals": {
+        "kernel": {
+          "sources": [
+            "arxiv"
+          ],
+          "ids": {},
+          "score": 0.45,
+          "rank": 1
+        }
+      }
+    },
+    {
+      "doi": "10.1/g",
+      "title": "Gamma study of synthetic trials",
+      "year": 2021,
+      "venue": "Synthetic Journal",
+      "cited_by": null,
+      "abstract": "Synthetic abstract of Gamma study of synthetic trials.",
+      "url": "https://x.test/10.1/g",
+      "source": "crossref",
+      "signals": {
+        "kernel": {
+          "sources": [
+            "crossref"
+          ],
+          "ids": {
+            "crossref": "https://x.test/10.1/g"
+          },
+          "score": 0.425968,
+          "rank": 2
+        }
+      }
+    },
+    {
+      "doi": null,
+      "title": "Beta study of synthetic cohorts",
+      "year": 2019,
+      "venue": "Synthetic Journal",
+      "cited_by": null,
+      "abstract": "Synthetic abstract of Beta study of synthetic cohorts.",
+      "url": null,
+      "source": "openalex",
+      "signals": {
+        "kernel": {
+          "sources": [
+            "openalex"
+          ],
+          "ids": {},
+          "score": 0.385968,
+          "rank": 3
+        }
+      }
+    }
+  ],
+  "dedup": [
+    {
+      "kept_id": "openalex:0",
+      "kept_key": "doi:10.1/a",
+      "duplicate_id": "crossref:0",
+      "duplicate_key": "doi:10.1/a",
+      "reason": "doi_exact",
+      "similarity": 1.0,
+      "kept_sources": [
+        "openalex",
+        "crossref"
+      ],
+      "duplicate_sources": [
+        "crossref"
+      ]
+    }
+  ]
+}
+{
+  "kernel": 1,
+  "sources": [
+    {
+      "source": "openalex",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "source": "crossref",
+      "status": "ok",
+      "count": 1
+    }
+  ],
+  "records": [
+    {
+      "doi": "10.1/a",
+      "title": "Alpha study of synthetic markers",
+      "year": 2020,
+      "venue": "Synthetic Journal",
+      "cited_by": null,
+      "abstract": "Synthetic abstract of Alpha study of synthetic markers.",
+      "url": "https://x.test/10.1/a",
+      "source": "openalex",
+      "signals": {
+        "kernel": {
+          "sources": [
+            "openalex",
+            "crossref"
+          ],
+          "ids": {
+            "openalex": "https://x.test/10.1/a",
+            "crossref": "https://x.test/10.1/a"
+          },
+          "score": 0.7,
+          "rank": 0
+        }
+      }
+    }
+  ],
+  "dedup": [
+    {
+      "kept_id": "openalex:0",
+      "kept_key": "doi:10.1/a",
+      "duplicate_id": "crossref:0",
+      "duplicate_key": "doi:10.1/a",
+      "reason": "doi_exact",
+      "similarity": 1.0,
+      "kept_sources": [
+        "openalex",
+        "crossref"
+      ],
+      "duplicate_sources": [
+        "crossref"
+      ]
+    }
+  ]
+}

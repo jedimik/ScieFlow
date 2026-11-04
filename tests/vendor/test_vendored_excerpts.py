@@ -32,12 +32,13 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def test_the_four_excerpt_pins_are_exactly_these() -> None:
+def test_the_five_excerpt_pins_are_exactly_these() -> None:
     assert {name for name, _ in _excerpts()} == {
         "query.py",
         "contributors.py",
         "errors.py",
         "provenance_ts.py",
+        "prisma_counts.py",
     }
 
 
