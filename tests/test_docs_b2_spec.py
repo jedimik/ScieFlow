@@ -60,7 +60,7 @@ def _section(text: str, heading: str, next_heading: str) -> str:
 
 def _constants_table() -> dict:
     section = _section(_read(SPEC), "### 5.13 ", "### 5.14 ")
-    rows = re.findall(r"^\| `([A-Z_]+)` \| ([0-9.]+) \|", section, re.M)
+    rows = re.findall(r"^\| `([A-Z0-9_]+)` \| ([0-9.]+) \|", section, re.M)
     return {name: float(v) if "." in v else int(v) for name, v in rows}
 
 
@@ -105,7 +105,7 @@ def test_manuscript_sentence_is_exact():
 
 def test_failure_reason_table_lists_the_twelve_codes_once_each():
     section = _section(_read(SPEC), "### 5.9 ", "### 5.10 ")
-    codes = re.findall(r"^\| `([a-z-]+)` \|", section, re.M)
+    codes = re.findall(r"^\| `([a-z0-9-]+)` \|", section, re.M)
     assert codes == REASON_CODES
     assert len(set(codes)) == len(codes) == 12
 
