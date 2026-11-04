@@ -12,12 +12,23 @@ one source of truth — never invent options that are not in it.
 
 ## 1. Load the tree
 
+With a shell, run:
+
 ```bash
 uv run scieflow menu --json
 ```
 
-It returns `sections` (top-level choices and their items), `workflows`
-(skill path, what to ask, relevant roles, prompt template), `agent_settings`
+Without a shell (read-only tools only), run nothing. Read the code-owned part of
+the tree from `skills/scieflow-menu/menu.json` (sections, workflows, scopes,
+roles, apply commands, resume prompt). Read the current settings from
+`config/agents.yml` (`menu:` blocks: models and effort), `config/defaults.yml`
+and `workspace/<slug>/config.yml`, and list the runs with a glob on
+`workspace/*/status.yml`. Never reconstruct the menu from `src/`: a test keeps
+the snapshot equal to the code, and the settings and runs come from the files.
+
+With a shell, `uv run scieflow menu --json` returns `sections` (top-level choices
+and their items), `workflows` (skill path, what to ask, relevant roles, prompt
+template), `agent_settings`
 (scopes, roles, per-agent models and effort levels, current effective
 defaults, the exact commands to apply) and `runs` (every run with kind and
 state).
@@ -54,8 +65,12 @@ Ask **where the change applies** before anything else, and say what it writes:
 Then role → agent, or agent → model / effort, using only the values listed in
 `agent_settings.agents.<name>.models` / `effort_levels` (a model outside the
 list only if the user names it). Claude's effort is `default` or
-`extended-thinking`; the latter means prefixing its `cmd`/`stdin_cmd` with
-`env MAX_THINKING_TOKENS=32000 `.
+Claude's effort is `default` or `extended-thinking`. For a one-shot dispatch,
+`extended-thinking` means prefixing its `cmd`/`stdin_cmd` with
+`env MAX_THINKING_TOKENS=32000 `. For a conversation turn, `reasoning: extended-thinking`
+(or that `cmd` prefix when `reasoning` is unset) makes ScieFlow add
+`MAX_THINKING_TOKENS=32000` to the turn's own environment, because an `env` prefix
+on `session_cmd` or `resume_cmd` is refused.
 
 Apply with the matching `agent_settings.apply_with` command plus `--yes`, e.g.
 

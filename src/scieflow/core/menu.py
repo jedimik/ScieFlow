@@ -840,14 +840,56 @@ def run_menu() -> None:
 
 
 # -- JSON for agents ---------------------------------------------------------
-def menu_json() -> dict:
+SNAPSHOT_PATH = Path("skills") / "scieflow-menu" / "menu.json"
+STATIC_OMITTED = ["agent_settings.agents", "agent_settings.effective_defaults", "runs"]
+
+
+def static_menu_json() -> dict:
+    """The code-owned part of the menu: no user config, no run and no path (F-2 F-1, F2-D1).
+
+    The checked-in snapshot skills/scieflow-menu/menu.json is this dict, written by
+    write_static_snapshot(); the no-shell menu skill reads that file.
+    """
     from dataclasses import asdict
 
     from scieflow.core import agent_config as ac
+
+    return {
+        "sections": [asdict(s) for s in TREE],
+        "workflows": {k: {**v, "prompt_template": prompt_for(k, "<subject>", "<slug>")}
+                      for k, v in WORKFLOWS.items()},
+        "agent_settings": {
+            "scopes": {k: {"title": t, "effect": e} for k, (t, e) in SCOPES.items()},
+            "roles": {r: {"help": s.help, "many": s.many, "support_ok": s.support_ok}
+                      for r, s in ac.ROLES.items()},
+            "apply_with": {
+                "default": "uv run scieflow agent configure --assign ROLE=AGENT "
+                           "--set AGENT.FIELD=VALUE --yes",
+                "workspace": "uv run scieflow agent configure --workspace <slug> "
+                             "--assign ROLE=AGENT --set AGENT.FIELD=VALUE --yes",
+                "news": "uv run scieflow agent configure --news --set FIELD=VALUE --yes",
+            },
+        },
+        "resume_prompt_template": resume_prompt("<slug>", "loop"),
+        "omitted": list(STATIC_OMITTED),
+    }
+
+
+def write_static_snapshot(root: Path | None = None) -> Path:
+    """Write skills/scieflow-menu/menu.json under `root` (the only writer of that file)."""
+    target = (root if root is not None else _root()) / SNAPSHOT_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(static_menu_json(), indent=2, ensure_ascii=True) + "\n",
+                      encoding="utf-8")
+    return target
+
+
+def menu_json() -> dict:
     from scieflow.core import service
-    from scieflow.core import workspace as ws
+    from scieflow.core import agent_config as ac
     from scieflow.core.project import Project
 
+    static = static_menu_json()
     root = _root()
     eff = ac.resolve(root)
     agents = {}
@@ -865,25 +907,17 @@ def menu_json() -> dict:
             "effort_how": reasoning.get("how"),
         }
     return {
-        "sections": [asdict(s) for s in TREE],
-        "workflows": {k: {**v, "prompt_template": prompt_for(k, "<subject>", "<slug>")}
-                      for k, v in WORKFLOWS.items()},
+        "sections": static["sections"],
+        "workflows": static["workflows"],
         "agent_settings": {
-            "scopes": {k: {"title": t, "effect": e} for k, (t, e) in SCOPES.items()},
-            "roles": {r: {"help": s.help, "many": s.many, "support_ok": s.support_ok}
-                      for r, s in ac.ROLES.items()},
+            "scopes": static["agent_settings"]["scopes"],
+            "roles": static["agent_settings"]["roles"],
             "agents": agents,
             "effective_defaults": eff.to_json(),
-            "apply_with": {
-                "default": "uv run scieflow agent configure --assign ROLE=AGENT "
-                           "--set AGENT.FIELD=VALUE --yes",
-                "workspace": "uv run scieflow agent configure --workspace <slug> "
-                             "--assign ROLE=AGENT --set AGENT.FIELD=VALUE --yes",
-                "news": "uv run scieflow agent configure --news --set FIELD=VALUE --yes",
-            },
+            "apply_with": static["agent_settings"]["apply_with"],
         },
         "runs": service.list_runs(Project.discover()),
-        "resume_prompt_template": resume_prompt("<slug>", "loop"),
+        "resume_prompt_template": static["resume_prompt_template"],
     }
 
 
