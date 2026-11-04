@@ -24,14 +24,14 @@ def write(tmp_path, data):
     return p
 
 
-def test_backend_remote_is_refused_with_pointer(tmp_path):
-    with pytest.raises(CampaignError, match="skills/remote-exec/SKILL.md"):
+def test_backend_remote_needs_a_remote_block(tmp_path):
+    with pytest.raises(CampaignError, match="'remote' mapping"):
         Campaign.load(write(tmp_path, BASE | {"backend": "remote"}))
 
 
-def test_remote_only_keys_are_refused_with_pointer(tmp_path):
-    for extra in ({"remote": "meta"}, {"resources": {"cpus": 4}}):
-        with pytest.raises(CampaignError, match="skills/remote-exec/SKILL.md"):
+def test_remote_keys_need_backend_remote(tmp_path):
+    for extra in ({"remote": {"name": "meta", "dir": "/data/x"}}, {"resources": {"cpus": 4}}):
+        with pytest.raises(CampaignError, match="need backend: remote"):
             Campaign.load(write(tmp_path, BASE | extra))
 
 

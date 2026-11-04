@@ -10,6 +10,8 @@ remotes:
     scheduler: pbs        # pbs (certified); slurm, ssh, local are experimental and need allow_experimental_scheduler: true (docs/remote.md)
     allowed_dirs:         # the ONLY remote paths the agent may touch
       - /storage/brno2/home/YOUR_USERNAME/projects/example
+    # A remote campaign (backend: remote) also needs the ops mkdir and rsync; see
+    # docs/experiments/remote-campaigns.md. Plus fetch and the submit and status ops (qsub, qstat on pbs).
     allowed_ops: [check, git-status, git-switch, git-pull, mv, qsub, qstat, logs, fetch]   # PBS names; abstract names (submit, status, cancel, logs) also work
     limits:
       max_walltime: "24:00:00"

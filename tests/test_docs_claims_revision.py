@@ -181,10 +181,12 @@ def test_l2_and_no_egress_rules_are_documented():
     assert "no network call" in text
 
 
-def test_verify_gate_is_documented_as_not_yet_wired():
+def test_verify_gate_is_documented():
     text = _read(CLAIMS_DOC)
-    assert "verify" in text
-    assert "M-G2" in text
+    assert "run mark" in text
+    assert "verify done" in text
+    assert "fail closed" in text
+    assert "not wired" not in text
 
 
 # --- plan section 8 residuals (R2, R4, R5, R9) must be named in the docs ---

@@ -108,6 +108,10 @@ manuscript, reviews, and evidence packages) to an external model provider.
    and continue without it.
 5. Track progress in `workspace/<slug>/status.yml` and append notable events
    (dispatches, failures, retries, timings) to `workspace/<slug>/log.md`.
+   A `paper-draft` or `paper-revision` run has native status: create it with
+   `uv run scieflow run init` or `run adopt`, change its phases only with `uv run
+   scieflow run mark <slug> <phase> <state> --as-agent`, and never edit its
+   `status.yml` by hand.
 6. Paper discovery uses the shared search commands (same sources for every
    agent): `scieflow research search all` (every enabled source at once,
    merged and ranked; the output names each source's status), or one source:

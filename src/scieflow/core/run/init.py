@@ -28,25 +28,27 @@ def init_workspace(slug: str, goal_file: Path, workspace_root: Path,
     own check ahead of this call is defence in depth, not the only guard.
     """
     slug = clean_slug(slug)
-    paper = overrides.get("workflow") == "paper-draft"
+    workflow = overrides.get("workflow")
+    paper = workflow in status_mod.PAPER_WORKFLOWS
     if paper and overrides.get("approval") is None:
-        raise ValueError("paper-draft initialization requires explicit --approval")
+        raise ValueError(f"{workflow} initialization requires explicit --approval")
     cfg = {} if paper else dict(config.load_defaults(root))
     cfg.update({k: v for k, v in overrides.items() if v is not None})
     caps = [cfg.get(k) for k in budget_mod.DIMENSIONS.values()]
     if paper and any(v is not None for v in caps) and any(v is None for v in caps):
-        raise ValueError("supply all three budget limits, or none, for paper-draft")
+        raise ValueError(f"supply all three budget limits, or none, for {workflow}")
     ws = _workspace_path(workspace_root, slug)
     with _initialization_lock(ws):
         _workspace_path(workspace_root, slug)
         # Ownership is established by an exclusive mkdir OUTSIDE cleanup.
         # A losing creator must never remove the winner's directory.
         ws.mkdir()
-        _populate_new_workspace(ws, goal_file, cfg, paper)
+        _populate_new_workspace(ws, goal_file, cfg, paper, workflow if paper else "research-loop")
     return ws
 
 
-def _populate_new_workspace(ws: Path, goal_file: Path, cfg: dict, paper: bool) -> None:
+def _populate_new_workspace(ws: Path, goal_file: Path, cfg: dict, paper: bool,
+                            workflow: str) -> None:
     try:
         if not paper:
             (ws / "iterations").mkdir()
@@ -57,8 +59,7 @@ def _populate_new_workspace(ws: Path, goal_file: Path, cfg: dict, paper: bool) -
         (ws / "scratch").mkdir()
         shutil.copy(goal_file, ws / "goal.md")
         (ws / "config.yml").write_text(yaml.safe_dump(cfg, sort_keys=False))
-        status_mod.write_status(ws, status_mod.new_status(
-            ws.name, cfg["approval"], "paper-draft" if paper else "research-loop"))
+        status_mod.write_status(ws, status_mod.new_status(ws.name, cfg["approval"], workflow))
         if not paper or any(cfg.get(k) is not None for k in budget_mod.DIMENSIONS.values()):
             budget_mod.write_budget(ws, budget_mod.new_budget(
                 cfg["max_iterations"], cfg["max_experiment_runs"], cfg["max_wall_minutes"]))
@@ -99,8 +100,8 @@ def adopt_workspace(slug: str, workspace_root: Path, *, workflow: str,
     not duplicate them, but may not contradict them. No defaults or budget
     are imported, and an existing goal always wins over the supplied source.
     """
-    if workflow != "paper-draft":
-        raise ValueError("adoption supports only paper-draft")
+    if workflow not in status_mod.PAPER_WORKFLOWS:
+        raise ValueError("adoption supports only paper-draft and paper-revision")
     st = status_mod.new_status(clean_slug(slug), approval, workflow)
     if actor not in events.ACTORS:
         raise ValueError(f"unknown actor: {actor}")

@@ -1,6 +1,7 @@
 # Remote execution (scheduler seam)
 
-`scripts/remote/remote.py` is the only way ScieFlow reaches a remote host
+`scripts/remote/remote.py` is the only way ScieFlow reaches a remote host,
+directly or through `scieflow experiment sweep|watch` for a remote campaign
 (AGENTS.md rule 11). Each remote in `config/remotes.yml` names a scheduler.
 The scheduler is an adapter in `scripts/remote/schedulers/`. Every policy
 check (allowed directories, allowed operations, resource limits, character
@@ -104,6 +105,15 @@ remote-exec skill makes `--after-dryrun` mandatory for those tasks.
 - The local end-to-end test needs Linux `bash`, `setsid`, `nohup`, `timeout`
   and `rsync`. On a runner where these differ, the test fails loudly; it is
   never skipped silently.
+
+## Remote campaigns
+
+A campaign whose YAML says `backend: remote` runs through
+`scieflow experiment sweep` (submits) and `scieflow experiment watch` (collects),
+not through `remote.py` by hand. Both call the same policy gate and the same
+`remote.py` command functions, and the campaign's results have the same shape as a
+local campaign. The campaign keys, the preflight, the failure reasons and the
+honest limits are in [Remote campaigns](experiments/remote-campaigns.md).
 
 ## Configuring a remote
 

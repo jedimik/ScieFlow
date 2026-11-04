@@ -32,6 +32,10 @@ never work around it. `<remote>` below is the remote's name in that file
    Never attempt any authentication yourself.
 3. Exit 1 → retry once; still failing → report to the user and stop.
 
+## Campaigns
+
+A campaign whose YAML says `backend: remote` is run with `scieflow experiment sweep`, then `scieflow experiment watch <campaign_dir>` until it exits 0; never by submitting its runs with `remote.py`. Both commands call the same policy gate and the same remote functions and record the budget. The remote's `allowed_ops` must include `check`, `mkdir`, `rsync`, `fetch`, its submit op and its status op. Preflight refusals (`POLICY:`, `resources-over-limit`, `no-run`, `campaign-exists`) are boundaries: report them and stop. `NO_TICKET` means stop and ask the user to run `kinit`. `watch` exit 4 means wait and run it again. Details: `docs/experiments/remote-campaigns.md`. The Snakemake dry-run gate and the fix loop below are for repository tasks that are not campaigns.
+
 ## Task loop (per campaign task; autonomous within an approved campaign —
 AGENTS.md rule 3 delegation applies, bounded by config/remotes.yml limits)
 
@@ -114,4 +118,5 @@ AGENTS.md rule 3 delegation applies, bounded by config/remotes.yml limits)
 - Job stuck queued far beyond expectation: report to the user. There is no
   cancel command: never cancel by hand, and never resubmit a duplicate.
 - Every submit/status/fix/fetch gets a line in `WS/log.md`; budget: record
-  each real (non-dry-run) job as an experiment run (`budget.py`).
+  each real (non-dry-run) job that is not part of a campaign with
+  `scieflow run spend`. A remote campaign's runs are recorded by its `sweep`.

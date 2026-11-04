@@ -285,7 +285,10 @@ def cancel_job(project: Project, job_id: str) -> dict:
     job = jobs.find(project, job_id)
     if job is None:
         raise ServiceError(f"no job {job_id}")
-    return asdict(jobs.cancel(job))
+    try:
+        return asdict(jobs.cancel(job))
+    except jobs.NotCancellable as exc:  # M-D3 t3: a remote campaign says why it cannot stop
+        raise ServiceError(str(exc)) from exc
 
 
 TURN_PROMPT_DIR = "logs"

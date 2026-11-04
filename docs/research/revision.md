@@ -171,6 +171,29 @@ more than 200 files, and more than 50 MB. `point list` lists the points.
 `latexdiff` runs with a fixed argument list, no shell, a minimal environment, a 120-second
 timeout and capped output. A latexdiff failure exits 1 and shows the last 20 stderr lines.
 
+## The paper-revision workflow
+
+A decision letter for a submitted manuscript can run as a `paper-revision` run. Its six phases
+are `intake`, `structure`, `revise`, `respond`, `verify` and `resubmit`, and the gates enforce
+two of them. Start one with `uv run scieflow run init SLUG --workflow paper-revision --goal FILE
+--approval per-campaign`, or with `run adopt` for a prepared folder; see
+[the paper-revision gates](../runs.md#paper-revision-runs-and-phase-gates). Otherwise revise in place in the draft run, with Phases A to D of the journal-revision skill. That route has no phase
+tracking.
+
+| Phase | What happens | Command | Gate on `done` |
+|---|---|---|---|
+| `intake` | The user brings the manuscript as submitted into `manuscript/`, and its evidence as a data package or a `scieflow data import` of a release. Never another run's `experiments/` or `inputs/`. The user stores the letter with `ingest`. | `scieflow manuscript revision ingest` | none |
+| `structure` | A sub-agent drafts the structure; the coordinator adopts it. | `scieflow manuscript revision prompt` (`--role research.submitter`), then `scieflow manuscript revision adopt` | none |
+| `revise` | The starter is written; the authors change the manuscript. | `scieflow manuscript revision respond` | none |
+| `respond` | Every comment is answered in `response.md`. | `scieflow manuscript revision coverage` | coverage passes for the highest round |
+| `verify` | The claim check runs. | `scieflow manuscript build`, `scieflow manuscript claims build`, `scieflow manuscript claims check` | no claim errors |
+| `resubmit` | The response letter and the package are written. | `scieflow manuscript revision letter`, `scieflow manuscript package` | none; the package refuses on claim errors itself |
+
+`run mark` checks the gates, and a refusal names the command to run and leaves the phase as it
+was. The evidence rule (M-G-D15) applies: a run reference stays inside its own run, so evidence
+from another run comes in only as a data package or a `scieflow data import` of a release. The
+user reads the response letter before anything is submitted.
+
 ## Limits and residuals
 
 - A letter is read by block headers and paragraphs. A heading the heuristic does not recognise
@@ -180,7 +203,8 @@ timeout and capped output. A latexdiff failure exits 1 and shows the last 20 std
 - The letter is written only after coverage passes. Coverage checks the presence of a change
   file, not that the change answers the comment.
 - No PDF of the diff and no PDF letters. The letter is LaTeX only.
-- The verify-phase gate and the `paper-revision` workflow are not wired yet (M-G2).
+- The paper-revision gates have residuals of their own, R1 to R3, listed under
+  [claims](claims.md#limits-and-residuals).
 - File-based integrity (R2). The revision events (`note.revision_ingested`, `note.revision_adopted`,
   `note.revision_coverage`) are plain lines in the run's events file, which a run's own agents can
   write; a forged event is not caught. See [claims](claims.md#limits-and-residuals).

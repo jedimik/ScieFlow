@@ -54,7 +54,7 @@ status declares `workflow: paper-draft` and `slug:`; old loop statuses keep
 their `run:` identity and their unchanged four-phase vocabulary. The same
 native `show`, `mark --as-agent`, `checkpoint` and `resume` commands below
 work with papers. `advance` is loop-only and refuses to reset paper phases.
-Native `mark` and `checkpoint` know only research-loop and paper-draft statuses;
+Native `mark` and `checkpoint` know only research-loop, paper-draft and paper-revision statuses;
 other research workflows (`lit-review`, `gap-discovery`, `paper-review`) keep
 their own `status.yml` protocol and are refused by both, with nothing written.
 Complete the paper protocol's intake directories separately; initialization
@@ -103,6 +103,45 @@ that guard; never remove it just to bypass the refusal. Lock files may remain
 after a refusal. An uncatchable process kill or storage
 failure is not a cross-file transaction: partial metadata must be inspected,
 and an already published status stays fail-closed on retry, never auto-reset.
+
+### Paper-revision runs and phase gates
+
+A journal decision letter for a submitted manuscript can run as its own native run,
+`paper-revision`. Use it when you want its steps tracked and gated. Otherwise revise in place in
+the draft run, as [journal revision](research/revision.md#the-paper-revision-workflow) describes.
+
+```bash
+uv run scieflow run init SLUG --workflow paper-revision --goal FILE --approval per-campaign
+uv run scieflow run adopt SLUG --workflow paper-revision --approval per-campaign --as-agent
+```
+
+Creation and adoption work exactly as for `paper-draft` above: an explicit `--approval`, the same
+all-or-none budget rule, no defaults loaded, and nothing copied from another run. You bring the
+manuscript as submitted and its evidence in yourself. The paper-revision phases are `intake`,
+`structure`, `revise`, `respond`, `verify` and `resubmit`, initially **all pending**.
+
+Two phases are gated. `respond` can be marked done only when the revision coverage of the highest
+ingested round passes. `verify` can be marked done only when the claim check has no errors. Both
+checks run inside `run mark`, before the status is written, so `uv run scieflow run mark SLUG
+respond done --as-agent` and `uv run scieflow run mark SLUG verify done --as-agent` can be refused.
+A refusal names the command to run, leaves `status.yml` byte-identical, and appends only its
+`note.phase_gate` event. The messages start `respond refused:` and `verify refused:`; they give
+counts and a rule id, never text from the manuscript or the letter.
+
+The gates fail closed. A linked `manuscript/` or `revision/` folder, an unreadable review
+status, a project the check cannot discover, an import error, or any other exception during the check
+refuses the phase. A paper-draft run
+without a `manuscript/` folder passes `verify` (outcome `no-manuscript`), so the paper-draft lifecycle
+above is unchanged. A paper-revision run without one is refused. Every gate run appends one
+`note.phase_gate` event with counts, rule ids and the round. Neither a message nor an event carries
+manuscript text, an evidence value, a letter quote or a blocker detail.
+
+There is no override flag. The human paths stay the human's: a waiver (`scieflow manuscript claims
+waive`), the `review-blocker` gate, and `scieflow data release`. An agent never waives a finding and
+never answers those gates.
+
+The browser marks phases with the same gates. It cannot create a paper-revision run; use the CLI for
+that.
 
 ## The state of a run
 
