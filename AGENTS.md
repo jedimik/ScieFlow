@@ -268,5 +268,10 @@ when to stop.
 - Runs: `scieflow workspace list | doctor <slug>`. Commands from before the
   module merge (`scripts/agent_run.py`, `expx`, `whatsnew`, …) still work and
   print their new name — use the new one (`docs/MIGRATION.md`).
+- An interactive coordinator (Hermes, Claude Desktop, Codex) may read runs
+  through the read-only MCP server `scieflow mcp serve` (`docs/mcp.md`). It
+  shows only what a sandboxed cloud agent may see (L2 runs are hidden),
+  writes nothing, and refuses to start inside a dispatch; every action still
+  goes through the CLI. Sub-agents never use it.
 - **Sub-agents: read only the module AGENTS.md your prompt names**, not this
   file — it keeps a single-module task's context small.

@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scieflow.core import store
+from scieflow.core import records, store
 
 EVENTS_FILE = "events.jsonl"
 ACTORS = frozenset({"human", "agent", "system"})
@@ -66,6 +66,7 @@ def emit(ws: Path, type_: str, actor: str = "system", **data) -> dict:
         "actor": actor,
         "data": data,
     }
+    event = records.check_event(event)
     store.append_jsonl(Path(ws) / EVENTS_FILE, event)
     return event
 

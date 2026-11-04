@@ -312,11 +312,70 @@ def preview_cmd(slug, source, compile_, as_json):
     _show(_call(service.preview_of, _project(), slug, source), as_json)
 
 
+# --- read-only views (M-I t3, plan 5.3) ---------------------------------------------------
+# Each reads through exactly one service function. --json prints the value; the text form
+# is one line per item. A value that is not the expected shape falls back to _show.
+
+
+def _panel_line(name: str, panel) -> str:
+    reason = panel.get("reason") if isinstance(panel, dict) else None
+    return f"{name}: {reason or 'ok'}"
+
+
+def _budget_line(run: dict) -> str:
+    head = f"{run.get('slug')} {run.get('kind')} {run.get('state')}"
+    remaining = run.get("remaining")
+    if not isinstance(remaining, dict) or not remaining:
+        return f"{head} no budget"
+    return f"{head} {min(remaining.values()) * 100:.0f}%"
+
+
+def _workflow_line(workflow: dict) -> str:
+    return f"{workflow.get('name')}: {', '.join(workflow.get('roles') or []) or '-'}"
+
+
+@click.command("overview")
+@click.argument("slug")
+@JSON
+def overview_cmd(slug, as_json):
+    """What the run has produced: one line per panel, its reason or ok."""
+    value = _call(service.run_overview, _project(), slug)
+    if as_json or not isinstance(value, dict):
+        _show(value, as_json)
+        return
+    for name, panel in value.items():
+        click.echo(_panel_line(name, panel))
+
+
+@click.command("budgets")
+@JSON
+def budgets_cmd(as_json):
+    """Every run: its kind, state and smallest remaining budget fraction."""
+    value = _call(service.list_runs_with_budget, _project())
+    if as_json or not isinstance(value, list):
+        _show(value, as_json)
+        return
+    for run in value:
+        click.echo(_budget_line(run))
+
+
+@click.command("workflows")
+@JSON
+def workflows_cmd(as_json):
+    """The workflows the Start wizard offers, with their roles."""
+    value = _call(service.workflows)
+    if as_json or not isinstance(value, list):
+        _show(value, as_json)
+        return
+    for workflow in value:
+        click.echo(_workflow_line(workflow))
+
+
 # --- group assembly ------------------------------------------------------------------------
 
 
 def new_commands() -> dict[str, click.Command]:
-    """The commands M-A T5 adds to `scieflow run`, by name."""
+    """The commands M-A T5 and M-I add to `scieflow run`, by name."""
     return {
         "conversation": conversation_cmd,
         "converse-agent": converse_agent_cmd,
@@ -327,6 +386,9 @@ def new_commands() -> dict[str, click.Command]:
         "manuscript": manuscript_group,
         "cancel": cancel_cmd,
         "preview": preview_cmd,
+        "overview": overview_cmd,
+        "budgets": budgets_cmd,
+        "workflows": workflows_cmd,
     }
 
 

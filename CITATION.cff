@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use ScieFlow, please cite it as below."
+title: "ScieFlow"
+type: software
+authors:
+  - family-names: "Krajča"
+    given-names: "Tomáš"
+version: "0.2.0"
+repository-code: "https://github.com/jedimik/ScieFlow"
+abstract: "Agent-driven research loop that couples computational experiments with literature research and keeps an auditable research notebook."
+keywords:
+  - research automation
+  - computational experiments
+  - literature review
+  - AI agents
+  - reproducibility

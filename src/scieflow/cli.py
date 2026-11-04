@@ -83,6 +83,12 @@ GROUPS = {
         "research",
         "Systematic review: protocol, search, dual screening, adjudication, PRISMA, appraisal.",
     ),
+    "mcp": (
+        "scieflow.mcp_server.cli",
+        "mcp",
+        None,
+        "Read-only MCP server for an interactive coordinator (stdio).",
+    ),
 }
 
 

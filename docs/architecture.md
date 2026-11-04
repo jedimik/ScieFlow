@@ -79,6 +79,16 @@ outside a workspace, for instance — records its job under
 `workspace/*/jobs` when no run is given), so `scieflow run list` and a
 project-wide job view see everything.
 
+### Records are checked when written
+
+Every event written to `events.jsonl` and every job record written to
+`jobs/<id>.json` is checked first: a known type, a valid actor, a
+`note.<name>` for free notes, plain JSON values, and the key fields each kind
+of event must carry. An invalid record is refused and nothing is written. The
+rules are documented in `schemas/events.yml` and `schemas/jobs.yml`; the
+checks live in `scieflow.core.records`. Reading an old log never fails:
+`scieflow workspace doctor` reports any unreadable or invalid line instead.
+
 ## Conversations are not a special path
 
 ScieFlow holds no long-lived agent process, for a run's coordinator

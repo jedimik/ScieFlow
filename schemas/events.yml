@@ -1,0 +1,55 @@
+# Documented form of an event record (scieflow.core.records, M-I t2; plan 5.2).
+# tests/core/test_records.py checks these values against the module constants.
+version: 1
+envelope:
+  keys: [id, ts, run, slug, type, actor, data]
+  id: "26 Crockford base32 characters (patterns.event_id)"
+  ts: "ISO 8601 text parsed by datetime.fromisoformat, with a UTC offset"
+  run: "non-empty string"
+  slug: "non-empty string"
+  type: "in events.TYPES, or note. followed by a name matching patterns.note_name"
+  actor: "in events.ACTORS"
+  types_source: scieflow.core.events.TYPES
+  actors_source: scieflow.core.events.ACTORS
+  read_required_keys: [id, ts, type, actor, data]
+  read_optional_keys: [run, slug]
+patterns:
+  event_id: "[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}"
+  note_name: "[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}"
+data:
+  root: "object with string keys, recursively"
+  allowed: [null, bool, int, float, str, list, object]
+  coercions:
+    - "os.PathLike and PurePath become str(path)"
+    - "tuple becomes list"
+    - "numbers.Integral that is not bool becomes int"
+    - "numbers.Real becomes float"
+  refused: "anything else (set, bytes, arbitrary object); the message names the key path, never the value"
+  finite: "NaN and infinity are refused"
+max_read_bytes: 52428800
+required_data:
+  job.queued: [job, kind, label]
+  job.started: [job, kind, label]
+  job.finished: [job, kind, label]
+  job.failed: [job, kind, label]
+  job.timeout: [job, kind, label]
+  job.cancelled: [job, kind, label]
+  job.lost: [job, kind, label]
+  job.refused: [reason]
+  gate.opened: [gate, kind, question]
+  gate.answered: [gate, kind, answer]
+  gate.withdrawn: [gate, kind]
+  phase.pending: [phase]
+  phase.started: [phase]
+  phase.done: [phase]
+  phase.failed: [phase]
+  iteration.advanced: [iteration]
+  checkpoint: [reason]
+  charter.set: [version]
+  curation.changed: [version]
+  curation.round: [version]
+  data.warning: [rule, path]
+  data.level_resolved: [level, boundary]
+  network.set: [mode]
+  literature.snapshot: [action]
+  literature.monitor: [action]
