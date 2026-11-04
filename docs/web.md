@@ -499,26 +499,27 @@ The send form has a second mode, `harness-command`, that marks a chat message as
 - Ordinary chat and a marked turn differ in ordering. Only a marked harness-command turn places the command before the charter; the charter is placed last and appears exactly once in the composed prompt.
 - Ordinary chat, generated turns and merge turns place the charter first.
 - The reply you see is the final parsed reply, not the raw job-output JSON.
+- The charter appears exactly once only when the run has a non-empty charter; a run without one sends the message alone.
 
 **Support list.** `CERTIFIED_POLICIES` is a finite code-owned list with exactly one entry: the raw `/scieflow-menu` command with no arguments, for the one evidenced identity. Unsupported identities run nothing as a command.
 
-**Web and API.** The web UI and HTTP API never execute a marked turn as a command today: `mode=harness-command` sent from the browser or the API is always delivered as ordinary chat, whatever `CERTIFIED_POLICIES` holds. The page then says the capability is not certified on this deployment.
+**Web and API.** The web UI and HTTP API never execute a marked turn as a command today: `mode=harness-command` sent from the browser or the API is always delivered as ordinary chat, whatever `CERTIFIED_POLICIES` holds. The page then says the capability is not certified on this deployment. When the HTTP API receives `mode=harness-command`, its response carries `"harness_command": {"requested": true, "delivered_as": "chat"}` with the same notice the page shows.
 
 **Input and limits.** The grammar is exact and raw: nothing is normalised, and a marked input with leading whitespace or a NUL character is rejected. The 64 KiB limit applies to marked input only.
 
 **Display caps.** Display caps are measured in these units: 200,000 UTF-16 units in the rendered live DOM, 16 KiB of UTF-8 per SSE wire line, 16 KiB per raw record, 64 KiB per read, and 2 MiB for the K-only parse. The display and file-view effects are shared with ordinary output; the run-event stream has its own boundary.
 
-**Admission on Linux.** Busy or unsafe refusal also applies to ordinary sends and hand-overs. On a platform without the required Linux primitives the reservation is skipped, ordinary chat runs without the new guarantee, and there is no lock fallback.
+**Admission on Linux.** Busy or unsafe refusal also applies to ordinary sends and hand-overs. On a platform without the required Linux primitives the reservation is skipped, ordinary chat runs without the new guarantee, and there is no lock fallback. Below the web UI and API, a marked turn on a platform without the required Linux admission primitives is refused; it is never run as chat there. On Linux, a run listed in `unsandboxed_runs` (or with an unsafe writable grant) cannot hold a protected conversation: ordinary sends and hand-overs to it are refused as well.
 
 **Reset and recovery.** The session is reset explicitly: there is no queue, no replay and no exactly-once delivery, and recovery after a restart or a loss requires a deliberate human reset.
 
 **Permissions and CLI-only items.** The current templates skip permission prompts, so do not assume that every tool call asks for permission. Chats, DVC uploads, promotions and remote execution stay separately gated, and a human-marked token does not consent to a consequential workflow action.
 
-**Not enabled anywhere today.** There is no enablement anywhere today: the production resolver builds an incomplete identity, so the `/scieflow-menu` entry is inert in every deployment.
+**Not enabled anywhere today.** The production resolver now captures the full 15-field identity for a marked turn, but the `/scieflow-menu` entry still matches no deployment: its working directory is the probe tree and its menu-skill bytes predate the F-1 change, so no other checkout produces the same identity.
 
 **Residuals.**
 
-- The menu shown is a model reconstruction that may drift from the real menu (R5-1 residual).
+- Without a shell, the menu skill reads the code-owned menu snapshot `skills/scieflow-menu/menu.json`, which a test keeps equal to the code; current settings and runs come from the run's own files.
 - A D8 residual remains: `~/.claude` is readable by the sandboxed process.
 - The Host/Origin, rebinding and same-origin risk is retained as a residual; hardening is separate work and is not done.
 - Raw job logs can grow on disk, and there is no capture or kill policy for that growth.

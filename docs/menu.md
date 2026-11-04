@@ -75,6 +75,8 @@ changes queued asks before discarding them.
 
 ## For agents
 
+Agents without a shell read `skills/scieflow-menu/menu.json`, the code-owned part of the same tree (sections, workflows, scopes, roles and the apply commands); `tests/core/test_menu_snapshot.py` keeps it equal to the code.
+
 Agents cannot press arrow keys. `uv run scieflow menu --json` prints the same
 tree with the current settings, and `skills/scieflow-menu/SKILL.md` tells an
 agent to offer these choices in its own question UI and apply them with
