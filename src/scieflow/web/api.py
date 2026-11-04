@@ -219,13 +219,15 @@ def say(request: Request, slug: str, message: str = Form(...),
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if submission.mode == 'harness-command':
-        from scieflow.web.pages import _as_chat
+        from scieflow.web.pages import HARNESS_COMMAND_NOTICE, _as_chat
 
         # Accepted but not enabled: the web/API path never executes a marked
         # turn as a command, so run the message as ordinary chat — never a
-        # silent enablement.
-        return service.say(project, slug, submission.message, 'human',
-                           human_submission=_as_chat(submission))
+        # silent enablement. The response says so, with the page's notice.
+        result = service.say(project, slug, submission.message, 'human',
+                             human_submission=_as_chat(submission))
+        return {**result, 'harness_command': {'requested': True, 'delivered_as': 'chat',
+                                              'notice': HARNESS_COMMAND_NOTICE}}
     return service.say(project, slug, submission.message, 'human',
                        human_submission=submission)
 

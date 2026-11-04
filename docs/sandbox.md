@@ -205,6 +205,7 @@ Further rules, checked at dispatch time:
   `MAX_THINKING_TOKENS`. `PATH`, `HOME` and `LD_*` are refused.
 - On the conversational (turn) path, `session_cmd` and `resume_cmd` may not
   start with `env`; the turn is refused.
+- A conversation turn gets Claude's extended thinking from `reasoning: extended-thinking` (or the `env MAX_THINKING_TOKENS=32000 ` prefix on the agent's `cmd`): ScieFlow adds `MAX_THINKING_TOKENS=32000` to the turn's own environment, because an `env` prefix on `session_cmd` or `resume_cmd` is refused.
 
 ### Agents that refuse until a human adds an entry
 

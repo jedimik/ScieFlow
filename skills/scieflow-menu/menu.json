@@ -1,0 +1,356 @@
+{
+  "sections": [
+    {
+      "key": "research",
+      "title": "Research",
+      "description": "Literature review, gap discovery, paper review and drafting, or the full experiment \u2194 literature loop.",
+      "items": [
+        {
+          "key": "lit-review",
+          "title": "Literature review",
+          "description": "Search, validate and synthesise papers.",
+          "how": "agent"
+        },
+        {
+          "key": "gap-discovery",
+          "title": "Gap discovery",
+          "description": "Find open questions and debate them.",
+          "how": "agent"
+        },
+        {
+          "key": "paper-review",
+          "title": "Paper review",
+          "description": "Journal-style review of a manuscript.",
+          "how": "agent"
+        },
+        {
+          "key": "paper-draft",
+          "title": "Paper draft",
+          "description": "Two independent drafts, cross-review, merge.",
+          "how": "agent"
+        },
+        {
+          "key": "research-loop",
+          "title": "Research loop",
+          "description": "Hypothesis \u2192 experiment \u2192 literature \u2192 synthesis, iterated.",
+          "how": "agent"
+        }
+      ]
+    },
+    {
+      "key": "experiment",
+      "title": "Experiment",
+      "description": "Design campaigns with an agent, or run and inspect existing ones.",
+      "items": [
+        {
+          "key": "experiment-design",
+          "title": "Design a campaign",
+          "description": "Agent proposes a campaign for approval.",
+          "how": "agent"
+        },
+        {
+          "key": "sweep",
+          "title": "Run a campaign",
+          "description": "`scieflow experiment sweep` on an approved campaign.",
+          "how": "cli"
+        },
+        {
+          "key": "compare",
+          "title": "Compare runs",
+          "description": "`scieflow experiment compare` for a campaign.",
+          "how": "cli"
+        },
+        {
+          "key": "report",
+          "title": "Campaign report",
+          "description": "`scieflow experiment report` for a campaign.",
+          "how": "cli"
+        }
+      ]
+    },
+    {
+      "key": "news",
+      "title": "What's new",
+      "description": "Track what changed in the tools and topics you follow.",
+      "items": [
+        {
+          "key": "news-run",
+          "title": "Run",
+          "description": "All interests, chosen interests, or a group.",
+          "how": "cli"
+        },
+        {
+          "key": "news-status",
+          "title": "Status",
+          "description": "Interests and when each was last checked.",
+          "how": "cli"
+        },
+        {
+          "key": "news-export",
+          "title": "Export latest report",
+          "description": "Markdown into workspace/news/reports/.",
+          "how": "cli"
+        },
+        {
+          "key": "news-gui",
+          "title": "Open the web GUI",
+          "description": "Local browser UI (extra: news-gui).",
+          "how": "cli"
+        }
+      ]
+    },
+    {
+      "key": "continue",
+      "title": "Continue a run",
+      "description": "Pick a run: new coordinator session on it, resume an earlier chat about it, or check its health.",
+      "items": []
+    },
+    {
+      "key": "settings",
+      "title": "Agent settings",
+      "description": "Which agent does each role, and each agent's model and effort \u2014 for all projects, one workspace, or news.",
+      "items": []
+    },
+    {
+      "key": "workspace",
+      "title": "Workspace",
+      "description": "List runs, health report, generated index.",
+      "items": [
+        {
+          "key": "ws-list",
+          "title": "List runs",
+          "description": "`scieflow workspace list`.",
+          "how": "cli"
+        },
+        {
+          "key": "ws-doctor",
+          "title": "Health report for a run",
+          "description": "`scieflow workspace doctor`.",
+          "how": "cli"
+        },
+        {
+          "key": "ws-index",
+          "title": "Write INDEX.md",
+          "description": "`scieflow workspace index`.",
+          "how": "cli"
+        },
+        {
+          "key": "ws-sync-status",
+          "title": "What would a sync upload?",
+          "description": "New files since the last sync, and the big ones.",
+          "how": "cli"
+        }
+      ]
+    },
+    {
+      "key": "chats",
+      "title": "Chats",
+      "description": "Back up and restore agent chats, skills and plugins.",
+      "items": [
+        {
+          "key": "chats-scan",
+          "title": "Scan",
+          "description": "Read-only inventory.",
+          "how": "cli"
+        },
+        {
+          "key": "chats-backup",
+          "title": "Back up",
+          "description": "Pick chats \u2192 encrypted bundle.",
+          "how": "cli"
+        },
+        {
+          "key": "chats-restore",
+          "title": "Restore (dry run first)",
+          "description": "Restore a bundle on this machine.",
+          "how": "cli"
+        },
+        {
+          "key": "chats-push",
+          "title": "Push to DVC storage",
+          "description": "Pick agents and projects, bundle, upload.",
+          "how": "cli"
+        },
+        {
+          "key": "chats-pull",
+          "title": "Pull from DVC storage",
+          "description": "Fetch a bundle and restore it.",
+          "how": "cli"
+        }
+      ]
+    }
+  ],
+  "workflows": {
+    "lit-review": {
+      "skill": "src/scieflow/research/skills/lit-review/SKILL.md",
+      "ask": "Topic or question to review",
+      "roles": [
+        "research.search",
+        "research.cross-review"
+      ],
+      "prompt_template": "Read AGENTS.md and src/scieflow/research/AGENTS.md, then run the lit-review workflow (src/scieflow/research/skills/lit-review/SKILL.md) on: <subject>. Use workspace slug `<slug>`. Start with the run configuration gate and confirm staffing with me."
+    },
+    "gap-discovery": {
+      "skill": "src/scieflow/research/skills/gap-discovery/SKILL.md",
+      "ask": "Field or question to find gaps in",
+      "roles": [
+        "research.search",
+        "research.gap-analysis",
+        "research.debate"
+      ],
+      "prompt_template": "Read AGENTS.md and src/scieflow/research/AGENTS.md, then run the gap-discovery workflow (src/scieflow/research/skills/gap-discovery/SKILL.md) on: <subject>. Use workspace slug `<slug>`. Start with the run configuration gate and confirm staffing with me."
+    },
+    "paper-review": {
+      "skill": "src/scieflow/research/skills/paper-review/SKILL.md",
+      "ask": "Manuscript to review (path) and target journal",
+      "roles": [
+        "research.journal-profile",
+        "research.reviewer",
+        "research.submitter"
+      ],
+      "prompt_template": "Read AGENTS.md and src/scieflow/research/AGENTS.md, then run the paper-review workflow (src/scieflow/research/skills/paper-review/SKILL.md) on: <subject>. Use workspace slug `<slug>`. Start with the run configuration gate and confirm staffing with me."
+    },
+    "paper-draft": {
+      "skill": "src/scieflow/research/skills/paper-draft/SKILL.md",
+      "ask": "What to draft from (a finished run slug, or a topic)",
+      "roles": [
+        "research.outline",
+        "research.draft-authors",
+        "research.draft-reviewers",
+        "research.cross-review",
+        "research.consistency"
+      ],
+      "prompt_template": "Read AGENTS.md and src/scieflow/research/AGENTS.md, then run the paper-draft workflow (src/scieflow/research/skills/paper-draft/SKILL.md) on: <subject>. Use workspace slug `<slug>`. Start with the run configuration gate and confirm staffing with me."
+    },
+    "research-loop": {
+      "skill": "skills/research-loop/SKILL.md",
+      "ask": "Research question / goal for the loop",
+      "roles": [
+        "loop.experiment",
+        "loop.literature",
+        "loop.paper-draft"
+      ],
+      "prompt_template": "Read AGENTS.md, then follow skills/research-loop/SKILL.md to start a new research run. Goal: <subject>. Use workspace slug `<slug>`. Draft goal.md with me and ask me for the approval mode before initialising the run."
+    },
+    "experiment-design": {
+      "skill": "src/scieflow/experiments/skills/experiment-designer/SKILL.md",
+      "ask": "What the experiment campaign should test",
+      "roles": [
+        "loop.experiment"
+      ],
+      "prompt_template": "Read AGENTS.md and src/scieflow/experiments/AGENTS.md. Using src/scieflow/experiments/skills/experiment-designer/SKILL.md, propose an experiment campaign for: <subject>. Record runs under workspace/<slug>/experiments. Do not run anything before I approve it."
+    },
+    "systematic-review": {
+      "skill": "src/scieflow/research/skills/systematic-review/SKILL.md",
+      "ask": "Review question for the systematic review",
+      "roles": [
+        "research.sr-screeners"
+      ],
+      "prompt_template": "Read AGENTS.md and src/scieflow/research/AGENTS.md, then run the systematic-review workflow (src/scieflow/research/skills/systematic-review/SKILL.md) on: <subject>. Use workspace slug `<slug>`. Start with the run configuration gate and confirm staffing with me."
+    }
+  },
+  "agent_settings": {
+    "scopes": {
+      "default": {
+        "title": "All projects (ScieFlow defaults)",
+        "effect": "Writes config/agents.yml and config/defaults.yml. Every run without its own override follows it."
+      },
+      "workspace": {
+        "title": "One workspace only",
+        "effect": "Writes workspace/<slug>/config.yml. Only that run changes; it stores just the differences from the defaults."
+      },
+      "news": {
+        "title": "News only",
+        "effect": "Writes config/news.yml. Affects `scieflow news` and nothing else."
+      }
+    },
+    "roles": {
+      "loop.experiment": {
+        "help": "experiment-cycle sub-agent: campaign design and run",
+        "many": false,
+        "support_ok": false
+      },
+      "loop.literature": {
+        "help": "literature-cycle sub-agent",
+        "many": false,
+        "support_ok": false
+      },
+      "loop.paper-draft": {
+        "help": "notebook paper handoff: paper-draft workflow",
+        "many": false,
+        "support_ok": false
+      },
+      "research.search": {
+        "help": "lit-review / gap-discovery literature search fan-out",
+        "many": true,
+        "support_ok": true
+      },
+      "research.cross-review": {
+        "help": "lit-review cross-review of findings",
+        "many": true,
+        "support_ok": false
+      },
+      "research.gap-analysis": {
+        "help": "gap-discovery gap analysis fan-out",
+        "many": true,
+        "support_ok": false
+      },
+      "research.debate": {
+        "help": "perspective debate participants",
+        "many": true,
+        "support_ok": false
+      },
+      "research.journal-profile": {
+        "help": "journal profiling (web search)",
+        "many": true,
+        "support_ok": true
+      },
+      "research.reviewer": {
+        "help": "paper-review reviewer(s)",
+        "many": true,
+        "support_ok": false
+      },
+      "research.submitter": {
+        "help": "paper-review submitter (differs from reviewer)",
+        "many": false,
+        "support_ok": false
+      },
+      "research.outline": {
+        "help": "paper-draft outline author",
+        "many": false,
+        "support_ok": false
+      },
+      "research.draft-authors": {
+        "help": "paper-draft independent draft authors",
+        "many": true,
+        "support_ok": false
+      },
+      "research.draft-reviewers": {
+        "help": "paper-draft reviewer pool (default: the draft authors)",
+        "many": true,
+        "support_ok": false
+      },
+      "research.consistency": {
+        "help": "paper-draft consistency pass",
+        "many": false,
+        "support_ok": false
+      },
+      "research.sr-screeners": {
+        "help": "systematic-review dual screeners (exactly two primary agents)",
+        "many": true,
+        "support_ok": false
+      }
+    },
+    "apply_with": {
+      "default": "uv run scieflow agent configure --assign ROLE=AGENT --set AGENT.FIELD=VALUE --yes",
+      "workspace": "uv run scieflow agent configure --workspace <slug> --assign ROLE=AGENT --set AGENT.FIELD=VALUE --yes",
+      "news": "uv run scieflow agent configure --news --set FIELD=VALUE --yes"
+    }
+  },
+  "resume_prompt_template": "Read AGENTS.md. Resume the research run workspace/<slug>: read its status.yml and continue from the first phase not done, per skills/research-loop/SKILL.md.",
+  "omitted": [
+    "agent_settings.agents",
+    "agent_settings.effective_defaults",
+    "runs"
+  ]
+}

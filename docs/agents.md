@@ -127,6 +127,8 @@ the agent's `cmd` template (`apply_role_override` in
   understands are listed per agent under `menu.reasoning` in
   `config/agents.yml`.
 
+A conversation turn gets Claude's extended thinking from `reasoning: extended-thinking` (or the `env MAX_THINKING_TOKENS=32000 ` prefix on the agent's `cmd`): ScieFlow adds `MAX_THINKING_TOKENS=32000` to the turn's own environment, because an `env` prefix on `session_cmd` or `resume_cmd` is refused.
+
 `model`, when set, always replaces the agent's configured model for that
 role's dispatch. `agent show [--workspace <slug>] --json` includes
 `role_overrides` in its output, so a coordinator agent can check what a

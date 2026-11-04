@@ -41,9 +41,9 @@ EXPECTED = [
     # D-8 permission prompts
     'The current templates skip permission prompts, so do not assume that every tool call asks for permission.',
     # D-9 no enablement
-    'There is no enablement anywhere today: the production resolver builds an incomplete identity, so the `/scieflow-menu` entry is inert in every deployment.',
+    'The production resolver now captures the full 15-field identity for a marked turn, but the `/scieflow-menu` entry still matches no deployment: its working directory is the probe tree and its menu-skill bytes predate the F-1 change, so no other checkout produces the same identity.',
     # D-10 residuals and verbatim limitation
-    'The menu shown is a model reconstruction that may drift from the real menu (R5-1 residual).',
+    "Without a shell, the menu skill reads the code-owned menu snapshot `skills/scieflow-menu/menu.json`, which a test keeps equal to the code; current settings and runs come from the run's own files.",
     'A D8 residual remains: `~/.claude` is readable by the sandboxed process.',
     R53_LIMITATION,
     # D-11 Host/Origin
