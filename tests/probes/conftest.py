@@ -7,6 +7,12 @@ suite verifies generation r14 in the state it was sealed for. The sealed files a
 edited. The G5 policy entry is covered by tests/core/test_harness_commands.py and by the
 guard test tests/probes/test_k_g5_binding_guard.py, which does not patch the tuple.
 
+F-2 (F2-D7): the same fixture also replaces the identity capture with the uncaptured production
+shape, so the sealed r14 binding sees the identity it was sealed for. Effort delivery cannot
+reach that binding (its probe override gives claude no reasoning and no prefixed cmd), and the
+probe's own refusal stays as sealed. tests/probes/test_f2_capture_guard.py proves that outside
+this file the capture is the real function.
+
 The sealed suite is RUN-layout evidence for generation r14, not a product regression suite:
 it derives its paths from the RUN layout and errors at setup anywhere else. It is therefore
 excluded from directory and default collection (collect_ignore below, G6D-1). Opt in by
@@ -15,7 +21,7 @@ naming the file explicitly:
 """
 import pytest
 
-from scieflow.core import harness_commands
+from scieflow.core import harness_commands, harness_identity
 
 collect_ignore = ['test_k_task8_binding.py']
 
@@ -25,3 +31,4 @@ def _r14_pre_entry_policy(request, monkeypatch):
     if request.node.path.name != 'test_k_task8_binding.py':
         return
     monkeypatch.setattr(harness_commands, 'CERTIFIED_POLICIES', ())
+    monkeypatch.setattr(harness_identity, 'capture', harness_identity.uncaptured)

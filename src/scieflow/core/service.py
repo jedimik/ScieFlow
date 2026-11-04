@@ -683,7 +683,8 @@ def _say_prepared(project, reservation, submission, actor):
         sandbox.check_agent_name(doc['agent'])
         accepted_revision = conversation.selection_revision(doc)
         resolved = agent_run.resolve_turn(project, doc['agent'], run_dir=ws, session=doc['session'],
-                                          create_home=True)
+                                          create_home=True,
+                                          capture_identity=(submission.mode == 'harness-command'))
         prepared = agent_run.prepare_turn(resolved, submission)
         data_dispatch.record_decision(ws, doc['agent'], resolved.data)
         reservation.validate_protection(prepared.protection)

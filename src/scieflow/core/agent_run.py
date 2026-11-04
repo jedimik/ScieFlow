@@ -33,6 +33,7 @@ from scieflow.core import legacy
 from scieflow.core import sandbox
 from scieflow.core import sessions
 from scieflow.core import harness_commands
+from scieflow.core import harness_identity
 from scieflow.core.harness_commands import HarnessIdentity
 from scieflow.core.turn_input import HumanSubmission, validate_marked_input
 from scieflow.core.project import Project
@@ -564,12 +565,14 @@ def _capture_execution(token: str, cwd: Path, env: dict):
 
 def resolve_turn(project: Project, agent: str, *, run_dir: Path,
                  session: str | None, cwd: Path | None = None,
-                 create_home: bool = False) -> ResolvedTurn:
+                 create_home: bool = False, capture_identity: bool = False) -> ResolvedTurn:
     """Full conversational resolution without a prompt file or any writes/launch.
 
     `create_home` (the live turn path only) creates the agent's sandboxed HOME inside the
     one protection capture, before its facts are recorded (F3). Without it nothing is written.
     Later consumers must reserve BEFORE calling and validate the SAME protection.
+    `capture_identity` (marked turns only, F2) captures the full harness identity from the
+    values already resolved; without it the identity is the uncaptured production shape.
     """
     try:
         root = project.root.resolve(strict=True)
@@ -663,6 +666,9 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
                                             credential_env=credential_env,
                                             writable=list(protection.writable))
                if layout is not None else dict(os.environ))
+        effort = harness_identity.turn_effort(cfg)   # F2-D2: after C12, never in argv
+        if effort is not None:
+            env = {**env, effort[0]: effort[1]}
         env_items = tuple(env.items())
         agreed = charter.snapshot(run)
         text, version = agreed['text'].strip(), agreed['current']
@@ -674,9 +680,16 @@ def resolve_turn(project: Project, agent: str, *, run_dir: Path,
             raise sandbox.SandboxError(
                 f'agent launcher {first_token!r} resolves to {located} on the host but to '
                 f'{execution_path} in the dispatch; refused')
-        identity = HarnessIdentity(agent, family, True, executable, None, None,
-                                   templates[0], templates[1], model, reasoning, str(work),
-                                   None, None, None, False)
+        identity_facts = dict(agent=agent, family=family, executable=executable,
+                              session_template=templates[0], resume_template=templates[1],
+                              model=model, configured_reasoning=reasoning, cwd=str(work))
+        if capture_identity:
+            identity = harness_identity.capture(
+                **identity_facts, env_items=env_items, execution_facts=execution_facts,
+                protection=protection, agent_home=layout.home if layout is not None else None,
+                credential_targets=tuple(dst for _, dst, _ in layout.binds) if layout is not None else ())
+        else:
+            identity = harness_identity.uncaptured(**identity_facts)
         return ResolvedTurn(agent, family, root, run, work, session, templates[0], templates[1],
                             model, reasoning, python, PROMPT_ARGV_LIMIT, float(timeout) * 60,
                             protection, env_items, identity, text, version, charter_digest,
