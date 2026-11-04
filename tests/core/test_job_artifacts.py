@@ -202,6 +202,7 @@ def test_selected_poll_same_parent_o1_atomic_replacement_and_transients(project,
         monkeypatch.setattr(os, 'scandir', forbidden)
         for state in ['queued', 'running', 'done']:
             value.state = state
+            value.finished = '2026-11-03T12:00:00.000+00:00' if state in jobs.FINAL else None
             jobs.save(value)  # Real atomic replacement must work with fresh record handles.
             assert location.peek_state() == state
         path = Path(value.log).with_suffix('.json')

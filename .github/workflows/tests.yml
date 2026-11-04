@@ -1,0 +1,40 @@
+name: Tests
+
+# The CI test gate (DECISIONS D22): Ubuntu only, the offline default suite
+# without slow, live or scite_live tests and without the sealed probe suite.
+# No secrets; read-only token. The same command runs locally:
+# scripts/ci-tests.sh (docs/testing.md).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: System tools for the sandbox and remote tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap rsync
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --ro-bind / / --dev /dev true
+      - name: Install the project
+        run: uv sync --frozen --python 3.12 --all-extras --group dev
+      - name: Tests
+        run: scripts/ci-tests.sh

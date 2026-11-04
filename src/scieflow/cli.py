@@ -77,6 +77,12 @@ GROUPS = {
         None,
         "Study design and analysis plan: check, lock, amend.",
     ),
+    "mcp": (
+        "scieflow.mcp_server.cli",
+        "mcp",
+        None,
+        "Read-only MCP server for an interactive coordinator (stdio).",
+    ),
 }
 
 
