@@ -144,7 +144,15 @@ at exactly this.
 | Draft workbench | `/runs/<slug>/drafts` | Every drafting agent's sections, side by side, each with a Compile PDF button; the curation built from them — kept passages and your own written blocks, reorderable, each removable, with a version history and a Restore button next to any earlier one; a note staged for the next round; the control that sends the round to the merging agent; and a manuscript-history panel with a diff form beside it. See below for what makes a kept passage trustworthy, how a round is dispatched, how the preview compiles, and how the manuscript's own git history works. |
 | Job output | `/runs/<slug>/jobs/<job_id>` | The job's command, state, exit code and duration, and its captured stdout/stderr. While the job is still running, output streams in live. |
 | Artifact browser | `/runs/<slug>/files[?path=...]` | A directory listing under the run; `/runs/<slug>/file?path=...` renders a small text file inline or downloads anything else, per the security model above. |
-| Agents | `/agents[?slug=<run>]` | Role assignments in effect (defaults, or one run's if `slug` is given), a form to pick a role and an agent, a preview of the resulting diff, and an Apply button. See [Agent configuration](agents.md#the-agents-page). |
+| Agents | `/agents[?scope=<scope>][&slug=<run>]` | The agent settings of one scope: the project defaults (`scope=project`), one run's workspace (`scope=workspace` with `slug`), or the news module (`scope=news`). Each setting shows its stored, inherited and effective value and where it comes from. Forms edit an agent's model, effort and timeout, a role's agent, and the news settings; a Preview shows the structured diff and writes nothing, and Apply writes only that previewed change. See [Agent configuration](agents.md#the-agents-page). |
+| Workspace | `/workspace` | Every run under `workspace/` with its kind, state, phase and lineage, read from each run's own files. Moved entries and aliases are listed, not followed, and a control file that cannot be read is shown as such, never as a healthy default. Read only. |
+| Run health | `/runs/<slug>/health` | One run's cheap health: its kind and state, which expected control files are missing, legacy config keys, and its DVC pointer. A Check button runs one bounded scan (`POST /runs/<slug>/health/check`), rendered on the page and not stored. |
+
+Every browser apply carries the revision of its preview; if any file the preview read has changed since, nothing is written and the page asks you to preview again.
+
+The workspace index and the health page only read: they never write `INDEX.md`, repair, clean up, upload or contact a remote or a model.
+
+A health check is partial when it stops at its budget (10,000 entries or about two seconds); a partial size is a lower bound, never a total.
 
 The run page's timeline and a running job's output are both live: each page
 opens a browser `EventSource` against the matching `/api/v1` stream (below)
@@ -461,7 +469,12 @@ this app's own pages — it is a stable-enough surface to script against.
 | `POST /api/v1/runs/<slug>/conversation` | Send one message; the reply is a sandboxed job that resumes the agent's session — `service.say`. There is no CLI equivalent: the conversation is browser-only today. |
 | `POST /api/v1/runs/<slug>/conversation/agent` | Hand the conversation to a different agent, clearing its recorded session — `service.set_conversation_agent`. |
 | `GET /api/v1/gates` | Gates still waiting for an answer, optionally `?slug=<run>`. |
-| `GET /api/v1/agents` | Effective role assignments and agent settings, with their sources. |
+| `GET /api/v1/agents` | Effective role assignments and agent settings, with their sources; with `scope` (`project`, `workspace` or `news`), the browser view of that scope. |
+| `POST /api/v1/agents/preview` | A browser change to the agent settings as JSON: its structured diff and the `revision` that binds it — `service.plan_agent_changes`. Writes nothing. |
+| `POST /api/v1/agents/apply` | Write a previewed change; it needs the `revision` of that preview — `service.apply_agent_changes`. A refusal is 400; a stale, busy or partial configuration is 409. |
+| `GET /api/v1/workspace` | The read-only workspace index — `service.workspace_index`. |
+| `GET /api/v1/runs/<slug>/health` | A run's cheap health, fixed reads only — `service.run_health`. |
+| `POST /api/v1/runs/<slug>/health/check` | One bounded scan of a run, returned and not stored — `service.scan_run_health`. |
 | `GET /api/v1/runs/<slug>/events/stream` | Server-sent events: the timeline, replayed then followed live. |
 | `GET /api/v1/jobs/<job_id>/log/stream` | Server-sent events: one frame per line of a job's stdout, as it is written. |
 | `POST /api/v1/runs/<slug>/phase` | Set a phase's state — `service.mark_phase`, same as `scieflow run mark`. |
@@ -479,6 +492,8 @@ Every `POST` above needs the CSRF header as well as the session cookie (see
 `/runs/<slug>/...` and `/agents` routes instead, which redirect back to a
 page rather than returning JSON. Both sets — and no others — are exactly
 the mutating-route inventory `tests/web/test_read_only.py` enforces.
+
+`GET /api/v1/agents` without `scope` still returns the full effective configuration, command templates included; with `scope=` it returns the browser view, which never includes them.
 
 The generated OpenAPI schema is at `/api/v1/openapi.json`, and interactive
 docs (Swagger UI) are at `/api/v1/docs` — both need the session cookie too.
@@ -543,11 +558,7 @@ A few things are terminal-only on purpose, not because nobody got to them:
   for a primary on one role. It exists to be deliberate and explicit (see
   [Agent configuration](agents.md#support-agents-as-primary-per-role)); a
   button that could do it in one click would defeat that purpose.
-- **Per-agent field edits, promotions and demotions on the Agents page.**
-  The page (below) covers role assignment only — see
-  ["The Agents page"](agents.md#the-agents-page). Changing a field like
-  `timeout_min`, or granting/removing a `--promote` exception, is still
-  `scieflow agent configure`.
+- **Command templates and promotions.** Executable command templates (`cmd`, `stdin_cmd`), project `enabled`, and support-as-primary promotion and demotion stay CLI-only; a workspace cannot set `enabled` at all. The browser can change an agent's model, effort and timeout, and a role's agent, in the project and in a workspace; see ["The Agents page"](agents.md#the-agents-page).
 
 Starting a run used to belong on this list; it no longer does — see the
 Start page above. Once a run exists, one way or the other, everything else
