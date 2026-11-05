@@ -125,6 +125,22 @@ def workspace_index(project: Project) -> dict:
     return workspace_health.index(project)
 
 
+def run_health(project: Project, slug: str) -> dict:
+    """A run's cheap health (`GET /runs/<slug>/health`): fixed control reads, no walk. Writes nothing."""
+    try:
+        return workspace_health.health(project, slug)
+    except workspace_health.RunNotFound as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def scan_run_health(project: Project, slug: str) -> dict:
+    """A run's full health (`POST /runs/<slug>/health/check`): one bounded scan. Writes nothing."""
+    try:
+        return workspace_health.scan(project, slug)
+    except workspace_health.RunNotFound as exc:
+        raise ServiceError(str(exc)) from exc
+
+
 def list_runs_with_budget(project: Project) -> list[dict]:
     """`list_runs`, each run also carrying `remaining`: the budget fraction
     left per dimension, or None when the run has no readable budget.
