@@ -106,30 +106,50 @@ def _current_phase(kind: str, status: dict) -> tuple[str | None, str | None]:
     return phase, state if isinstance(state, str) else None
 
 
-def describe(path: Path) -> Run:
-    status = _load(path / "status.yml")
+def describe_from(slug: str, status: dict, config: dict, updated: str | None,
+                  updated_at: str | None) -> Run:
+    """A run's description from already-read controls and activity stamps.
+
+    `describe` reads them from a path; the workspace index reads them through
+    `control_read` and passes them here, so both give the same fields.
+    """
     if "run" in status:
         kind = "loop"
     elif status.get("workflow"):
         kind = str(status["workflow"])
     else:
         kind = "none"
-    config = _load(path / "config.yml")
     phase, phase_state = _current_phase(kind, status) if kind != "none" else (None, None)
     stopped = status.get("stopped")
     return Run(
-        slug=path.name,
+        slug=slug,
         kind=kind,
         state=_state(kind, status),
-        updated=_updated(path),
+        updated=updated,
         lineage=config.get("lineage") if isinstance(config.get("lineage"), str) else None,
         id=status.get("id"),
         phase=phase,
         phase_state=phase_state,
         iteration=status.get("iteration") if kind == "loop" else None,
         stopped_reason=(stopped.get("reason") if isinstance(stopped, dict) else stopped) or None,
-        updated_at=_updated_at(path),
+        updated_at=updated_at,
     )
+
+
+def describe(path: Path) -> Run:
+    return describe_from(path.name, _load(path / "status.yml"), _load(path / "config.yml"),
+                         _updated(path), _updated_at(path))
+
+
+def sibling_name(link: str) -> str | None:
+    """The sibling a relative symlink target names (`name` or `./name`), else None.
+
+    A target with a further path separator (`_misc/…`, `../x`) is not a sibling.
+    """
+    name = link[2:] if link.startswith("./") else link
+    if not name or "/" in name or name in (".", ".."):
+        return None
+    return name
 
 
 def list_runs(root: Path | None = None) -> list[Run]:

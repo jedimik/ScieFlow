@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}ScieFlow — workspace{% endblock %}
+{% block content %}
+<h1>Workspace</h1>
+<p class="dim">A read-only index of workspace/, observed {{ index.observed_at }}. Results may change while a run is active.</p>
+{% if not index.complete %}
+  <p class="dim">Partial: {{ index.omitted_note or "the index is incomplete" }}</p>
+{% endif %}
+
+{% if not index.runs %}
+  <p class="dim">No runs yet. <a href="/start">Start your first run</a> to pick a workflow, name it and set a goal.</p>
+{% else %}
+<table>
+  <tr><th>run</th><th>kind</th><th>state</th><th>updated</th><th>aliases</th><th>findings</th></tr>
+  {% for run in index.runs %}
+  <tr>
+    <td><a href="/runs/{{ run.slug }}">{{ run.slug }}</a></td>
+    <td class="dim">{{ run.kind }}</td>
+    <td>{{ run.state }}</td>
+    <td class="dim">{{ (run.updated_at or "")[:16] }}</td>
+    <td class="dim">{% for alias in run.aliases %}{{ alias }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    <td>{% for finding in run.findings %}<div class="dim">{{ finding.file }}: {{ finding.status }}</div>{% endfor %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Lineage</h2>
+{% if not index.lineage %}
+  <p class="dim">No lineage recorded.{% if index.lineage_partial %} Partial: some runs have unknown lineage.{% endif %}</p>
+{% else %}
+  {% for name, slugs in index.lineage.items() %}
+  <div><span class="dim">{{ name }}:</span> {{ slugs|join(" → ") }}</div>
+  {% endfor %}
+  {% if index.lineage_partial %}<p class="dim">Partial: some runs have unknown lineage.</p>{% endif %}
+{% endif %}
+
+<h2>Not runs</h2>
+{% if not index.moved and not index.external_aliases and not index.unattached_aliases %}
+  <p class="dim">Nothing else in workspace/.</p>
+{% endif %}
+{% for entry in index.moved %}
+  <div>{{ entry.name }} → workspace/{{ entry.target }} <span class="dim">(moved; old path kept as a link)</span></div>
+{% endfor %}
+{% for entry in index.external_aliases %}
+  <div>{{ entry.name }} <span class="dim">{{ entry.note }}</span></div>
+{% endfor %}
+{% for entry in index.unattached_aliases %}
+  <div>{{ entry.name }} <span class="dim">alias of {{ entry.target }}, which is not a listed run</span></div>
+{% endfor %}
+{% endblock %}

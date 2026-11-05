@@ -38,6 +38,7 @@ from scieflow.core import (
     store,
     turn_admission,
     workspace,
+    workspace_health,
 )
 from scieflow.core.data import dispatch as data_dispatch
 from scieflow.core.gates import ADOPTED, CHARTER_ADOPTION
@@ -117,6 +118,11 @@ def job_json(job: jobs.Job) -> dict:
 
 def list_runs(project: Project) -> list[dict]:
     return [asdict(r) for r in workspace.list_runs(project.root)]
+
+
+def workspace_index(project: Project) -> dict:
+    """The read-only workspace index (`GET /workspace`, `/api/v1/workspace`). Writes nothing."""
+    return workspace_health.index(project)
 
 
 def list_runs_with_budget(project: Project) -> list[dict]:

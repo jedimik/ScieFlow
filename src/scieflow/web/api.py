@@ -44,6 +44,12 @@ def list_runs(request: Request) -> list[dict]:
     return service.list_runs(_project(request))
 
 
+@router.get("/workspace", tags=["workspace"])
+def workspace_index(request: Request) -> dict:
+    """The read-only workspace index: runs, aliases, moved and external entries, findings."""
+    return service.workspace_index(_project(request))
+
+
 @router.get("/runs/{slug}", tags=["runs"])
 def run_detail(request: Request, slug: str) -> dict:
     """Status, budget, remaining fractions, open gates, recent jobs and events."""

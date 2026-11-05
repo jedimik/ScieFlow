@@ -219,6 +219,14 @@ def dashboard(request: Request) -> HTMLResponse:
     })
 
 
+@router.get("/workspace", response_class=HTMLResponse)
+def workspace_page(request: Request) -> HTMLResponse:
+    """The workspace index: runs, aliases, moved and external entries, findings. Read-only, no form."""
+    return TEMPLATES.TemplateResponse(request, "workspace.html", {
+        "index": service.workspace_index(_project(request)),
+    })
+
+
 #: The workflow the form's `<select>` shows chosen when nothing else applies
 #: — a fresh visit, or a refusal that carried no workflow at all. Not "no
 #: workflow": `init_workspace` writes the loop-shaped `status.yml` that
