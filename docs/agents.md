@@ -120,14 +120,18 @@ the agent's `cmd` template (`apply_role_override` in
 - **Codex** (`cmd` contains a `{reasoning}` placeholder): the value is
   substituted straight into the command line, e.g. `xhigh`.
 - **Claude** (no `{reasoning}` placeholder — Claude has no effort flag):
-  `reasoning: extended-thinking` prefixes the command with
-  `env MAX_THINKING_TOKENS=32000 `; any other value (`default`, say)
-  removes that prefix if it was there. `extended-thinking` is the only
-  value that turns anything *on* for Claude — the effort levels a provider
-  understands are listed per agent under `menu.reasoning` in
-  `config/agents.yml`.
+  `reasoning: extended-thinking` adds the `env MAX_THINKING_TOKENS=32000 `
+  prefix to the command at dispatch; any other value (`default`, say)
+  dispatches it without that prefix. The choice never edits the stored
+  `cmd`. `extended-thinking` is the only value that turns anything *on*
+  for Claude; other providers list their effort names under
+  `menu.reasoning` in `config/agents.yml`.
 
 A conversation turn gets Claude's extended thinking from `reasoning: extended-thinking` (or the `env MAX_THINKING_TOKENS=32000 ` prefix on the agent's `cmd`): ScieFlow adds `MAX_THINKING_TOKENS=32000` to the turn's own environment, because an `env` prefix on `session_cmd` or `resume_cmd` is refused.
+
+Claude effort is `reasoning: default` or `reasoning: extended-thinking`: ScieFlow adds `MAX_THINKING_TOKENS=32000` itself (the `env` prefix of a one-shot dispatch, or a conversation turn's environment), so choosing it never edits the `cmd`.
+
+The effort choices for an agent are its own `menu.reasoning.levels` in `config/agents.yml`; list the effort names your subscription uses there. A Claude agent has no `menu.reasoning.levels` of its own: its two effort choices are the ones above.
 
 `model`, when set, always replaces the agent's configured model for that
 role's dispatch. `agent show [--workspace <slug>] --json` includes
@@ -252,30 +256,53 @@ Settable agent fields: `model`, `reasoning`, `timeout_min`, `cmd`,
 ## The Agents page
 
 `scieflow serve` (see [The local web app](web.md)) has a browser page at
-`/agents` for the one piece of this that comes up often enough to want a
-form: **which agent performs which role**. `GET /agents` shows the
-assignments in effect for the project defaults, or for one run with
-`?slug=<run>`; picking a role and an agent and choosing Preview calls
-`service.plan_staffing`, the same planning step `scieflow agent configure`
-uses, and shows the same unified diff `configure` would print. Nothing is
-written until you choose Apply, which posts to `/agents` and calls
-`service.apply_staffing` — the same validation, the same diff, the same
-`assignments:` key in `config/defaults.yml` or the run's `config.yml`.
-`?assign=role=agent` can be repeated in the URL to preview more than one
-change at once, the same way `--assign` is repeatable on the command line.
+`/agents` for the settings this file describes: which agent performs which
+role, and each agent's model, effort and timeout, plus the news module's
+agent settings. The page has three scopes, chosen with `?scope=`:
 
-The page is deliberately narrower than `configure`: it covers role
-assignment only. Per-agent field edits (`model`, `reasoning`,
-`timeout_min`, `cmd`, `stdin_cmd`, `enabled`), and granting or removing a
-`--promote` exception (see ["Support agents as primary, per
-role"](#support-agents-as-primary-per-role) above), stay on the CLI —
-`scieflow agent configure --set ...`, `--promote` and `--demote`. A
-one-click promotion would work against the whole point of `--promote`
-being a deliberate, visible exception, so the page never offers it.
+- `project` — the defaults in `config/agents.yml` and `config/defaults.yml`;
+- `workspace`, with `?slug=<run>` — one run's overrides in
+  `workspace/<slug>/config.yml`;
+- `news` — `config/news.yml`. When that file is missing the page says so and
+  asks you to run `scieflow news init` first.
+
+Without `scope`, a `slug` opens that run's workspace and no slug opens the
+project. Every setting shows its stored value, the value it inherits, the
+effective value and where that comes from, so a run's own override is never
+mistaken for the project default. A role row takes an agent (one or more for
+the fan-out roles) with an optional model and effort for that role only, the
+same as `--assign`.
+
+A change is previewed before it is written. Preview posts the changes to
+`/agents/preview` and shows the structured diff: only the keys that change,
+with their before and after values; the value of a command template is shown
+as "(command template, not shown)". Preview writes nothing. Apply posts the
+same changes with the revision of that preview to `/agents/apply`, and writes
+only if the settings still match the ones previewed. If they changed in the
+meantime, nothing is written and the page asks for a new preview.
+
+Reset means "inherit again", and it is not the same in both scopes. In a
+workspace, unsetting a value removes that run's override only, so the run
+inherits the project value again. In the project, unsetting an optional
+registry field removes it from the file; it does not restore a shipped
+default.
 
 Older research runs may carry top-level `agents:`, `reviewer:`, `submitter:`,
 `outline_agent:` or `consistency_agent:` keys. They are still read, and any
-assignment written by `configure` takes precedence over them.
+assignment written by `configure` takes precedence over them. The page shows
+a legacy value as what it is, and it does not rewrite it on its own.
+
+The page is deliberately narrower than `configure`. Executable command
+templates (`cmd`, `stdin_cmd`), the project's `enabled` flag, and granting or
+removing a `--promote` or `--demote` exception (see
+["Support agents as primary, per role"](#support-agents-as-primary-per-role)
+above) stay on the CLI: `scieflow agent configure --set ...`, `--promote` and
+`--demote`. A workspace cannot set `enabled` at all. A one-click promotion
+would work against the whole point of `--promote` being a deliberate, visible
+exception, so the page never offers it.
+
+`GET /agents?assign=role=agent` can be repeated in the URL to preview role
+changes at once, as before; that preview writes nothing either.
 
 ## The charter is already in the prompt
 
