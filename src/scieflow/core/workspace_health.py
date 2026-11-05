@@ -69,12 +69,16 @@ def _run_row(ws_fd: int, name: str) -> dict:
     findings = [{"file": file, "status": read.status}
                 for file, read in (("status.yml", status), ("config.yml", config))
                 if read.status != "ok"]
+    row = None
     if status.status == "ok":
         status_dict = status.data if isinstance(status.data, dict) else {}
         config_dict = config.data if config.status == "ok" and isinstance(config.data, dict) else {}
-        run = wsmod.describe_from(name, status_dict, config_dict, updated, updated_at)
-        row = asdict(run)
-    else:
+        try:
+            row = asdict(wsmod.describe_from(name, status_dict, config_dict, updated, updated_at))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            # Valid YAML of the wrong shape (e.g. `phases: 5`): a finding, never a crash.
+            findings.append({"file": "status.yml", "status": "invalid-shape"})
+    if row is None:
         row = _unknown_run(name, updated, updated_at)
     row["lineage"] = _lineage(config)
     row["aliases"] = []
