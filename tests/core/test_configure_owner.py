@@ -181,6 +181,51 @@ def test_a_changed_code_fingerprint_makes_apply_stale(repo, monkeypatch):
         acf.apply(plan)
 
 
+@pytest.mark.parametrize("change", ["rewrite_defaults", "create_status"])
+def test_a_dependency_changed_between_replan_and_the_locks_makes_apply_stale(repo, monkeypatch, change):
+    """The replan sees the old files; a non-target dependency that changes before the sibling
+    locks are held is caught only by the under-lock re-read of every dependency."""
+    plan = acf.preview("workspace", repo, DEFAULT_OPS, slug="run-1")
+    run = repo / "workspace" / "run-1"
+    defaults = repo / "config" / "defaults.yml"
+    status = run / "status.yml"
+    real_build = acf._build
+
+    def build_then_change(*args, **kwargs):
+        built = real_build(*args, **kwargs)
+        if change == "rewrite_defaults":
+            defaults.write_text(defaults.read_text() + "# changed after the replan\n")
+        else:
+            status.write_text("state: running\n")
+        return built
+
+    monkeypatch.setattr(acf, "_build", build_then_change)
+    with pytest.raises(acf.StaleError, match="preview again"):
+        acf.apply(plan)
+    assert not (run / "config.yml").exists()
+    if change == "create_status":
+        assert status.read_text() == "state: running\n"
+
+
+def test_apply_takes_the_project_lock_then_sorted_sibling_locks_once_in_workspace_scope(repo, monkeypatch):
+    plan = acf.preview("workspace", repo, DEFAULT_OPS, slug="run-1")
+    run = repo / "workspace" / "run-1"
+    order = []
+    real_acquire = filelock.FileLock.acquire
+
+    def spy(self, *args, **kwargs):
+        order.append(self.lock_file)
+        return real_acquire(self, *args, **kwargs)
+
+    monkeypatch.setattr(filelock.FileLock, "acquire", spy)
+    acf.apply(plan)
+    assert order == [str(repo / LOCK),
+                     str(repo / "config" / "agents.yml.lock"),
+                     str(repo / "config" / "defaults.yml.lock"),
+                     str(run / "config.yml.lock"),
+                     str(run / "status.yml.lock")]
+
+
 def test_cli_yes_with_a_file_changed_after_preview_exits_1_and_writes_nothing(repo, monkeypatch):
     real_print = cli_mod._print_plan
     defaults = repo / "config" / "defaults.yml"
