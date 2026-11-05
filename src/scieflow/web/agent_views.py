@@ -20,6 +20,9 @@ RESERVED = frozenset({"csrf_token", "scope", "slug", "revision", "change"})
 #: Keys the browser never writes; a forged one is named as CLI-only.
 CLI_ONLY = frozenset({"cmd", "stdin_cmd", "session_cmd", "resume_cmd", "enabled", "promote", "demote"})
 
+#: Characters the assign grammar reads as structure, plus whitespace and control characters.
+ROW_SEPARATORS = re.compile(r"[,@/\s\x00-\x1f\x7f]")
+
 AGENT_FIELD = re.compile(r"agent\.(?P<agent>[^.\s]+)\.(?P<field>[A-Za-z0-9_]+)")
 NEWS_FIELD = re.compile(r"news\.(?P<field>[A-Za-z0-9_]+)")
 ROLE_FIELD = re.compile(r"role\.(?P<role>[A-Za-z0-9_.\-]+)\.(?P<row>[0-9]{1,2})\.(?P<field>agent|model|effort)")
@@ -117,6 +120,8 @@ def changes_from_form(form) -> list[str]:
             out.append(f"unset {field}" if not merged else f"set {field}={merged}")
     for role, rows in sorted(roles.items()):
         entries = [rows[index] for index in sorted(rows)]
+        for number, entry in enumerate(entries, start=1):
+            _check_row(role, number, entry)
         text = role_text(entries)
         init = (singles.get(f"init.role.{role}") or "").strip()
         if text != init:
@@ -139,29 +144,64 @@ def role_entries(value) -> list[dict]:
     return out
 
 
+def _check_row(role: str, number: int, entry: dict) -> None:
+    """Refuse a role row the assign grammar cannot carry unchanged (nothing is written).
+
+    The text is the owner's grammar, so a separator typed into a value would change
+    its structure (an extra agent, a split model); a model or effort without an agent
+    would otherwise vanish silently.
+    """
+    for field in ("agent", "model", "effort"):
+        if ROW_SEPARATORS.search(entry.get(field) or ""):
+            raise ConfigChangeRefused(
+                f"role {role}, row {number}: {field} may not contain commas, @, /, spaces or "
+                "control characters; nothing was written")
+    if not (entry.get("agent") or "").strip() and (entry.get("model") or entry.get("effort")):
+        raise ConfigChangeRefused(
+            f"role {role}, row {number}: choose an agent for the model or effort, or clear the row; "
+            "nothing was written")
+
+
 def role_text(entries) -> str:
-    """The `assign` text of a role's rows: AGENT[@MODEL][/EFFORT], comma-separated; blank rows drop."""
+    """The `assign` text of a role's rows: AGENT[@MODEL][/EFFORT], comma-separated; blank rows drop.
+
+    An effort without a model is written AGENT@/EFFORT, the owner's form for it."""
     parts = []
     for entry in entries:
         agent = (entry.get("agent") or "").strip()
         if not agent:
             continue
+        model = (entry.get("model") or "").strip()
+        effort = (entry.get("effort") or "").strip()
         text = agent
-        if (entry.get("model") or "").strip():
-            text += f"@{entry['model'].strip()}"
-        if (entry.get("effort") or "").strip():
-            text += f"/{entry['effort'].strip()}"
+        if model or effort:
+            text += f"@{model}"
+        if effort:
+            text += f"/{effort}"
         parts.append(text)
     return ",".join(parts)
+
+
+def _stored_entries(info: dict) -> list[dict]:
+    """A role's stored rows: the agent names of its effective value, each with the model and
+    effort its override carries (the owner splits `AGENT@MODEL/EFFORT` the same way)."""
+    entries = role_entries(info["value"])
+    overrides = info.get("overrides") or {}
+    for entry in entries:
+        extra = overrides.get(entry["agent"]) or {}
+        entry["model"] = entry["model"] or str(extra.get("model") or "")
+        entry["effort"] = entry["effort"] or str(extra.get("reasoning") or "")
+    return entries
 
 
 def decorate(view: dict) -> dict:
     """The role rows and their initial text, for rendering a project or workspace view."""
     forms = {}
     for role, info in view["roles"].items():
-        entries = role_entries(info["value"])
+        entries = _stored_entries(info)
         rows = list(entries)
         if info["many"] or not rows:
             rows.append({"agent": "", "model": "", "effort": ""})
         forms[role] = {"rows": rows, "init": role_text(entries)}
     return view | {"role_forms": forms}
+
