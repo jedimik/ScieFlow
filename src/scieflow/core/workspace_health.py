@@ -8,6 +8,7 @@ it feeds are reported as unknown, never as a default.
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -20,10 +21,36 @@ if TYPE_CHECKING:
     from scieflow.core.project import Project
 
 INDEX_LIMIT = 10_000
+MAX_TEXT = 200   # the longest text a control field may carry into a row (bounds the reply)
 UNKNOWN = "unknown"
 NOTE_EXTERNAL = "points outside workspace/; not followed"
 _STAMPED = ("status.yml", "log.md", "notebook.md")
 _EVENTS = "events.jsonl"
+
+
+def _bounded(value) -> bool:
+    """A value the index may copy into a row: None, a bool or number, a short string."""
+    if isinstance(value, str):
+        return len(value) <= MAX_TEXT
+    if value is None or isinstance(value, (bool, int)):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
+
+
+def _status_shaped(status: dict) -> bool:
+    """Whether every status field the row copies is a bounded scalar.
+
+    An alias can make a ~1 KB file expand to tens of MB once it is copied, so a
+    container in any of these fields is an invalid shape, not a value to show.
+    """
+    stopped = status.get("stopped")
+    if isinstance(stopped, dict):
+        stopped = stopped.get("reason")
+    phases = status.get("phases")
+    phases_ok = phases is None or (isinstance(phases, dict) and all(
+        _bounded(key) and _bounded(value) for key, value in phases.items()))
+    return phases_ok and _bounded(stopped) and all(
+        _bounded(status.get(key)) for key in ("id", "workflow", "phase", "iteration"))
 
 
 def _iso(ns: int) -> str:
@@ -73,14 +100,21 @@ def _run_row(ws_fd: int, name: str) -> dict:
     if status.status == "ok":
         status_dict = status.data if isinstance(status.data, dict) else {}
         config_dict = config.data if config.status == "ok" and isinstance(config.data, dict) else {}
-        try:
-            row = asdict(wsmod.describe_from(name, status_dict, config_dict, updated, updated_at))
-        except (AttributeError, KeyError, TypeError, ValueError):
-            # Valid YAML of the wrong shape (e.g. `phases: 5`): a finding, never a crash.
+        if not _status_shaped(status_dict):
             findings.append({"file": "status.yml", "status": "invalid-shape"})
+        else:
+            try:
+                row = asdict(wsmod.describe_from(name, status_dict, config_dict, updated, updated_at))
+            except (AttributeError, KeyError, TypeError, ValueError):
+                # Valid YAML of the wrong shape (e.g. `phases: 5`): a finding, never a crash.
+                findings.append({"file": "status.yml", "status": "invalid-shape"})
     if row is None:
         row = _unknown_run(name, updated, updated_at)
-    row["lineage"] = _lineage(config)
+    config_lineage = config.data.get("lineage") if isinstance(config.data, dict) else None
+    lineage_ok = _bounded(config_lineage)
+    if not lineage_ok:
+        findings.append({"file": "config.yml", "status": "invalid-shape"})
+    row["lineage"] = _lineage(config) if lineage_ok else UNKNOWN
     row["aliases"] = []
     row["findings"] = findings
     return row
