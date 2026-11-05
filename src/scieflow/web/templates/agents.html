@@ -114,6 +114,8 @@
     {% if scope == "project" %}A change here reaches every run that does not override that setting; a run with its own value keeps it.
     {% else %}A change here affects only this run; "inherit" means the project value applies.{% endif %}
   </p>
+  {% for problem in scoped.problems %}<p class="state-failed">{{ problem }}</p>{% endfor %}
+  {% for warning in scoped.warnings %}<p class="state-failed">{{ warning }}</p>{% endfor %}
   <form method="post" action="/agents/preview">
     <input type="hidden" name="csrf_token" value="{{ csrf }}">
     <input type="hidden" name="scope" value="{{ scope }}">
@@ -184,7 +186,7 @@
         effort <input name="role.{{ role }}.{{ i }}.effort" value="{{ values.get('role.' ~ role ~ '.' ~ i ~ '.effort', row.effort) }}">
       </p>
       {% endfor %}
-      {% if info.exception %}<p class="dim">A support-as-primary exception is in effect for this role (read only; the CLI changes it).</p>{% endif %}
+      {% if info.exception %}<p class="dim">A support-as-primary exception is in effect for this role (source: {{ info.exception }}; read only; the CLI changes it).</p>{% endif %}
       {% if info.overrides %}<p class="dim">Run overrides: {% for agent_name, found in info.overrides.items() %}{{ agent_name }} ({{ found.source }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
     </fieldset>
     {% endfor %}

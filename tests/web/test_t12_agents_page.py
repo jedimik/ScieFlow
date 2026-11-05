@@ -384,3 +384,40 @@ def test_agent_names_and_run_slugs_with_markup_render_as_text(client, project):
     assert "<script>x</script>" not in page
     assert "&lt;script&gt;x&lt;/script&gt;" in page
     assert "<b>x</b>" not in client.get("/agents", params={"slug": "<b>x</b>"}).text
+
+
+def test_project_and_workspace_views_show_their_validation_warnings(client, project):
+    path = _agents_yml(project)
+    doc = yaml.safe_load(path.read_text())
+    doc["agents"]["stub"]["reasoning"] = "max"
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    assert "is only a label" in client.get("/agents").text
+    assert "is only a label" in client.get("/agents", params={"scope": "workspace", "slug": "r1"}).text
+
+
+def _support_outline(project, *, defaults_exception: bool, workspace_exception: bool):
+    """research.outline staffed by a support-tier agent, with the exception in the chosen scope."""
+    defaults_path = project.root / "config" / "defaults.yml"
+    defaults = yaml.safe_load(defaults_path.read_text())
+    defaults["assignments"]["research.outline"] = "agy"
+    if defaults_exception:
+        defaults["support_as_primary"] = ["research.outline"]
+    defaults_path.write_text(yaml.safe_dump(defaults, sort_keys=False))
+    _add_agents(project, '  agy: {cmd: "true", enabled: true, timeout_min: 1, tier: support}\n')
+    if workspace_exception:
+        ws_config = project.root / "workspace" / "r1" / "config.yml"
+        ws_config.write_text(ws_config.read_text() + "support_as_primary: [research.outline]\n")
+
+
+def test_a_default_support_exception_line_names_its_source(client, project):
+    _support_outline(project, defaults_exception=True, workspace_exception=False)
+    line = "exception is in effect for this role (source: default;"
+    assert line in client.get("/agents").text
+    assert line in client.get("/agents", params={"scope": "workspace", "slug": "r1"}).text
+
+
+def test_a_workspace_support_exception_line_names_its_source(client, project):
+    _support_outline(project, defaults_exception=False, workspace_exception=True)
+    assert "exception is in effect for this role (source: workspace;" in client.get(
+        "/agents", params={"scope": "workspace", "slug": "r1"}).text
+    assert "exception is in effect" not in client.get("/agents").text
