@@ -131,7 +131,7 @@ A conversation turn gets Claude's extended thinking from `reasoning: extended-th
 
 Claude effort is `reasoning: default` or `reasoning: extended-thinking`: ScieFlow adds `MAX_THINKING_TOKENS=32000` itself (the `env` prefix of a one-shot dispatch, or a conversation turn's environment), so choosing it never edits the `cmd`.
 
-The effort choices for an agent are its own `menu.reasoning.levels` in `config/agents.yml`; list the effort names your subscription uses there. A Claude agent has no `menu.reasoning.levels` of its own: its two effort choices are the ones above.
+The effort choices for an agent are its own `menu.reasoning.levels` in `config/agents.yml`; list the effort names your subscription uses there. For a Claude agent the two choices are fixed (`default`, `extended-thinking`) whatever `menu.reasoning.levels` lists.
 
 `model`, when set, always replaces the agent's configured model for that
 role's dispatch. `agent show [--workspace <slug>] --json` includes
