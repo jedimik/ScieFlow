@@ -5,6 +5,7 @@ templates, T12-D8); with `scope` it returns the browser view, which never
 includes template text. Synthetic temporary projects only.
 """
 
+import json
 import re
 
 import yaml
@@ -33,12 +34,14 @@ def _preview_api(client, fields, scope="project", slug=None):
     return _post(client, "/api/v1/agents/preview", base + list(fields))
 
 
-def test_unscoped_agents_is_unchanged_and_still_carries_templates(client):
+def test_unscoped_agents_is_unchanged_and_still_carries_templates(client, project):
+    from scieflow.core import service
     response = client.get("/api/v1/agents")
     assert response.status_code == 200
     body = response.json()
     assert body["assignments"]["research.outline"]["value"] == "stub"
     assert "stub_agent" in response.text
+    assert body == json.loads(json.dumps(service.agent_settings(project, None), default=str))
 
 
 def test_scoped_view_never_carries_command_text(client):
