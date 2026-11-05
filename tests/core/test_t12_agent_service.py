@@ -187,6 +187,82 @@ def test_a_workspace_alias_is_refused_for_view_and_write(repo, write_ws):
     refused("workspace", ["set claude.model=fable-2"], repo, "alias", match="alias")
 
 
+# -- the write path refuses the same hostile files as the view (T-12 t3 fix, finding 1) ----
+
+def configs(root: Path) -> dict:
+    """Bytes of config/*.yml and of each run's config.yml; a directory named status.yml is never read."""
+    paths = list((root / "config").glob("*.yml")) + list((root / "workspace").glob("*/config.yml"))
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in paths}
+
+
+def write_refused(scope, changes, repo, slug=None, *, match):
+    """Plan and apply both refuse, and a forged revision cannot get past the input checks."""
+    before = tree(repo)
+    with pytest.raises(svc().ConfigChangeRefused, match=match):
+        plan(repo, scope, changes, slug)
+    with pytest.raises(svc().ConfigChangeRefused, match=match):
+        apply(repo, scope, changes, "forged-revision", slug)
+    assert tree(repo) == before
+
+
+def test_write_refuses_a_symlinked_project_config(repo):
+    target = repo / "config" / "elsewhere.yml"
+    target.write_text((repo / "config" / "agents.yml").read_text())
+    (repo / "config" / "agents.yml").unlink()
+    (repo / "config" / "agents.yml").symlink_to(target)
+    write_refused("project", ["set claude.timeout_min=45"], repo, match="symbolic link")
+
+
+def test_write_refuses_an_oversized_project_config(repo):
+    (repo / "config" / "agents.yml").write_text("# " + "x" * (1024 * 1024) + "\n")
+    write_refused("project", ["set claude.timeout_min=45"], repo, match="larger than 1 MiB")
+
+
+def test_write_refuses_a_symlinked_run_config(repo):
+    target = repo / "config" / "elsewhere.yml"
+    target.write_text("agent_overrides: {}\n")
+    (repo / "workspace" / "run-1" / "config.yml").symlink_to(target)
+    write_refused("workspace", ["set claude.model=fable-2"], repo, "run-1", match="symbolic link")
+
+
+def test_write_refuses_an_oversized_run_config(repo):
+    (repo / "workspace" / "run-1" / "config.yml").write_text("# " + "x" * (1024 * 1024) + "\n")
+    write_refused("workspace", ["set claude.model=fable-2"], repo, "run-1", match="larger than 1 MiB")
+
+
+def test_write_refuses_a_run_status_that_is_not_a_regular_file(repo):
+    # A directory, not a FIFO: the check must refuse without opening it.
+    status = repo / "workspace" / "run-1" / "status.yml"
+    status.mkdir()
+    before = configs(repo)
+    for call in (lambda: plan(repo, "workspace", ["set claude.model=fable-2"], "run-1"),
+                 lambda: apply(repo, "workspace", ["set claude.model=fable-2"], "forged-revision", "run-1")):
+        with pytest.raises(svc().ConfigChangeRefused, match="not a regular file"):
+            call()
+    assert configs(repo) == before
+    assert not (repo / "workspace" / "run-1" / "config.yml").exists()
+    assert status.is_dir()
+
+
+def test_write_refuses_a_symlinked_news_config(repo):
+    target = repo / "config" / "elsewhere-news.yml"
+    target.write_text(NEWS)
+    (repo / "config" / "news.yml").symlink_to(target)
+    write_refused("news", ["set timeout=30"], repo, match="symbolic link")
+
+
+def test_write_names_a_malformed_file_without_its_content(repo):
+    (repo / "config" / "defaults.yml").write_text("assignments: [SECRETTOKEN, b\n")
+    before = tree(repo)
+    for call in (lambda: plan(repo, "project", ["set claude.timeout_min=45"]),
+                 lambda: apply(repo, "project", ["set claude.timeout_min=45"], "forged-revision")):
+        with pytest.raises(svc().ConfigChangeRefused) as info:
+            call()
+        assert "`config/defaults.yml`: not valid YAML (line" in str(info.value)
+        assert "SECRETTOKEN" not in str(info.value)
+    assert tree(repo) == before
+
+
 # -- scope rules ------------------------------------------------------------------
 
 @pytest.mark.parametrize("scope, slug, match", [
@@ -447,6 +523,22 @@ def test_a_partial_write_is_reported_with_its_written_and_uncertain_lists(repo, 
         apply(repo, "project", ["set claude.timeout_min=45"], previewed["revision"])
     assert info.value.written == ["config/a.yml"]
     assert info.value.uncertain == ["config/b.yml"]
+
+
+def test_a_real_partial_write_names_only_project_relative_files(repo, monkeypatch):
+    previewed = plan(repo, "project", ["set claude.timeout_min=45"])
+
+    def fail(path, text):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(store, "_atomic_write", fail)
+    with pytest.raises(svc().StaleConfiguration) as info:
+        apply(repo, "project", ["set claude.timeout_min=45"], previewed["revision"])
+    message = str(info.value)
+    assert "uncertain: config/agents.yml" in message
+    assert "unchanged: none" in message
+    assert str(repo) not in message
+    assert info.value.uncertain == ["config/agents.yml"]
 
 
 # -- isolation and file families -------------------------------------------------------
