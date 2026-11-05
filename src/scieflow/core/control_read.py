@@ -148,7 +148,9 @@ def read_yaml(dir_fd: int, name: str, cap: int = CONTROL_CAP) -> ControlRead:
         return _fail("malformed")
     try:
         value = yaml.safe_load(text)
-    except yaml.YAMLError:
+    except (yaml.YAMLError, RecursionError, ValueError):
+        # RecursionError: nesting deeper than the parser allows; ValueError: a value the
+        # loader rejects (e.g. 2026-02-30). Both are a malformed control, never a 500.
         return _fail("malformed")
     if not isinstance(value, dict):
         return _fail("invalid-shape")
