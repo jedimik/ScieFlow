@@ -39,6 +39,9 @@ functions:
   agent_config_view: {cli: "agent show"}
   plan_agent_changes: {cli: "agent configure"}
   apply_agent_changes: {cli: "agent configure"}
+
+  # --- T-12 t5: read-only index for the browser (plan 5.7); `workspace list` prints the same runs
+  workspace_index: {cli: "workspace list"}
   run_charter: {cli: "run charter"}
   set_charter: {cli: "run charter"}
   revert_charter: {cli: "run charter"}
