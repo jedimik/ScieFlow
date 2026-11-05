@@ -345,6 +345,21 @@ def test_role_row_separators_are_refused_and_nothing_is_written(client, project,
     assert (project.root / "config" / "defaults.yml").read_text() == before
 
 
+@pytest.mark.parametrize("row", [
+    ("stub", "x,stub2", ""),
+    ("stub", "claude-x,stub2", ""),
+    ("stub,stub2", "", ""),
+])
+def test_comma_rows_are_refused_on_a_fan_out_role(client, project, row):
+    # research.search takes several agents; a comma in a row would add one unseen.
+    before = (project.root / "config" / "defaults.yml").read_text()
+    response = _preview(client, _role_fields("research.search", [row])
+                        + [("init.role.research.search", "stub")])
+    assert response.status_code == 400
+    assert "research.search" in response.text
+    assert (project.root / "config" / "defaults.yml").read_text() == before
+
+
 def test_a_role_row_with_a_model_but_no_agent_is_refused(client, project):
     before = (project.root / "config" / "defaults.yml").read_text()
     response = _preview(client, _role_fields("research.outline", [("", "claude-x", "")])
