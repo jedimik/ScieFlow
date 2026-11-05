@@ -27,7 +27,7 @@ from starlette.datastructures import FormData
 from scieflow.core import jobs as jobs_mod
 from scieflow.core import service
 from scieflow.core.project import ProjectError
-from scieflow.web import auth, review_views
+from scieflow.web import agent_views, auth, review_views
 from scieflow.web.app import TEMPLATES
 
 router = APIRouter(dependencies=[Depends(auth.require_session)])
@@ -362,19 +362,37 @@ def start_run(request: Request, slug: str = Form(...), goal: str = Form(...),
 
 @router.get("/agents", response_class=HTMLResponse)
 def agents_page(request: Request, slug: str = "", error: str = "", ok: str = "",
-                assign: list[str] = Query(default=[])) -> HTMLResponse:
+                scope: str = "", assign: list[str] = Query(default=[])) -> HTMLResponse:
     """Plain `def`: staffing and review settings read the run's YAML from disk.
 
-    The review editor's live preview is a POST (`preview_review_settings`), not
-    a query on this page: a GET would carry the form's csrf_token in the URL
-    (owner finding O2)."""
+    `?assign=` is the legacy role-assignment preview, unchanged. Otherwise the
+    page shows one explicit scope: `scope`, or the run's workspace when a slug
+    is given, or the project defaults. The review editor's live preview is a
+    POST (`preview_review_settings`), not a query on this page: a GET would
+    carry the form's csrf_token in the URL (owner finding O2)."""
     project = _project(request)
-    review = review_views.editor_context(project, slug) if slug else None
-    return _agents_response(request, slug, error=error, ok=ok, assign=assign, review=review)
+    if assign:
+        review = review_views.editor_context(project, slug) if slug else None
+        return _agents_response(request, slug, error=error, ok=ok, assign=assign, review=review)
+    chosen = scope or ("workspace" if slug else "project")
+    scoped, scope_error = _scoped_context(project, chosen, slug)
+    review = review_views.editor_context(project, slug) if slug and chosen == "workspace" else None
+    return _agents_response(request, slug, error=error or scope_error, ok=ok, review=review,
+                            scope=chosen, scoped=scoped)
+
+
+def _scoped_context(project, scope: str, slug: str):
+    """The scoped view for the page, or (None, the refusal's message)."""
+    try:
+        view = service.agent_config_view(project, scope, slug or None)
+    except service.ServiceError as exc:
+        return None, str(exc)
+    return (view if scope == "news" else agent_views.decorate(view)), ""
 
 
 def _agents_response(request: Request, slug: str, *, error: str = "", ok: str = "",
-                     assign=(), review=None) -> HTMLResponse:
+                     assign=(), review=None, scope: str = "", scoped=None, values=None,
+                     change_preview=None, status_code: int = 200) -> HTMLResponse:
     from scieflow.core import agent_config
 
     project = _project(request)
@@ -384,9 +402,20 @@ def _agents_response(request: Request, slug: str, *, error: str = "", ok: str = 
             preview_staffing = service.plan_staffing(project, list(assign), slug or None)
         except service.ServiceError as exc:
             problem = str(exc)
+    if scope:
+        try:
+            settings = service.agent_settings(project, slug or None)
+        except service.ServiceError:
+            settings = None  # the scope's own refusal is shown instead
+    else:
+        settings = service.agent_settings(project, slug or None)
     return TEMPLATES.TemplateResponse(request, "agents.html", {
         "slug": slug,
-        "settings": service.agent_settings(project, slug or None),
+        "scope": scope,
+        "settings": settings,
+        "scoped": scoped,
+        "values": values or {},
+        "change_preview": change_preview,
         "roles": list(agent_config.ROLES),
         "runs": service.list_runs(project),
         "assign": list(assign),
@@ -395,7 +424,16 @@ def _agents_response(request: Request, slug: str, *, error: str = "", ok: str = 
         "error": problem,
         "ok": ok,
         "csrf": auth.csrf_token(request),
-    })
+    }, status_code=status_code)
+
+
+def _render_scoped(request: Request, project, *, scope: str, slug: str, error: str = "",
+                   values=None, change_preview=None, status_code: int = 200) -> HTMLResponse:
+    scoped, scope_error = (_scoped_context(project, scope, slug)
+                           if scope in service.AGENT_SCOPES else (None, ""))
+    return _agents_response(request, slug, error=error or scope_error, scope=scope or "project",
+                            scoped=scoped, values=values, change_preview=change_preview,
+                            status_code=status_code)
 
 
 def _run_dir_or_404(project, slug: str):
@@ -452,6 +490,50 @@ def apply_agents(request: Request, slug: str = Form(""),
         return RedirectResponse(target + ("&" if slug else "?")
                                 + "error=" + quote(str(exc)), status_code=303)
     return RedirectResponse(target, status_code=303)
+
+
+@router.post("/agents/preview", dependencies=MUTATE)
+def preview_agent_changes(request: Request, form: FormData = Depends(_conversation_form)):
+    """The scoped form's preview: what it would write, with the revision that binds it.
+
+    Writes nothing. A refusal re-renders the page with the reason and the values
+    the user submitted, so nothing typed is lost."""
+    project = _project(request)
+    values = agent_views.submitted_values(form)
+    scope, slug = values.get("scope", ""), values.get("slug", "")
+    try:
+        scope, slug = agent_views.scope_and_slug(form)
+        plan = service.plan_agent_changes(project, scope, agent_views.changes_from_form(form),
+                                          slug or None)
+    except service.ServiceError as exc:
+        return _render_scoped(request, project, scope=scope, slug=slug, error=str(exc),
+                              values=values, status_code=400)
+    return _render_scoped(request, project, scope=scope, slug=slug, values=values,
+                          change_preview=plan)
+
+
+@router.post("/agents/apply", dependencies=MUTATE)
+def apply_agent_changes_page(request: Request, form: FormData = Depends(_conversation_form)):
+    """Write a previewed change; only if the settings are still the ones previewed.
+
+    The changes are the canonical texts the preview produced (`change`), not
+    values re-read from the form, and the revision must match. Success is a 303
+    to a fresh scoped read; a refusal re-renders the page with the reason."""
+    project = _project(request)
+    scope, slug = agent_views.submitted_values(form).get("scope", ""), ""
+    try:
+        scope, slug = agent_views.scope_and_slug(form)
+        result = service.apply_agent_changes(project, scope, agent_views.change_texts(form),
+                                             agent_views.revision(form), slug or None)
+    except service.StaleConfiguration as exc:
+        return _render_scoped(request, project, scope=scope, slug=slug, error=str(exc),
+                              values={"scope": scope, "slug": slug}, status_code=409)
+    except service.ServiceError as exc:
+        return _render_scoped(request, project, scope=scope, slug=slug, error=str(exc),
+                              values={"scope": scope, "slug": slug}, status_code=400)
+    target = f"/agents?scope={quote(scope)}" + (f"&slug={quote(slug)}" if slug else "")
+    saved = "saved: " + ", ".join(result["written"])
+    return RedirectResponse(f"{target}&ok={quote(saved)}", status_code=303)
 
 
 @router.get("/runs/{slug}", response_class=HTMLResponse)

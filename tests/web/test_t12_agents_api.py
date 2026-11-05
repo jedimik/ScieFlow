@@ -21,8 +21,11 @@ def _csrf(client):
 
 
 def _post(client, route, fields):
-    return client.post(route, data=list(fields) + [(auth.CSRF_FIELD, _csrf(client))],
-                       follow_redirects=False)
+    grouped: dict[str, list] = {}
+    for name, value in [*fields, (auth.CSRF_FIELD, _csrf(client))]:
+        grouped.setdefault(name, []).append(value)
+    body = {name: values[0] if len(values) == 1 else values for name, values in grouped.items()}
+    return client.post(route, data=body, follow_redirects=False)
 
 
 def _preview_api(client, fields, scope="project", slug=None):
@@ -111,6 +114,9 @@ def test_api_mutations_need_a_session(project):
 
     from scieflow.web.app import create_app
     with TestClient(create_app(project, "test-token")) as anonymous:
-        response = anonymous.post("/api/v1/agents/apply", data={"scope": "project"})
+        # A matching CSRF pair, but no session: the session guard refuses (401).
+        anonymous.cookies.set(auth.CSRF_COOKIE, "matching")
+        response = anonymous.post("/api/v1/agents/apply", data={
+            auth.CSRF_FIELD: "matching", "scope": "project"})
     assert response.status_code == 401
     assert "error" in response.json()  # a JSON refusal, not a page

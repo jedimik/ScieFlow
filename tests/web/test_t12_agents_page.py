@@ -40,10 +40,21 @@ def _csrf(client):
 
 
 def _post(client, route, fields, *, csrf=True):
-    data = list(fields)
+    data = _body(list(fields))
     if csrf:
-        data.append((auth.CSRF_FIELD, _csrf(client)))
+        data[auth.CSRF_FIELD] = _csrf(client)
     return client.post(route, data=data, follow_redirects=False)
+
+
+def _body(pairs):
+    """A form body from (name, value) pairs: a repeated name becomes a list value."""
+    body: dict = {}
+    for name, value in pairs:
+        if name in body:
+            body[name] = (body[name] if isinstance(body[name], list) else [body[name]]) + [value]
+        else:
+            body[name] = value
+    return body
 
 
 def _preview(client, fields, *, scope="project", slug=None):
@@ -134,11 +145,12 @@ def test_markup_in_values_and_keys_renders_as_text(client, project):
 def test_templates_and_view_code_have_no_dialogs_and_no_safe_filter():
     web = Path(__file__).resolve().parents[2] / "src" / "scieflow" / "web"
     sources = [web / "agent_views.py", *sorted((web / "templates").glob("*.html"))]
+    unsafe_filter = re.compile(r"\{[{%][^}%]*\|\s*safe\b")
     for path in sources:
         text = path.read_text(encoding="utf-8")
         for banned in ("alert(", "confirm(", "prompt("):
             assert banned not in text, f"{path.name} must not use a browser dialog"
-        assert "|safe" not in text, f"{path.name} must not disable escaping"
+        assert not unsafe_filter.search(text), f"{path.name} must not disable escaping"
 
 
 def test_preview_writes_nothing_and_shows_only_the_changed_keys(client, project):

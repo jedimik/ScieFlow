@@ -6,22 +6,28 @@
 {% if error %}<p class="state-failed" role="alert">{{ error }}</p>{% endif %}
 {% if ok %}<p class="note" role="status">{{ ok }}</p>{% endif %}
 <p class="dim">
-  {% if slug %}Editing run <strong>{{ slug }}</strong> — a workspace only stores
-  what differs from the defaults.{% else %}Editing the project defaults.{% endif %}
-  Per-agent fields, promotions and demotions stay on the CLI &mdash; see
-  <code>docs/agents.md</code>.
+  Edit a scope's agent settings here: each agent's model, effort and timeout,
+  each role's agent, and the news settings. Command templates, <code>enabled</code>,
+  promotions and demotions stay on the CLI (<code>scieflow agent configure</code>);
+  see <code>docs/agents.md</code>.
 </p>
 
 <form method="get" action="/agents">
-  <select name="slug" onchange="this.form.submit()">
-    <option value="">project defaults</option>
+  <select name="scope">
+    <option value="project"{% if scope == "project" %} selected{% endif %}>Project defaults</option>
+    <option value="workspace"{% if scope == "workspace" %} selected{% endif %}>Workspace</option>
+    <option value="news"{% if scope == "news" %} selected{% endif %}>News settings</option>
+  </select>
+  <select name="slug">
+    <option value="">no run</option>
     {% for run in runs %}
     <option value="{{ run.slug }}" {% if run.slug == slug %}selected{% endif %}>{{ run.slug }}</option>
     {% endfor %}
   </select>
-  <noscript><button>Switch</button></noscript>
+  <button>Show</button>
 </form>
 
+{% if scope != "news" and settings %}
 <h2>Who does what</h2>
 <table>
   <tr><th>role</th><th>agent</th><th>from</th></tr>
@@ -59,6 +65,159 @@
       {% for one in assign %}<input type="hidden" name="assign" value="{{ one }}">{% endfor %}
       <input type="hidden" name="revision" value="{{ preview.revision }}">
       <button>Apply these changes</button>
+    </form>
+  {% endif %}
+{% endif %}
+
+{% endif %}
+
+{% if scope == "news" and scoped %}
+  <h2>News settings</h2>
+  {% if not scoped.available %}
+    <p class="dim">{{ scoped.message }}</p>
+  {% else %}
+    <p class="dim">{{ scoped.defaults_meaning }}</p>
+    {% for warning in scoped.warnings %}<p class="state-failed">{{ warning }}</p>{% endfor %}
+    {% set news = scoped.settings %}
+    <form method="post" action="/agents/preview">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="scope" value="news">
+      <p>
+        <label>agent
+          <select name="news.agent">
+            {% set cur = values.get("news.agent", news.agent or "") %}
+            {% for name in scoped.agents %}<option value="{{ name }}"{% if name == cur %} selected{% endif %}>{{ name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>model <input name="news.model" value="{{ values.get('news.model', news.model or '') }}"></label>
+        <label>reasoning
+          <select name="news.reasoning">
+            {% set cur = values.get("news.reasoning", news.reasoning or "") %}
+            <option value=""{% if not cur %} selected{% endif %}>(agent default)</option>
+            {% for level in scoped.levels %}<option value="{{ level }}"{% if level == cur %} selected{% endif %}>{{ level }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>timeout (seconds) <input type="number" name="news.timeout" min="1" step="1" value="{{ values.get('news.timeout', news.timeout or '') }}"></label>
+      </p>
+      <input type="hidden" name="init.news.agent" value="{{ news.agent or '' }}">
+      <input type="hidden" name="init.news.model" value="{{ news.model or '' }}">
+      <input type="hidden" name="init.news.reasoning" value="{{ news.reasoning or '' }}">
+      <input type="hidden" name="init.news.timeout" value="{{ news.timeout or '' }}">
+      <p class="actions"><button>Preview changes</button></p>
+    </form>
+  {% endif %}
+{% endif %}
+
+{% if scope in ["project", "workspace"] and scoped %}
+  <h2>{% if scope == "project" %}Project defaults{% else %}Run {{ slug }}{% endif %}: agent settings</h2>
+  <p class="dim">Bound project: <code>{{ scoped.project_root }}</code>.
+    {% if scope == "project" %}A change here reaches every run that does not override that setting; a run with its own value keeps it.
+    {% else %}A change here affects only this run; "inherit" means the project value applies.{% endif %}
+  </p>
+  <form method="post" action="/agents/preview">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="scope" value="{{ scope }}">
+    {% if scope == "workspace" %}<input type="hidden" name="slug" value="{{ slug }}">{% endif %}
+
+    {% for name, agent in scoped.agents.items() %}
+    <fieldset>
+      <legend>{{ name }}{% if agent.tier %} ({{ agent.tier }}){% endif %}{% if not agent.enabled %}, disabled{% endif %}</legend>
+      <p>
+        <label>model
+          <select name="agent.{{ name }}.model">
+            {% set cur = values.get("agent." ~ name ~ ".model", agent.model.stored or "") %}
+            <option value=""{% if not cur %} selected{% endif %}>{{ "(inherit)" if scope == "workspace" else "(not set)" }}</option>
+            {% for option in agent.models %}<option value="{{ option }}"{% if option == cur %} selected{% endif %}>{{ option }}</option>{% endfor %}
+            {% if cur and cur not in agent.models %}<option value="{{ cur }}" selected>{{ cur }}</option>{% endif %}
+          </select>
+        </label>
+        <label>or another model <input name="agent.{{ name }}.model_custom" value="{{ values.get('agent.' ~ name ~ '.model_custom', '') }}"></label>
+        <input type="hidden" name="init.agent.{{ name }}.model" value="{{ agent.model.stored or '' }}">
+        <span class="dim">stored here: {{ agent.model.stored or "—" }}; inherited: {{ agent.model.inherited or "—" }}; in effect: {{ agent.model.effective or "—" }} ({{ agent.model.source }})</span>
+      </p>
+      {% if agent.effort.mode == "none" %}
+        <p class="dim">This agent has no effort setting.</p>
+      {% else %}
+        <p>
+          <label>effort
+            <select name="agent.{{ name }}.reasoning">
+              {% set cur = values.get("agent." ~ name ~ ".reasoning", agent.reasoning.stored or "") %}
+              <option value=""{% if not cur %} selected{% endif %}>{{ "(inherit)" if scope == "workspace" else "(not set)" }}</option>
+              {% for level in agent.effort.levels %}<option value="{{ level }}"{% if level == cur %} selected{% endif %}>{{ level }}</option>{% endfor %}
+              {% if cur and cur not in agent.effort.levels %}<option value="{{ cur }}" selected>{{ cur }}</option>{% endif %}
+            </select>
+          </label>
+          {% if agent.effort.custom_ok %}
+          <label>or another effort <input name="agent.{{ name }}.reasoning_custom" value="{{ values.get('agent.' ~ name ~ '.reasoning_custom', '') }}"></label>
+          {% endif %}
+          <input type="hidden" name="init.agent.{{ name }}.reasoning" value="{{ agent.reasoning.stored or '' }}">
+          <span class="dim">{{ agent.effort.how }} Stored here: {{ agent.reasoning.stored or "—" }}; in effect: {{ agent.reasoning.effective or "—" }} ({{ agent.reasoning.source }})</span>
+        </p>
+      {% endif %}
+      <p>
+        {% set cur = values.get("agent." ~ name ~ ".timeout_min", agent.timeout_min.stored if agent.timeout_min.stored is not none else "") %}
+        <label>timeout (minutes) <input type="number" name="agent.{{ name }}.timeout_min" min="0" step="any" value="{{ cur }}"></label>
+        <input type="hidden" name="init.agent.{{ name }}.timeout_min" value="{{ agent.timeout_min.stored if agent.timeout_min.stored is not none else '' }}">
+        <span class="dim">stored here: {{ agent.timeout_min.stored if agent.timeout_min.stored is not none else "—" }}; in effect: {{ agent.timeout_min.effective if agent.timeout_min.effective is not none else "—" }} ({{ agent.timeout_min.source }})</span>
+      </p>
+      <p class="dim">Command template: {{ "configured; change it on the CLI with scieflow agent configure" if agent.cmd.configured else "not configured" }}.</p>
+    </fieldset>
+    {% endfor %}
+
+    <h2>Roles</h2>
+    <p class="dim">Which agent does each role, and for that role alone an optional model and effort. Promotions and demotions stay on the CLI: <code>scieflow agent configure --promote ROLE</code>.</p>
+    {% for role, form in scoped.role_forms.items() %}
+    {% set info = scoped.roles[role] %}
+    <fieldset>
+      <legend>{{ role }}{% if info.many %} (several agents){% endif %}</legend>
+      <p class="dim">{{ info.help }}</p>
+      <input type="hidden" name="init.role.{{ role }}" value="{{ form.init }}">
+      {% for row in form.rows %}
+      {% set i = loop.index0 %}
+      <p>
+        <select name="role.{{ role }}.{{ i }}.agent">
+          {% set cur = values.get("role." ~ role ~ "." ~ i ~ ".agent", row.agent) %}
+          <option value=""{% if not cur %} selected{% endif %}>— none —</option>
+          {% for name in scoped.agents %}<option value="{{ name }}"{% if name == cur %} selected{% endif %}>{{ name }}</option>{% endfor %}
+        </select>
+        model <input name="role.{{ role }}.{{ i }}.model" value="{{ values.get('role.' ~ role ~ '.' ~ i ~ '.model', row.model) }}">
+        effort <input name="role.{{ role }}.{{ i }}.effort" value="{{ values.get('role.' ~ role ~ '.' ~ i ~ '.effort', row.effort) }}">
+      </p>
+      {% endfor %}
+      {% if info.exception %}<p class="dim">A support-as-primary exception is in effect for this role (read only; the CLI changes it).</p>{% endif %}
+      {% if info.overrides %}<p class="dim">Run overrides: {% for agent_name, found in info.overrides.items() %}{{ agent_name }} ({{ found.source }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+    </fieldset>
+    {% endfor %}
+
+    <p class="actions"><button>Preview changes</button></p>
+  </form>
+{% endif %}
+
+{% if change_preview %}
+  <h2>Preview (nothing written)</h2>
+  {% if change_preview.empty %}
+    <p class="dim">Already configured that way; nothing to write.</p>
+  {% else %}
+    <table>
+      <tr><th>file</th><th>key</th><th>before</th><th>after</th></tr>
+      {% for row in change_preview.structured %}
+      <tr>
+        <td>{{ row.file }}</td><td>{{ row.key }}</td>
+        <td>{{ row.before if row.before is not none else "—" }}</td>
+        <td>{{ row.after if row.after is not none else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% for note in change_preview.notes %}<p class="note">{{ note }}</p>{% endfor %}
+    {% for warning in change_preview.warnings %}<p class="state-failed">{{ warning }}</p>{% endfor %}
+    {% for line in change_preview.inheritance %}<p class="dim">{{ line }}</p>{% endfor %}
+    <form method="post" action="/agents/apply">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="scope" value="{{ scope }}">
+      {% if scope == "workspace" %}<input type="hidden" name="slug" value="{{ slug }}">{% endif %}
+      {% for change in change_preview.changes %}<input type="hidden" name="change" value="{{ change }}">{% endfor %}
+      <input type="hidden" name="revision" value="{{ change_preview.revision }}">
+      <p class="actions"><button>Apply these changes</button></p>
     </form>
   {% endif %}
 {% endif %}
