@@ -264,11 +264,11 @@ def configure(slug, news, assigns, sets, promotes, demotes, unsets, yes):
                 return
             yes = False
         if target == "news":
-            plan = acf.plan_news(root, ops)
+            plan = acf.preview("news", root, ops)
         elif target == "workspace":
-            plan = acf.plan_workspace(root, slug, ops)
+            plan = acf.preview("workspace", root, ops, slug=slug)
         else:
-            plan = acf.plan_defaults(root, ops)
+            plan = acf.preview("default", root, ops)
     except acf.ConfigureError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -283,7 +283,10 @@ def configure(slug, news, assigns, sets, promotes, demotes, unsets, yes):
         if not click.confirm("Write these changes?", default=False):
             click.echo("not written")
             return
-    acf.write(plan)
+    try:
+        acf.apply(plan)
+    except acf.ConfigureError as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo("written: " + ", ".join(str(c.path.relative_to(root)) for c in plan.changes))
 
 

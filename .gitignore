@@ -20,6 +20,8 @@ config/scite.yml
 config/integrations.yml
 config/chats.yml
 config/data-policy.yml
+# The configurator's project lock (core/agent_configure.py); created on first use.
+config/.agent-configure.lock
 # Machine-local DVC remote (endpoint + bucket); credentials live in config.local
 .dvc/config
 .env

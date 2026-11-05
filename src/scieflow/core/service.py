@@ -1290,31 +1290,40 @@ def _staffing_plan(project: Project, assignments: list[str], slug: str | None):
         ops = [acf.parse_assign(text) for text in assignments]
         if slug:
             _ws(project, slug)          # validates the slug the same way
-            return acf.plan_workspace(project.root, slug, ops)
-        return acf.plan_defaults(project.root, ops)
+            return acf.preview("workspace", project.root, ops, slug=slug)
+        return acf.preview("default", project.root, ops)
     except acf.ConfigureError as exc:
         raise ServiceError(str(exc)) from exc
 
 
 def plan_staffing(project: Project, assignments: list[str],
                   slug: str | None = None) -> dict:
-    """What changing these role assignments would write, as a diff."""
+    """What changing these role assignments would write, as a diff, with its revision."""
     plan = _staffing_plan(project, assignments, slug)
     return {
         "diff": "".join(change.diff(project.root) for change in plan.changes),
         "notes": list(plan.notes),
         "warnings": list(plan.warnings),
         "empty": not plan.changes,
+        "revision": plan.revision,
     }
 
 
 def apply_staffing(project: Project, assignments: list[str],
-                   slug: str | None = None) -> dict:
-    """Re-plan from what is on disk right now, then write."""
+                   slug: str | None = None, *, revision: str | None = None) -> dict:
+    """Write the change only if it is still the one previewed under `revision`."""
+    if not revision:
+        raise ServiceError("no preview revision was given; preview again, nothing written")
     plan = _staffing_plan(project, assignments, slug)
     if not plan.changes:
         raise ServiceError("already configured that way; nothing to write")
-    acf.write(plan)
+    if plan.revision != revision:
+        raise ServiceError("the configuration changed since it was previewed; nothing written; "
+                           "preview again")
+    try:
+        acf.apply(plan)
+    except acf.ConfigureError as exc:
+        raise ServiceError(str(exc)) from exc
     return {"written": [str(c.path.relative_to(project.root)) for c in plan.changes],
             "warnings": list(plan.warnings)}
 

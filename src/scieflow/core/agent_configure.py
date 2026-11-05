@@ -9,26 +9,58 @@ the override.
 
 from __future__ import annotations
 
+import dataclasses
 import difflib
+import hashlib
 import io
+import json
 import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+from filelock import Timeout as LockTimeout
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from scieflow.core import agent_config as ac
 from scieflow.core import store
+from scieflow.news import config as news_config
 
 NUMBER_FIELDS = {"timeout_min", "timeout"}
 BOOL_FIELDS = {"enabled"}
 
+#: The one project lock every configuration writer takes first (`config/` is git-ignored for it).
+LOCK_NAME = ".agent-configure.lock"
+CONFIGURE_LOCK_TIMEOUT = 10          # seconds; contention is BusyError
+REVISION_VERSION = 1
+_STALE = "the configuration changed since it was previewed; nothing written; preview again"
+_BUSY = "another configuration change is being written; preview again"
+
 
 class ConfigureError(Exception):
     """A requested change is invalid; nothing was written."""
+
+
+class StaleError(ConfigureError):
+    """What was previewed is no longer what is on disk; nothing was written."""
+
+
+class BusyError(ConfigureError):
+    """Another process holds the configuration lock; nothing was written."""
+
+
+class PartialWriteError(ConfigureError):
+    """A write failed part-way. No rollback is promised (FG:209-213)."""
+
+    def __init__(self, written: list[str], uncertain: list[str], unchanged: list[str]) -> None:
+        self.written, self.uncertain, self.unchanged = written, uncertain, unchanged
+        super().__init__(
+            "a write failed part-way; "
+            f"written: {', '.join(written) or 'none'}; "
+            f"uncertain: {', '.join(uncertain) or 'none'}; "
+            f"unchanged: {', '.join(unchanged) or 'none'}. Check these files and preview again.")
 
 
 @dataclass(frozen=True)
@@ -57,6 +89,14 @@ class Plan:
     changes: list[FileChange]
     notes: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # Set by the owner (`_build`). A Plan made by hand has no revision: `apply` refuses it.
+    scope: str | None = None
+    root: Path | None = None
+    slug: str | None = None
+    config_path: Path | None = None
+    ops: tuple = ()
+    deps: dict = field(default_factory=dict)     # canonical path -> digest read while planning
+    revision: str | None = None
 
 
 # --- parsing -----------------------------------------------------------------
@@ -161,11 +201,66 @@ def _dump(doc, style) -> str:
     return out.getvalue()
 
 
-def _load(path: Path):
+def _key(path) -> str:
+    """The canonical key of a path in a read set or a revision."""
+    return os.path.abspath(os.fspath(path))
+
+
+def _digest_bytes(raw: bytes) -> str:
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def _digest(path) -> str:
+    """What the read set records for a path: content, `dir`, or `absent`."""
+    target = Path(path)
+    if target.is_file():
+        return _digest_bytes(target.read_bytes())
+    return "dir" if target.is_dir() else "absent"
+
+
+class _Reads:
+    """Every file the planners consult, with the digest seen at the first read."""
+
+    def __init__(self) -> None:
+        self.seen: dict[str, str] = {}
+
+    def _record(self, path, digest: str) -> None:
+        self.seen.setdefault(_key(path), digest)
+
+    def text(self, path) -> str | None:
+        target = Path(path)
+        if target.is_file():
+            raw = target.read_bytes()
+            self._record(target, _digest_bytes(raw))
+            return raw.decode("utf-8")
+        self._record(target, _digest(target))
+        return None
+
+    def exists(self, path) -> bool:
+        self._record(path, _digest(path))
+        return Path(path).exists()
+
+    def is_dir(self, path) -> bool:
+        self._record(path, _digest(path))
+        return Path(path).is_dir()
+
+
+def _read_yaml(reads: _Reads, path: Path) -> dict:
+    """What `agent_config._load_yaml` reads, through the tracer."""
+    text = reads.text(path)
+    if text is None:
+        return {}
+    data = yaml.safe_load(text) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a mapping")
+    return data
+
+
+def _load(path: Path, reads: _Reads | None = None):
     """Load for editing; pick the indentation style that reproduces the file."""
-    if not path.exists():
+    text = (reads or _Reads()).text(path)
+    if text is None:
         return "", CommentedMap(), _STYLES[1]
-    text = path.read_text()
     for style in _STYLES:
         doc = _yaml(style).load(text)
         if doc is None:
@@ -275,9 +370,115 @@ def _change(path: Path, before: str, doc, style) -> FileChange | None:
     return None if after == before else FileChange(path, before, after)
 
 
-def write(plan: Plan) -> None:
-    for change in plan.changes:
-        store.write_text(change.path, change.after)
+def _lock_path(root: Path) -> Path:
+    config_dir = root / "config"
+    if not config_dir.is_dir():
+        raise ConfigureError(f"{config_dir} does not exist; there is no configuration to change")
+    return config_dir / LOCK_NAME
+
+
+def _sha(text: str) -> str:
+    return _digest_bytes(text.encode("utf-8"))
+
+
+def _revision(scope, root, slug, config_path, ops, deps, targets) -> str:
+    body = {
+        "v": REVISION_VERSION, "code": CODE_FINGERPRINT, "root": _key(root), "scope": scope,
+        "slug": slug, "config_path": _key(config_path) if config_path else None,
+        "ops": [[op.kind, op.key, op.value] for op in ops], "deps": deps, "targets": targets,
+    }
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _build(scope: str, root: Path, ops, *, slug: str | None = None,
+           config_path: Path | None = None) -> Plan:
+    """Plan one scope with a fresh read set, and seal the plan with its revision.
+
+    Takes no lock: `preview` holds the project lock around this, and the
+    wizard's per-answer validation calls the planners directly.
+    """
+    ops = list(ops)
+    reads = _Reads()
+    if scope == "default":
+        plan = _plan_defaults(root, ops, reads)
+    elif scope == "workspace":
+        if not slug:
+            raise ConfigureError("a workspace change needs a run slug")
+        plan = _plan_workspace(root, slug, ops, reads)
+    elif scope == "news":
+        config_path = config_path or news_config_path(root)
+        plan = _plan_news(root, ops, config_path, reads)
+    else:
+        raise ConfigureError(f"unknown configuration scope {scope!r}")
+    plan.scope, plan.root, plan.slug, plan.config_path = scope, root, slug, config_path
+    plan.ops = tuple(ops)
+    plan.deps = dict(reads.seen)
+    targets = {_key(change.path): _sha(change.after) for change in plan.changes}
+    plan.revision = _revision(scope, root, slug, config_path, plan.ops, plan.deps, targets)
+    return plan
+
+
+def preview(scope: str, root: Path, ops, *, slug: str | None = None,
+            config_path: Path | None = None) -> Plan:
+    """Plan a change under the project lock; the lock is released before returning."""
+    try:
+        with store.exclusive(_lock_path(root), CONFIGURE_LOCK_TIMEOUT):
+            return _build(scope, root, ops, slug=slug, config_path=config_path)
+    except LockTimeout as exc:
+        raise BusyError(_BUSY) from exc
+
+
+def _unchanged(deps: dict) -> bool:
+    return all(_digest(Path(key)) == digest for key, digest in deps.items())
+
+
+def _lock_files(plan: Plan) -> list[str]:
+    """Each dependency that is a file (or may be created inside an existing folder), and each target."""
+    keys = {key for key, digest in plan.deps.items()
+            if digest != "dir" and Path(key).parent.is_dir()}
+    keys.update(_key(change.path) for change in plan.changes)
+    return sorted(keys)
+
+
+def apply(plan: Plan) -> list[Path]:
+    """Write a previewed plan, but only if the configuration is still the one previewed.
+
+    Under the project lock: replan from the plan's own scope, slug, ops and
+    config path; then, holding the sibling locks, re-read every dependency and
+    compare the revision. Any difference raises StaleError before a byte is
+    replaced. Targets are replaced in path order.
+    """
+    if plan.revision is None or plan.root is None:
+        raise ConfigureError("refused: this plan was not produced by a planner; preview it first")
+    targets = sorted(plan.changes, key=lambda change: _key(change.path))
+    written: list[Path] = []
+    try:
+        with store.exclusive(_lock_path(plan.root), CONFIGURE_LOCK_TIMEOUT):
+            try:
+                fresh = _build(plan.scope or "", plan.root, plan.ops, slug=plan.slug,
+                               config_path=plan.config_path)
+            except ConfigureError as exc:
+                raise StaleError(f"{_STALE} ({exc})") from exc
+            with store.held_locks(_lock_files(plan), CONFIGURE_LOCK_TIMEOUT) as locks:
+                if not _unchanged(plan.deps) or fresh.revision != plan.revision:
+                    raise StaleError(_STALE)
+                for index, change in enumerate(targets):
+                    try:
+                        locks.replace(change.path, change.after)
+                    except OSError as exc:
+                        raise PartialWriteError(
+                            written=[_key(c.path) for c in targets[:index]],
+                            uncertain=[_key(change.path)],
+                            unchanged=[_key(c.path) for c in targets[index + 1:]],
+                        ) from exc
+                    written.append(change.path)
+    except LockTimeout as exc:
+        raise BusyError(_BUSY) from exc
+    return written
+
+
+write = apply
 
 
 def _refuse_problems(eff: ac.Effective) -> None:
@@ -330,10 +531,15 @@ def _split_agent_key(key: str) -> tuple[str, str]:
 # --- targets -----------------------------------------------------------------
 
 def plan_defaults(root: Path, ops: list[Op]) -> Plan:
+    """The project defaults: a sealed plan. `preview` is the locked form."""
+    return _build("default", root, ops)
+
+
+def _plan_defaults(root: Path, ops: list[Op], reads: _Reads) -> Plan:
     agents_path = root / "config" / "agents.yml"
     defaults_path = root / "config" / "defaults.yml"
-    agents_before, agents_doc, agents_style = _load(agents_path)
-    defaults_before, defaults_doc, defaults_style = _load(defaults_path)
+    agents_before, agents_doc, agents_style = _load(agents_path, reads)
+    defaults_before, defaults_doc, defaults_style = _load(defaults_path, reads)
     registry = agents_doc.get("agents") or {}
 
     for op in ops:
@@ -377,13 +583,19 @@ def plan_defaults(root: Path, ops: list[Op]) -> Plan:
 
 
 def plan_workspace(root: Path, slug: str, ops: list[Op]) -> Plan:
+    """One run's change: a sealed plan. `preview` is the locked form."""
+    return _build("workspace", root, ops, slug=slug)
+
+
+def _plan_workspace(root: Path, slug: str, ops: list[Op], reads: _Reads) -> Plan:
     ws_dir = ac.workspace_dir(root, slug)
-    if not ws_dir.is_dir():
+    if not reads.is_dir(ws_dir):
         raise ConfigureError(f"no workspace {slug!r} under {root / 'workspace'}")
     path = ws_dir / "config.yml"
-    before, doc, style = _load(path)
-    registry = ac._load_yaml(root / "config" / "agents.yml")
-    defaults = ac._load_yaml(root / "config" / "defaults.yml")
+    before, doc, style = _load(path, reads)
+    registry = _read_yaml(reads, root / "config" / "agents.yml")
+    defaults = _read_yaml(reads, root / "config" / "defaults.yml")
+    has_status = reads.exists(ws_dir / "status.yml")
     baseline = ac.resolve_data(registry, defaults)
     registry_agents = registry.get("agents") or {}
     legacy_roles = {role for key, role in ac.LEGACY_ROLE_KEYS.items() if key in doc}
@@ -458,7 +670,7 @@ def plan_workspace(root: Path, slug: str, ops: list[Op]) -> Plan:
     _check_following_reviewers(eff, ops, registry_agents)
     change = _change(path, before, doc, style)
     plan = Plan([change] if change else [], warnings=eff.warnings)
-    if change and not (ws_dir / "status.yml").exists():
+    if change and not has_status:
         plan.notes.append(
             f"workspace/{slug} has no status.yml yet: `scieflow agent run` refuses "
             "prompts in a run folder with config.yml but no status.yml, so create the "
@@ -475,15 +687,19 @@ def news_config_path(root: Path) -> Path:
 
 
 def plan_news(root: Path, ops: list[Op], config_path: Path | None = None) -> Plan:
+    """Agent settings of the news module: a sealed plan. `preview` is the locked form."""
+    return _build("news", root, ops, config_path=config_path)
+
+
+def _plan_news(root: Path, ops: list[Op], path: Path, reads: _Reads) -> Plan:
     """Agent settings of the news module (its own restricted adapter)."""
     import tempfile
 
     from scieflow.news.config import ConfigError, load_config
 
-    path = config_path or news_config_path(root)
-    if not path.exists():
+    if not reads.exists(path):
         raise ConfigureError(f"{path} does not exist; create it with `scieflow news init`")
-    before, doc, style = _load(path)
+    before, doc, style = _load(path, reads)
     for op in ops:
         if op.kind == "assign":
             raise ConfigureError("the news module has no roles; use --set agent=<name>")
@@ -527,3 +743,25 @@ def news_settings(root: Path, config_path: Path | None = None) -> dict:
         "reasoning": data.get("reasoning"),
         "timeout": data.get("timeout"),
     }
+
+
+def _code_fingerprint() -> str:
+    """Changes whenever a schema the configurator writes against changes (FG:185-186)."""
+    body = {
+        "roles": {name: dataclasses.asdict(spec) for name, spec in ac.ROLES.items()},
+        "agent_fields": ac.AGENT_FIELDS,
+        "workspace_agent_fields": ac.WORKSPACE_AGENT_FIELDS,
+        "role_override_fields": ac.ROLE_OVERRIDE_FIELDS,
+        "extended_thinking": ac.EXTENDED_THINKING,
+        "thinking_levels": ac.THINKING_LEVELS,
+        "news_fields": NEWS_FIELDS,
+        "news_valid_agents": news_config.VALID_AGENTS,
+        "news_valid_reasoning": news_config.VALID_REASONING,
+        "news_top_level_keys": sorted(news_config.TOP_LEVEL_KEYS),
+    }
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+CODE_FINGERPRINT = _code_fingerprint()
+

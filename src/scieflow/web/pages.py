@@ -439,14 +439,15 @@ def apply_review_settings(request: Request, slug: str,
 
 @router.post("/agents", dependencies=MUTATE)
 def apply_agents(request: Request, slug: str = Form(""),
-                 assign: list[str] = Form(default=[])):
+                 assign: list[str] = Form(default=[]), revision: str = Form("")):
     target = "/agents" + (f"?slug={quote(slug)}" if slug else "")
     if not assign:
         return RedirectResponse(target + ("&" if slug else "?")
                                 + "error=" + quote("choose a role and an agent first"),
                                 status_code=303)
     try:
-        service.apply_staffing(_project(request), assign, slug or None)
+        service.apply_staffing(_project(request), assign, slug or None,
+                               revision=revision or None)
     except service.ServiceError as exc:
         return RedirectResponse(target + ("&" if slug else "?")
                                 + "error=" + quote(str(exc)), status_code=303)

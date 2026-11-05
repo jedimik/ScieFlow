@@ -431,6 +431,11 @@ def agent_settings(ui: UI, scope: str | None = None, slug: str | None = None) ->
         return (acf.plan_workspace(root, slug, candidate) if scope == "workspace"
                 else acf.plan_defaults(root, candidate))
 
+    def preview_queued(candidate):
+        """The locked preview that Save writes; validation above stays unlocked."""
+        return (acf.preview("workspace", root, candidate, slug=slug) if scope == "workspace"
+                else acf.preview("default", root, candidate))
+
     def attempt(new: list) -> None:
         try:
             plan(ops + new)
@@ -486,10 +491,18 @@ def agent_settings(ui: UI, scope: str | None = None, slug: str | None = None) ->
             if not ops:
                 click.echo("nothing queued")
                 continue
-            result = plan(ops)
+            try:
+                result = preview_queued(ops)
+            except acf.ConfigureError as exc:
+                click.echo(click.style(f"not applied: {exc}", fg="red"))
+                continue
             _print_plan(result, root)
             if ui.confirm("Write these changes?", default=False):
-                acf.write(result)
+                try:
+                    acf.apply(result)
+                except acf.ConfigureError as exc:
+                    click.echo(click.style(f"not saved: {exc}", fg="red"))
+                    continue          # the queued changes stay queued
                 click.echo(click.style("saved", fg="green"))
                 return
 
@@ -634,14 +647,18 @@ def _news_settings(ui: UI, root: Path) -> None:
                 click.echo("nothing queued")
                 continue
             try:
-                result = acf.plan_news(root, ops)
+                result = acf.preview("news", root, ops)
             except acf.ConfigureError as exc:
                 click.echo(click.style(f"not applied: {exc}", fg="red"))
                 ops.clear()
                 continue
             _print_plan(result, root)
             if ui.confirm("Write these changes?", default=False):
-                acf.write(result)
+                try:
+                    acf.apply(result)
+                except acf.ConfigureError as exc:
+                    click.echo(click.style(f"not saved: {exc}", fg="red"))
+                    continue          # the queued changes stay queued
                 click.echo(click.style("saved", fg="green"))
             return
         if field_name == "agent":
