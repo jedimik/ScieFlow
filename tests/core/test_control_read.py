@@ -151,6 +151,21 @@ def test_reasons_never_carry_file_content(run):
         assert "SECRET" not in result.reason
 
 
+def test_a_deeply_nested_control_is_malformed_not_an_exception(run):
+    # Under the size cap, but deeper than the parser's recursion limit (T-12 t5r finding 1).
+    root, fd = run
+    depth = 100_000
+    _write(root, "status.yml", "k: " + "[" * depth + "]" * depth + "\n")
+    assert cr.read_yaml(fd, "status.yml").status == "malformed"
+
+
+def test_an_impossible_date_is_malformed_not_an_exception(run):
+    # The loader raises ValueError for a date that does not exist (T-12 t5r finding 1).
+    root, fd = run
+    _write(root, "status.yml", "run: r1\ncreated: 2026-02-30\n")
+    assert cr.read_yaml(fd, "status.yml").status == "malformed"
+
+
 def test_open_dir_refuses_a_symlinked_component(run):
     root, _ = run
     (root / "real").mkdir()
