@@ -254,3 +254,118 @@ def test_a_workspace_change_is_scoped_to_its_run(client, project):
     project_view = client.get("/api/v1/agents", params={"scope": "project"}).json()
     assert run["agents"]["stub"]["timeout_min"]["effective"] == 9
     assert project_view["agents"]["stub"]["timeout_min"]["stored"] == 1
+
+
+def _role_fields(role, rows):
+    """Role-row form fields from (agent, model, effort) rows, as the page posts them."""
+    out = []
+    for index, (agent, model, effort) in enumerate(rows):
+        out += [(f"role.{role}.{index}.agent", agent), (f"role.{role}.{index}.model", model),
+                (f"role.{role}.{index}.effort", effort)]
+    return out
+
+
+def _preview_page(client, fields, *, scope="project", slug=None):
+    response = _preview(client, fields, scope=scope, slug=slug)
+    assert response.status_code == 200, response.text
+    return response.text
+
+
+def _apply_previewed(client, page, *, scope="project", slug=None):
+    changes = re.findall(r'name="change" value="([^"]*)"', page)
+    revision = re.search(r'name="revision" value="([0-9a-f]{64})"', page).group(1)
+    base = [("scope", scope)] + ([("slug", slug)] if slug else []) + [("revision", revision)]
+    return _post(client, "/agents/apply", base + [("change", c) for c in changes])
+
+
+def _defaults(project):
+    return yaml.safe_load((project.root / "config" / "defaults.yml").read_text())
+
+
+def test_role_model_only_is_written_as_agent_at_model(client):
+    page = _preview_page(client, _role_fields("research.outline", [("stub", "claude-x", "")])
+                         + [("init.role.research.outline", "stub")])
+    assert re.findall(r'name="change" value="([^"]*)"', page) == ["assign research.outline=stub@claude-x"]
+
+
+def test_role_effort_only_is_written_as_agent_at_slash_effort(client, project):
+    page = _preview_page(client, _role_fields("research.outline", [("stub", "", "extended-thinking")])
+                         + [("init.role.research.outline", "stub")])
+    assert re.findall(r'name="change" value="([^"]*)"', page) == [
+        "assign research.outline=stub@/extended-thinking"]
+    assert _apply_previewed(client, page).status_code == 303
+    assert _defaults(project)["assignments"]["research.outline"] == {
+        "agent": "stub", "reasoning": "extended-thinking"}
+
+
+def test_role_model_and_effort_are_written_as_agent_at_model_slash_effort(client, project):
+    page = _preview_page(client, _role_fields("research.outline", [("stub", "claude-x", "extended-thinking")])
+                         + [("init.role.research.outline", "stub")])
+    assert _apply_previewed(client, page).status_code == 303
+    assert _defaults(project)["assignments"]["research.outline"] == {
+        "agent": "stub", "model": "claude-x", "reasoning": "extended-thinking"}
+
+
+def test_fan_out_role_second_row_is_written_as_a_second_agent(client, project):
+    page = _preview_page(client, _role_fields("research.search", [("stub", "", ""), ("stub2", "", "")])
+                         + [("init.role.research.search", "stub")])
+    assert re.findall(r'name="change" value="([^"]*)"', page) == ["assign research.search=stub,stub2"]
+    assert _apply_previewed(client, page).status_code == 303
+    assert _defaults(project)["assignments"]["research.search"] == ["stub", "stub2"]
+
+
+def test_stored_effort_only_role_initial_text_is_canonical(client, project):
+    defaults = project.root / "config" / "defaults.yml"
+    defaults.write_text(defaults.read_text().replace(
+        "  research.outline: stub\n", "  research.outline: {agent: stub, reasoning: extended-thinking}\n"))
+    page = client.get("/agents").text
+    assert 'name="init.role.research.outline" value="stub@/extended-thinking"' in page
+    changed = _preview_page(client, _role_fields("research.outline", [("stub", "claude-x", "extended-thinking")])
+                            + [("init.role.research.outline", "stub@/extended-thinking")])
+    assert re.findall(r'name="change" value="([^"]*)"', changed) == [
+        "assign research.outline=stub@claude-x/extended-thinking"]
+
+
+@pytest.mark.parametrize("row", [
+    ("stub", "x,stub2", ""),
+    ("stub", "a@b", ""),
+    ("stub", "openai/gpt-5", ""),
+    ("stub", "claude x", ""),
+    ("stub", "a\nb", ""),
+    ("stub", "", "a/b"),
+    ("stub", "", "x,y"),
+    ("stub,stub2", "", ""),
+])
+def test_role_row_separators_are_refused_and_nothing_is_written(client, project, row):
+    before = (project.root / "config" / "defaults.yml").read_text()
+    response = _preview(client, _role_fields("research.outline", [row])
+                        + [("init.role.research.outline", "stub")])
+    assert response.status_code == 400
+    assert "research.outline" in response.text
+    assert (project.root / "config" / "defaults.yml").read_text() == before
+
+
+def test_a_role_row_with_a_model_but_no_agent_is_refused(client, project):
+    before = (project.root / "config" / "defaults.yml").read_text()
+    response = _preview(client, _role_fields("research.outline", [("", "claude-x", "")])
+                        + [("init.role.research.outline", "stub")])
+    assert response.status_code == 400
+    assert "choose an agent" in response.text
+    assert (project.root / "config" / "defaults.yml").read_text() == before
+
+
+def test_claude_effort_round_trip_through_preview_and_apply(client, project):
+    page = _preview_page(client, [("agent.stub.reasoning", "extended-thinking"),
+                                  ("init.agent.stub.reasoning", "")])
+    assert re.findall(r'name="change" value="([^"]*)"', page) == ["set stub.reasoning=extended-thinking"]
+    assert _apply_previewed(client, page).status_code == 303
+    view = client.get("/api/v1/agents", params={"scope": "project"}).json()
+    assert view["agents"]["stub"]["reasoning"]["stored"] == "extended-thinking"
+
+
+def test_agent_names_and_run_slugs_with_markup_render_as_text(client, project):
+    _add_agents(project, '  "<script>x</script>": {cmd: "true", enabled: true, timeout_min: 1}\n')
+    page = client.get("/agents").text
+    assert "<script>x</script>" not in page
+    assert "&lt;script&gt;x&lt;/script&gt;" in page
+    assert "<b>x</b>" not in client.get("/agents", params={"slug": "<b>x</b>"}).text

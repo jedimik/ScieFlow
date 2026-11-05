@@ -80,6 +80,14 @@ def test_api_preview_refuses_a_forged_command_with_400(client):
     assert "CLI-only" in response.json()["error"]
 
 
+def test_api_role_effort_only_preview_writes_the_at_slash_form(client):
+    plan = _preview_api(client, [
+        ("role.research.outline.0.agent", "stub"), ("role.research.outline.0.model", ""),
+        ("role.research.outline.0.effort", "extended-thinking"),
+        ("init.role.research.outline", "stub")]).json()
+    assert plan["changes"] == ["assign research.outline=stub@/extended-thinking"]
+
+
 def test_api_apply_writes_and_reports_the_written_files(client, project):
     plan = _preview_api(client, [
         ("agent.stub.timeout_min", "7"), ("init.agent.stub.timeout_min", "1")]).json()
