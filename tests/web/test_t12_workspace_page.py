@@ -31,7 +31,7 @@ def test_page_lists_runs_with_canonical_links(client):
     response = client.get("/workspace")
     assert response.status_code == 200
     assert 'href="/runs/r1"' in response.text
-    assert "/runs/r1/health" not in response.text   # the health page is t6
+    assert 'href="/runs/r1/health"' in response.text   # T-12 t6: each run links to its health
 
 
 def test_page_escapes_names(client, project):

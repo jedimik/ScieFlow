@@ -44,6 +44,8 @@ MUTATING_PATHS = {
     "/runs/{slug}/review/settings": {"post"},
     "/runs/{slug}/review/preview": {"post"},
     "/runs/{slug}/review/{round}/decisions": {"post"},
+    "/runs/{slug}/health/check": {"post"},
+    "/api/v1/runs/{slug}/health/check": {"post"},
 }
 
 #: Placeholder ids for the templated paths above. Guard tests never resolve
@@ -86,6 +88,8 @@ SAMPLES: dict[str, dict] = {
     "/runs/{slug}/review/settings": {"scite_present": "1", "scite_use": "on"},
     "/runs/{slug}/review/preview": {"scite_present": "1", "scite_use": "on"},
     "/runs/{slug}/review/{round}/decisions": {"cluster": "K2", "decision": "accept"},
+    "/runs/{slug}/health/check": {},
+    "/api/v1/runs/{slug}/health/check": {},
 }
 
 

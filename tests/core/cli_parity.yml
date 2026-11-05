@@ -42,6 +42,10 @@ functions:
 
   # --- T-12 t5: read-only index for the browser (plan 5.7); `workspace list` prints the same runs
   workspace_index: {cli: "workspace list"}
+
+  # --- T-12 t6: run health (plan 5.8); the CLI `workspace doctor` reports the same checks
+  run_health: {cli: "workspace doctor"}
+  scan_run_health: {cli: "workspace doctor"}
   run_charter: {cli: "run charter"}
   set_charter: {cli: "run charter"}
   revert_charter: {cli: "run charter"}
