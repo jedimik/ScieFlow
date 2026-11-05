@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}ScieFlow — health {{ result.slug }}{% endblock %}
+{% block content %}
+<h1>Run health: {{ result.slug }}</h1>
+
+{% if result.alias_of %}
+  <p class="dim">This name is an alias of {{ result.alias_of }}. Health is not checked through an alias; open the run it points to.</p>
+{% elif result.external_alias is defined %}
+  <p class="dim">This name is a link to {{ result.external_alias }}. {{ result.note }}.</p>
+{% else %}
+  <p class="dim">{{ result.kind }} · {{ result.state }} · observed {{ result.observed_at }}</p>
+
+  <table>
+    <tr><th>check</th><th>status</th><th>result</th></tr>
+    {% for name, check in result.checks.items() %}
+    <tr>
+      <td>{{ name }}</td>
+      <td>{{ check.status }}</td>
+      <td>
+        {% if check.status == "complete" %}
+          {% if check.value is mapping %}
+            {% for rel, size in check.value.items() %}{{ rel }} ({{ size }} bytes){% if not loop.last %}, {% endif %}{% else %}none{% endfor %}
+          {% elif check.value is iterable and check.value is not string %}
+            {{ check.value|join(", ") or "none" }}
+          {% else %}
+            {{ check.value }}
+          {% endif %}
+        {% elif check.status == "partial" %}
+          at least {% if check.at_least is mapping %}{{ check.at_least|length }} found so far{% else %}{{ check.at_least }}{% endif %} <span class="dim">(partial: the scan stopped early)</span>
+        {% elif check.status == "refused" %}
+          not read: {{ check.finding.file }} is {{ check.finding.status }}
+        {% else %}
+          <span class="dim">{{ check.reason }}</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  {% if result.findings %}
+  <h2>Findings</h2>
+  {% for finding in result.findings %}
+    <div>{{ finding.file }}: {{ finding.status }}</div>
+  {% endfor %}
+  {% endif %}
+
+  {% if scanned %}
+  <h2>Check result</h2>
+  <p>Scan: {{ result.entries_observed }} entries observed of {{ result.max_entries }}; stop reason: {{ result.stop_reason }}.</p>
+  <p class="dim">{{ result.note }}.</p>
+  {% endif %}
+
+  <form method="post" action="/runs/{{ result.slug|urlencode }}/health/check">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <p class="actions"><button>Check now</button></p>
+  </form>
+{% endif %}
+{% endblock %}

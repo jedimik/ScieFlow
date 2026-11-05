@@ -11,7 +11,7 @@
   <p class="dim">No runs yet. <a href="/start">Start your first run</a> to pick a workflow, name it and set a goal.</p>
 {% else %}
 <table>
-  <tr><th>run</th><th>kind</th><th>state</th><th>updated</th><th>aliases</th><th>findings</th></tr>
+  <tr><th>run</th><th>kind</th><th>state</th><th>updated</th><th>aliases</th><th>findings</th><th>health</th></tr>
   {% for run in index.runs %}
   <tr>
     <td><a href="/runs/{{ run.slug }}">{{ run.slug }}</a></td>
@@ -20,6 +20,7 @@
     <td class="dim">{{ (run.updated_at or "")[:16] }}</td>
     <td class="dim">{% for alias in run.aliases %}{{ alias }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
     <td>{% for finding in run.findings %}<div class="dim">{{ finding.file }}: {{ finding.status }}</div>{% endfor %}</td>
+    <td><a href="/runs/{{ run.slug }}/health">health</a></td>
   </tr>
   {% endfor %}
 </table>

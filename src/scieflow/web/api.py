@@ -50,6 +50,18 @@ def workspace_index(request: Request) -> dict:
     return service.workspace_index(_project(request))
 
 
+@router.get("/runs/{slug}/health", tags=["runs"])
+def run_health(request: Request, slug: str) -> dict:
+    """A run's cheap health: missing controls, legacy keys, the DVC pointer. No walk."""
+    return service.run_health(_project(request), slug)
+
+
+@router.post("/runs/{slug}/health/check", dependencies=MUTATE, tags=["runs"])
+def run_health_check(request: Request, slug: str) -> dict:
+    """A bounded full health scan of the run. Nothing is stored or repaired."""
+    return service.scan_run_health(_project(request), slug)
+
+
 @router.get("/runs/{slug}", tags=["runs"])
 def run_detail(request: Request, slug: str) -> dict:
     """Status, budget, remaining fractions, open gates, recent jobs and events."""

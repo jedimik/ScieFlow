@@ -227,6 +227,25 @@ def workspace_page(request: Request) -> HTMLResponse:
     })
 
 
+@router.get("/runs/{slug}/health", response_class=HTMLResponse)
+def run_health_page(request: Request, slug: str) -> HTMLResponse:
+    """A run's cheap health at once; the full check runs only when its button is pressed."""
+    return _health_response(request, service.run_health(_project(request), slug), scanned=False)
+
+
+@router.post("/runs/{slug}/health/check", dependencies=MUTATE, response_class=HTMLResponse)
+def run_health_check_page(request: Request, slug: str) -> HTMLResponse:
+    """The bounded full check, rendered directly. Nothing is stored or repaired."""
+    return _health_response(request, service.scan_run_health(_project(request), slug),
+                            scanned=True)
+
+
+def _health_response(request: Request, result: dict, *, scanned: bool) -> HTMLResponse:
+    return TEMPLATES.TemplateResponse(request, "health.html", {
+        "result": result, "scanned": scanned, "csrf": auth.csrf_token(request),
+    })
+
+
 #: The workflow the form's `<select>` shows chosen when nothing else applies
 #: — a fresh visit, or a refusal that carried no workflow at all. Not "no
 #: workflow": `init_workspace` writes the loop-shaped `status.yml` that
