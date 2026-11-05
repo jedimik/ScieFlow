@@ -36,6 +36,9 @@ functions:
   agent_settings: {cli: "agent show"}
   plan_staffing: {cli: "agent configure"}
   apply_staffing: {cli: "agent configure"}
+  agent_config_view: {cli: "agent show"}
+  plan_agent_changes: {cli: "agent configure"}
+  apply_agent_changes: {cli: "agent configure"}
   run_charter: {cli: "run charter"}
   set_charter: {cli: "run charter"}
   revert_charter: {cli: "run charter"}

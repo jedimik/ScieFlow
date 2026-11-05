@@ -54,6 +54,24 @@ class ServiceError(Exception):
     """A request the service cannot fulfil, with a message for the user."""
 
 
+class ConfigChangeRefused(ServiceError):
+    """A browser change to the agent settings that is invalid or not allowed (API 400)."""
+
+
+class StaleConfiguration(ServiceError):
+    """The settings changed since they were previewed, are busy, or were partly written (API 409).
+
+    `written`, `uncertain` and `unchanged` list the files of a partial write, so the
+    user can see what was replaced before a preview is made again.
+    """
+
+    def __init__(self, message: str, *, written=(), uncertain=(), unchanged=()) -> None:
+        super().__init__(message)
+        self.written = list(written)
+        self.uncertain = list(uncertain)
+        self.unchanged = list(unchanged)
+
+
 class RunStartedError(ServiceError):
     """`start_run` failed *after* the run was already created.
 
@@ -1326,6 +1344,542 @@ def apply_staffing(project: Project, assignments: list[str],
         raise ServiceError(str(exc)) from exc
     return {"written": [str(c.path.relative_to(project.root)) for c in plan.changes],
             "warnings": list(plan.warnings)}
+
+
+# --- scoped agent settings, browser and API (T-12 t3, plan 5.4) -----------------------
+#
+# The read model and the only writers of the agent settings the browser may change.
+# Every rule lives here: the allowlist per scope, the value rules, the scope and file
+# rules, the structured preview and the revision. The writes go through the shared
+# configurator owner (`agent_configure.preview` / `apply`), so a stale or busy change
+# never writes a byte. Diagnostics name files and rules, never file content.
+
+AGENT_SCOPES = ("project", "workspace", "news")
+#: The browser and API call the project scope "project"; the configurator owner calls it "default".
+_OWNER_SCOPE = {"project": "default", "workspace": "workspace", "news": "news"}
+AGENT_CHANGE_LIMIT = 50
+AGENT_FILE_CAP = 1024 * 1024                    # T12-D10: a browser-written file is at most 1 MiB
+MODEL_MAX = 200
+EFFORT_MAX = 64
+CLI_ONLY_AGENT_FIELDS = ("cmd", "stdin_cmd")    # executable command templates
+BROWSER_AGENT_FIELDS = ("model", "reasoning", "timeout_min")
+NEWS_CHANGE_FIELDS = ("agent", "model", "reasoning", "timeout")
+COMMAND_KEYS = ("cmd", "stdin_cmd", "session_cmd", "resume_cmd")
+COMMAND_SHOWN = "(command template, not shown)"
+NEWS_UNAVAILABLE = "news is not set up; initialize news with `scieflow news init`"
+NEWS_DEFAULTS_MEANING = ("An unset model or reasoning means the agent CLI's own default; "
+                         "an unset timeout means the per-template default, in seconds.")
+AGY_SUPPORT_NOTE = ("agy is a support-tier agent (AGENTS.md rule 10); news research runs it "
+                    "alone, so choose it only on the user's explicit request")
+EFFORT_HOW = {
+    "thinking": "Claude: default or extended thinking, applied to the one-shot command.",
+    "placeholder": "The agent's command takes this effort value; choose a level or type another.",
+    "none": "This agent has no effort setting.",
+}
+_ABSENT = object()
+
+
+def _control_free(text: str) -> bool:
+    return not any(ord(ch) < 32 or ord(ch) == 127 for ch in text)
+
+
+def _rel_list(project: Project, items) -> list[str]:
+    out = []
+    for item in items:
+        try:
+            out.append(Path(item).relative_to(project.root).as_posix())
+        except ValueError:
+            out.append(str(item))
+    return out
+
+
+def _scope_target(project: Project, scope: str, slug: str | None) -> Path | None:
+    """The run directory of a workspace change (None otherwise), or a refusal."""
+    if scope not in AGENT_SCOPES:
+        raise ConfigChangeRefused(f"unknown scope {scope!r}; use project, workspace or news")
+    if scope != "workspace":
+        if slug:
+            raise ConfigChangeRefused(f"the {scope} scope takes no run slug")
+        return None
+    if not slug:
+        raise ConfigChangeRefused("a workspace needs a run slug")
+    try:
+        ws = project.run_dir(slug)
+    except ProjectError as exc:
+        raise ConfigChangeRefused(str(exc)) from exc
+    if ws.is_symlink():
+        raise ConfigChangeRefused(f"run {slug!r} is an alias (symbolic link); edit the run it points to")
+    if not ws.is_dir():
+        raise ConfigChangeRefused(f"no run workspace/{slug}")
+    return ws
+
+
+def _fixed_inputs(project: Project, scope: str, ws: Path | None) -> list[Path]:
+    root = project.root
+    if scope == "news":
+        return [acf.news_config_path(root)]
+    fixed = [root / "config" / "agents.yml", root / "config" / "defaults.yml"]
+    if scope == "workspace":
+        fixed += [ws / "config.yml", ws / "status.yml"]
+    return fixed
+
+
+def _check_inputs(project: Project, paths: list[Path]) -> None:
+    """Each fixed input and target: absent, or a regular file inside the project, at most 1 MiB,
+    holding a YAML mapping. The message names the file and the rule, never its content."""
+    root = project.root.resolve()
+    problems = []
+    for path in paths:
+        rel = path.relative_to(project.root).as_posix()
+        if path.is_symlink():
+            problems.append(f"`{rel}`: is a symbolic link; refused")
+            continue
+        if not path.exists():
+            continue
+        if not path.is_file():
+            problems.append(f"`{rel}`: is not a regular file")
+            continue
+        if not path.resolve().is_relative_to(root):
+            problems.append(f"`{rel}`: resolves outside the project")
+            continue
+        if path.stat().st_size > AGENT_FILE_CAP:
+            problems.append(f"`{rel}`: is larger than 1 MiB")
+            continue
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except UnicodeDecodeError:
+            problems.append(f"`{rel}`: is not UTF-8 text")
+        except yaml.YAMLError as exc:
+            mark = getattr(exc, "problem_mark", None)
+            where = f" (line {mark.line + 1})" if mark is not None else ""
+            problems.append(f"`{rel}`: not valid YAML{where}")
+        else:
+            if data is not None and not isinstance(data, dict):
+                problems.append(f"`{rel}`: not a mapping")
+    if problems:
+        raise ConfigChangeRefused("; ".join(problems))
+
+
+def _check_model(value, label: str) -> None:
+    text = str(value)
+    if not text.strip():
+        raise ConfigChangeRefused(f"{label}: the model is empty")
+    if len(text) > MODEL_MAX:
+        raise ConfigChangeRefused(f"{label}: a model name is at most {MODEL_MAX} characters")
+    if not _control_free(text):
+        raise ConfigChangeRefused(f"{label}: a model name may not contain control characters")
+
+
+def _check_effort(agent: str, value, eff, label: str) -> None:
+    mode = agent_config.effort_mode(eff.effort_cfg(agent))
+    if mode == "none":
+        raise ConfigChangeRefused(f"{agent} has no effort setting; there is nothing to set")
+    text = str(value)
+    if not text.strip():
+        raise ConfigChangeRefused(f"{label}: the effort is empty")
+    if len(text) > EFFORT_MAX:
+        raise ConfigChangeRefused(f"{label}: an effort is at most {EFFORT_MAX} characters")
+    if not _control_free(text):
+        raise ConfigChangeRefused(f"{label}: an effort may not contain control characters")
+    if mode == "thinking" and text not in agent_config.THINKING_LEVELS:
+        raise ConfigChangeRefused(f"{agent} is a Claude agent: its effort is default or extended-thinking")
+
+
+def _agent_key(key: str, scope: str, eff) -> tuple[str, str]:
+    agent, dot, field = key.partition(".")
+    if not dot or not agent or not field:
+        raise ConfigChangeRefused(f"unsupported setting {key!r}; expected AGENT.FIELD")
+    if agent not in eff.families:
+        raise ConfigChangeRefused(f"unsupported: unknown agent {agent!r}")
+    if field in CLI_ONLY_AGENT_FIELDS:
+        raise ConfigChangeRefused(
+            f"{key}: {field} is deliberately CLI-only (executable command templates); "
+            f"in a terminal: scieflow agent configure --set {key}=...")
+    if field == "enabled":
+        if scope == "project":
+            raise ConfigChangeRefused(
+                f"{key}: enabled is deliberately CLI-only in this slice; "
+                f"in a terminal: scieflow agent configure --set {key}=true|false")
+        raise ConfigChangeRefused(f"unsupported in a run: enabled is global, change it in the project defaults")
+    if field not in BROWSER_AGENT_FIELDS:
+        raise ConfigChangeRefused(
+            f"unsupported setting {key!r}; the browser sets {', '.join(BROWSER_AGENT_FIELDS)}")
+    return agent, field
+
+
+def _assign_change(body: str, eff) -> acf.Op:
+    role = body.partition("=")[0].strip()
+    if role not in agent_config.ROLES:
+        raise ConfigChangeRefused(f"unsupported role {role!r} (known: {', '.join(agent_config.ROLES)})")
+    try:
+        op = acf.parse_assign(body)
+    except acf.ConfigureError as exc:
+        raise ConfigChangeRefused(str(exc)) from exc
+    entries = op.value if isinstance(op.value, list) else [op.value]
+    for entry in entries:
+        fields = entry if isinstance(entry, dict) else {}
+        name = fields.get("agent") if fields else entry
+        if name not in eff.families:
+            raise ConfigChangeRefused(f"unsupported: unknown agent {name!r} in {role}")
+        for field in fields:
+            if field not in ("agent", "model", "reasoning"):
+                raise ConfigChangeRefused(f"unsupported role entry field {field!r}")
+        if "model" in fields:
+            _check_model(fields["model"], f"{role} {name}")
+        if "reasoning" in fields:
+            _check_effort(name, fields["reasoning"], eff, f"{role} {name}")
+    return op
+
+
+def _news_change(kind: str, body: str) -> acf.Op:
+    if kind == "assign":
+        raise ConfigChangeRefused("unsupported: the news module has no roles; set agent, model, reasoning or timeout")
+    if kind == "set":
+        key = body.partition("=")[0].strip()
+    elif kind == "unset":
+        key = body
+    else:
+        raise ConfigChangeRefused(f"unsupported change {kind!r} in news settings")
+    if key not in NEWS_CHANGE_FIELDS:
+        raise ConfigChangeRefused(
+            f"unsupported in news settings: {key!r} (settable: {', '.join(NEWS_CHANGE_FIELDS)})")
+    if kind == "unset":
+        return acf.parse_unset(key)
+    try:
+        op = acf.parse_set(body, news=True)
+    except acf.ConfigureError as exc:
+        raise ConfigChangeRefused(str(exc)) from exc
+    from scieflow.news.config import VALID_AGENTS, VALID_REASONING
+    if op.key == "agent" and op.value not in VALID_AGENTS:
+        raise ConfigChangeRefused(f"agent must be one of {', '.join(VALID_AGENTS)}")
+    if op.key == "reasoning" and op.value not in VALID_REASONING:
+        raise ConfigChangeRefused(f"reasoning must be one of {', '.join(VALID_REASONING)}")
+    if op.key == "model":
+        _check_model(op.value, "news model")
+    if op.key == "timeout" and (isinstance(op.value, bool) or not isinstance(op.value, int) or op.value <= 0):
+        raise ConfigChangeRefused("news timeout must be a positive whole number of seconds")
+    return op
+
+
+def _one_change(kind: str, body: str, scope: str, eff) -> acf.Op:
+    if kind in ("promote", "demote"):
+        if scope == "news":
+            raise ConfigChangeRefused(f"{kind} is unsupported in news settings (the news module has no roles)")
+        raise ConfigChangeRefused(
+            f"{kind} is deliberately CLI-only; in a terminal: scieflow agent configure --{kind} {body}")
+    if scope == "news":
+        return _news_change(kind, body)
+    if kind == "assign":
+        return _assign_change(body, eff)
+    if kind == "unset":
+        if body in agent_config.ROLES:
+            if scope == "project" and body != agent_config.DRAFT_REVIEWERS:
+                raise ConfigChangeRefused(
+                    f"{body} is required in the project defaults; change it with assign instead")
+            return acf.Op("unset", body)
+        _agent_key(body, scope, eff)
+        return acf.parse_unset(body)
+    if kind == "set":
+        agent, field = _agent_key(body.partition("=")[0].strip(), scope, eff)
+        try:
+            op = acf.parse_set(body)
+        except acf.ConfigureError as exc:
+            raise ConfigChangeRefused(str(exc)) from exc
+        if field == "model":
+            _check_model(op.value, op.key)
+        elif field == "reasoning":
+            _check_effort(agent, op.value, eff, op.key)
+        elif field == "timeout_min" and (isinstance(op.value, bool) or not op.value > 0):
+            raise ConfigChangeRefused(f"{op.key}: timeout_min must be a positive number of minutes")
+        return op
+    raise ConfigChangeRefused(f"unsupported change {kind!r}; use assign, set, unset, promote or demote")
+
+
+def _parse_changes(changes, scope: str, eff) -> list[acf.Op]:
+    if not isinstance(changes, (list, tuple)):
+        raise ConfigChangeRefused("the changes must be a list of change texts")
+    if len(changes) > AGENT_CHANGE_LIMIT:
+        raise ConfigChangeRefused(f"at most {AGENT_CHANGE_LIMIT} changes per preview")
+    ops = []
+    for text in changes:
+        if not isinstance(text, str) or not text.strip():
+            raise ConfigChangeRefused("each change must be a non-empty text")
+        if not _control_free(text.strip()):
+            raise ConfigChangeRefused("a change may not contain control characters")
+        kind, _, body = text.strip().partition(" ")
+        ops.append(_one_change(kind, body.strip(), scope, eff))
+    return ops
+
+
+def _checked_plan(project: Project, scope: str, changes, slug: str | None):
+    """Validate the scope, the files and the changes, then plan them under the project lock."""
+    ws = _scope_target(project, scope, slug)
+    _check_inputs(project, _fixed_inputs(project, scope, ws))
+    eff = agent_config.resolve_dir(project.root, ws)
+    ops = _parse_changes(changes, scope, eff)
+    try:
+        plan = acf.preview(_OWNER_SCOPE[scope], project.root, ops, slug=ws.name if ws else None)
+    except acf.BusyError as exc:
+        raise StaleConfiguration(str(exc)) from exc
+    except acf.ConfigureError as exc:
+        raise ConfigChangeRefused(str(exc)) from exc
+    touched = {change.path.name for change in plan.changes if change.path.parent.name == "config"}
+    if scope == "project" and {"agents.yml", "defaults.yml"} <= touched:
+        raise ConfigChangeRefused(
+            "a browser change may edit config/agents.yml or config/defaults.yml, not both; "
+            "use `scieflow agent configure` in a terminal for this mix")
+    return ws, plan, ops
+
+
+def _flatten(node, prefix: str = "") -> dict:
+    if isinstance(node, dict) and node:
+        out: dict = {}
+        for key, value in node.items():
+            out.update(_flatten(value, f"{prefix}.{key}" if prefix else str(key)))
+        return out
+    return {prefix: node} if prefix else {}
+
+
+def _shown(key: str, value):
+    if value is _ABSENT or value is None:
+        return None
+    if key.rsplit(".", 1)[-1] in COMMAND_KEYS:
+        return COMMAND_SHOWN
+    return value
+
+
+def _structured_diff(rel: str, before: str, after: str) -> list[dict]:
+    """The keys whose value differs between two texts of one file; command templates never shown."""
+    old = _flatten(yaml.safe_load(before) or {} if before else {})
+    new = _flatten(yaml.safe_load(after) or {} if after else {})
+    rows = []
+    for key in sorted(set(old) | set(new)):
+        was, now = old.get(key, _ABSENT), new.get(key, _ABSENT)
+        if was == now:
+            continue
+        rows.append({"file": rel, "key": key, "before": _shown(key, was), "after": _shown(key, now)})
+    return rows
+
+
+def _render_entry(entry) -> str:
+    if not isinstance(entry, dict):
+        return str(entry)
+    text = str(entry.get("agent", ""))
+    if "model" in entry or "reasoning" in entry:
+        text += f"@{entry.get('model', '')}"
+        if "reasoning" in entry:
+            text += f"/{entry['reasoning']}"
+    return text
+
+
+def _render_change(op: acf.Op) -> str:
+    if op.kind == "assign":
+        entries = op.value if isinstance(op.value, list) else [op.value]
+        return f"assign {op.key}=" + ",".join(_render_entry(entry) for entry in entries)
+    if op.kind == "set":
+        value = op.value
+        if isinstance(value, bool):
+            value = "true" if value else "false"
+        return f"set {op.key}={value}"
+    return f"unset {op.key}"
+
+
+def _inheritance(scope: str, ops: list[acf.Op]) -> list[str]:
+    if scope != "project":
+        return []
+    sentences: list[str] = []
+    for op in ops:
+        if op.kind in ("set", "unset", "assign"):
+            sentence = (f"Runs that do not override {op.key} will use the new value; "
+                        "runs with their own override keep it.")
+            if sentence not in sentences:
+                sentences.append(sentence)
+    return sentences
+
+
+def _resolved_inputs(project: Project, scope: str, slug: str | None) -> Path | None:
+    ws = _scope_target(project, scope, slug)
+    _check_inputs(project, _fixed_inputs(project, scope, ws))
+    return ws
+
+
+def _field_view(scope: str, base_fields: dict, eff_fields: dict, field: str,
+                *, editable: bool = True, why: str = "") -> dict:
+    inherited = base_fields[field].value if field in base_fields else None
+    current = eff_fields.get(field)
+    if scope == "workspace":
+        stored = current.value if current is not None and current.source == agent_config.WORKSPACE else None
+        effective = current.value if current is not None else None
+        source = agent_config.WORKSPACE if stored is not None else (
+            agent_config.DEFAULT if inherited is not None else "not set")
+    else:
+        stored = inherited
+        inherited = None
+        effective = stored
+        source = agent_config.DEFAULT if stored is not None else "not set"
+    return {"stored": stored, "inherited": inherited, "effective": effective, "source": source,
+            "editable": editable, "why_not": "" if editable else why}
+
+
+def _agent_view(name: str, scope: str, base, eff) -> dict:
+    cfg = eff.effort_cfg(name)
+    mode = agent_config.effort_mode(cfg)
+    menu = eff.menus.get(name) or {}
+    base_fields = base.agents.get(name) or {}
+    eff_fields = eff.agents.get(name) or {}
+    no_effort = "this agent has no effort setting"
+    reasoning = _field_view(scope, base_fields, eff_fields, "reasoning",
+                            editable=mode != "none", why=no_effort)
+    enabled = eff_fields.get("enabled")
+    return {
+        "tier": eff.tiers.get(name),
+        "enabled": bool(enabled.value) if enabled is not None else True,
+        "effort": {
+            "mode": mode,
+            "levels": agent_config.effort_levels_for(cfg, menu),
+            "current": reasoning["effective"],
+            "custom_ok": mode == "placeholder",
+            "how": EFFORT_HOW[mode],
+        },
+        "models": [str(model) for model in (menu.get("models") or [])],
+        "model": _field_view(scope, base_fields, eff_fields, "model"),
+        "reasoning": reasoning,
+        "timeout_min": _field_view(scope, base_fields, eff_fields, "timeout_min"),
+        "cmd": {"configured": "cmd" in base_fields, "cli_only": True},
+        "stdin_cmd": {"configured": "stdin_cmd" in base_fields, "cli_only": True},
+    }
+
+
+def _role_view(role: str, eff) -> dict:
+    spec = agent_config.ROLES[role]
+    setting = eff.assignments.get(role)
+    overrides = {agent: {**dict(found.value), "source": found.source}
+                 for agent, found in eff.role_overrides.get(role, {}).items()}
+    return {"many": spec.many, "support_ok": spec.support_ok, "help": spec.help,
+            "value": setting.value if setting is not None else None,
+            "source": setting.source if setting is not None else None,
+            "overrides": overrides, "exception": eff.support_as_primary.get(role)}
+
+
+def _news_view(project: Project) -> dict:
+    from scieflow.news.config import VALID_AGENTS, VALID_REASONING
+    path = acf.news_config_path(project.root)
+    view = {"scope": "news", "defaults_meaning": NEWS_DEFAULTS_MEANING,
+            "agents": list(VALID_AGENTS), "levels": list(VALID_REASONING)}
+    if not path.exists() and not path.is_symlink():
+        return view | {"available": False, "message": NEWS_UNAVAILABLE, "settings": None, "warnings": []}
+    _check_inputs(project, [path])
+    settings = acf.news_settings(project.root, path)
+    warnings = [AGY_SUPPORT_NOTE] if settings.get("agent") == "agy" else []
+    return view | {"available": True, "settings": settings, "warnings": warnings}
+
+
+def agent_config_view(project: Project, scope: str = "project", slug: str | None = None) -> dict:
+    """The agent settings of one scope, for the browser: stored, inherited and effective values
+    with their sources, the effort choices, the roles, and the read-only exceptions. Command
+    templates are never included, only whether they are configured."""
+    if scope == "news":
+        _scope_target(project, scope, slug)
+        return _news_view(project)
+    ws = _resolved_inputs(project, scope, slug)
+    base = agent_config.resolve_dir(project.root, None)
+    eff = agent_config.resolve_dir(project.root, ws)
+    return {
+        "scope": scope,
+        "slug": ws.name if ws is not None else None,
+        "project_root": str(project.root),
+        "agents": {name: _agent_view(name, scope, base, eff) for name in sorted(eff.families)},
+        "roles": {role: _role_view(role, eff) for role in agent_config.ROLES},
+        "exceptions": dict(eff.support_as_primary),
+        "problems": list(eff.problems),
+        "warnings": list(eff.warnings),
+    }
+
+
+def _effective_after(project: Project, scope: str, ws: Path | None, plan, ops: list[acf.Op]) -> list[dict]:
+    """The value and source each changed key would have once the planned files are written.
+
+    A reset that exposes a legacy key shows that key's value and its label here (FG:86-88).
+    Command templates are never part of this list: the browser cannot change them.
+    """
+    if scope == "news" or not plan.changes:
+        return []
+    written = {change.path: change.after for change in plan.changes}
+
+    def document(path: Path) -> dict:
+        text = written[path] if path in written else (path.read_text(encoding="utf-8") if path.is_file() else "")
+        return yaml.safe_load(text) or {}
+
+    root = project.root
+    registry = document(root / "config" / "agents.yml")
+    defaults = document(root / "config" / "defaults.yml")
+    run = document(ws / "config.yml") if ws is not None else None
+    eff = agent_config.resolve_data(registry, defaults, run)
+    rows = []
+    for op in ops:
+        if op.kind not in ("set", "unset", "assign"):
+            continue
+        if op.key in agent_config.ROLES:
+            setting = eff.assignments.get(op.key)
+            rows.append({"key": op.key, "value": setting.value if setting else None,
+                         "source": setting.source if setting else None})
+        elif "." in op.key:
+            agent, _, field = op.key.partition(".")
+            found = (eff.agents.get(agent) or {}).get(field)
+            rows.append({"key": op.key, "value": found.value if found else None,
+                         "source": found.source if found else None})
+    return rows
+
+
+def plan_agent_changes(project: Project, scope: str, changes: list[str], slug: str | None = None) -> dict:
+    """What a browser change to the agent settings would write, with the revision that binds it.
+
+    Writes nothing. The changes use the CLI's syntax: `assign ROLE=AGENT[@MODEL][/EFFORT],…`,
+    `set AGENT.FIELD=VALUE`, `unset KEY`; news takes `set FIELD=VALUE` and `unset FIELD`.
+    """
+    ws, plan, ops = _checked_plan(project, scope, changes, slug)
+    structured = []
+    for change in plan.changes:
+        rel = change.path.relative_to(project.root).as_posix()
+        structured += _structured_diff(rel, change.before, change.after)
+    return {
+        "scope": scope,
+        "slug": ws.name if ws is not None else None,
+        "changes": [_render_change(op) for op in ops],
+        "revision": plan.revision,
+        "files": [change.path.relative_to(project.root).as_posix() for change in plan.changes],
+        "structured": structured,
+        "effective": _effective_after(project, scope, ws, plan, ops),
+        "notes": list(plan.notes),
+        "warnings": list(plan.warnings),
+        "inheritance": _inheritance(scope, ops) if plan.changes else [],
+        "empty": not plan.changes,
+    }
+
+
+def apply_agent_changes(project: Project, scope: str, changes: list[str], revision: str | None,
+                        slug: str | None = None) -> dict:
+    """Write a previewed change, but only if the settings are still the ones previewed."""
+    if not revision:
+        raise ConfigChangeRefused("no preview revision was given; preview the change first, nothing written")
+    _ws, plan, _ops = _checked_plan(project, scope, changes, slug)
+    if not plan.changes:
+        raise ConfigChangeRefused("already configured that way; nothing to write")
+    if plan.revision != revision:
+        raise StaleConfiguration(
+            "the configuration changed since it was previewed; nothing written; preview again")
+    try:
+        written = acf.apply(plan)
+    except acf.PartialWriteError as exc:
+        raise StaleConfiguration(
+            str(exc), written=_rel_list(project, exc.written),
+            uncertain=_rel_list(project, exc.uncertain),
+            unchanged=_rel_list(project, exc.unchanged)) from exc
+    except (acf.BusyError, acf.StaleError) as exc:
+        raise StaleConfiguration(str(exc)) from exc
+    except acf.ConfigureError as exc:
+        raise ConfigChangeRefused(str(exc)) from exc
+    return {"written": _rel_list(project, written), "warnings": list(plan.warnings)}
 
 
 def run_charter(project: Project, slug: str) -> dict:
