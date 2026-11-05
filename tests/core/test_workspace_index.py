@@ -4,6 +4,7 @@ Read-only, top-level only, bounded to 10,000 inspected entries, alias grouping
 without following an alias, and findings (never defaults) for unreadable controls.
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -208,6 +209,63 @@ def test_the_index_writes_nothing(project):
     workspace_health.index(project)
     assert _tree(project.root) == before
     assert not (project.root / "workspace" / "INDEX.md").exists()
+
+
+def alias_bomb(levels: int = 6) -> str:
+    """A ~1 KB status.yml whose anchors expand to 10**levels shared leaves when copied out."""
+    lines = ["a0: &a0 [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]"]
+    for i in range(1, levels + 1):
+        lines.append(f"a{i}: &a{i} [" + ", ".join([f"*a{i - 1}"] * 10) + "]")
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize("extra", [
+    "run: bomb\nid: *a6\n",
+    "run: bomb\niteration: *a6\n",
+    "run: bomb\nphases: *a6\n",
+    "run: bomb\nphases: {hypothesize: *a6}\n",
+    "run: bomb\nstopped: *a6\n",
+    "workflow: lit-review\nphase: *a6\n",
+    "workflow: *a6\n",
+])
+def test_an_alias_bomb_status_is_a_finding_and_the_index_stays_small(project, extra):
+    odd = project.root / "workspace" / "bomb"
+    odd.mkdir()
+    (odd / "status.yml").write_text(alias_bomb() + extra)
+    (odd / "config.yml").write_text("k: v\n")
+    index = workspace_health.index(project)
+    row = _row(index, "bomb")
+    assert {"file": "status.yml", "status": "invalid-shape"} in row["findings"]
+    assert row["kind"] == "unknown"
+    assert len(json.dumps(index)) < 20_000
+
+
+def test_an_overlong_text_field_is_invalid_shape(project):
+    odd = project.root / "workspace" / "long"
+    odd.mkdir()
+    (odd / "status.yml").write_text("run: long\nid: " + "x" * 201 + "\n")
+    row = _row(workspace_health.index(project), "long")
+    assert {"file": "status.yml", "status": "invalid-shape"} in row["findings"]
+
+
+def test_an_overlong_lineage_in_config_is_invalid_shape(project):
+    odd = project.root / "workspace" / "longcfg"
+    odd.mkdir()
+    (odd / "status.yml").write_text("run: longcfg\nphases: {}\n")
+    (odd / "config.yml").write_text("lineage: " + "x" * 201 + "\n")
+    row = _row(workspace_health.index(project), "longcfg")
+    assert {"file": "config.yml", "status": "invalid-shape"} in row["findings"]
+    assert row["lineage"] == "unknown"
+
+
+def test_a_deeply_nested_status_is_a_finding_and_the_index_survives(project):
+    odd = project.root / "workspace" / "deep"
+    odd.mkdir()
+    depth = 100_000
+    (odd / "status.yml").write_text("k: " + "[" * depth + "]" * depth + "\n")
+    index = workspace_health.index(project)
+    assert {"file": "status.yml", "status": "malformed"} in _row(index, "deep")["findings"]
+    assert _row(index, "2026-01-loop")["kind"] == "loop"
 
 
 def test_describe_from_gives_describe_for_the_same_status(project):

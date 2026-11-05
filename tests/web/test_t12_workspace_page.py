@@ -67,6 +67,23 @@ def test_the_page_writes_nothing(client, project):
     assert not (project.root / "workspace" / "INDEX.md").exists()
 
 
+def test_page_and_api_survive_an_alias_bomb(client, project):
+    odd = project.root / "workspace" / "bomb"
+    odd.mkdir()
+    levels = 6
+    lines = ["a0: &a0 [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]"]
+    for i in range(1, levels + 1):
+        lines.append(f"a{i}: &a{i} [" + ", ".join([f"*a{i - 1}"] * 10) + "]")
+    (odd / "status.yml").write_text("\n".join(lines) + "\nrun: bomb\nid: *a6\n")
+    page = client.get("/workspace")
+    assert page.status_code == 200
+    assert len(page.content) < 200_000
+    api = client.get("/api/v1/workspace")
+    assert api.status_code == 200
+    assert len(api.content) < 200_000
+    assert 'href="/runs/r1"' in page.text
+
+
 def test_the_page_has_no_form_and_no_dialog_or_safe_filter(project):
     template = Path(__file__).resolve().parents[2] / "src/scieflow/web/templates"
     for name in ("workspace.html", "base.html"):
