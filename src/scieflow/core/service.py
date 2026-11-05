@@ -1871,10 +1871,16 @@ def apply_agent_changes(project: Project, scope: str, changes: list[str], revisi
     try:
         written = acf.apply(plan)
     except acf.PartialWriteError as exc:
+        # The owner's own message carries absolute paths; build this one from the relative lists.
+        done = _rel_list(project, exc.written)
+        unsure = _rel_list(project, exc.uncertain)
+        untouched = _rel_list(project, exc.unchanged)
         raise StaleConfiguration(
-            str(exc), written=_rel_list(project, exc.written),
-            uncertain=_rel_list(project, exc.uncertain),
-            unchanged=_rel_list(project, exc.unchanged)) from exc
+            "a write failed part-way; "
+            f"written: {', '.join(done) or 'none'}; "
+            f"uncertain: {', '.join(unsure) or 'none'}; "
+            f"unchanged: {', '.join(untouched) or 'none'}. Check these files and preview again.",
+            written=done, uncertain=unsure, unchanged=untouched) from exc
     except (acf.BusyError, acf.StaleError) as exc:
         raise StaleConfiguration(str(exc)) from exc
     except acf.ConfigureError as exc:
