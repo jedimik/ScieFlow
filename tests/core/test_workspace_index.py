@@ -161,6 +161,19 @@ def test_malformed_status_is_a_finding_not_a_default(project):
     assert row["state"] == "unknown"
 
 
+def test_a_mis_shaped_status_is_a_finding_and_the_index_survives(project):
+    odd = project.root / "workspace" / "odd-shape"
+    odd.mkdir()
+    (odd / "status.yml").write_text("run: odd\nphases: 5\n")
+    (odd / "config.yml").write_text("k: v\n")
+    index = workspace_health.index(project)
+    row = _row(index, "odd-shape")
+    assert {"file": "status.yml", "status": "invalid-shape"} in row["findings"]
+    assert row["kind"] == "unknown"
+    assert row["state"] == "unknown"
+    assert _row(index, "2026-01-loop")["kind"] == "loop"
+
+
 def test_oversized_config_is_a_finding_and_lineage_is_unknown(project):
     row = _row(workspace_health.index(project), "bigcfg")
     assert {"file": "config.yml", "status": "oversized"} in row["findings"]

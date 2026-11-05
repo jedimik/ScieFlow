@@ -46,6 +46,15 @@ def test_api_equals_the_service_output(client, project):
     assert _strip_time(body) == _strip_time(service.workspace_index(project))
 
 
+def test_page_survives_a_mis_shaped_status(client, project):
+    odd = project.root / "workspace" / "odd-shape"
+    odd.mkdir()
+    (odd / "status.yml").write_text("run: odd\nphases: 5\n")
+    response = client.get("/workspace")
+    assert response.status_code == 200
+    assert 'href="/runs/r1"' in response.text
+
+
 def test_the_dashboard_nav_links_the_page(client):
     assert 'href="/workspace"' in client.get("/").text
 
