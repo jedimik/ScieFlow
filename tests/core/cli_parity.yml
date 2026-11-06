@@ -36,9 +36,19 @@ functions:
   agent_settings: {cli: "agent show"}
   plan_staffing: {cli: "agent configure"}
   apply_staffing: {cli: "agent configure"}
+  agent_config_view: {cli: "agent show"}
+  plan_agent_changes: {cli: "agent configure"}
+  apply_agent_changes: {cli: "agent configure"}
+
+  # --- T-12 t5: read-only index for the browser (plan 5.7); `workspace list` prints the same runs
+  workspace_index: {cli: "workspace list"}
   run_charter: {cli: "run charter"}
   set_charter: {cli: "run charter"}
   revert_charter: {cli: "run charter"}
+
+  # --- T-12 t6: run health (plan 5.8); the CLI `workspace doctor` reports the same checks
+  run_health: {cli: "workspace doctor"}
+  scan_run_health: {cli: "workspace doctor"}
   mark_phase: {cli: "run mark"}
   advance_run: {cli: "run advance"}
   checkpoint_run: {cli: "run checkpoint"}

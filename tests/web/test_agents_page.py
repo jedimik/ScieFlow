@@ -5,6 +5,8 @@ fixture project assigns `research.outline`. Assignments are written to
 `config/defaults.yml`, not `config/agents.yml`, which holds the registry.
 """
 
+import re
+
 import yaml
 
 from scieflow.web import auth
@@ -36,13 +38,33 @@ def test_previewing_a_change_shows_a_diff_and_writes_nothing(client, project):
     assert (project.root.joinpath(*DEFAULTS)).read_text() == before
 
 
+def _preview_revision(client, assign, slug=""):
+    """The preview page's hidden revision: the apply form must post it back (T-12 D6)."""
+    params = {"assign": assign} | ({"slug": slug} if slug else {})
+    page = client.get("/agents", params=params).text
+    match = re.search(r'name="revision" value="([0-9a-f]{64})"', page)
+    assert match, "the preview page must carry exactly the revision to apply"
+    assert page.count('name="revision"') == 1
+    return match.group(1)
+
+
 def test_applying_writes_the_change(client, project):
     token = client.cookies[auth.CSRF_COOKIE]
+    revision = _preview_revision(client, "research.outline=stub2")
     response = client.post("/agents", follow_redirects=False, data={
-        auth.CSRF_FIELD: token, "assign": "research.outline=stub2"})
+        auth.CSRF_FIELD: token, "assign": "research.outline=stub2", "revision": revision})
     assert response.status_code == 303
     written = yaml.safe_load((project.root.joinpath(*DEFAULTS)).read_text())
     assert written["assignments"]["research.outline"] == "stub2"
+
+
+def test_applying_without_the_previewed_revision_writes_nothing(client, project):
+    before = (project.root.joinpath(*DEFAULTS)).read_text()
+    token = client.cookies[auth.CSRF_COOKIE]
+    response = client.post("/agents", follow_redirects=False, data={
+        auth.CSRF_FIELD: token, "assign": "research.outline=stub2"})
+    assert response.headers["location"].startswith("/agents?error=")
+    assert (project.root.joinpath(*DEFAULTS)).read_text() == before
 
 
 def test_an_unknown_role_is_reported_not_raised(client):
@@ -61,8 +83,10 @@ def test_an_unknown_agent_is_reported_not_written(client, project):
 
 def test_a_workspace_change_is_scoped_to_that_run(client, project):
     token = client.cookies[auth.CSRF_COOKIE]
+    revision = _preview_revision(client, "research.outline=stub2", slug="r1")
     client.post("/agents", follow_redirects=False, data={
-        auth.CSRF_FIELD: token, "slug": "r1", "assign": "research.outline=stub2"})
+        auth.CSRF_FIELD: token, "slug": "r1", "assign": "research.outline=stub2",
+        "revision": revision})
     defaults = yaml.safe_load((project.root.joinpath(*DEFAULTS)).read_text())
     assert defaults["assignments"]["research.outline"] == "stub"
     scoped = client.get("/api/v1/agents", params={"slug": "r1"}).json()

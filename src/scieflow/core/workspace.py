@@ -106,30 +106,68 @@ def _current_phase(kind: str, status: dict) -> tuple[str | None, str | None]:
     return phase, state if isinstance(state, str) else None
 
 
-def describe(path: Path) -> Run:
-    status = _load(path / "status.yml")
+def describe_from(slug: str, status: dict, config: dict, updated: str | None,
+                  updated_at: str | None) -> Run:
+    """A run's description from already-read controls and activity stamps.
+
+    `describe` reads them from a path; the workspace index reads them through
+    `control_read` and passes them here, so both give the same fields.
+    """
     if "run" in status:
         kind = "loop"
     elif status.get("workflow"):
         kind = str(status["workflow"])
     else:
         kind = "none"
-    config = _load(path / "config.yml")
     phase, phase_state = _current_phase(kind, status) if kind != "none" else (None, None)
     stopped = status.get("stopped")
     return Run(
-        slug=path.name,
+        slug=slug,
         kind=kind,
         state=_state(kind, status),
-        updated=_updated(path),
+        updated=updated,
         lineage=config.get("lineage") if isinstance(config.get("lineage"), str) else None,
         id=status.get("id"),
         phase=phase,
         phase_state=phase_state,
         iteration=status.get("iteration") if kind == "loop" else None,
         stopped_reason=(stopped.get("reason") if isinstance(stopped, dict) else stopped) or None,
-        updated_at=_updated_at(path),
+        updated_at=updated_at,
     )
+
+
+def describe(path: Path) -> Run:
+    return describe_from(path.name, _load(path / "status.yml"), _load(path / "config.yml"),
+                         _updated(path), _updated_at(path))
+
+
+def expected_files(kind: str) -> tuple[str, ...]:
+    """The control files a run of this kind must have (shared by doctor and run health)."""
+    return LOOP_FILES if kind == "loop" else RESEARCH_FILES if kind != "none" else ()
+
+
+def legacy_keys(config: dict) -> list[str]:
+    """Config keys a run still honours but no longer writes (shared by doctor and run health)."""
+    from scieflow.core import agent_config
+
+    return [k for k in (*agent_config.LEGACY_ROLE_KEYS, "agent", "journal_profiler",
+                        *agent_config.LEGACY_UNMAPPED_KEYS) if k in config]
+
+
+def is_self_link(target: str, run_path) -> bool:
+    """Whether a symlink target is an absolute path inside the run (shared by doctor and run health)."""
+    return target.startswith(str(run_path) + "/")
+
+
+def sibling_name(link: str) -> str | None:
+    """The sibling a relative symlink target names (`name` or `./name`), else None.
+
+    A target with a further path separator (`_misc/…`, `../x`) is not a sibling.
+    """
+    name = link[2:] if link.startswith("./") else link
+    if not name or "/" in name or name in (".", ".."):
+        return None
+    return name
 
 
 def list_runs(root: Path | None = None) -> list[Run]:
@@ -253,8 +291,6 @@ def _size(path: Path, cap: int = 200_000) -> int:
 
 def doctor(slug: str, root: Path | None = None) -> dict:
     """Read-only findings for one run."""
-    from scieflow.core import agent_config
-
     root = root or config_mod.repo_root()
     ws = workspace_root(root)
     path = ws / slug
@@ -263,7 +299,7 @@ def doctor(slug: str, root: Path | None = None) -> dict:
     if path.is_symlink():
         return {"slug": slug, "alias_of": os.readlink(path)}
     run = describe(path)
-    expected = LOOP_FILES if run.kind == "loop" else RESEARCH_FILES if run.kind != "none" else ()
+    expected = expected_files(run.kind)
     archive = _archive_mod()
 
     junk: dict[str, int] = {}
@@ -281,12 +317,11 @@ def doctor(slug: str, root: Path | None = None) -> dict:
         dirnames[:] = kept if depth < 4 else []
         for name in filenames + [d for d in kept if (base / d).is_symlink()]:
             link = base / name
-            if link.is_symlink() and os.readlink(link).startswith(str(path) + "/"):
+            if link.is_symlink() and is_self_link(os.readlink(link), path):
                 self_links += 1
 
     config = _load(path / "config.yml")
-    legacy = [k for k in (*agent_config.LEGACY_ROLE_KEYS, "agent", "journal_profiler",
-                          *agent_config.LEGACY_UNMAPPED_KEYS) if k in config]
+    legacy = legacy_keys(config)
     logs_scripts = len(list((path / "logs").glob("*.py"))) if (path / "logs").is_dir() else 0
     bad_events = records.check_event_lines(path / "events.jsonl")
     bad_jobs = records.check_job_files(path / "jobs")

@@ -57,6 +57,70 @@ def _atomic_write(path: Path, text: str) -> None:
         raise
 
 
+@contextmanager
+def exclusive(lock_path: Path, timeout: float):
+    """One lock on exactly `lock_path` (no `.lock` suffix added, no directory made).
+
+    A missing parent directory raises OSError instead of being created.
+    """
+    _require_parent(lock_path)
+    with FileLock(str(lock_path), timeout=timeout):
+        yield
+
+
+def _require_parent(path) -> None:
+    # filelock would create a missing parent directory; a lock must never do that.
+    parent = Path(path).parent
+    if not parent.is_dir():
+        raise FileNotFoundError(f"{parent} does not exist; a lock does not create it")
+
+
+class LockSet:
+    """Sibling `<path>.lock` files, each taken once, in sorted path order.
+
+    Released in reverse. `replace` writes only a path the set holds, through
+    `_atomic_write`: `write_text` would take a second lock on a path held here.
+    """
+
+    def __init__(self, paths, timeout: float = LOCK_TIMEOUT) -> None:
+        self._keys = tuple(sorted({str(Path(p).absolute()) for p in paths}))
+        self._timeout = timeout
+        self._held: list[FileLock] = []
+
+    def __enter__(self) -> "LockSet":
+        try:
+            for key in self._keys:
+                _require_parent(key + ".lock")
+                lock = FileLock(key + ".lock", timeout=self._timeout)
+                lock.acquire()
+                self._held.append(lock)
+        except BaseException:
+            self._release()
+            raise
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self._release()
+
+    def _release(self) -> None:
+        while self._held:
+            self._held.pop().release()
+
+    def holds(self, path) -> bool:
+        return (str(Path(path).absolute()) in self._keys
+                and len(self._held) == len(self._keys))
+
+    def replace(self, path, text: str) -> None:
+        if not self.holds(path):
+            raise RuntimeError(f"{path} is not held by this lock set")
+        _atomic_write(Path(path), text)
+
+
+def held_locks(paths, timeout: float = LOCK_TIMEOUT) -> LockSet:
+    """Sibling locks for `paths`; use as a context manager."""
+    return LockSet(paths, timeout)
+
+
 def write_text(path: Path, text: str) -> None:
     path = Path(path)
     with locked(path):

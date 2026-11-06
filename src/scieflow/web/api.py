@@ -17,9 +17,11 @@ enforce this for the whole app, not just this module.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from starlette.datastructures import FormData
 
 from scieflow.core import jobs, service
-from scieflow.web import auth
+from scieflow.web import agent_views, auth
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(auth.require_session)])
 
@@ -40,6 +42,24 @@ from scieflow.web.pages import _conversation_form as _read_form
 def list_runs(request: Request) -> list[dict]:
     """Every run: slug, kind, phase, state, last activity."""
     return service.list_runs(_project(request))
+
+
+@router.get("/workspace", tags=["workspace"])
+def workspace_index(request: Request) -> dict:
+    """The read-only workspace index: runs, aliases, moved and external entries, findings."""
+    return service.workspace_index(_project(request))
+
+
+@router.get("/runs/{slug}/health", tags=["runs"])
+def run_health(request: Request, slug: str) -> dict:
+    """A run's cheap health: missing controls, legacy keys, the DVC pointer. No walk."""
+    return service.run_health(_project(request), slug)
+
+
+@router.post("/runs/{slug}/health/check", dependencies=MUTATE, tags=["runs"])
+def run_health_check(request: Request, slug: str) -> dict:
+    """A bounded full health scan of the run. Nothing is stored or repaired."""
+    return service.scan_run_health(_project(request), slug)
 
 
 @router.get("/runs/{slug}", tags=["runs"])
@@ -92,13 +112,56 @@ def open_gates(request: Request,
 @router.get("/agents", tags=["agents"])
 def agent_settings(request: Request,
                    slug: str | None = Query(default=None,
-                                            description="Resolve for this run.")
-                   ) -> dict:
-    """Effective role assignments and agent settings, with their sources."""
+                                            description="Resolve for this run."),
+                   scope: str | None = Query(default=None,
+                                             description="project, workspace or news: the "
+                                                         "browser view, which never includes "
+                                                         "command templates.")
+                   ):
+    """Effective role assignments and agent settings, with their sources.
+
+    Without `scope` this is unchanged (it still returns command templates). With
+    `scope` it is the browser's view of one scope (`service.agent_config_view`)."""
     project = _project(request)
+    if scope is not None:
+        return _config_reply(lambda: service.agent_config_view(project, scope, slug or None))
     if slug is not None:
         service.run_workspace(project, slug)  # raises ServiceError -> 404
     return service.agent_settings(project, slug)
+
+
+def _config_reply(call):
+    """A configuration call's result, or its refusal as JSON: 400 refused, 409 stale."""
+    try:
+        return call()
+    except service.StaleConfiguration as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    except service.ConfigChangeRefused as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+@router.post("/agents/preview", dependencies=MUTATE, tags=["agents"])
+def preview_agent_changes(request: Request, form: FormData = Depends(_read_form)):
+    """The page's preview as JSON: the structured change and its revision. Writes nothing."""
+    project = _project(request)
+
+    def plan():
+        scope, slug = agent_views.scope_and_slug(form)
+        return service.plan_agent_changes(project, scope, agent_views.changes_from_form(form),
+                                          slug or None)
+    return _config_reply(plan)
+
+
+@router.post("/agents/apply", dependencies=MUTATE, tags=["agents"])
+def apply_agent_changes(request: Request, form: FormData = Depends(_read_form)):
+    """Write a previewed change (the `change` texts and `revision` of a preview)."""
+    project = _project(request)
+
+    def apply():
+        scope, slug = agent_views.scope_and_slug(form)
+        return service.apply_agent_changes(project, scope, agent_views.change_texts(form),
+                                           agent_views.revision(form), slug or None)
+    return _config_reply(apply)
 
 
 @router.post("/runs/{slug}/phase", dependencies=MUTATE, tags=["runs"])

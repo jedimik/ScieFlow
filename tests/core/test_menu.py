@@ -84,11 +84,12 @@ def test_workspace_scope_touches_only_that_run(repo):
     assert ws["agent_overrides"]["codex"]["reasoning"] == "high"
 
 
-def test_claude_extended_thinking_prefixes_cmd(repo):
+def test_claude_extended_thinking_sets_reasoning(repo):
     ui = ScriptedUI(["default", "effort", "claude", "extended", "save", True])
     menu.agent_settings(ui)
     reg = yaml.safe_load((repo / "config" / "agents.yml").read_text())
-    assert reg["agents"]["claude"]["cmd"].startswith(menu.EXTENDED_THINKING)
+    assert reg["agents"]["claude"]["reasoning"] == "extended-thinking"
+    assert reg["agents"]["claude"]["cmd"] == "claude -p --model {model} {prompt}"
 
 
 def test_support_agent_on_primary_role_needs_explicit_exception(repo):

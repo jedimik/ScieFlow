@@ -65,8 +65,7 @@ Then change any of:
 - **An agent's model** — from its menu in `config/agents.yml`, or type
   another your account offers.
 - **An agent's effort** — codex: `low … max`; agy: `low/medium/high`;
-  claude: `default` or `extended thinking` (adds
-  `MAX_THINKING_TOKENS=32000` to its command).
+  claude: `default` or `extended thinking`. The menu's Claude effort choice sets `reasoning`; it no longer edits the agent's `cmd`.
 
 Changes are queued and checked as you go; an invalid one (for example the
 same agent as reviewer and submitter) is refused on the spot. **Review and

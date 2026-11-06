@@ -19,6 +19,7 @@ enforces the catalogue and tier routing (root AGENTS.md rule 10).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -110,6 +111,54 @@ def model_family(agent_cfg: dict) -> str | None:
     return None
 
 
+#: The one effort rule (T-12 T12-D2). An agent's effort mode is `placeholder` when a
+#: command template carries `{reasoning}`, `thinking` for a Claude-family agent without
+#: one (its effort is the env prefix below), and `none` otherwise.
+EFFORT_TEMPLATES = ("cmd", "stdin_cmd", "session_cmd", "resume_cmd")
+THINKING_LEVELS = ("default", "extended-thinking")
+DEFAULT_LEVELS = ("low", "medium", "high")
+#: Registry fields the effort rule reads that are not AGENT_FIELDS (kept out of to_json).
+EFFORT_FAMILY_FIELDS = ("model_family", "family", "session_cmd", "resume_cmd")
+
+
+def effort_mode(cfg: dict) -> str:
+    """'placeholder', 'thinking' or 'none' for an agent's effective configuration."""
+    if any("{reasoning}" in str(cfg.get(key) or "") for key in EFFORT_TEMPLATES):
+        return "placeholder"
+    if model_family(cfg) == "claude":
+        return "thinking"
+    return "none"
+
+
+def effort_levels_for(cfg: dict, menu: dict) -> list[str]:
+    """The effort choices of an agent: its menu levels, the Claude pair, or none."""
+    mode = effort_mode(cfg)
+    if mode == "placeholder":
+        levels = ((menu or {}).get("reasoning") or {}).get("levels")
+        return [str(level) for level in levels] if levels else list(DEFAULT_LEVELS)
+    if mode == "thinking":
+        return list(THINKING_LEVELS)
+    return []
+
+
+def apply_effort(cfg: dict) -> dict:
+    """The agent configuration with a Claude effort setting applied to its commands.
+
+    Only a `thinking` agent with `reasoning: default|extended-thinking` changes: its
+    `cmd`/`stdin_cmd` get the env prefix exactly once for extended thinking and lose it
+    for default. Every other case returns an unchanged copy. The input is never mutated.
+    """
+    out = dict(cfg)
+    reasoning = cfg.get("reasoning")
+    if reasoning not in THINKING_LEVELS or effort_mode(cfg) != "thinking":
+        return out
+    for key in ("cmd", "stdin_cmd"):
+        if isinstance(out.get(key), str):
+            plain = out[key].removeprefix(EXTENDED_THINKING)
+            out[key] = EXTENDED_THINKING + plain if reasoning == "extended-thinking" else plain
+    return out
+
+
 @dataclass
 class Setting:
     value: object
@@ -125,12 +174,20 @@ class Effective:
     support_as_primary: dict[str, str] = field(default_factory=dict)   # role -> source
     #: role -> agent -> Setting({model?, reasoning?}): this role's own staffing
     role_overrides: dict[str, dict[str, Setting]] = field(default_factory=dict)
+    #: agent -> registry fields the effort rule reads (EFFORT_FAMILY_FIELDS); not in to_json
+    families: dict[str, dict] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)   # block writes, exit 1
     warnings: list[str] = field(default_factory=list)   # shown, never block
 
     def value(self, role: str):
         setting = self.assignments.get(role)
         return None if setting is None else setting.value
+
+    def effort_cfg(self, name: str) -> dict:
+        """Effective fields for effort_mode: registry family/session fields, then this run's values."""
+        cfg = dict(self.families.get(name, {}))
+        cfg.update({f: s.value for f, s in self.agents.get(name, {}).items()})
+        return cfg
 
     def to_json(self) -> dict:
         return {
@@ -245,8 +302,11 @@ def resolve_data(registry: dict, defaults: dict, workspace: dict | None = None) 
             role_overrides[role] = {a: Setting(v, setting.source) for a, v in extra.items()}
     _follow_authors(assignments)
 
+    families = {name: {f: entry[f] for f in EFFORT_FAMILY_FIELDS if f in entry}
+                for name, entry in entries.items()}
     eff = Effective(agents=agents, tiers=tiers, menus=menus, assignments=assignments,
-                    support_as_primary=exceptions, role_overrides=role_overrides)
+                    support_as_primary=exceptions, role_overrides=role_overrides,
+                    families=families)
     eff.problems, eff.warnings = validate(eff)
     for key, why in LEGACY_UNMAPPED_KEYS.items():
         if key in ws:
@@ -406,6 +466,7 @@ def validate(eff: Effective) -> tuple[list[str], list[str]]:
         if timeout is not None and (
             isinstance(timeout.value, bool)
             or not isinstance(timeout.value, (int, float))
+            or not math.isfinite(timeout.value)
             or timeout.value <= 0
         ):
             problems.append(f"agent {name}: timeout_min must be a positive number")
@@ -416,7 +477,13 @@ def validate(eff: Effective) -> tuple[list[str], list[str]]:
         if enabled is not None and not isinstance(enabled.value, bool):
             problems.append(f"agent {name}: enabled must be true or false")
         reasoning = fields.get("reasoning")
-        if reasoning is not None:
+        if reasoning is not None and effort_mode(eff.effort_cfg(name)) == "thinking":
+            if reasoning.value not in THINKING_LEVELS:
+                warnings.append(
+                    f"agent {name}: Claude effort is 'default' or 'extended-thinking'; "
+                    f"reasoning {reasoning.value!r} is only a label"
+                )
+        elif reasoning is not None:
             templates = " ".join(
                 str(fields[f].value) for f in ("cmd", "stdin_cmd") if f in fields
             )
@@ -425,6 +492,7 @@ def validate(eff: Effective) -> tuple[list[str], list[str]]:
                     f"agent {name}: cmd has no {{reasoning}} placeholder, so reasoning "
                     f"{reasoning.value!r} is only a label unless the cmd sets it (menu `how`)"
                 )
+        if reasoning is not None:
             levels = ((eff.menus.get(name) or {}).get("reasoning") or {}).get("levels")
             if isinstance(levels, list) and reasoning.value not in levels:
                 warnings.append(
