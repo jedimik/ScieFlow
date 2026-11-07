@@ -26,10 +26,12 @@ Usage:
 
 import argparse
 import codecs
+import errno
 import json
 import os
 import subprocess
 import sys
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -344,6 +346,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _io_failure(exc: OSError) -> tuple[str, str]:
+    """The failure code and sentence for a local I/O error. ENOSPC is disk-full (B2:5.9); any other error has
+    no code of its own in the closed set, so it is dvc-failed with the OS error text in its place."""
+    if exc.errno == errno.ENOSPC:
+        return "disk-full", arch.sentence("disk-full")
+    return "dvc-failed", f"the local file could not be read or written ({exc.strerror or exc})"
+
+
 def _write_failure(state_dir: Path, slug: str, prev: dict | None, st: os.stat_result | None,
                    pointer_md5: str, code: str, exit_code: int | None, pid: int) -> None:
     """Record a failure. A verification the file still matches is kept, so a failed re-download over an
@@ -383,7 +393,7 @@ def _fetch_locked(slug: str, root: Path, workspace_root: Path, state_dir: Path, 
         return 1
     zip_file = archive.archive_path(workspace_root, slug)
     pointer = archive.pointer_path(workspace_root, slug)
-    if _outside_cache(zip_file, root):
+    if _outside_cache(zip_file, root) and (verify_only or not replace):
         print(f"Error: {slug}: the local zip is a link outside the DVC cache")
         return 1
     prev = _read_record(state_dir, slug)
@@ -391,9 +401,13 @@ def _fetch_locked(slug: str, root: Path, workspace_root: Path, state_dir: Path, 
     st = _stat(zip_file)
     size_matches = st is not None and ptr.size is not None and st.st_size == ptr.size
 
-    def fail(code: str, exit_code: int | None) -> int:
-        _write_failure(state_dir, slug, prev, _stat(zip_file), ptr.md5, code, exit_code, pid)
-        print(f"Error: {slug}: {arch.sentence(code, n=exit_code, md5=ptr.md5, log_path='the job log')}")
+    def fail(code: str, exit_code: int | None, text: str | None = None) -> int:
+        try:
+            _write_failure(state_dir, slug, prev, _stat(zip_file), ptr.md5, code, exit_code, pid)
+        except OSError as exc:  # a full disk may refuse the record too: say so and keep the last good one
+            print(f"Error: {slug}: the failed record could not be written ({exc.strerror})")
+        print(f"Error: {slug}: "
+              f"{text or arch.sentence(code, n=exit_code, md5=ptr.md5, log_path='the job log')}")
         return 1
 
     rc = None
@@ -403,17 +417,28 @@ def _fetch_locked(slug: str, root: Path, workspace_root: Path, state_dir: Path, 
         rc, tail = run_cmd_tail(cmd, cwd=root)
         if rc != 0:
             return fail(arch.classify(rc, tail), rc)
+    if _outside_cache(zip_file, root):  # --replace ran dvc and the link is still there: never opened (B2:5.5)
+        return fail("dvc-failed", rc, "the local zip is still a link outside the DVC cache after the pull")
     st = _stat(zip_file)
     if st is None or (ptr.size is not None and st.st_size != ptr.size):
         return fail("verify-size", rc)
-    if archive.md5_file(zip_file, arch.MD5_CHUNK_BYTES) != ptr.md5:
+    try:
+        digest = archive.md5_file(zip_file, arch.MD5_CHUNK_BYTES)
+    except OSError as exc:
+        code, text = _io_failure(exc)
+        return fail(code, rc, text)
+    if digest != ptr.md5:
         return fail("verify-md5", rc)
-    linked = archive.link_to_cache(zip_file, pointer, root / ".dvc" / "cache")
-    st = os.stat(zip_file)  # after the link: a hard link has its own inode
-    _write_record(state_dir, slug, {
-        "pointer_md5": ptr.md5, **_stat_fields(st), "verified_at": _now(), "linked": linked,
-        "outcome": "ready", "reason": None, "exit_code": 0, "pid": pid,
-    })
+    try:
+        linked = archive.link_to_cache(zip_file, pointer, root / ".dvc" / "cache")
+        st = os.stat(zip_file)  # after the link: a hard link has its own inode
+        _write_record(state_dir, slug, {
+            "pointer_md5": ptr.md5, **_stat_fields(st), "verified_at": _now(), "linked": linked,
+            "outcome": "ready", "reason": None, "exit_code": 0, "pid": pid,
+        })
+    except OSError as exc:
+        code, text = _io_failure(exc)
+        return fail(code, rc, text)
     print(f"Verified workspace/{archive.ARCHIVE_DIR}/{slug}.zip ({st.st_size} bytes)")
     return 0
 
@@ -422,6 +447,7 @@ RESTORE_MESSAGES = {
     "run-exists": "workspace/{slug} exists and is not empty; restore needs it absent or empty.",
     "corrupt-member": "the archive has a corrupt member (its CRC does not match).",
     "unreadable-zip": "the archive is not a readable zip.",
+    "disk-full": arch.sentence("disk-full"),
 }
 
 
@@ -460,11 +486,14 @@ def _restore_locked(slug: str, root: Path, workspace_root: Path, state_dir: Path
     pid = os.getpid()
     dest = workspace_root / slug
 
-    def fail(code: str) -> int:
-        _write_record(state_dir, slug, {**record, "outcome": "failed", "reason": code,
-                                        "exit_code": None, "pid": pid})
+    def fail(code: str, text: str | None = None) -> int:
+        try:
+            _write_record(state_dir, slug, {**record, "outcome": "failed", "reason": code,
+                                            "exit_code": None, "pid": pid})
+        except OSError as exc:  # a full disk may refuse the record too: say so and keep the last good one
+            print(f"Error: {slug}: the failed record could not be written ({exc.strerror})")
         print(f"Error: {slug}: restore refused: "
-              + RESTORE_MESSAGES[code].format(slug=slug))
+              + (text or RESTORE_MESSAGES[code].format(slug=slug)))
         return 1
 
     if os.path.lexists(dest) and not (dest.is_dir() and not os.path.islink(dest) and not any(dest.iterdir())):
@@ -475,8 +504,11 @@ def _restore_locked(slug: str, root: Path, workspace_root: Path, state_dir: Path
         return fail("corrupt-member" if "corrupt member" in str(exc) else "unreadable-zip")
     try:
         archive.extract_zip(zip_file, dest, force=False)
-    except archive.ArchiveError:
+    except (archive.ArchiveError, zipfile.BadZipFile):
         return fail("unreadable-zip")
+    except OSError as exc:
+        code, text = _io_failure(exc)
+        return fail(code, text)
     _write_record(state_dir, slug, {**record, "outcome": "restored", "reason": None,
                                     "exit_code": 0, "pid": pid})
     print(f"Restored workspace/{slug} from {archive.ARCHIVE_DIR}/{slug}.zip")
