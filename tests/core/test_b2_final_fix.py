@@ -3,9 +3,12 @@ and `archived_runs` lists `workspace/` once for the whole list (B2:5.2 T8-D9, B2
 """
 
 import pytest
+from click.testing import CliRunner
 
+from scieflow.cli import main
 from scieflow.core import archives as a
 from scieflow.core import service
+from scieflow.core.project import Project
 from tests.fixtures.b2_archives import make_project, write_legacy_pointer, write_pointer
 
 
@@ -45,3 +48,11 @@ def test_archived_runs_lists_workspace_once_for_the_whole_list(project, monkeypa
     assert listed.count(("workspace",)) == 1
     assert listed.count(("workspace", "_archives")) == 1
     assert len(doc["rows"]) == min(count, a.LIST_CAP)
+
+
+def test_cli_list_prints_a_legacy_pointers_file_count(project, monkeypatch):
+    monkeypatch.setattr(Project, "discover", lambda *args, **kwargs: project)
+    write_legacy_pointer(project, "old", nfiles=4321)
+    out = CliRunner().invoke(main, ["workspace", "archives"]).output
+    assert "4321 files" in out
+    assert "uv run scripts/dvc_sync.py pull old" in out
