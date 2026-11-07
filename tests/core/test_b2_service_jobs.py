@@ -19,8 +19,8 @@ import pytest
 from scieflow.core import archives as a
 from scieflow.core import service
 from tests.fixtures import b2_fake_dvc as fake
-from tests.fixtures.b2_archives import (make_project, stat_record, write_pointer, write_record,
-                                        write_zip, zip_path)
+from tests.fixtures.b2_archives import (dead_pid, make_project, stat_record, write_job, write_pointer,
+                                        write_record, write_zip, zip_path)
 
 REPO_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 MEMBERS = {"status.yml": b"kind: loop\nstate: running\nphase: p1\niteration: 2\n",
@@ -169,3 +169,43 @@ def test_restore_makes_the_run_local(project, dvc_bin):
     assert (project.workspace_root / "r1" / "status.yml").read_bytes() == MEMBERS["status.yml"]
     rows = {row["slug"]: row for row in service.archived_runs(project)["rows"]}
     assert rows["r1"]["relation"] == "also-local"
+    assert "r1" in [run["slug"] for run in service.list_runs_with_budget(project)]
+
+
+def test_restore_accepts_an_empty_run_folder(project, dvc_bin):
+    """B2:5.8 and W2: restore unpacks into an absent or EMPTY workspace/<slug>."""
+    data = zip_bytes()
+    md5 = pointer_for(project, "r1", data)
+    write_zip(project, "r1", data)
+    write_record(project, "r1", stat_record(zip_path(project, "r1"), pointer_md5=md5))
+    (project.workspace_root / "r1").mkdir()
+
+    doc = service.restore_archive(project, "r1", wait=True)
+
+    assert doc["outcome"] == "restored"
+    assert (project.workspace_root / "r1" / "status.yml").read_bytes() == MEMBERS["status.yml"]
+
+
+def test_a_dead_running_job_is_lost_by_the_next_fetch(project, dvc_bin):
+    data = zip_bytes()
+    pointer_for(project, "r1", data)
+    job_id = write_job(project, "r1", kind="archive-fetch", state="running", pid=dead_pid())
+    fake.set_script(dvc_bin, content=data)
+
+    doc = service.fetch_archive(project, "r1", wait=True)
+
+    assert doc["outcome"] == "ready"
+    assert '"state": "lost"' in (project.state_dir / "jobs" / f"{job_id}.json").read_text()
+
+
+def test_a_dead_running_job_is_lost_by_the_next_restore(project, dvc_bin):
+    data = zip_bytes()
+    md5 = pointer_for(project, "r1", data)
+    write_zip(project, "r1", data)
+    write_record(project, "r1", stat_record(zip_path(project, "r1"), pointer_md5=md5))
+    job_id = write_job(project, "r1", kind="archive-restore", state="running", pid=dead_pid())
+
+    doc = service.restore_archive(project, "r1", wait=True)
+
+    assert doc["outcome"] == "restored"
+    assert '"state": "lost"' in (project.state_dir / "jobs" / f"{job_id}.json").read_text()

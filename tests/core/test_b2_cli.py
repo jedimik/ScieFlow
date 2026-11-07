@@ -7,14 +7,17 @@ message and exit 1. Project discovery is pointed at a temporary project.
 import hashlib
 import io
 import json
+import sys
+import types
 import zipfile
 
+import click
 import pytest
 from click.testing import CliRunner
 
 from scieflow.cli import main
 from scieflow.core import archives as a
-from scieflow.core import jobs
+from scieflow.core import jobs, service
 from scieflow.core.project import Project
 from tests.fixtures.b2_archives import make_project, stat_record, write_pointer, write_record, write_zip, zip_path
 
@@ -112,3 +115,53 @@ def test_an_unknown_slug_is_an_error_exit(project):
     result = run("archive", "show", "nope")
     assert result.exit_code != 0
     assert "no archived run nope" in result.output
+
+
+def ready_members(project, members, slug="r1"):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    data = buf.getvalue()
+    write_zip(project, slug, data)
+    md5 = hashlib.md5(data).hexdigest()
+    write_pointer(project, slug, md5=md5, size=len(data))
+    write_record(project, slug, stat_record(zip_path(project, slug), pointer_md5=md5))
+
+
+def test_fetch_yes_reaches_the_service_through_the_cli(project, monkeypatch):
+    calls = []
+
+    def fake(proj, slug, **kwargs):
+        calls.append((slug, kwargs))
+        return {"slug": slug, "action": "fetch", "state": "ready", "started": True, "job_id": "j",
+                "outcome": "ready", "reason": None, "exit_code": 0, "log": "x",
+                "message": "Downloaded and verified."}
+    monkeypatch.setattr(service, "fetch_archive", fake)
+
+    result = run("archive", "fetch", "r1", "--yes", "--replace")
+
+    assert result.exit_code == 0, result.output
+    assert "Downloaded and verified." in result.output
+    assert calls == [("r1", {"replace": True, "yes": True, "wait": True})]
+
+
+def test_cat_refuses_a_binary_member_on_a_terminal_without_out(project, monkeypatch):
+    from scieflow.core.archives_cli import cat_cmd
+    ready_members(project, {"data.bin": b"\x00\xff\x10"})
+    tty = types.SimpleNamespace(isatty=lambda: True, buffer=io.BytesIO())
+    monkeypatch.setattr(sys, "stdout", tty)
+
+    with pytest.raises(click.ClickException, match="this member is binary: use --out FILE"):
+        cat_cmd.main(["r1", "data.bin"], standalone_mode=False)
+    assert tty.buffer.getvalue() == b""
+
+
+def test_cat_out_writes_the_member_bytes(project, tmp_path):
+    ready_members(project, {"data.bin": b"\x00\xff\x10"})
+    target = tmp_path / "copy.bin"
+
+    result = run("archive", "cat", "r1", "data.bin", "--out", str(target))
+
+    assert result.exit_code == 0, result.output
+    assert target.read_bytes() == b"\x00\xff\x10"

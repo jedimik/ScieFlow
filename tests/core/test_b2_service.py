@@ -16,7 +16,7 @@ import pytest
 import yaml
 
 from scieflow.core import archives as a
-from scieflow.core import jobs, service, store
+from scieflow.core import jobs, sandbox, service, store
 from scieflow.core.project import Project
 from tests.fixtures.b2_archives import (MD5, dead_pid, make_project, state_dir, stat_record,
                                         tree_snapshot, write_job, write_job_pointer,
@@ -398,3 +398,165 @@ def test_member_media_types_follow_the_web_download_rule(project, reads_only):
         assert (raw["media_type"], raw["attachment"]) == (media, attachment), name
     assert service.archive_member(project, "r1", "readme.txt", mode="raw")["text"] is True
     assert service.archive_member(project, "r1", "p.png", mode="raw")["text"] is False
+
+
+# -- T-9 t4 fix: review r1 finding 4 (plan section 6 t4 items that had no test) ------------------
+
+def _dvc_on_path(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/dvc")
+
+
+def _roomy(monkeypatch):
+    monkeypatch.setattr(a, "disk_check", lambda root, receivers: a.DiskCheck(True, []))
+
+
+def _no_dvc(monkeypatch, project):
+    monkeypatch.setenv("PATH", str(project.root / "empty-bin"))
+
+
+def _threshold(monkeypatch, value: int = 10):
+    monkeypatch.setattr(a, "CONSENT_BYTES", value)
+
+
+def _full_disk(monkeypatch):
+    groups = [{"path": "/x/cache", "received": 20, "needed": 999, "free": 5}]
+    monkeypatch.setattr(a, "disk_check", lambda root, receivers: a.DiskCheck(False, groups))
+
+
+def _refusal_setups():
+    """(name, setup(project, monkeypatch), call(project), reason): every refusal of B2:5.7 rules 1-5."""
+    def fetch(**kw):
+        return lambda p: service.fetch_archive(p, "r1", **kw)
+
+    def restore(**kw):
+        return lambda p: service.restore_archive(p, "r1", **kw)
+
+    def dvc_missing(p, mp):
+        write_pointer(p, "r1", size=10)
+        _no_dvc(mp, p)
+
+    def size_unknown(p, mp):
+        write_pointer(p, "r1", size=None)
+        _dvc_on_path(mp)
+
+    def replace_required(p, mp):
+        write_pointer(p, "r1", size=10)
+        write_zip(p, "r1", b"short")
+        _dvc_on_path(mp)
+
+    def no_space(p, mp):
+        write_pointer(p, "r1", size=10)
+        _dvc_on_path(mp)
+        _full_disk(mp)
+
+    def confirm_required(p, mp):
+        write_pointer(p, "r1", size=20)
+        _dvc_on_path(mp)
+        _roomy(mp)
+        _threshold(mp)
+
+    def confirm_mismatch(p, mp):
+        confirm_required(p, mp)
+
+    def not_ready(p, mp):
+        write_pointer(p, "r1", size=10)
+
+    def run_exists(p, mp):
+        ready_archive(p, "r1")
+        (p.workspace_root / "r1").mkdir()
+        (p.workspace_root / "r1" / "status.yml").write_text("kind: loop\n")
+        _roomy(mp)
+
+    def in_dispatch(p, mp):
+        ready_archive(p, "r1")
+        mp.setenv("SCIEFLOW_DISPATCH", "1")
+
+    return [
+        ("not-zip-pointer", lambda p, mp: write_legacy_pointer(p, "r1"), fetch(yes=True), "not-zip-pointer"),
+        ("dvc-missing", dvc_missing, fetch(yes=True), "dvc-missing"),
+        ("size-unknown", size_unknown, fetch(), "size-unknown"),
+        ("replace-required", replace_required, fetch(yes=True), "replace-required"),
+        ("no-space", no_space, fetch(yes=True), "no-space"),
+        ("confirm-required", confirm_required, fetch(), "confirm-required"),
+        ("confirm-mismatch", confirm_mismatch, fetch(confirm_size="1"), "confirm-mismatch"),
+        ("not-ready", not_ready, restore(yes=True), "not-ready"),
+        ("run-exists", run_exists, restore(yes=True), "run-exists"),
+        ("in-dispatch", in_dispatch, restore(yes=True), "in-dispatch"),
+    ]
+
+
+@pytest.mark.parametrize("name, setup, call, reason", _refusal_setups(), ids=lambda v: v if isinstance(v, str) else "")
+def test_every_refusal_starts_nothing_and_writes_no_job(project, no_jobs, monkeypatch, name, setup, call, reason):
+    setup(project, monkeypatch)
+    with pytest.raises(service.ArchiveRefused) as exc:
+        call(project)
+    assert exc.value.reason == reason
+    assert not (state_dir(project) / "r1.job").exists()
+    jobs_dir = project.state_dir / "jobs"
+    assert not jobs_dir.exists() or not list(jobs_dir.glob("*.json"))
+    assert not zip_path(project, "r1").with_suffix(".zip.partial").exists()
+
+
+def test_one_byte_below_the_threshold_is_not_asked(project, dvc_present, roomy_disk, monkeypatch):
+    class Reached(Exception):
+        """The call got past every refusal and would start the job."""
+    write_pointer(project, "r1", size=a.CONSENT_BYTES - 1)
+
+    def reached(*args, **kwargs):
+        raise Reached()
+    monkeypatch.setattr(jobs, "start", reached)
+    with pytest.raises(Reached):
+        service.fetch_archive(project, "r1")
+
+
+def test_replace_needs_consent_even_for_a_small_copy(project, dvc_present, roomy_disk, monkeypatch):
+    class Reached(Exception):
+        """The call got past every refusal and would start the job."""
+    write_pointer(project, "r1", size=10)
+    write_zip(project, "r1", b"short")
+    with pytest.raises(service.ArchiveRefused) as exc:
+        service.fetch_archive(project, "r1", replace=True)
+    assert exc.value.reason == "confirm-required"
+
+    monkeypatch.setattr(jobs, "start", lambda *args, **kwargs: (_ for _ in ()).throw(Reached()))
+    with pytest.raises(Reached):
+        service.fetch_archive(project, "r1", replace=True, confirm_size="10")
+
+
+@pytest.mark.parametrize("call", [
+    lambda p: service.fetch_archive(p, "r1", yes=True),
+    lambda p: service.restore_archive(p, "r1", yes=True),
+    lambda p: service.cancel_archive_job(p, "r1"),
+])
+def test_actions_refused_by_the_sandbox_cache_dir_heuristic(project, no_jobs, roomy_disk, dvc_present,
+                                                           monkeypatch, call):
+    ready_archive(project, "r1")
+    monkeypatch.delenv("SCIEFLOW_DISPATCH", raising=False)
+    monkeypatch.setenv("UV_CACHE_DIR", "/home/ubuntu/cache/" + sandbox.CACHE_DIRNAME)
+    with pytest.raises(service.ArchiveRefused) as exc:
+        call(project)
+    assert exc.value.reason == "in-dispatch"
+    assert not (state_dir(project) / "r1.job").exists()
+
+
+def test_gets_never_reconcile_find_list_or_lock_and_change_nothing(project, monkeypatch):
+    ready_archive(project, "r1")
+    from tests.fixtures.b2_archives import write_job
+    job_id = write_job(project, "r1", kind="archive-fetch", state="running", pid=dead_pid())
+
+    def boom(*args, **kwargs):
+        raise AssertionError("a read started a process, opened a socket, reconciled, searched, listed or locked")
+    monkeypatch.setattr(subprocess, "Popen", boom)
+    monkeypatch.setattr(socket.socket, "connect", boom)
+    for owner, name in ((jobs, "reconcile"), (jobs, "find"), (jobs, "list_jobs"), (store, "try_locked")):
+        monkeypatch.setattr(owner, name, boom)
+
+    before = (tree_snapshot(project.root), tree_snapshot(project.state_dir))
+    service.archived_runs(project)
+    service.archive_detail(project, "r1")
+    service.archive_entries(project, "r1")
+    service.archive_entries(project, "r1", "notes")
+    service.archive_member(project, "r1", "status.yml")
+    service.archive_member(project, "r1", "status.yml", mode="raw")
+    assert (tree_snapshot(project.root), tree_snapshot(project.state_dir)) == before
+    assert '"state": "running"' in (project.state_dir / "jobs" / f"{job_id}.json").read_text()
