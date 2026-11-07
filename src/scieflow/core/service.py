@@ -9,16 +9,18 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import mimetypes
 import os
 import re
 import shutil
 import stat
+import sys
 import tempfile
 import threading
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -26,7 +28,9 @@ from scieflow.core import (
     agent_config,
     agent_configure as acf,
     agent_run,
+    archives,
     config,
+    control_read,
     drafts,
     events,
     gates,
@@ -42,7 +46,7 @@ from scieflow.core import (
 )
 from scieflow.core.data import dispatch as data_dispatch
 from scieflow.core.gates import ADOPTED, CHARTER_ADOPTION
-from scieflow.core.project import Project, ProjectError
+from scieflow.core.project import Project, ProjectError, clean_slug
 from scieflow.core.run import actions, budget, charter, conversation, curation, status
 from scieflow.core.turn_input import HumanSubmission, accept_human_submission
 from scieflow.core import turn_artifacts, turn_output
@@ -3015,3 +3019,531 @@ def run_overview(project: Project, slug: str) -> dict:
     """
     ws = _ws(project, slug)
     return {name: _panel(name, _PANELS[name], ws) for name in _PANELS}
+
+
+# -- archived runs (T-9 t4; B2:5.4-5.8, 5.11; T9-D2) -----------------------------------------------
+
+ARCHIVE_MANUSCRIPT = ("Manuscript history is not kept in archives. It is rebuilt from the run's drafts "
+                      "after you restore the run: open its drafts page, or complete a merge round.")
+ARCHIVE_L2_BANNER = ("This archive is declared L2 (patient-level data). It is shown to you only; "
+                     "ScieFlow sends nothing from an archive to a model or a remote.")
+ARCHIVE_INLINE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+ARCHIVE_REPLACE_STATES = ("incomplete", "different", "outdated")
+ARCHIVE_DOWNLOAD_STATES = ("not-downloaded", "incomplete", "different", "outdated")
+ARCHIVE_BUSY_STATES = {"fetch": "downloading", "verify": "verifying", "restore": "restoring"}
+ARCHIVE_REFUSAL_TEXT = {
+    "in-dispatch": "Archives cannot be downloaded, restored or cancelled from inside an agent dispatch.",
+    "locked": archives.sentence("locked"),
+    "not-zip-pointer": "This archive has no zip pointer (a legacy directory pointer or an unreadable one), "
+                       "so there is nothing to download.",
+    "replace-required": "A local copy of this archive exists and is not the verified one. Download it "
+                        "again with replace to overwrite it.",
+    "dvc-missing": archives.sentence("dvc-missing"),
+    "size-unknown": "The download size is not recorded, so free disk space cannot be checked. From the "
+                    "terminal run: {command}",
+    "no-space": "Not enough free disk at {path}: {needed_human} needed (the transfer, with 5% headroom, "
+                "and 1 GiB kept free), {free_human} free.",
+    "confirm-required": "This transfer is {size_human} ({size} bytes). Confirm it on the page, or from the "
+                        "terminal run: {command}",
+    "confirm-mismatch": "The size changed since the confirmation was shown ({size} bytes now). Nothing "
+                        "was started.",
+    "not-ready": "This archive is not downloaded and verified yet.",
+    "run-exists": "workspace/{slug} already exists and is not empty. Restore never writes over a run.",
+    "unreadable-zip": "The archive is not a readable zip file.",
+    "too-many-entries": "The archive has more entries than ScieFlow reads.",
+}
+
+
+class ArchiveRefused(ServiceError):
+    """An archive action refused before anything starts (T9-D2). `reason` is a B2:5.9 code.
+
+    The page re-renders with `message`; the API answers 409 {reason, message}; the CLI prints `message`.
+    `details` holds numbers and the exact command only, never dvc output.
+    """
+
+    def __init__(self, reason: str, message: str, details: dict | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.message = message
+        self.details = dict(details or {})
+
+
+def _refuse(reason: str, **details) -> ArchiveRefused:
+    template = ARCHIVE_REFUSAL_TEXT.get(reason, f"The archive cannot be used ({reason}).")
+    return ArchiveRefused(reason, template.format(**details), details)
+
+
+def _archive_slug(slug: str) -> str:
+    try:
+        return clean_slug(slug)
+    except ProjectError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def _archive_in_dispatch() -> bool:
+    from scieflow.integrations.scite import mcp as scite_mcp  # the one dispatch heuristic
+    return scite_mcp.in_dispatch()
+
+
+def _refuse_if_dispatch() -> None:
+    if _archive_in_dispatch():
+        raise _refuse("in-dispatch")
+
+
+def _archive_pointer(project: Project, slug: str) -> archives.Pointer:
+    """The slug's zip pointer, else its legacy directory pointer (B2:5.5). ServiceError when neither."""
+    root = Path(project.root)
+    for parts, name, legacy in ((("workspace", "_archives"), f"{slug}.zip.dvc", False),
+                                (("workspace",), f"{slug}.dvc", True)):
+        try:
+            fd = control_read.open_dir(root, parts)
+        except OSError:
+            continue
+        try:
+            try:
+                os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except OSError:
+                continue
+            return archives.read_pointer(fd, name, slug, legacy=legacy)
+        finally:
+            os.close(fd)
+    raise ServiceError(f"no archived run {slug}")
+
+
+def _local_or_none(project: Project, ptr: archives.Pointer):
+    try:
+        return archives.local_state(project, ptr)
+    except (OSError, ValueError):
+        return None
+
+
+def _last_outcome(ls) -> str | None:
+    if ls.job.running:
+        return None
+    if ls.job.outcome:
+        return ls.job.outcome
+    record = ls.record or {}
+    if record.get("outcome") == "failed":
+        return f"failed:{record.get('reason') or 'dvc-failed'}"
+    return record.get("outcome")
+
+
+def _reason_of(outcome: str | None, fallback: str | None) -> str | None:
+    if outcome and outcome.startswith("failed:"):
+        return outcome.split(":", 1)[1]
+    return fallback
+
+
+def _archive_row(ptr: archives.Pointer, ls) -> dict:
+    row = {"slug": ptr.slug, "kind": ptr.kind, "size": ptr.size,
+           "md5_12": ptr.md5[:12] if ptr.md5 else None, "state": None, "relation": None,
+           "outcome": None, "reason": ptr.reason,
+           "command": (f"uv run scripts/dvc_sync.py pull {ptr.slug}" if ptr.kind == "directory" else None)}
+    if ls is None:
+        row["reason"] = ptr.reason or "unreadable"
+        return row
+    row["state"], row["relation"] = ls.state, ls.relation
+    row["outcome"] = _last_outcome(ls)
+    row["reason"] = _reason_of(row["outcome"], ptr.reason)
+    return row
+
+
+def archived_runs(project: Project) -> dict:
+    """Every archive of this checkout: pointers only, sorted and capped (T9-D9). Reads only (B2:5.6)."""
+    disc = archives.discover(project)
+    return {"rows": [_archive_row(ptr, _local_or_none(project, ptr)) for ptr in disc.rows],
+            "total": disc.total, "shown": disc.shown, "cap": archives.LIST_CAP,
+            "cap_note": disc.cap_note, "skipped_names": disc.skipped_names}
+
+
+def _archive_actions(state: str | None, relation: str | None) -> list[str]:
+    if state == "not-downloaded":
+        return ["download"]
+    if state in ARCHIVE_BUSY_STATES.values():
+        return ["cancel"]
+    if state in ARCHIVE_REPLACE_STATES:
+        return ["replace"]
+    if state == "unverified":
+        return ["verify"]
+    if state == "ready":
+        return ["browse"] + (["restore"] if relation == "archived-only" else [])
+    return []
+
+
+def _archive_index(project: Project, slug: str):
+    """(the ZipIndex, None) or (None, the refusal word) for one ready archive."""
+    try:
+        return archives.index(project, slug), None
+    except archives.ZipRefused as exc:
+        return None, exc.reason
+    except OSError:
+        return None, "unreadable-zip"
+
+
+def _ready_view(project: Project, slug: str) -> dict:
+    idx, refusal = _archive_index(project, slug)
+    if refusal is not None:
+        return {"data_level": None, "summary": None, "totals": None, "browse_refusal": refusal}
+    try:
+        doc = archives.summary(idx)
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"data_level": None, "summary": None, "totals": None, "browse_refusal": "unreadable"}
+    level = doc["data_level"]
+    return {"data_level": {**level, "banner": ARCHIVE_L2_BANNER if level["level"] == "L2" else None},
+            "summary": {key: doc[key] for key in ("controls", "run", "run_reason", "budget",
+                                                  "updated_label")},
+            "totals": doc["totals"], "browse_refusal": None}
+
+
+def _download_receivers(project: Project, size: int) -> list[tuple[Path, int]]:
+    root = Path(project.root)
+    return [(root / ".dvc" / "cache", size), (root / "workspace" / "_archives", size)]
+
+
+def _archive_disk(project: Project, receivers) -> dict | None:
+    try:
+        check = archives.disk_check(Path(project.root), receivers)
+    except OSError:
+        return None
+    return {"ok": check.ok, "groups": check.groups}
+
+
+def _remote_config_found(project: Project) -> bool:
+    for name in ("config", "config.local"):
+        try:
+            os.stat(Path(project.root) / ".dvc" / name)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def archive_detail(project: Project, slug: str) -> dict:
+    """The archive page's facts (B2:5.7): reads only; a zip is opened only in state `ready`."""
+    slug = _archive_slug(slug)
+    ptr = _archive_pointer(project, slug)
+    ls = _local_or_none(project, ptr)
+    row = _archive_row(ptr, ls)
+    state = row["state"]
+    detail = {**row,
+              "environment": {"dvc": "found" if shutil.which("dvc") else "not installed",
+                              "remote_config": "found" if _remote_config_found(project) else "not found"},
+              "disk": None,
+              "actions": _archive_actions(state, row["relation"]),
+              "leftovers": ls.leftovers if ls else [],
+              "symlink_note": ls.symlink_note if ls else None,
+              "manuscript": ARCHIVE_MANUSCRIPT,
+              "data_level": None, "summary": None, "totals": None, "browse_refusal": None}
+    if ptr.kind == "zip" and ptr.size is not None and state in ARCHIVE_DOWNLOAD_STATES:
+        detail["disk"] = _archive_disk(project, _download_receivers(project, ptr.size))
+    if ptr.kind == "zip" and state == "ready":
+        detail.update(_ready_view(project, slug))
+    return detail
+
+
+def _archive_ready(project: Project, ptr: archives.Pointer) -> bool:
+    ls = _local_or_none(project, ptr)
+    return ptr.kind == "zip" and ls is not None and ls.state == "ready"
+
+
+def archive_entries(project: Project, slug: str, path: str = "", page: int = 1) -> dict:
+    """One directory of a ready archive, paginated (B2:5.6). A refusal is a `reason`, never a raise."""
+    slug = _archive_slug(slug)
+    ptr = _archive_pointer(project, slug)
+    empty = {"path": path, "page": page, "pages": 0, "total": 0, "entries": [], "hidden_locks": 0,
+             "unsafe_count": 0, "note": None}
+    if not _archive_ready(project, ptr):
+        return {**empty, "reason": "not-ready"}
+    idx, refusal = _archive_index(project, slug)
+    if refusal is not None:
+        return {**empty, "reason": refusal}
+    return {**archives.entries(idx, path, page), "reason": None}
+
+
+def _member_result(path: str, reason: str | None, size=None, *, mode: str) -> dict:
+    if mode == "raw":
+        return {"path": path, "size": size, "media_type": None, "attachment": None, "filename": None,
+                "stream": None, "reason": reason}
+    return {"path": path, "size": size, "text": None, "complete": False, "reason": reason}
+
+
+def archive_member(project: Project, slug: str, path: str, *, mode: str = "view") -> dict:
+    """One member of a ready archive (T9-D11). `view`: text up to INLINE_MAX_BYTES; `raw`: a byte stream.
+
+    Only an exact central-directory name of a file member is served (B2:5.11 item 3). Nothing is
+    extracted. A refusal is returned as `reason` with no content.
+    """
+    if mode not in ("view", "raw"):
+        raise ServiceError(f"unknown member mode {mode!r}")
+    slug = _archive_slug(slug)
+    ptr = _archive_pointer(project, slug)
+    if not _archive_ready(project, ptr):
+        return _member_result(path, "not-ready", mode=mode)
+    idx, refusal = _archive_index(project, slug)
+    if refusal is not None:
+        return _member_result(path, refusal, mode=mode)
+    try:
+        info, chunks = archives.open_member(idx, path)
+    except archives.ZipRefused as exc:
+        return _member_result(path, exc.reason, mode=mode)
+    if mode == "raw":
+        name = PurePosixPath(path).name
+        media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        return {"path": path, "size": info.file_size, "media_type": media_type,
+                "attachment": media_type not in ARCHIVE_INLINE_TYPES, "filename": name,
+                "stream": chunks, "reason": None}
+    if info.file_size > archives.INLINE_MAX_BYTES:
+        return _member_result(path, archives.TOO_LARGE, info.file_size, mode=mode)
+    try:
+        data = b"".join(chunks)
+    except archives.ZipRefused as exc:
+        return _member_result(path, exc.reason, info.file_size, mode=mode)
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return _member_result(path, "not text", info.file_size, mode=mode)
+    return {"path": path, "size": info.file_size, "text": text, "complete": True, "reason": None}
+
+
+def _as_size(value) -> int:
+    """A confirmed size from a form or argument; -1 when it is not a number (never equal to a size)."""
+    if value is None:
+        return -1
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        return -1
+
+
+def _human_bytes(n: int) -> str:
+    for unit, name in ((1 << 30, "GiB"), (1 << 20, "MiB"), (1 << 10, "KiB")):
+        if n >= unit:
+            return f"{n / unit:.1f} {name}"
+    return f"{n} bytes"
+
+
+def _consent(size: int, *, needed: bool, yes: bool, confirm_size, command: str, slug: str) -> None:
+    """B2:5.4: at or above CONSENT_BYTES (or any replace) the exact size must be confirmed, unless `yes`."""
+    if yes or not needed:
+        return
+    if confirm_size is None:
+        raise _refuse("confirm-required", size=size, size_human=_human_bytes(size), command=command,
+                      slug=slug)
+    if _as_size(confirm_size) != size:
+        raise _refuse("confirm-mismatch", size=size)
+
+
+def _no_space(groups: list[dict]) -> ArchiveRefused:
+    short = next(g for g in groups if g["free"] < g["needed"])
+    return _refuse("no-space", path=short["path"], needed=short["needed"], free=short["free"],
+                   needed_human=_human_bytes(short["needed"]), free_human=_human_bytes(short["free"]),
+                   groups=groups)
+
+
+def _occupied(target: Path) -> bool:
+    """workspace/<slug> is present and not an empty directory (a link counts as present)."""
+    try:
+        st = os.lstat(target)
+    except FileNotFoundError:
+        return False
+    if stat.S_ISDIR(st.st_mode):
+        with os.scandir(target) as entries:
+            return any(True for _ in entries)
+    return True
+
+
+def _launch_archive(project: Project, slug: str, action: str, state: Path, *, verify: bool = False,
+                    replace: bool = False) -> tuple[dict, tuple]:
+    argv = [sys.executable, "-B", str(Path(project.root) / "scripts" / "dvc_sync.py"), action, slug]
+    if action == "fetch":
+        if replace:
+            argv.append("--replace")
+        if verify:
+            argv.append("--verify-only")
+    argv += ["--state-dir", str(project.state_dir)]
+    try:
+        job, proc = jobs.start(project, argv, kind=f"archive-{action}", cwd=Path(project.root),
+                               run_dir=None, label=slug)
+    except FileNotFoundError as exc:
+        raise _refuse("dvc-missing") from exc
+    store.write_text(archives.job_pointer_path(state, slug), job.id + "\n")
+    label = "verify" if verify else action
+    started = {"fetch": "Download started. Its progress and outcome show on the archive page.",
+               "verify": "Verification started (no network).",
+               "restore": "Restore started. The run becomes local when it finishes."}[label]
+    doc = {"slug": slug, "action": label, "state": ARCHIVE_BUSY_STATES[label], "started": True,
+           "job_id": job.id, "outcome": None, "reason": None, "exit_code": None, "log": None,
+           "message": started}
+    return doc, (job, proc)
+
+
+def _noop(slug: str) -> dict:
+    return {"slug": slug, "action": "fetch", "state": "ready", "started": False, "job_id": None,
+            "outcome": None, "reason": None, "exit_code": None, "log": None,
+            "message": "Already downloaded and verified."}
+
+
+def _fetch_plan(project: Project, slug: str, ptr, ls, state: Path, *, confirm_size, replace: bool,
+                yes: bool):
+    """B2:5.8 fetch order: pointer, ready, unverified, replace, dvc, size, disk, consent."""
+    if ptr.kind != "zip":
+        raise _refuse("not-zip-pointer")
+    if ls.state == "ready":
+        return _noop(slug), None
+    if ls.state == "unverified":
+        return _launch_archive(project, slug, "fetch", state, verify=True)
+    if ls.state in ARCHIVE_REPLACE_STATES and not replace:
+        raise _refuse("replace-required")
+    if shutil.which("dvc") is None:
+        raise _refuse("dvc-missing")
+    command = f"scieflow workspace archive fetch {slug} --yes"
+    if ptr.size is None:
+        if not yes:
+            raise _refuse("size-unknown", command=command)
+    else:
+        disk = _archive_disk(project, _download_receivers(project, ptr.size))
+        if disk is None:
+            raise ServiceError("cannot read the free disk space of this checkout")
+        if not disk["ok"]:
+            raise _no_space(disk["groups"])
+        big = ptr.size >= archives.CONSENT_BYTES
+        _consent(ptr.size, needed=big or replace, yes=yes, confirm_size=confirm_size,
+                 command=command, slug=slug)
+    return _launch_archive(project, slug, "fetch", state, replace=replace)
+
+
+def _restore_plan(project: Project, slug: str, ls, state: Path, *, confirm_size, yes: bool):
+    """B2:5.8 restore order: ready, empty target, readable zip, disk, consent."""
+    if ls.state != "ready":
+        raise _refuse("not-ready")
+    if _occupied(Path(project.root) / "workspace" / slug):
+        raise _refuse("run-exists", slug=slug)
+    idx, refusal = _archive_index(project, slug)
+    if refusal is not None:
+        raise _refuse(refusal)
+    unpacked = idx.totals["uncompressed_bytes"]
+    disk = _archive_disk(project, [(Path(project.root) / "workspace", unpacked)])
+    if disk is None:
+        raise ServiceError("cannot read the free disk space of this checkout")
+    if not disk["ok"]:
+        raise _no_space(disk["groups"])
+    _consent(unpacked, needed=unpacked >= archives.CONSENT_BYTES, yes=yes, confirm_size=confirm_size,
+             command=f"scieflow workspace archive restore {slug} --yes", slug=slug)
+    return _launch_archive(project, slug, "restore", state)
+
+
+def _outcome_message(outcome: str | None, exit_code, log: str, action: str) -> str:
+    if outcome == "ready":
+        return "Verified." if action == "verify" else "Downloaded and verified."
+    if outcome == "restored":
+        return "Restored into workspace; the run is now local."
+    if outcome == "interrupted":
+        return archives.sentence("interrupted")
+    if outcome and outcome.startswith("failed:"):
+        code = outcome.split(":", 1)[1]
+        if code in archives.SENTENCES:
+            return archives.sentence(code, n=exit_code, log_path=log)
+        return f"Failed: {code}. The job log is {log}."
+    return f"The job has no recorded outcome; its log is {log}."
+
+
+def _job_log(project: Project, job: jobs.Job) -> str:
+    try:
+        return str(Path(job.log).relative_to(Path(project.root)))
+    except ValueError:
+        return str(job.log)
+
+
+def _finished(project: Project, slug: str, doc: dict, job: jobs.Job) -> dict:
+    view = archives.effective_job(project, slug)
+    ls = _local_or_none(project, _archive_pointer(project, slug))
+    log = _job_log(project, job)
+    return {**doc, "outcome": view.outcome, "reason": _reason_of(view.outcome, None),
+            "exit_code": view.exit_code, "log": log, "state": ls.state if ls else None,
+            "message": _outcome_message(view.outcome, view.exit_code, log, doc["action"])}
+
+
+def _start_archive(project: Project, slug: str, action: str, *, confirm_size, replace: bool,
+                   yes: bool, wait: bool) -> dict:
+    """Start (or refuse) one archive job under the start lock (B2:5.8). The wait happens after it."""
+    state = archives.state_dir_for(project)
+    try:
+        state.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ServiceError(f"cannot create the archive state directory: {exc}") from exc
+    try:
+        with store.try_locked(archives.start_lock_path(state, slug)):
+            ptr = _archive_pointer(project, slug)
+            archives.reconcile_archive_job(project, slug)
+            ls = _local_or_none(project, ptr)
+            if ls is None:
+                raise ServiceError(f"cannot read the local state of {slug}")
+            if ls.job.running:
+                raise _refuse("locked")
+            try:
+                with store.try_locked(archives.lock_path(state, slug)):
+                    pass
+            except store.Busy as exc:
+                raise _refuse("locked") from exc
+            if action == "fetch":
+                doc, launch = _fetch_plan(project, slug, ptr, ls, state, confirm_size=confirm_size,
+                                          replace=replace, yes=yes)
+            else:
+                doc, launch = _restore_plan(project, slug, ls, state, confirm_size=confirm_size,
+                                            yes=yes)
+    except store.Busy as exc:
+        raise _refuse("locked") from exc
+    if launch is None:
+        return doc
+    job, proc = launch
+    if not wait:
+        threading.Thread(target=jobs.wait, args=(job, proc), daemon=True).start()
+        return doc
+    jobs.wait(job, proc)
+    return _finished(project, slug, doc, job)
+
+
+def fetch_archive(project: Project, slug: str, *, confirm_size=None, replace: bool = False,
+                  yes: bool = False, wait: bool = False) -> dict:
+    """Download and verify one archive zip (never unpacks). `wait` waits in the foreground (the CLI)."""
+    slug = _archive_slug(slug)
+    _archive_pointer(project, slug)
+    _refuse_if_dispatch()
+    return _start_archive(project, slug, "fetch", confirm_size=confirm_size, replace=replace,
+                          yes=yes, wait=wait)
+
+
+def restore_archive(project: Project, slug: str, *, confirm_size=None, yes: bool = False,
+                    wait: bool = False) -> dict:
+    """Unpack a verified archive into an absent or empty workspace/<slug> (B2:5.8)."""
+    slug = _archive_slug(slug)
+    _archive_pointer(project, slug)
+    _refuse_if_dispatch()
+    return _start_archive(project, slug, "restore", confirm_size=confirm_size, replace=False,
+                          yes=yes, wait=wait)
+
+
+def cancel_archive_job(project: Project, slug: str) -> dict:
+    """Stop the slug's running archive job; a dead one is marked lost first, nothing is signalled."""
+    slug = _archive_slug(slug)
+    ptr = _archive_pointer(project, slug)
+    _refuse_if_dispatch()
+    state = archives.state_dir_for(project)
+    try:
+        state.mkdir(parents=True, exist_ok=True)
+        with store.try_locked(archives.start_lock_path(state, slug)):
+            archives.reconcile_archive_job(project, slug)
+            ls = _local_or_none(project, ptr)
+            if ls is None or not ls.job.running:
+                return {"slug": slug, "cancelled": False, "state": ls.state if ls else None,
+                        "message": "No archive job is running for this run."}
+            record = Path(project.state_dir) / "jobs" / f"{ls.job.id}.json"
+            try:
+                jobs.cancel(jobs.load(record))
+            except jobs.NotCancellable as exc:
+                raise ServiceError(str(exc)) from exc
+            after = _local_or_none(project, ptr)
+            return {"slug": slug, "cancelled": True, "state": after.state if after else None,
+                    "message": "Cancelled. The archive job was stopped."}
+    except store.Busy as exc:
+        raise _refuse("locked") from exc
