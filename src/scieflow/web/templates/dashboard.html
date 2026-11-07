@@ -11,7 +11,7 @@
   <tr><th>run</th><th>kind</th><th>phase</th><th>budget left</th><th>updated</th></tr>
   {% for run in runs %}
   <tr>
-    <td><a href="/runs/{{ run.slug }}">{{ run.slug }}</a></td>
+    <td><a href="/runs/{{ run.slug }}">{{ run.slug }}</a>{% if run.slug in archived_local %} <a href="/archives/{{ run.slug }}"><span class="dim">archived</span></a>{% endif %}</td>
     <td class="dim">{{ run.kind }}</td>
     <td class="state-{{ run.phase_state or 'none' }}">
       {{ run.phase or "—" }}{% if run.phase_state %} ({{ run.phase_state }}){% endif %}
@@ -26,6 +26,24 @@
   </tr>
   {% endfor %}
 </table>
+{% endif %}
+
+<h2>Archived runs</h2>
+{% if not archives.rows %}
+  <p class="dim">No archived runs in this checkout.</p>
+{% else %}
+<table>
+  <tr><th>run</th><th>size</th><th>state</th><th>outcome</th></tr>
+  {% for row in archives.rows %}
+  <tr>
+    <td><a href="/archives/{{ row.slug }}">{{ row.slug }}</a></td>
+    <td class="dim">{{ row.size_human or "—" }}</td>
+    <td>{{ row.state or "—" }}{% if row.relation %} <span class="dim">({{ row.relation }})</span>{% endif %}</td>
+    <td class="dim">{{ row.outcome_text or "" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% if archives.cap_note %}<p class="dim">{{ archives.cap_note }}</p>{% endif %}
 {% endif %}
 
 <h2>Open gates</h2>

@@ -50,6 +50,54 @@ def workspace_index(request: Request) -> dict:
     return service.workspace_index(_project(request))
 
 
+@router.get("/archives", tags=["archives"])
+def list_archives(request: Request) -> dict:
+    """Archived runs of this checkout: pointers only, sorted and capped (B2:5.6). Read-only."""
+    return service.archived_runs(_project(request))
+
+
+@router.get("/archives/{slug}", tags=["archives"])
+def archive_detail(request: Request, slug: str) -> dict:
+    """One archived run: state, relation, disk, restore facts and the run summary. Read-only."""
+    return service.archive_detail(_project(request), slug)
+
+
+@router.get("/archives/{slug}/entries", tags=["archives"])
+def archive_entries(request: Request, slug: str, path: str = "", page: int = Query(1, ge=1)) -> dict:
+    """One directory of a verified archive, paginated. Read-only; nothing is extracted."""
+    return service.archive_entries(_project(request), slug, path, page)
+
+
+def _archive_refused(exc: service.ArchiveRefused) -> JSONResponse:
+    return JSONResponse({"reason": exc.reason, "message": exc.message}, status_code=409)
+
+
+@router.post("/archives/{slug}/fetch", dependencies=MUTATE, tags=["archives"])
+def archive_fetch(request: Request, slug: str, confirm_size: str = Form(""), replace: str = Form("")):
+    """Start a download. The terminal's `yes` is never reachable from the API (T9-D2)."""
+    try:
+        return service.fetch_archive(_project(request), slug, confirm_size=confirm_size or None,
+                                     replace=replace == "1")
+    except service.ArchiveRefused as exc:
+        return _archive_refused(exc)
+
+
+@router.post("/archives/{slug}/restore", dependencies=MUTATE, tags=["archives"])
+def archive_restore(request: Request, slug: str, confirm_size: str = Form("")):
+    try:
+        return service.restore_archive(_project(request), slug, confirm_size=confirm_size or None)
+    except service.ArchiveRefused as exc:
+        return _archive_refused(exc)
+
+
+@router.post("/archives/{slug}/cancel", dependencies=MUTATE, tags=["archives"])
+def archive_cancel(request: Request, slug: str):
+    try:
+        return service.cancel_archive_job(_project(request), slug)
+    except service.ArchiveRefused as exc:
+        return _archive_refused(exc)
+
+
 @router.get("/runs/{slug}/health", tags=["runs"])
 def run_health(request: Request, slug: str) -> dict:
     """A run's cheap health: missing controls, legacy keys, the DVC pointer. No walk."""
