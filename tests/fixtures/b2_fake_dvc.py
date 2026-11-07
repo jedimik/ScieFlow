@@ -27,6 +27,8 @@ if script.get("sleep"):
     time.sleep(script["sleep"])
 if script.get("content_b64") is not None:
     target = sys.argv[-1][: -len(".dvc")]
+    if script.get("unlink") and os.path.lexists(target):
+        os.unlink(target)  # DVC replaces an existing output (a link too) instead of writing through it
     with open(target, "wb") as fh:
         fh.write(base64.b64decode(script["content_b64"]))
 for line in script.get("stdout", []):
@@ -50,8 +52,9 @@ def install(bin_dir: Path) -> Path:
 
 
 def set_script(bin_dir: Path, *, exit_code: int = 0, stdout=(), stderr=(),
-               content: bytes | None = None, sleep: float = 0) -> None:
-    doc: dict = {"exit": exit_code, "stdout": list(stdout), "stderr": list(stderr), "sleep": sleep}
+               content: bytes | None = None, sleep: float = 0, unlink: bool = False) -> None:
+    doc: dict = {"exit": exit_code, "stdout": list(stdout), "stderr": list(stderr), "sleep": sleep,
+                 "unlink": unlink}
     if content is not None:
         doc["content_b64"] = base64.b64encode(content).decode("ascii")
     (Path(bin_dir) / "script.json").write_text(json.dumps(doc))

@@ -6,6 +6,7 @@ Synthetic zips, temporary projects, SCIEFLOW_STATE_DIR isolated by tests/conftes
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -402,3 +403,120 @@ def test_write_record_is_atomic_and_creates_its_directory(tmp_path):
     archive.write_record(target, {"outcome": "ready"})
     assert json.loads(target.read_text()) == {"outcome": "ready"}
     assert [p.name for p in target.parent.iterdir()] == ["r1.json"]
+
+
+# -- T-9 t3 fix: a foreign link under --replace; OS errors become failed records --------------------
+
+def foreign_link(root: Path, tmp_path: Path, data: bytes) -> Path:
+    target = tmp_path / "elsewhere.zip"
+    target.write_bytes(data)
+    zip_path(root).symlink_to(target)
+    return target
+
+
+def test_replace_pulls_over_a_foreign_link_and_accepts_the_result(proj, state, dvc_bin, tmp_data,
+                                                                  tmp_path):
+    write_pointer(proj, SLUG, tmp_data)
+    foreign_link(proj, tmp_path, b"x" * len(tmp_data))
+    fake.set_script(dvc_bin, content=tmp_data, unlink=True)
+
+    assert fetch(proj, state=state, replace=True) == 0
+
+    assert fake.argv(dvc_bin) == [["pull", "--force", "workspace/_archives/r1.zip.dvc"]]
+    assert not zip_path(proj).is_symlink()
+    assert zip_path(proj).read_bytes() == tmp_data
+    assert read_record(state)["outcome"] == "ready"
+
+
+def test_replace_refuses_a_link_that_survives_the_pull_and_never_opens_it(proj, state, dvc_bin,
+                                                                          tmp_data, tmp_path, capsys):
+    write_pointer(proj, SLUG, tmp_data)
+    other = b"x" * len(tmp_data)
+    target = foreign_link(proj, tmp_path, other)
+    fake.set_script(dvc_bin)  # dvc succeeds and changes nothing
+
+    assert fetch(proj, state=state, replace=True) == 1
+
+    assert fake.argv(dvc_bin) == [["pull", "--force", "workspace/_archives/r1.zip.dvc"]]
+    assert zip_path(proj).is_symlink()
+    assert target.read_bytes() == other
+    rec = read_record(state)
+    assert rec["outcome"] == "failed" and rec["reason"] == "dvc-failed" and rec["exit_code"] == 0
+    assert "link outside the DVC cache" in capsys.readouterr().out
+
+
+def test_a_foreign_link_without_replace_is_refused_before_dvc_runs(proj, state, dvc_bin, tmp_data,
+                                                                    tmp_path):
+    write_pointer(proj, SLUG, tmp_data)
+    foreign_link(proj, tmp_path, tmp_data)
+
+    assert fetch(proj, state=state) == 1
+    assert fetch(proj, state=state, verify_only=True) == 1
+
+    assert fake.argv(dvc_bin) == []
+
+
+def test_disk_full_while_checksumming_is_a_disk_full_record(proj, state, dvc_bin, tmp_data,
+                                                             monkeypatch, capsys):
+    write_pointer(proj, SLUG, tmp_data)
+    fake.set_script(dvc_bin, content=tmp_data)
+
+    def full(path, chunk):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(archive, "md5_file", full)
+
+    assert fetch(proj, state=state) == 1
+
+    rec = read_record(state)
+    assert rec["outcome"] == "failed" and rec["reason"] == "disk-full"
+    assert arch.sentence("disk-full") in capsys.readouterr().out
+
+
+def test_other_io_error_while_checksumming_is_a_failed_record_not_a_traceback(
+        proj, state, dvc_bin, tmp_data, monkeypatch):
+    write_pointer(proj, SLUG, tmp_data)
+    fake.set_script(dvc_bin, content=tmp_data)
+
+    def broken(path, chunk):
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(archive, "md5_file", broken)
+
+    assert fetch(proj, state=state) == 1
+
+    rec = read_record(state)
+    assert rec["outcome"] == "failed" and rec["reason"] == "dvc-failed"
+
+
+def test_restore_disk_full_leaves_no_run_and_records_disk_full(proj, state, dvc_bin, tmp_data,
+                                                                monkeypatch):
+    ready_copy(proj, state, dvc_bin, tmp_data)
+
+    def full(zip_file, dest, *, force=False):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(archive, "extract_zip", full)
+
+    assert restore(proj, state=state) == 1
+
+    assert not (proj / "workspace" / SLUG).exists()
+    assert leftovers(proj) == []
+    rec = read_record(state)
+    assert rec["outcome"] == "failed" and rec["reason"] == "disk-full"
+
+
+def test_restore_bad_zip_during_extraction_is_unreadable_zip(proj, state, dvc_bin, tmp_data,
+                                                              monkeypatch):
+    ready_copy(proj, state, dvc_bin, tmp_data)
+
+    def bad(zip_file, dest, *, force=False):
+        raise zipfile.BadZipFile("bad central directory")
+
+    monkeypatch.setattr(archive, "extract_zip", bad)
+
+    assert restore(proj, state=state) == 1
+
+    assert not (proj / "workspace" / SLUG).exists()
+    rec = read_record(state)
+    assert rec["outcome"] == "failed" and rec["reason"] == "unreadable-zip"
