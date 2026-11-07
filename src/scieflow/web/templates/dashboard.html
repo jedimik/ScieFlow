@@ -39,7 +39,7 @@
     <td><a href="/archives/{{ row.slug }}">{{ row.slug }}</a></td>
     <td class="dim">{{ row.size_human or "—" }}</td>
     <td>{{ row.state or "—" }}{% if row.relation %} <span class="dim">({{ row.relation }})</span>{% endif %}</td>
-    <td class="dim">{{ row.outcome_text or "" }}</td>
+    <td class="dim">{% if row.kind == "directory" %}<div>{{ row.nfiles ~ " files" if row.nfiles is not none else "file count not recorded" }}</div><div>{{ row.command }}</div>{% else %}{{ row.outcome_text or "" }}{% endif %}</td>
   </tr>
   {% endfor %}
 </table>

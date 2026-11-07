@@ -28,9 +28,10 @@
   <span class="dim">size</span> {{ archive.size_text or "—" }}
   <span class="dim">md5</span> {{ archive.md5_12 or "—" }}
 </p>
+{% if archive.kind == "directory" %}<p class="dim">Legacy directory pointer: {{ archive.file_count }}. Pull it from the terminal: {{ archive.command }}</p>{% endif %}
 {% if archive.outcome_text %}<p class="{% if archive.outcome_failed %}state-failed{% else %}dim{% endif %}">{{ archive.outcome_text }}</p>{% endif %}
 {% if archive.reason_text and not archive.outcome_text %}<p class="dim">{{ archive.reason_text }}</p>{% endif %}
-{% for leftover in archive.leftovers %}<p class="dim">Leftover, not removed: {{ leftover }}</p>{% endfor %}
+{% for leftover in archive.leftovers %}<p class="dim">Leftover, not removed: {{ leftover.name }} ({{ leftover.text }})</p>{% endfor %}
 {% if archive.symlink_note %}<p class="dim">{{ archive.symlink_note }}</p>{% endif %}
 
 {% if archive.data_level %}
@@ -38,6 +39,7 @@
   <p class="dim">data level: {{ archive.data_level.level }}{% if archive.data_level.reason %} ({{ archive.data_level.reason }}){% endif %}</p>
 {% endif %}
 
+{% if archive.browse_text %}<p class="state-failed">{{ archive.browse_text }}</p>{% endif %}
 {% if archive.summary %}
 <h2>Run summary</h2>
 {% for label, value in archive.summary_facts %}<p><span class="dim">{{ label }}</span> {{ value }}</p>{% endfor %}
@@ -46,8 +48,9 @@
 {% endif %}
 
 <h2>Environment</h2>
-<p class="dim">dvc: {{ archive.environment.dvc }}</p>
-<p class="dim">DVC remote configuration: {{ archive.environment.remote_config }} (advisory; ScieFlow does not read it)</p>
+<p class="dim">dvc: {{ archive.environment.dvc }} (docs/DVC_STORAGE.md §1)</p>
+<p class="dim">DVC remote configuration in this checkout: {{ archive.environment.remote_config }} (.dvc/config is machine-local; docs/DVC_STORAGE.md §2)</p>
+<p class="dim">The configuration line is advisory: DVC can also take its remote from its global or system configuration, which ScieFlow does not inspect. Credentials and remotes are learned only by trying.</p>
 
 {% if archive.disk %}
 <h2>Disk</h2>

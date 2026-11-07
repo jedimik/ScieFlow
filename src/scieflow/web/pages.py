@@ -1045,6 +1045,38 @@ ARCHIVE_REASON_TEXT = {
 }
 ARCHIVE_MISSING_REASONS = ("no-such-member", archives.NOT_IN_ARCHIVE)
 
+#: Browse refusals (B2:5.10): a too-large listing says how to look inside; a summary that cannot be read
+#: says so (it is not the pointer file, which `unreadable` means elsewhere on this page).
+ARCHIVE_BROWSE_TEXT = {
+    "too-many-entries": "The archive has more entries than ScieFlow reads: restore it from the terminal to look inside.",
+    "unreadable": "The run summary inside this archive cannot be read.",
+}
+
+#: Leftover sentences (B2:5.7.6). The names come from the service; these words are the page's.
+ARCHIVE_LEFTOVER_TEXT = {
+    ".zip.partial": ("an interrupted archive build left this file; it is not an archive and nothing reads it; "
+                     "delete it when no push is running"),
+    ".zip.link": "an interrupted cache link; delete it when no transfer is running",
+    "extract": "an interrupted restore or forced pull; not the run; delete it",
+    "replaced": "an interrupted restore or forced pull; not the run; delete it",
+}
+
+
+def _leftover_text(name: str) -> str:
+    if name.endswith(".zip.partial"):
+        return ARCHIVE_LEFTOVER_TEXT[".zip.partial"]
+    if name.endswith(".zip.link"):
+        return ARCHIVE_LEFTOVER_TEXT[".zip.link"]
+    if ".extract-" in name:
+        return ARCHIVE_LEFTOVER_TEXT["extract"]
+    return ARCHIVE_LEFTOVER_TEXT["replaced"]
+
+
+def _browse_text(reason: str | None) -> str | None:
+    if not reason:
+        return None
+    return ARCHIVE_BROWSE_TEXT.get(reason) or _archive_sentence(reason)
+
 
 def _archive_sentence(reason: str, *, md5: str = "", n: int | None = None, log_path: str | None = None) -> str:
     """The fixed sentence for a reason code. Never dvc output and never a traceback."""
@@ -1171,6 +1203,10 @@ def _archive_view(project, slug: str, refusal: dict | None = None) -> dict:
             "reason_text": _detail_reason_text(detail, md5),
             "dvc_missing": detail["environment"]["dvc"] != "found",
             "dvc_reason": _archive_sentence("dvc-missing"),
+            "browse_text": _browse_text(detail.get("browse_refusal")),
+            "leftovers": [{"name": name, "text": _leftover_text(name)} for name in detail["leftovers"]],
+            "file_count": (f"{detail['nfiles']} files" if detail.get("nfiles") is not None
+                           else "file count not recorded"),
             "summary_facts": _summary_facts(detail["summary"], detail["totals"]),
             "refusal": refusal}
     if detail.get("restore"):
@@ -1221,7 +1257,7 @@ def archive_files_page(request: Request, slug: str, path: str = "", page: int = 
     reason = listing.get("reason")
     return TEMPLATES.TemplateResponse(request, "archive_files.html", {
         "slug": slug, "listing": listing,
-        "reason_text": _archive_sentence(reason) if reason else None,
+        "reason_text": _browse_text(reason),
     })
 
 
