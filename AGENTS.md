@@ -158,6 +158,8 @@ when to stop.
     when the total passes ~5 GB, or when the run has never been synced —
     offer moving rebuildable output to `scratch/` instead. Never upload
     anything the user did not agree to, and say afterwards what was left out.
+    A download of 1 GiB or more (`scieflow workspace archive fetch|restore …
+    --yes`) is the user's decision too: ask before passing `--yes`.
 
 16. **Chat backups** (optional, user-invoked). Copying agent chats between
     machines goes ONLY through `uv run scieflow chats` per
