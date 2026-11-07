@@ -3029,6 +3029,11 @@ ARCHIVE_L2_BANNER = ("This archive is declared L2 (patient-level data). It is sh
                      "ScieFlow sends nothing from an archive to a model or a remote.")
 # The same allowlist as web.files.INLINE_SAFE_TYPES (core does not import web; a test keeps them equal).
 ARCHIVE_INLINE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf")
+# The same suffix set as web.files.TEXT_SUFFIXES (B2:5.5, T9-D11; a test keeps them equal).
+ARCHIVE_TEXT_SUFFIXES = frozenset({
+    ".md", ".txt", ".log", ".err", ".json", ".jsonl", ".yml", ".yaml",
+    ".csv", ".tex", ".bib", ".py", ".sh", ".toml", ".cfg", ".ini",
+})
 ARCHIVE_REPLACE_STATES = ("incomplete", "different", "outdated")
 ARCHIVE_DOWNLOAD_STATES = ("not-downloaded", "incomplete", "different", "outdated")
 ARCHIVE_BUSY_STATES = {"fetch": "downloading", "verify": "verifying", "restore": "restoring"}
@@ -3310,7 +3315,7 @@ def archive_member(project: Project, slug: str, path: str, *, mode: str = "view"
         return {"path": path, "size": info.file_size,
                 "media_type": guessed if inline else "application/octet-stream",
                 "attachment": not inline, "filename": name,
-                "text": bool(guessed and guessed.startswith("text/")),
+                "text": PurePosixPath(name).suffix.lower() in ARCHIVE_TEXT_SUFFIXES,
                 "stream": chunks, "reason": None}
     if info.file_size > archives.INLINE_MAX_BYTES:
         return _member_result(path, archives.TOO_LARGE, info.file_size, mode=mode)
