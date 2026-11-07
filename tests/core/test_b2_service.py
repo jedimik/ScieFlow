@@ -321,3 +321,79 @@ def test_a_bad_job_pointer_is_shown_and_blocks_nothing(project, reads_only):
     ready_archive(project, "r1")
     write_job_pointer(project, "r1", "not a job id\n")
     assert service.archive_detail(project, "r1")["state"] == "ready"
+
+
+# -- T-9 t4 fix: review r1 findings 1-3 (RED first) ----------------------------------------------
+
+def test_replace_refusal_command_names_the_replace_flag(project, no_jobs, dvc_present, roomy_disk):
+    write_pointer(project, "r1", size=None)
+    write_zip(project, "r1", b"short")                    # a local copy that is not the verified one
+    with pytest.raises(service.ArchiveRefused) as exc:
+        service.fetch_archive(project, "r1", replace=True)
+    assert exc.value.reason == "size-unknown"
+    assert exc.value.details["command"] == "scieflow workspace archive fetch r1 --replace --yes"
+    assert "fetch r1 --replace --yes" in exc.value.message
+
+
+def test_replace_at_a_known_size_asks_with_the_replace_command(project, no_jobs, dvc_present, roomy_disk):
+    write_pointer(project, "r1", size=10)
+    write_zip(project, "r1", b"short")
+    with pytest.raises(service.ArchiveRefused) as exc:
+        service.fetch_archive(project, "r1", replace=True)
+    assert exc.value.reason == "confirm-required"
+    assert exc.value.details["command"] == "scieflow workspace archive fetch r1 --replace --yes"
+
+
+def test_confirm_refusal_carries_disk_groups_and_destination(project, no_jobs, dvc_present, monkeypatch):
+    groups = [{"path": "/x/cache", "received": 20, "needed": 21, "free": 9 << 30}]
+    monkeypatch.setattr(a, "disk_check", lambda root, receivers: a.DiskCheck(True, groups))
+    monkeypatch.setattr(a, "CONSENT_BYTES", 10)
+    write_pointer(project, "r1", size=20)
+    with pytest.raises(service.ArchiveRefused) as exc:
+        service.fetch_archive(project, "r1")
+    assert exc.value.reason == "confirm-required"
+    assert exc.value.details["groups"] == groups
+    assert exc.value.details["destination"] == "workspace/_archives/r1.zip"
+
+
+def test_restore_confirmation_carries_unpacked_size_groups_and_destination(project, no_jobs, monkeypatch):
+    ready_archive(project, "r1")
+    groups = [{"path": "/x/ws", "received": 99, "needed": 104, "free": 9 << 30}]
+    monkeypatch.setattr(a, "disk_check", lambda root, receivers: a.DiskCheck(True, groups))
+    monkeypatch.setattr(a, "CONSENT_BYTES", 10)
+    unpacked = sum(len(v) for v in MEMBERS.values())
+    with pytest.raises(service.ArchiveRefused) as exc:
+        service.restore_archive(project, "r1")
+    assert exc.value.reason == "confirm-required"
+    assert exc.value.details["size"] == unpacked
+    assert exc.value.details["groups"] == groups
+    assert exc.value.details["destination"] == "workspace/r1"
+
+
+def test_archive_detail_restore_block_for_an_archived_only_run(project, reads_only, monkeypatch):
+    ready_archive(project, "r1")
+    groups = [{"path": "/x/ws", "received": 99, "needed": 104, "free": 9 << 30}]
+    monkeypatch.setattr(a, "disk_check", lambda root, receivers: a.DiskCheck(True, groups))
+    detail = service.archive_detail(project, "r1")
+    assert detail["restore"]["unpacked"] == sum(len(v) for v in MEMBERS.values())
+    assert detail["restore"]["destination"] == "workspace/r1"
+    assert detail["restore"]["disk"] == {"ok": True, "groups": groups}
+    (project.workspace_root / "r1").mkdir()
+    (project.workspace_root / "r1" / "status.yml").write_text("kind: loop\n")
+    assert service.archive_detail(project, "r1")["restore"] is None
+
+
+def test_member_media_types_follow_the_web_download_rule(project, reads_only):
+    from scieflow.web import files as web_files
+    members = {"page.html": b"<p>x</p>", "q.svg": b"<svg/>", "s.xyz": b"1 2 3", "r.pdf": b"%PDF-1.4",
+               "p.png": b"\x89PNG", "u.unknownext": b"??", "readme.txt": b"hello\n"}
+    ready_archive(project, "r1", members=members)
+    assert set(service.ARCHIVE_INLINE_TYPES) == set(web_files.INLINE_SAFE_TYPES)
+    want = {"page.html": ("application/octet-stream", True), "q.svg": ("application/octet-stream", True),
+            "s.xyz": ("application/octet-stream", True), "r.pdf": ("application/pdf", False),
+            "p.png": ("image/png", False), "u.unknownext": ("application/octet-stream", True)}
+    for name, (media, attachment) in want.items():
+        raw = service.archive_member(project, "r1", name, mode="raw")
+        assert (raw["media_type"], raw["attachment"]) == (media, attachment), name
+    assert service.archive_member(project, "r1", "readme.txt", mode="raw")["text"] is True
+    assert service.archive_member(project, "r1", "p.png", mode="raw")["text"] is False
