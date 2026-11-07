@@ -114,8 +114,15 @@ def _identity(st) -> tuple:
     return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
 
 
-def read_yaml(dir_fd: int, name: str, cap: int = CONTROL_CAP) -> ControlRead:
-    """One control file as a mapping, or a category explaining why not."""
+def read_bytes(dir_fd: int, name: str, cap: int = CONTROL_CAP) -> ControlRead:
+    """One regular file's bytes, read at most `cap` bytes, without parsing (T9-D12).
+
+    The same open/fstat/cap/re-fstat rules as read_yaml; `data` is bytes.
+    """
+    return _read_raw(dir_fd, name, cap)
+
+
+def _read_raw(dir_fd: int, name: str, cap: int) -> ControlRead:
     if not supported():
         return _fail("unsupported")
     try:
@@ -142,8 +149,18 @@ def read_yaml(dir_fd: int, name: str, cap: int = CONTROL_CAP) -> ControlRead:
         return _fail("unreadable")
     finally:
         os.close(fd)
+    return ControlRead("ok", bytes(data), "")
+
+
+def read_yaml(dir_fd: int, name: str, cap: int = CONTROL_CAP) -> ControlRead:
+    """One control file as a mapping, or a category explaining why not."""
+    raw = _read_raw(dir_fd, name, cap)
+    if raw.status != "ok":
+        return raw
+    if not isinstance(raw.data, bytes):
+        return _fail("malformed")
     try:
-        text = bytes(data).decode("utf-8")
+        text = raw.data.decode("utf-8")
     except UnicodeDecodeError:
         return _fail("malformed")
     try:
