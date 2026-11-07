@@ -157,6 +157,16 @@ def test_cat_refuses_a_binary_member_on_a_terminal_without_out(project, monkeypa
     assert tty.buffer.getvalue() == b""
 
 
+def test_cat_writes_a_text_member_to_a_terminal(project, monkeypatch):
+    from scieflow.core.archives_cli import cat_cmd
+    ready_members(project, {"readme.txt": b"hello\n"})
+    tty = types.SimpleNamespace(isatty=lambda: True, buffer=io.BytesIO())
+    monkeypatch.setattr(sys, "stdout", tty)
+
+    cat_cmd.main(["r1", "readme.txt"], standalone_mode=False)
+    assert tty.buffer.getvalue() == b"hello\n"
+
+
 def test_cat_out_writes_the_member_bytes(project, tmp_path):
     ready_members(project, {"data.bin": b"\x00\xff\x10"})
     target = tmp_path / "copy.bin"
