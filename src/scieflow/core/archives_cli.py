@@ -147,7 +147,7 @@ def cat_cmd(slug, member, out):
     stream = doc.get("stream")
     if stream is None:
         return
-    is_text = (doc.get("media_type") or "").startswith("text/")
+    is_text = bool(doc.get("text"))
     try:
         if out:
             with open(out, "wb") as fh:
