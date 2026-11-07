@@ -3027,7 +3027,8 @@ ARCHIVE_MANUSCRIPT = ("Manuscript history is not kept in archives. It is rebuilt
                       "after you restore the run: open its drafts page, or complete a merge round.")
 ARCHIVE_L2_BANNER = ("This archive is declared L2 (patient-level data). It is shown to you only; "
                      "ScieFlow sends nothing from an archive to a model or a remote.")
-ARCHIVE_INLINE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+# The same allowlist as web.files.INLINE_SAFE_TYPES (core does not import web; a test keeps them equal).
+ARCHIVE_INLINE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf")
 ARCHIVE_REPLACE_STATES = ("incomplete", "different", "outdated")
 ARCHIVE_DOWNLOAD_STATES = ("not-downloaded", "incomplete", "different", "outdated")
 ARCHIVE_BUSY_STATES = {"fetch": "downloading", "verify": "verifying", "restore": "restoring"}
@@ -3228,7 +3229,7 @@ def archive_detail(project: Project, slug: str) -> dict:
     detail = {**row,
               "environment": {"dvc": "found" if shutil.which("dvc") else "not installed",
                               "remote_config": "found" if _remote_config_found(project) else "not found"},
-              "disk": None,
+              "disk": None, "restore": None,
               "actions": _archive_actions(state, row["relation"]),
               "leftovers": ls.leftovers if ls else [],
               "symlink_note": ls.symlink_note if ls else None,
@@ -3238,7 +3239,21 @@ def archive_detail(project: Project, slug: str) -> dict:
         detail["disk"] = _archive_disk(project, _download_receivers(project, ptr.size))
     if ptr.kind == "zip" and state == "ready":
         detail.update(_ready_view(project, slug))
+        if row["relation"] == "archived-only":
+            detail["restore"] = _restore_view(project, slug)
     return detail
+
+
+def _restore_view(project: Project, slug: str) -> dict:
+    """The restore panel's facts (B2:5.4): the unpacked bytes, the workspace disk and the destination."""
+    idx, refusal = _archive_index(project, slug)
+    if refusal is not None:
+        return {"unpacked": None, "unpacked_human": None, "disk": None,
+                "destination": f"workspace/{slug}", "reason": refusal}
+    unpacked = idx.totals["uncompressed_bytes"]
+    return {"unpacked": unpacked, "unpacked_human": _human_bytes(unpacked),
+            "disk": _archive_disk(project, [(Path(project.root) / "workspace", unpacked)]),
+            "destination": f"workspace/{slug}", "reason": None}
 
 
 def _archive_ready(project: Project, ptr: archives.Pointer) -> bool:
@@ -3263,7 +3278,7 @@ def archive_entries(project: Project, slug: str, path: str = "", page: int = 1) 
 def _member_result(path: str, reason: str | None, size=None, *, mode: str) -> dict:
     if mode == "raw":
         return {"path": path, "size": size, "media_type": None, "attachment": None, "filename": None,
-                "stream": None, "reason": reason}
+                "text": None, "stream": None, "reason": reason}
     return {"path": path, "size": size, "text": None, "complete": False, "reason": reason}
 
 
@@ -3287,10 +3302,15 @@ def archive_member(project: Project, slug: str, path: str, *, mode: str = "view"
     except archives.ZipRefused as exc:
         return _member_result(path, exc.reason, mode=mode)
     if mode == "raw":
+        # T9-D11 / web.files.download_type: only the inline allowlist keeps its type and renders;
+        # every other member is sent as an attachment with a non-active type.
         name = PurePosixPath(path).name
-        media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
-        return {"path": path, "size": info.file_size, "media_type": media_type,
-                "attachment": media_type not in ARCHIVE_INLINE_TYPES, "filename": name,
+        guessed = mimetypes.guess_type(name)[0]
+        inline = guessed in ARCHIVE_INLINE_TYPES
+        return {"path": path, "size": info.file_size,
+                "media_type": guessed if inline else "application/octet-stream",
+                "attachment": not inline, "filename": name,
+                "text": bool(guessed and guessed.startswith("text/")),
                 "stream": chunks, "reason": None}
     if info.file_size > archives.INLINE_MAX_BYTES:
         return _member_result(path, archives.TOO_LARGE, info.file_size, mode=mode)
@@ -3322,13 +3342,17 @@ def _human_bytes(n: int) -> str:
     return f"{n} bytes"
 
 
-def _consent(size: int, *, needed: bool, yes: bool, confirm_size, command: str, slug: str) -> None:
-    """B2:5.4: at or above CONSENT_BYTES (or any replace) the exact size must be confirmed, unless `yes`."""
+def _consent(size: int, *, needed: bool, yes: bool, confirm_size, command: str, slug: str,
+             groups: list[dict], destination: str) -> None:
+    """B2:5.4: at or above CONSENT_BYTES (or any replace) the exact size must be confirmed, unless `yes`.
+
+    The refusal carries the panel's facts: the disk groups and the project-relative destination.
+    """
     if yes or not needed:
         return
     if confirm_size is None:
         raise _refuse("confirm-required", size=size, size_human=_human_bytes(size), command=command,
-                      slug=slug)
+                      slug=slug, groups=groups, destination=destination)
     if _as_size(confirm_size) != size:
         raise _refuse("confirm-mismatch", size=size)
 
@@ -3396,7 +3420,8 @@ def _fetch_plan(project: Project, slug: str, ptr, ls, state: Path, *, confirm_si
         raise _refuse("replace-required")
     if shutil.which("dvc") is None:
         raise _refuse("dvc-missing")
-    command = f"scieflow workspace archive fetch {slug} --yes"
+    flags = " --replace" if replace else ""
+    command = f"scieflow workspace archive fetch {slug}{flags} --yes"
     if ptr.size is None:
         if not yes:
             raise _refuse("size-unknown", command=command)
@@ -3408,7 +3433,8 @@ def _fetch_plan(project: Project, slug: str, ptr, ls, state: Path, *, confirm_si
             raise _no_space(disk["groups"])
         big = ptr.size >= archives.CONSENT_BYTES
         _consent(ptr.size, needed=big or replace, yes=yes, confirm_size=confirm_size,
-                 command=command, slug=slug)
+                 command=command, slug=slug, groups=disk["groups"],
+                 destination=f"workspace/_archives/{slug}.zip")
     return _launch_archive(project, slug, "fetch", state, replace=replace)
 
 
@@ -3428,7 +3454,8 @@ def _restore_plan(project: Project, slug: str, ls, state: Path, *, confirm_size,
     if not disk["ok"]:
         raise _no_space(disk["groups"])
     _consent(unpacked, needed=unpacked >= archives.CONSENT_BYTES, yes=yes, confirm_size=confirm_size,
-             command=f"scieflow workspace archive restore {slug} --yes", slug=slug)
+             command=f"scieflow workspace archive restore {slug} --yes", slug=slug,
+             groups=disk["groups"], destination=f"workspace/{slug}")
     return _launch_archive(project, slug, "restore", state)
 
 
