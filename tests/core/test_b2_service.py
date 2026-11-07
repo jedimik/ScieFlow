@@ -400,6 +400,18 @@ def test_member_media_types_follow_the_web_download_rule(project, reads_only):
     assert service.archive_member(project, "r1", "p.png", mode="raw")["text"] is False
 
 
+def test_text_flag_follows_the_b2_text_suffixes_not_the_media_type(project, reads_only):
+    from scieflow.web import files as web_files
+    text_names = ["status.yml", "x.json", "e.jsonl", "run.log", "a.toml", "a.cfg", "a.ini", "a.err", "readme.txt"]
+    binary_names = ["data.bin", "p.png", "r.pdf", "s.xyz"]
+    ready_archive(project, "r1", members={name: b"k: v\n" for name in text_names + binary_names})
+    assert set(service.ARCHIVE_TEXT_SUFFIXES) == set(web_files.TEXT_SUFFIXES)
+    for name in text_names:
+        assert service.archive_member(project, "r1", name, mode="raw")["text"] is True, name
+    for name in binary_names:
+        assert service.archive_member(project, "r1", name, mode="raw")["text"] is False, name
+
+
 # -- T-9 t4 fix: review r1 finding 4 (plan section 6 t4 items that had no test) ------------------
 
 def _dvc_on_path(monkeypatch):

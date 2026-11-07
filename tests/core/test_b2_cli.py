@@ -167,6 +167,29 @@ def test_cat_writes_a_text_member_to_a_terminal(project, monkeypatch):
     assert tty.buffer.getvalue() == b"hello\n"
 
 
+@pytest.mark.parametrize("name, body", [("status.yml", b"kind: loop\n"), ("x.json", b"{}\n"),
+                                        ("run.log", b"ok\n")])
+def test_cat_writes_a_b2_text_suffix_member_to_a_terminal(project, monkeypatch, name, body):
+    from scieflow.core.archives_cli import cat_cmd
+    ready_members(project, {name: body})
+    tty = types.SimpleNamespace(isatty=lambda: True, buffer=io.BytesIO())
+    monkeypatch.setattr(sys, "stdout", tty)
+
+    cat_cmd.main(["r1", name], standalone_mode=False)
+    assert tty.buffer.getvalue() == body
+
+
+def test_cat_still_refuses_a_non_text_suffix_member_on_a_terminal(project, monkeypatch):
+    from scieflow.core.archives_cli import cat_cmd
+    ready_members(project, {"image.bin": b"hello\n"})
+    tty = types.SimpleNamespace(isatty=lambda: True, buffer=io.BytesIO())
+    monkeypatch.setattr(sys, "stdout", tty)
+
+    with pytest.raises(click.ClickException, match="this member is binary: use --out FILE"):
+        cat_cmd.main(["r1", "image.bin"], standalone_mode=False)
+    assert tty.buffer.getvalue() == b""
+
+
 def test_cat_out_writes_the_member_bytes(project, tmp_path):
     ready_members(project, {"data.bin": b"\x00\xff\x10"})
     target = tmp_path / "copy.bin"
