@@ -46,6 +46,12 @@ MUTATING_PATHS = {
     "/runs/{slug}/review/{round}/decisions": {"post"},
     "/runs/{slug}/health/check": {"post"},
     "/api/v1/runs/{slug}/health/check": {"post"},
+    "/archives/{slug}/fetch": {"post"},
+    "/archives/{slug}/restore": {"post"},
+    "/archives/{slug}/cancel": {"post"},
+    "/api/v1/archives/{slug}/fetch": {"post"},
+    "/api/v1/archives/{slug}/restore": {"post"},
+    "/api/v1/archives/{slug}/cancel": {"post"},
 }
 
 #: Placeholder ids for the templated paths above. Guard tests never resolve
@@ -90,6 +96,12 @@ SAMPLES: dict[str, dict] = {
     "/runs/{slug}/review/{round}/decisions": {"cluster": "K2", "decision": "accept"},
     "/runs/{slug}/health/check": {},
     "/api/v1/runs/{slug}/health/check": {},
+    "/archives/{slug}/fetch": {"confirm_size": "1"},
+    "/archives/{slug}/restore": {"confirm_size": "1"},
+    "/archives/{slug}/cancel": {},
+    "/api/v1/archives/{slug}/fetch": {"confirm_size": "1"},
+    "/api/v1/archives/{slug}/restore": {"confirm_size": "1"},
+    "/api/v1/archives/{slug}/cancel": {},
 }
 
 
