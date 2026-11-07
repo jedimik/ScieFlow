@@ -256,6 +256,7 @@ class Discovery:
     shown: int
     skipped_names: int
     cap_note: str | None
+    ws_names: list               # the one listing of workspace/ (B2:5.6), reused by every row's state
 
 
 def discover(project) -> Discovery:
@@ -311,7 +312,7 @@ def discover(project) -> Discovery:
         _close(ws_fd)
     total = len(ordered)
     note = f"{total - len(rows)} more not shown (cap {LIST_CAP})" if total > len(rows) else None
-    return Discovery(rows, total, len(rows), skipped, note)
+    return Discovery(rows, total, len(rows), skipped, note, ws_names)
 
 
 # -- job liveness (B2:5.6.1) -----------------------------------------------------------------------

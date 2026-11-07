@@ -62,6 +62,8 @@ def archives_cmd(as_json):
     for row in doc.get("rows", []):
         line = (f"{row.get('slug')}  {row.get('kind') or '-'}  {_human(row.get('size'))}  "
                 f"{row.get('state') or '-'}  {row.get('relation') or '-'}")
+        if row.get("kind") == "directory":
+            line += f"  {row['nfiles']} files" if row.get("nfiles") is not None else "  file count not recorded"
         if row.get("outcome"):
             line += f"  last: {row['outcome']}"
         elif row.get("reason"):

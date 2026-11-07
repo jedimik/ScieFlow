@@ -3116,9 +3116,9 @@ def _archive_pointer(project: Project, slug: str) -> archives.Pointer:
     raise ServiceError(f"no archived run {slug}")
 
 
-def _local_or_none(project: Project, ptr: archives.Pointer):
+def _local_or_none(project: Project, ptr: archives.Pointer, ws_names: list[str] | None = None):
     try:
-        return archives.local_state(project, ptr)
+        return archives.local_state(project, ptr, ws_names=ws_names)
     except (OSError, ValueError):
         return None
 
@@ -3144,6 +3144,7 @@ def _archive_row(project: Project, ptr: archives.Pointer, ls) -> dict:
     row = {"slug": ptr.slug, "kind": ptr.kind, "size": ptr.size,
            "md5_12": ptr.md5[:12] if ptr.md5 else None, "state": None, "relation": None,
            "outcome": None, "reason": ptr.reason, "exit_code": None, "log": None,
+           "nfiles": ptr.nfiles,
            "command": (f"uv run scripts/dvc_sync.py pull {ptr.slug}" if ptr.kind == "directory" else None)}
     if ls is None:
         row["reason"] = ptr.reason or "unreadable"
@@ -3159,7 +3160,7 @@ def _archive_row(project: Project, ptr: archives.Pointer, ls) -> dict:
 def archived_runs(project: Project) -> dict:
     """Every archive of this checkout: pointers only, sorted and capped (T9-D9). Reads only (B2:5.6)."""
     disc = archives.discover(project)
-    return {"rows": [_archive_row(project, ptr, _local_or_none(project, ptr)) for ptr in disc.rows],
+    return {"rows": [_archive_row(project, ptr, _local_or_none(project, ptr, disc.ws_names)) for ptr in disc.rows],
             "total": disc.total, "shown": disc.shown, "cap": archives.LIST_CAP,
             "cap_note": disc.cap_note, "skipped_names": disc.skipped_names}
 
