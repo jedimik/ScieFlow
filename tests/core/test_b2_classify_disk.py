@@ -99,8 +99,9 @@ def test_none_or_a_signal_is_interrupted():
     assert a.classify(-9, b"") == "interrupted"
 
 
-def test_locked_exit_status_is_locked_and_unmatched_is_dvc_failed():
-    assert a.classify(a.LOCKED_EXIT, b"") == "locked"
+def test_locked_is_never_a_dvc_classification_and_unmatched_is_dvc_failed():
+    # `locked` comes from the job exit code (effective_job) or store.Busy, never from dvc output (T9-D5).
+    assert a.classify(a.LOCKED_EXIT, b"") == "dvc-failed"
     assert a.classify(5, b"") == "dvc-failed"
 
 

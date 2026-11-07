@@ -498,10 +498,12 @@ def _file_state(ptr: Pointer, job: JobView, present: bool, zip_stat: dict | None
         if record_md5 is not None and record_md5 != ptr.md5:
             return "outdated"
         if record_md5 == ptr.md5 and _record_matches(record, zip_stat):
-            if record.get("outcome") == "ready":
-                return "ready"
             if record.get("outcome") == "failed" and record.get("reason") == "verify-md5":
                 return "different"
+            # B2:5.5: the verification decides ready, not the last outcome. A failed re-download
+            # that dvc did not touch keeps the verified fields, so the copy stays ready.
+            if record.get("verified_at") is not None:
+                return "ready"
     return "unverified"
 
 
@@ -564,8 +566,6 @@ def classify(exit_code: int | None, tail: bytes) -> str:
     for code, needles in _MATCH_ROWS:
         if any(needle in text for needle in needles):
             return code
-    if exit_code == LOCKED_EXIT:
-        return "locked"
     return "dvc-failed"
 
 

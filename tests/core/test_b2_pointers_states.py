@@ -289,6 +289,61 @@ def test_md5_mismatch_record_is_different(tmp_path):
     assert _state(project, "r1").state == "different"
 
 
+def test_failed_redownload_over_an_untouched_ready_copy_stays_ready(tmp_path):
+    # B2:5.5: a failed re-download that dvc did not touch keeps the verification of the copy.
+    project = make_project(tmp_path)
+    write_pointer(project, "r1", size=6)
+    zip_file = write_zip(project, "r1", b"abcdef")
+    write_record(project, "r1", stat_record(zip_file, outcome="failed", reason="remote-unreachable"))
+    st = _state(project, "r1")
+    assert st.state == "ready"
+    assert st.record["outcome"] == "failed"
+
+
+def test_any_failed_reason_over_an_untouched_copy_stays_ready(tmp_path):
+    project = make_project(tmp_path)
+    write_pointer(project, "r1", size=6)
+    zip_file = write_zip(project, "r1", b"abcdef")
+    write_record(project, "r1", stat_record(zip_file, outcome="failed", reason="disk-full"))
+    assert _state(project, "r1").state == "ready"
+
+
+def test_a_restored_outcome_keeps_the_copy_ready(tmp_path):
+    # restore merges {outcome: restored} into the same record (plan 5.8); the verification still holds.
+    project = make_project(tmp_path)
+    write_pointer(project, "r1", size=6)
+    zip_file = write_zip(project, "r1", b"abcdef")
+    write_record(project, "r1", stat_record(zip_file, outcome="restored"))
+    assert _state(project, "r1").state == "ready"
+
+
+def test_failed_outcome_with_a_changed_stat_is_unverified(tmp_path):
+    project = make_project(tmp_path)
+    write_pointer(project, "r1", size=6)
+    zip_file = write_zip(project, "r1", b"abcdef")
+    write_record(project, "r1", stat_record(zip_file, outcome="failed", reason="remote-unreachable"))
+    os.utime(zip_file, ns=(1, os.stat(zip_file).st_mtime_ns + 10**9))
+    assert _state(project, "r1").state == "unverified"
+
+
+def test_failed_outcome_without_verification_fields_is_unverified(tmp_path):
+    project = make_project(tmp_path)
+    write_pointer(project, "r1", size=6)
+    write_zip(project, "r1", b"abcdef")
+    write_record(project, "r1", {"outcome": "failed", "reason": "remote-unreachable", "exit_code": 1, "pid": 1})
+    assert _state(project, "r1").state == "unverified"
+
+
+def test_matching_fields_without_a_verified_at_marker_are_unverified(tmp_path):
+    project = make_project(tmp_path)
+    write_pointer(project, "r1", size=6)
+    zip_file = write_zip(project, "r1", b"abcdef")
+    record = stat_record(zip_file, outcome="failed", reason="remote-unreachable")
+    record["verified_at"] = None
+    write_record(project, "r1", record)
+    assert _state(project, "r1").state == "unverified"
+
+
 def test_oversized_or_broken_record_counts_as_no_record(tmp_path):
     project = make_project(tmp_path)
     write_pointer(project, "r1", size=6)
