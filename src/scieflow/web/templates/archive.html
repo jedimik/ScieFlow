@@ -6,9 +6,10 @@
 {% if archive.refusal %}<p class="state-failed" role="alert">{{ archive.refusal.message }}</p>{% endif %}
 {% if archive.refusal and archive.refusal.confirm %}
 <div class="gate human">
-  <div>Transfer: {{ archive.refusal.size_human }} ({{ archive.refusal.size }} bytes)</div>
+  <div>Transfer: {{ archive.refusal.size_text }}</div>
   {% for group in archive.refusal.groups %}<div class="dim">{{ group.path }}: {{ group.needed }} needed, {{ group.free }} free</div>{% endfor %}
   {% if archive.refusal.destination %}<div class="dim">destination: {{ archive.refusal.destination }}</div>{% endif %}
+  {% if archive.refusal.replace %}<div class="dim">The existing file will be overwritten.</div>{% endif %}
   <div class="dim">It runs until done or cancelled.</div>
   <form method="post" action="/archives/{{ archive.slug }}/{{ archive.refusal.action }}" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf }}">
@@ -21,9 +22,11 @@
 {% endif %}
 
 <p>
+  <span class="dim">pointer</span> {{ archive.kind or "—" }}
   <span class="dim">state</span> {{ archive.state or "—" }}
   <span class="dim">relation</span> {{ archive.relation or "—" }}
-  <span class="dim">size</span> {{ archive.size_human or "—" }}
+  <span class="dim">size</span> {{ archive.size_text or "—" }}
+  <span class="dim">md5</span> {{ archive.md5_12 or "—" }}
 </p>
 {% if archive.outcome_text %}<p class="{% if archive.outcome_failed %}state-failed{% else %}dim{% endif %}">{{ archive.outcome_text }}</p>{% endif %}
 {% if archive.reason_text and not archive.outcome_text %}<p class="dim">{{ archive.reason_text }}</p>{% endif %}
@@ -37,12 +40,7 @@
 
 {% if archive.summary %}
 <h2>Run summary</h2>
-  {% if archive.summary.run is mapping %}
-  <p>{% for key, value in archive.summary.run.items() %}<span class="dim">{{ key }}</span> {{ value }} {% endfor %}</p>
-  {% else %}
-  <p>{{ archive.summary.run }}</p>
-  {% endif %}
-{% if archive.summary.run_reason %}<p class="dim">{{ archive.summary.run_reason }}</p>{% endif %}
+{% for label, value in archive.summary_facts %}<p><span class="dim">{{ label }}</span> {{ value }}</p>{% endfor %}
 <p class="dim">{{ archive.summary.updated_label }}</p>
 <p class="dim">{% for name, word in archive.summary.controls.items() %}{{ name }}: {{ word }}; {% endfor %}</p>
 {% endif %}
@@ -62,13 +60,13 @@
   {% if action == "download" %}
   <form method="post" action="/archives/{{ archive.slug }}/fetch" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf }}">
-    <button>Download</button>
+    {% if archive.dvc_missing %}<button disabled>Download{% if archive.size_human %} {{ archive.size_human }}{% endif %}</button> <span class="dim">{{ archive.dvc_reason }}</span>{% else %}<button>Download{% if archive.size_human %} {{ archive.size_human }}{% endif %}</button>{% endif %}
   </form>
   {% elif action == "replace" %}
   <form method="post" action="/archives/{{ archive.slug }}/fetch" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf }}">
     <input type="hidden" name="replace" value="1">
-    <button>Download again (replace)</button>
+    {% if archive.dvc_missing %}<button disabled>Download again (replace){% if archive.size_human %} {{ archive.size_human }}{% endif %}</button> <span class="dim">{{ archive.dvc_reason }}</span>{% else %}<button>Download again (replace){% if archive.size_human %} {{ archive.size_human }}{% endif %}</button>{% endif %}
   </form>
   {% elif action == "verify" %}
   <form method="post" action="/archives/{{ archive.slug }}/fetch" class="actions">
@@ -97,7 +95,7 @@
   {% if "restore" in archive.actions %}
   <form method="post" action="/archives/{{ archive.slug }}/restore" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf }}">
-    <button>Restore</button>
+    <button>Restore{% if archive.restore.unpacked_human %} {{ archive.restore.unpacked_human }}{% endif %}</button>
   </form>
   {% endif %}
 {% endif %}

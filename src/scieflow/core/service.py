@@ -3049,7 +3049,7 @@ ARCHIVE_REFUSAL_TEXT = {
                     "terminal run: {command}",
     "no-space": "Not enough free disk at {path}: {needed_human} needed (the transfer, with 5% headroom, "
                 "and 1 GiB kept free), {free_human} free.",
-    "confirm-required": "This transfer is {size_human} ({size} bytes). Confirm it on the page, or from the "
+    "confirm-required": "This transfer is {size_text}. Confirm it on the page, or from the "
                         "terminal run: {command}",
     "confirm-mismatch": "The size changed since the confirmation was shown ({size} bytes now). Nothing "
                         "was started.",
@@ -3140,10 +3140,10 @@ def _reason_of(outcome: str | None, fallback: str | None) -> str | None:
     return fallback
 
 
-def _archive_row(ptr: archives.Pointer, ls) -> dict:
+def _archive_row(project: Project, ptr: archives.Pointer, ls) -> dict:
     row = {"slug": ptr.slug, "kind": ptr.kind, "size": ptr.size,
            "md5_12": ptr.md5[:12] if ptr.md5 else None, "state": None, "relation": None,
-           "outcome": None, "reason": ptr.reason,
+           "outcome": None, "reason": ptr.reason, "exit_code": None, "log": None,
            "command": (f"uv run scripts/dvc_sync.py pull {ptr.slug}" if ptr.kind == "directory" else None)}
     if ls is None:
         row["reason"] = ptr.reason or "unreadable"
@@ -3151,13 +3151,15 @@ def _archive_row(ptr: archives.Pointer, ls) -> dict:
     row["state"], row["relation"] = ls.state, ls.relation
     row["outcome"] = _last_outcome(ls)
     row["reason"] = _reason_of(row["outcome"], ptr.reason)
+    row["exit_code"] = ls.job.dvc_exit
+    row["log"] = _job_log_path(project, ls.job.id)
     return row
 
 
 def archived_runs(project: Project) -> dict:
     """Every archive of this checkout: pointers only, sorted and capped (T9-D9). Reads only (B2:5.6)."""
     disc = archives.discover(project)
-    return {"rows": [_archive_row(ptr, _local_or_none(project, ptr)) for ptr in disc.rows],
+    return {"rows": [_archive_row(project, ptr, _local_or_none(project, ptr)) for ptr in disc.rows],
             "total": disc.total, "shown": disc.shown, "cap": archives.LIST_CAP,
             "cap_note": disc.cap_note, "skipped_names": disc.skipped_names}
 
@@ -3229,7 +3231,7 @@ def archive_detail(project: Project, slug: str) -> dict:
     slug = _archive_slug(slug)
     ptr = _archive_pointer(project, slug)
     ls = _local_or_none(project, ptr)
-    row = _archive_row(ptr, ls)
+    row = _archive_row(project, ptr, ls)
     state = row["state"]
     detail = {**row,
               "environment": {"dvc": "found" if shutil.which("dvc") else "not installed",
@@ -3347,6 +3349,12 @@ def _human_bytes(n: int) -> str:
     return f"{n} bytes"
 
 
+def _size_text(n: int) -> str:
+    """`312.4 MiB (327155712 bytes)`; the byte count is repeated only when the human size is already bytes."""
+    human = _human_bytes(n)
+    return human if human == f"{n} bytes" else f"{human} ({n} bytes)"
+
+
 def _consent(size: int, *, needed: bool, yes: bool, confirm_size, command: str, slug: str,
              groups: list[dict], destination: str) -> None:
     """B2:5.4: at or above CONSENT_BYTES (or any replace) the exact size must be confirmed, unless `yes`.
@@ -3356,7 +3364,8 @@ def _consent(size: int, *, needed: bool, yes: bool, confirm_size, command: str, 
     if yes or not needed:
         return
     if confirm_size is None:
-        raise _refuse("confirm-required", size=size, size_human=_human_bytes(size), command=command,
+        raise _refuse("confirm-required", size=size, size_human=_human_bytes(size), size_text=_size_text(size),
+                      command=command,
                       slug=slug, groups=groups, destination=destination)
     if _as_size(confirm_size) != size:
         raise _refuse("confirm-mismatch", size=size)
@@ -3479,11 +3488,22 @@ def _outcome_message(outcome: str | None, exit_code, log: str, action: str) -> s
     return f"The job has no recorded outcome; its log is {log}."
 
 
-def _job_log(project: Project, job: jobs.Job) -> str:
+def _rel_to_root(project: Project, path) -> str:
     try:
-        return str(Path(job.log).relative_to(Path(project.root)))
+        return str(Path(path).relative_to(Path(project.root)))
     except ValueError:
-        return str(job.log)
+        return str(path)
+
+
+def _job_log(project: Project, job: jobs.Job) -> str:
+    return _rel_to_root(project, job.log)
+
+
+def _job_log_path(project: Project, job_id: str | None) -> str | None:
+    """The project-relative path of an archive job's log (state_dir/jobs/<id>.log), or None (B2:5.9)."""
+    if not job_id:
+        return None
+    return _rel_to_root(project, Path(project.state_dir) / "jobs" / f"{job_id}.log")
 
 
 def _finished(project: Project, slug: str, doc: dict, job: jobs.Job) -> dict:
@@ -3492,7 +3512,7 @@ def _finished(project: Project, slug: str, doc: dict, job: jobs.Job) -> dict:
     log = _job_log(project, job)
     return {**doc, "outcome": view.outcome, "reason": _reason_of(view.outcome, None),
             "exit_code": view.exit_code, "log": log, "state": ls.state if ls else None,
-            "message": _outcome_message(view.outcome, view.exit_code, log, doc["action"])}
+            "message": _outcome_message(view.outcome, view.dvc_exit, log, doc["action"])}
 
 
 def _start_archive(project: Project, slug: str, action: str, *, confirm_size, replace: bool,

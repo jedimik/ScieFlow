@@ -130,7 +130,7 @@ def disk_needed(received: int) -> int:
 def sentence(code: str, **values) -> str:
     text = SENTENCES[code]
     if "n" in values:
-        text = text.replace("<n>", str(values["n"]))
+        text = text.replace("<n>", "unknown" if values["n"] is None else str(values["n"]))
     if "log_path" in values:
         text = text.replace("<log path>", str(values["log_path"]))
     if "md5" in values:
@@ -325,6 +325,7 @@ class JobView:
     outcome: str | None
     exit_code: int | None
     reason: str | None = None
+    dvc_exit: int | None = None     # dvc's own exit number of a failed download, from its child record (5.9)
 
 
 def _read_json_dict(dir_fd: int | None, name: str, cap: int) -> dict | None:
@@ -379,16 +380,32 @@ def _child_record(project, slug: str) -> dict | None:
         _close(arch_fd)
 
 
-def _pid_matched_outcome(child: dict | None, pid) -> str | None:
-    """The fetch or restore subcommand's own outcome, when it was written by this job's process."""
-    if child is None or not isinstance(pid, int) or child.get("pid") != pid:
+def _matched_child(child: dict | None, pid) -> dict | None:
+    """The fetch or restore subcommand's own record, only when this job's process wrote it (5.6.1)."""
+    if child is None or not isinstance(pid, int) or child.get("pid") != pid or child.get("outcome") is None:
         return None
-    outcome = child.get("outcome")
-    if outcome is None:
+    return child
+
+
+def _outcome_of(child: dict | None) -> str | None:
+    if child is None:
         return None
+    outcome = child["outcome"]
     if outcome == "failed":
         return f"failed:{child.get('reason') or 'dvc-failed'}"
     return str(outcome)
+
+
+def _dvc_exit(child: dict | None) -> int | None:
+    """dvc's own exit number from a failed child record (B2:5.9 `dvc failed (exit <n>)`), else None."""
+    if child is None or child.get("outcome") != "failed":
+        return None
+    code = child.get("exit_code")
+    return code if isinstance(code, int) and not isinstance(code, bool) else None
+
+
+def _pid_matched_outcome(child: dict | None, pid) -> str | None:
+    return _outcome_of(_matched_child(child, pid))
 
 
 def effective_job(project, slug: str) -> JobView:
@@ -405,20 +422,21 @@ def effective_job(project, slug: str) -> JobView:
     if state == "running":
         if isinstance(pid, int) and jobs._alive(pid):
             return JobView(job_id, kind, True, verify_only, None, exit_code)
-        outcome = _pid_matched_outcome(_child_record(project, slug), pid) or "interrupted"
-        return JobView(job_id, kind, False, verify_only, outcome, exit_code)
+        child = _matched_child(_child_record(project, slug), pid)
+        outcome = _outcome_of(child) or "interrupted"
+        return JobView(job_id, kind, False, verify_only, outcome, exit_code, dvc_exit=_dvc_exit(child))
     if state in jobs.FINAL:
-        child = _child_record(project, slug)
+        child = _matched_child(_child_record(project, slug), pid)
         if state == "done":
-            outcome = _pid_matched_outcome(child, pid)
+            outcome = _outcome_of(child)
         elif state == "failed":
             if exit_code == LOCKED_EXIT:
                 outcome = "failed:locked"
             else:
-                outcome = _pid_matched_outcome(child, pid) or "failed:dvc-failed"
+                outcome = _outcome_of(child) or "failed:dvc-failed"
         else:
             outcome = "interrupted"
-        return JobView(job_id, kind, False, verify_only, outcome, exit_code)
+        return JobView(job_id, kind, False, verify_only, outcome, exit_code, dvc_exit=_dvc_exit(child))
     return JobView(job_id, kind, False, verify_only, None, exit_code)
 
 

@@ -1046,25 +1046,26 @@ ARCHIVE_REASON_TEXT = {
 ARCHIVE_MISSING_REASONS = ("no-such-member", archives.NOT_IN_ARCHIVE)
 
 
-def _archive_sentence(reason: str, *, md5: str = "") -> str:
+def _archive_sentence(reason: str, *, md5: str = "", n: int | None = None, log_path: str | None = None) -> str:
     """The fixed sentence for a reason code. Never dvc output and never a traceback."""
     if reason in ARCHIVE_REASON_TEXT:
         return ARCHIVE_REASON_TEXT[reason]
     if reason in archives.SENTENCES:
-        return archives.sentence(reason, md5=md5, n="—", log_path="the archive job's log (state directory)")
+        return archives.sentence(reason, md5=md5, n=n, log_path=log_path or "the archive job's log (state directory)")
     text = service.ARCHIVE_REFUSAL_TEXT.get(reason)
     if text is not None and "{" not in text:
         return text
     return f"This archive cannot be used here ({reason})."
 
 
-def _outcome_text(outcome: str | None, md5: str = "") -> str | None:
+def _outcome_text(outcome: str | None, md5: str = "", *, exit_code: int | None = None,
+                  log: str | None = None) -> str | None:
     """The page's words for a job outcome: `failed:<code>` and the bare codes read as their sentences."""
     if not outcome:
         return None
     code = outcome.split(":", 1)[1] if outcome.startswith("failed:") else outcome
     if outcome.startswith("failed:") or code in archives.SENTENCES or code in ARCHIVE_REASON_TEXT:
-        return _archive_sentence(code, md5=md5)
+        return _archive_sentence(code, md5=md5, n=exit_code, log_path=log)
     return outcome
 
 
@@ -1075,6 +1076,11 @@ def _human(n: int | None) -> str | None:
         if n >= unit:
             return f"{n / unit:.1f} {name}"
     return f"{n} bytes"
+
+
+def _size_text(n: int | None) -> str | None:
+    """The service's phrasing (`312.4 MiB (327155712 bytes)`); None stays None."""
+    return None if n is None else service._size_text(n)
 
 
 def _rel(project, path) -> str:
@@ -1107,6 +1113,7 @@ def _refusal_view(project, exc: service.ArchiveRefused, action: str, replace: bo
     return {"reason": exc.reason, "message": _scrub(project, exc.message), "action": action,
             "confirm": exc.reason == "confirm-required", "replace": replace,
             "size": details.get("size"), "size_human": details.get("size_human"),
+            "size_text": _size_text(details.get("size")),
             "destination": details.get("destination"), "groups": _groups_view(project, details.get("groups"))}
 
 
@@ -1115,18 +1122,56 @@ def _detail_reason_text(detail: dict, md5: str) -> str | None:
     if detail["kind"] == "unreadable":
         return (f"The pointer file cannot be read (reason: {detail['reason'] or 'unreadable'}). "
                 "Nothing can be downloaded from it until it is repaired.")
-    return _archive_sentence(detail["reason"], md5=md5) if detail["reason"] else None
+    if not detail["reason"]:
+        return None
+    return _archive_sentence(detail["reason"], md5=md5, n=detail.get("exit_code"), log_path=detail.get("log"))
+
+
+def _summary_facts(summary: dict | None, totals: dict | None) -> list[tuple[str, str]]:
+    """The run summary as named facts (B2:5.7.3): words for every missing value, never a raw dict or None."""
+    if not summary:
+        return []
+    run, run_reason = summary["run"], summary["run_reason"]
+    budget = summary["budget"]
+
+    def field(key: str) -> str:
+        if run is None:
+            return run_reason or archives.UNREADABLE
+        value = run.get(key)
+        if value is None or value == []:
+            return "not recorded"
+        return str(value)
+
+    if budget["status"] != "ok":
+        budget_text = budget["status"]
+    else:
+        budget_text = ", ".join(f"{dim.replace('_', ' ')} {frac:.0%}"
+                                for dim, frac in (budget["remaining"] or {}).items()) or "not recorded"
+    facts = [("kind", field("kind")), ("state", field("state")), ("phase", field("phase")),
+             ("iteration", field("iteration")), ("stopped reason", field("stopped_reason")),
+             ("lineage", field("lineage")), ("budget remaining", budget_text),
+             ("packed", field("updated") if run is not None else (run_reason or archives.UNREADABLE))]
+    if totals is not None:
+        facts += [("members", str(totals["members"])), ("unpacked", _size_text(totals["uncompressed_bytes"]))]
+    return facts
 
 
 def _archive_view(project, slug: str, refusal: dict | None = None) -> dict:
     detail = service.archive_detail(project, slug)
     md5 = detail["md5_12"] or ""
+    outcome_text = _outcome_text(detail["outcome"], md5, exit_code=detail.get("exit_code"), log=detail.get("log"))
+    if detail["outcome"] == "ready" and detail["state"] != "ready" and outcome_text:
+        outcome_text = f"Last job: {outcome_text}"     # an old success must not read as the current state (6c)
     view = {**detail,
             "size_human": _human(detail["size"]),
+            "size_text": _size_text(detail["size"]),
             "disk": _disk_view(project, detail["disk"]),
-            "outcome_text": _outcome_text(detail["outcome"], md5),
+            "outcome_text": outcome_text,
             "outcome_failed": bool(detail["outcome"]) and detail["outcome"] != "ready",
             "reason_text": _detail_reason_text(detail, md5),
+            "dvc_missing": detail["environment"]["dvc"] != "found",
+            "dvc_reason": _archive_sentence("dvc-missing"),
+            "summary_facts": _summary_facts(detail["summary"], detail["totals"]),
             "refusal": refusal}
     if detail.get("restore"):
         restore = detail["restore"]
@@ -1154,7 +1199,8 @@ def _archive_refused(request: Request, slug: str, exc: service.ArchiveRefused, a
 def _archive_index(project) -> tuple[dict, set]:
     doc = service.archived_runs(project)
     rows = [{**row, "size_human": _human(row["size"]),
-             "outcome_text": _outcome_text(row["outcome"], row["md5_12"] or "")} for row in doc["rows"]]
+             "outcome_text": _outcome_text(row["outcome"], row["md5_12"] or "", exit_code=row["exit_code"],
+                                           log=row["log"])} for row in doc["rows"]]
     local = {row["slug"] for row in rows if row["relation"] == "also-local"}
     return {**doc, "rows": rows}, local
 
@@ -1180,8 +1226,13 @@ def archive_files_page(request: Request, slug: str, path: str = "", page: int = 
 
 
 def _attachment_disposition(name: str) -> str:
-    safe = re.sub(r'[\x00-\x1f\x7f"\\]', "_", name or "download")
-    return f'attachment; filename="{safe}"'
+    """An attachment name in both forms (RFC 6266 / 5987): an ASCII fallback, then the UTF-8 name.
+
+    A header value is latin-1 on the wire, so a Czech member name in the plain form alone would raise.
+    """
+    clean = re.sub(r'[\x00-\x1f\x7f"\\]', "_", name or "download")
+    ascii_name = "".join(ch if " " <= ch < "\x7f" else "_" for ch in clean)
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(clean, safe='')}"
 
 
 def _member_refusal(request: Request, slug: str, path: str, reason: str) -> HTMLResponse:
