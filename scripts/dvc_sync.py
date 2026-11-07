@@ -246,7 +246,7 @@ def run_cmd_tail(cmd: list[str], cwd: Path, tail: int = arch.DVC_OUTPUT_TAIL) ->
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
     kept = bytearray()
     while True:
-        chunk = proc.stdout.read1(65536)
+        chunk = proc.stdout.readline(65536)  # line by line, each line bounded (T9-D4)
         if not chunk:
             break
         sys.stdout.write(decoder.decode(chunk))
