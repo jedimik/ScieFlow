@@ -114,6 +114,39 @@ def test_oversized_central_directory_is_refused_before_zipfile_parses(project, m
     assert zipcalls == []
 
 
+def test_exactly_65535_entries_without_zip64_record_is_readable(project):
+    # zipfile writes the 0xFFFF count with no zip64 record at exactly ZIP_FILECOUNT_LIMIT entries.
+    # The archive is valid and must be browsable (t2r-r1 finding 1).
+    path = put_zip(project, SLUG, [(f"f{i:05d}", b"") for i in range(65535)])
+    assert ZIP64_REC not in path.read_bytes()
+    entries, _cd = _precheck(path)
+    assert entries == 65535
+    idx = a.index(project, SLUG)
+    assert len(idx.members) == 65535
+
+
+def test_end_record_that_undercounts_is_refused_after_parse(project, monkeypatch, zipcalls):
+    # The end record claims 2 entries over a directory holding 6. zipfile reads by byte size, so
+    # the real count is checked after parsing, and the refused archive is never cached (t2r-r1 finding 2).
+    monkeypatch.setattr(a, "MAX_ARCHIVE_ENTRIES", 5)
+    path = put_zip(project, SLUG, [(f"f{i}", b"x") for i in range(6)])
+    data = bytearray(path.read_bytes())
+    eocd = data.rfind(EOCD)
+    struct.pack_into("<H", data, eocd + 8, 2)
+    struct.pack_into("<H", data, eocd + 10, 2)
+    path.write_bytes(bytes(data))
+    assert _precheck(path)[0] == 2
+    zipcalls.clear()
+    with pytest.raises(a.ZipRefused) as err:
+        a.index(project, SLUG)
+    assert err.value.reason == "too-many-entries"
+    assert len(zipcalls) == 1
+    assert not a._INDEX_LRU
+    with pytest.raises(a.ZipRefused):
+        a.index(project, SLUG)
+    assert len(zipcalls) == 2
+
+
 def test_garbage_is_unreadable_zip(project, zipcalls):
     zip_path(project, SLUG).write_bytes(b"this is not a zip archive at all")
     with pytest.raises(a.ZipRefused) as err:

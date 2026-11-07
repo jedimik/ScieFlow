@@ -666,7 +666,12 @@ def precheck_central_directory(fd: int, size: int) -> tuple[int, int]:
     cd_size = struct.unpack_from("<I", tail, pos + 12)[0]
     cd_offset = struct.unpack_from("<I", tail, pos + 16)[0]
     if entries == 0xFFFF or cd_size == 0xFFFFFFFF or cd_offset == 0xFFFFFFFF:
-        entries, cd_size, cd_offset = _zip64_end(fd, size, tail, pos)
+        if _has_zip64_locator(tail, pos):
+            entries, cd_size, cd_offset = _zip64_end(fd, size, tail, pos)
+        elif cd_size == 0xFFFFFFFF or cd_offset == 0xFFFFFFFF:
+            raise ZipRefused("unreadable-zip")
+        # else: zipfile writes the 0xFFFF count with no zip64 record at exactly 65,535 entries;
+        # the end record's own values are the archive's, as zipfile reads them.
     if entries > MAX_ARCHIVE_ENTRIES or cd_size > MAX_CENTRAL_DIRECTORY_BYTES:
         raise ZipRefused("too-many-entries")
     if cd_offset + cd_size > size:
@@ -674,10 +679,13 @@ def precheck_central_directory(fd: int, size: int) -> tuple[int, int]:
     return entries, cd_size
 
 
+def _has_zip64_locator(tail: bytes, pos: int) -> bool:
+    loc = pos - ZIP64_LOCATOR
+    return loc >= 0 and tail[loc:loc + 4] == _ZIP64_LOC_SIG
+
+
 def _zip64_end(fd: int, size: int, tail: bytes, pos: int) -> tuple[int, int, int]:
     loc = pos - ZIP64_LOCATOR
-    if loc < 0 or tail[loc:loc + 4] != _ZIP64_LOC_SIG:
-        raise ZipRefused("unreadable-zip")
     rec_at = struct.unpack_from("<Q", tail, loc + 8)[0]
     if rec_at + ZIP64_EOCD_FIXED > size:
         raise ZipRefused("unreadable-zip")
@@ -823,6 +831,11 @@ def index(project, slug: str) -> ZipIndex:
             except (zipfile.BadZipFile, OSError, ValueError, EOFError, struct.error) as exc:
                 fobj.close()
                 raise ZipRefused("unreadable-zip") from exc
+            # zipfile parses the directory by its byte size, not the claimed count: the real count
+            # is bounded here, and a refused archive is not cached (t2r-r1 finding 2).
+            if len(zf.infolist()) > MAX_ARCHIVE_ENTRIES:
+                fobj.close()
+                raise ZipRefused("too-many-entries")
             idx = _build_index(slug, key, fobj, zf)
             _INDEX_LRU[cache_key] = idx
             while len(_INDEX_LRU) > INDEX_CACHE:
