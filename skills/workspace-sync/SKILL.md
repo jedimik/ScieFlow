@@ -52,6 +52,8 @@ assume, when any of these is true:**
 | total over ~5 GB | slow upload, real storage cost |
 | the run has never been synced | the first push sends everything |
 
+A download of 1 GiB or more (`scieflow workspace archive fetch|restore … --yes`) is the user's decision: ask before passing `--yes`; inside a dispatch the commands refuse.
+
 Offer the concrete choices rather than a yes/no: push everything; push after
 moving the big or generated files into `scratch/` (excluded from archives);
 or skip the data this time and push only the chat. If something large looks
