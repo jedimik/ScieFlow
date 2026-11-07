@@ -18,7 +18,7 @@ import yaml
 from scieflow.core import archives as a
 from scieflow.core import jobs, service, store
 from scieflow.core.project import Project
-from tests.fixtures.b2_archives import (dead_pid, make_project, state_dir, stat_record,
+from tests.fixtures.b2_archives import (MD5, dead_pid, make_project, state_dir, stat_record,
                                         tree_snapshot, write_job, write_job_pointer,
                                         write_legacy_pointer, write_pointer, write_record,
                                         write_zip, zip_path)
@@ -327,7 +327,8 @@ def test_a_bad_job_pointer_is_shown_and_blocks_nothing(project, reads_only):
 
 def test_replace_refusal_command_names_the_replace_flag(project, no_jobs, dvc_present, roomy_disk):
     write_pointer(project, "r1", size=None)
-    write_zip(project, "r1", b"short")                    # a local copy that is not the verified one
+    zip_file = write_zip(project, "r1", b"short")         # a local copy that failed verification: "different"
+    write_record(project, "r1", stat_record(zip_file, pointer_md5=MD5, outcome="failed", reason="verify-md5"))
     with pytest.raises(service.ArchiveRefused) as exc:
         service.fetch_archive(project, "r1", replace=True)
     assert exc.value.reason == "size-unknown"
