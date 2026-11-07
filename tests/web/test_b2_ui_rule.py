@@ -26,3 +26,11 @@ def test_archive_actions_reuse_the_run_page_form_wrapper(arch_project, web):
     assert "<button" in text
     body = web.get("/archives/r1").text
     assert '<form method="post" action="/archives/r1/fetch" class="actions">' in body
+
+
+def test_member_view_uses_the_log_panel_of_the_run_file_page(arch_project, web):
+    """T-9 t5 r1 finding 5: archive_file.html reuses the sibling file.html's `pre.log` panel."""
+    from tests.fixtures.b2_web import ready_archive
+    ready_archive(arch_project, "r1")
+    body = web.get("/archives/r1/file", params={"path": "notes/log.md"}).text
+    assert '<pre class="log">' in body

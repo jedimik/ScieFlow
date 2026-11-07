@@ -94,3 +94,17 @@ def test_failure_page_uses_the_alert_paragraph_for_refusals(arch_project, web, r
     write_pointer(arch_project, "r1", size=None)
     r = post(web, "/archives/r1/fetch")
     assert '<p class="state-failed" role="alert">' in r.text
+
+
+def test_dvc_failed_shows_the_exit_code_and_the_log_path(arch_project, web, roomy_disk, dvc_bin):
+    """T-9 t5 r1 finding 2 (B2:5.9): the exit number and the job log's path, never placeholders."""
+    pointer_only(arch_project, "r1", size=6)
+    fake.set_script(dvc_bin, exit_code=5, stderr=["ERROR: something unexpected happened"])
+    assert post(web, "/archives/r1/fetch").status_code == 303
+    wait_idle(arch_project, "r1")
+    job_id = a.job_pointer_path(a.state_dir_for(arch_project), "r1").read_text().strip()
+    body = page_text(web)
+    assert "dvc failed (exit 5); its output is in " in body
+    assert f"jobs/{job_id}.log" in body
+    assert "exit —" not in body and "exit None" not in body and "the archive job's log" not in body
+    assert "something unexpected happened" not in body

@@ -128,3 +128,18 @@ def test_gets_write_nothing_start_nothing_and_never_open_credentials(arch_projec
     assert tree_snapshot(state) == state_before
     assert not [p for p in opened if p.endswith(".env") or "/.dvc/config" in p]
     assert all("SECRET=fake-marker" not in body for body in bodies)
+
+
+def test_non_latin1_member_names_download_with_a_utf8_filename(arch_project, web):
+    """T-9 t5 r1 finding 1: a Czech member name must not raise UnicodeEncodeError on the attachment header."""
+    members = {"data/čá.bin": b"abc", "data/č.svg": b"<svg></svg>", "data/č.txt": b"text\n",
+               "status.yml": b"kind: loop\n"}
+    ready_archive(arch_project, "r1", zip_bytes(members))
+    r = web.get("/archives/r1/file", params={"path": "data/čá.bin", "download": "1"})
+    assert r.status_code == 200
+    disposition = r.headers["content-disposition"]
+    disposition.encode("latin-1")                              # the header value is representable
+    assert "filename*=UTF-8''%C4%8D%C3%A1.bin" in disposition
+    for path in ("data/č.svg", "data/č.txt"):
+        assert web.get("/archives/r1/file", params={"path": path, "download": "1"}).status_code == 200
+    assert web.get("/archives/r1/file", params={"path": "data/č.svg"}).status_code == 200

@@ -108,3 +108,39 @@ def test_csrf_token_is_never_in_a_url(arch_project, web):
     pointer_only(arch_project, "r1")
     body = web.get("/archives/r1").text
     assert "csrf_token=" not in body
+
+
+def test_replace_panel_says_the_file_is_overwritten_and_states_the_size_once(arch_project, web, roomy_disk):
+    """T-9 t5 r1 finding 4 (B2:5.4)."""
+    data = ready_archive(arch_project, "r1")
+    write_pointer(arch_project, "r1", md5=OTHER_MD5, size=len(data))
+    r = post(web, "/archives/r1/fetch", replace="1")
+    assert "The existing file will be overwritten." in r.text
+    assert f"{len(data)} bytes ({len(data)} bytes)" not in r.text
+
+
+def test_download_button_shows_its_size(arch_project, web, roomy_disk):
+    """T-9 t5 r1 finding 6a (B2:5.4): `Download 312.0 MiB`."""
+    sized_pointer(arch_project, 327155712)
+    assert "Download 312.0 MiB" in web.get("/archives/r1").text
+
+
+def test_download_is_disabled_with_its_reason_when_dvc_is_missing(arch_project, web, roomy_disk, monkeypatch,
+                                                                  tmp_path):
+    """T-9 t5 r1 finding 6b (B2:5.7.5): disabled, with the reason, only when dvc is missing."""
+    empty = tmp_path / "no-programs"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    sized_pointer(arch_project, 6)
+    body = web.get("/archives/r1").text
+    assert "<button disabled>Download" in body
+    assert "dvc is not installed on this machine" in body
+
+
+def test_outdated_state_does_not_present_an_old_outcome_as_current(arch_project, web):
+    """T-9 t5 r1 finding 6c: a stale 'Downloaded and verified.' reads as the last job, not the current state."""
+    data = ready_archive(arch_project, "r1")
+    write_pointer(arch_project, "r1", md5=OTHER_MD5, size=len(data))
+    body = web.get("/archives/r1").text.replace("&#39;", "'")
+    assert "outdated" in body
+    assert "Downloaded and verified." not in body.replace("Last job: Downloaded and verified.", "")
