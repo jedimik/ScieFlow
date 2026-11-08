@@ -507,3 +507,11 @@ def echo_scite(scite: dict | None) -> None:
                + ("" if scite["sdk_installed"] else f" ({scite['install_hint']})"))
     for warning in scite["warnings"]:
         click.echo(f"  warning: {warning}")
+
+
+# T-9 t4: archived-run commands (B2:5.11). archives_cli imports the service inside each command only.
+from scieflow.core.archives_cli import archive as _archive_group  # noqa: E402
+from scieflow.core.archives_cli import archives_cmd as _archives_cmd  # noqa: E402
+
+workspace.add_command(_archives_cmd)
+workspace.add_command(_archive_group)

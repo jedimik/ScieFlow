@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ slug }} archived files{% endblock %}
+{% block nav %}<a href="/archives/{{ slug }}">← {{ slug }} archive</a>{% endblock %}
+{% block content %}
+<h1>{{ slug }}/{{ listing.path }}</h1>
+{% if reason_text %}<p class="state-failed" role="alert">{{ reason_text }}</p>{% endif %}
+{% if listing.note %}<p class="dim">{{ listing.note }}</p>{% endif %}
+<table>
+  {% for entry in listing.entries %}
+  <tr>
+    <td>
+      {% if entry.kind == "dir" %}
+        <a href="/archives/{{ slug }}/files?path={{ entry.path | urlencode }}">{{ entry.name }}/</a>
+      {% elif entry.kind == "file" %}
+        <a href="/archives/{{ slug }}/file?path={{ entry.path | urlencode }}">{{ entry.name }}</a>
+      {% else %}
+        {{ entry.name }} <span class="dim">({{ entry.kind }}, not followed)</span>
+      {% endif %}
+    </td>
+    <td class="dim">{{ entry.size if entry.kind == "file" and entry.size is not none else "" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% if listing.pages and listing.pages > 1 %}
+<p>
+  {% if listing.page > 1 %}<a href="/archives/{{ slug }}/files?path={{ listing.path | urlencode }}&page={{ listing.page - 1 }}">previous page</a>{% endif %}
+  {% if listing.page < listing.pages %}<a href="/archives/{{ slug }}/files?path={{ listing.path | urlencode }}&page={{ listing.page + 1 }}">next page</a>{% endif %}
+</p>
+{% endif %}
+{% endblock %}

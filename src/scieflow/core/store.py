@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 LOCK_TIMEOUT = 30
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -42,6 +42,31 @@ def locked(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(path) + ".lock", timeout=LOCK_TIMEOUT):
         yield
+
+
+class Busy(Exception):
+    """A non-blocking lock is held by someone else (see try_locked)."""
+
+
+@contextmanager
+def try_locked(path: Path):
+    """Take the lock at `path` (`<path>.lock`) without waiting; `Busy` when it is held.
+
+    The parent directory must already exist: a missing one raises OSError, it is not created
+    (a read path never takes this lock; a write path makes its own directory first).
+    """
+    path = Path(path)
+    lock_file = str(path) + ".lock"
+    _require_parent(lock_file)
+    lock = FileLock(lock_file, timeout=0)
+    try:
+        lock.acquire(timeout=0)
+    except Timeout as exc:
+        raise Busy(str(path)) from exc
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def _atomic_write(path: Path, text: str) -> None:

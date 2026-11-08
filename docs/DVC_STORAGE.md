@@ -162,6 +162,12 @@ disk. If `workspace/<slug>` already has content, pull refuses; rerun with
 **Limits.** Building an archive needs free disk equal to the workspace size.
 Symlinks inside a workspace are refused, not followed.
 
+### 3.6 Browse and download from the web app
+
+The dashboard's *Archived runs* list and the page of each archived run show what is known without downloading. A download fetches the one zip, with `scieflow workspace archive fetch <slug>` or the page's Download button, and never unpacks it; restore is a separate step. Downloads from the web app or `scieflow workspace archive fetch` use this checkout's own DVC configuration and credentials, as `dvc_sync.py pull` does; ScieFlow never reads the credentials itself.
+
+Each filesystem that receives a download must keep 1 GiB free afterwards, with 5% headroom; otherwise the download is refused. A download of 1 GiB or more asks for your confirmation first (`--yes` from the terminal); see [the web app's archived runs](web.md#archived-runs).
+
 ---
 
 ## 4. Cache & Ignore Policies

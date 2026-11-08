@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}{{ archive.slug }} — archived run{% endblock %}
+{% block nav %}<a href="/">← all runs</a>{% endblock %}
+{% block content %}
+<h1>{{ archive.slug }} <span class="dim">archived</span></h1>
+{% if archive.refusal %}<p class="state-failed" role="alert">{{ archive.refusal.message }}</p>{% endif %}
+{% if archive.refusal and archive.refusal.confirm %}
+<div class="gate human">
+  <div>Transfer: {{ archive.refusal.size_text }}</div>
+  {% for group in archive.refusal.groups %}<div class="dim">{{ group.path }}: {{ group.needed }} needed, {{ group.free }} free</div>{% endfor %}
+  {% if archive.refusal.destination %}<div class="dim">destination: {{ archive.refusal.destination }}</div>{% endif %}
+  {% if archive.refusal.replace %}<div class="dim">The existing file will be overwritten.</div>{% endif %}
+  <div class="dim">It runs until done or cancelled.</div>
+  <form method="post" action="/archives/{{ archive.slug }}/{{ archive.refusal.action }}" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="confirm_size" value="{{ archive.refusal.size }}">
+    {% if archive.refusal.replace %}<input type="hidden" name="replace" value="1">{% endif %}
+    <button>Confirm</button>
+    <a href="/archives/{{ archive.slug }}">Cancel</a>
+  </form>
+</div>
+{% endif %}
+
+<p>
+  <span class="dim">pointer</span> {{ archive.kind or "—" }}
+  <span class="dim">state</span> {{ archive.state or "—" }}
+  <span class="dim">relation</span> {{ archive.relation or "—" }}
+  <span class="dim">size</span> {{ archive.size_text or "—" }}
+  <span class="dim">md5</span> {{ archive.md5_12 or "—" }}
+</p>
+{% if archive.kind == "directory" %}<p class="dim">Legacy directory pointer: {{ archive.file_count }}. Pull it from the terminal: {{ archive.command }}</p>{% endif %}
+{% if archive.outcome_text %}<p class="{% if archive.outcome_failed %}state-failed{% else %}dim{% endif %}">{{ archive.outcome_text }}</p>{% endif %}
+{% if archive.reason_text and not archive.outcome_text %}<p class="dim">{{ archive.reason_text }}</p>{% endif %}
+{% for leftover in archive.leftovers %}<p class="dim">Leftover, not removed: {{ leftover.name }} ({{ leftover.text }})</p>{% endfor %}
+{% if archive.symlink_note %}<p class="dim">{{ archive.symlink_note }}</p>{% endif %}
+
+{% if archive.data_level %}
+  {% if archive.data_level.banner %}<div class="gate"><p>{{ archive.data_level.banner }}</p></div>{% endif %}
+  <p class="dim">data level: {{ archive.data_level.level }}{% if archive.data_level.reason %} ({{ archive.data_level.reason }}){% endif %}</p>
+{% endif %}
+
+{% if archive.browse_text %}<p class="state-failed">{{ archive.browse_text }}</p>{% endif %}
+{% if archive.summary %}
+<h2>Run summary</h2>
+{% for label, value in archive.summary_facts %}<p><span class="dim">{{ label }}</span> {{ value }}</p>{% endfor %}
+<p class="dim">{{ archive.summary.updated_label }}</p>
+<p class="dim">{% for name, word in archive.summary.controls.items() %}{{ name }}: {{ word }}; {% endfor %}</p>
+{% endif %}
+
+<h2>Environment</h2>
+<p class="dim">dvc: {{ archive.environment.dvc }} (docs/DVC_STORAGE.md §1)</p>
+<p class="dim">DVC remote configuration in this checkout: {{ archive.environment.remote_config }} (.dvc/config is machine-local; docs/DVC_STORAGE.md §2)</p>
+<p class="dim">The configuration line is advisory: DVC can also take its remote from its global or system configuration, which ScieFlow does not inspect. Credentials and remotes are learned only by trying.</p>
+
+{% if archive.disk %}
+<h2>Disk</h2>
+  {% if archive.disk.ok %}<p class="dim">Enough free disk for this transfer.</p>{% else %}<p class="state-failed">Not enough free disk for this transfer.</p>{% endif %}
+  {% for group in archive.disk.groups %}<p class="dim">{{ group.path }}: {{ group.needed }} needed, {{ group.free }} free</p>{% endfor %}
+{% endif %}
+
+<h2>Actions</h2>
+{% for action in archive.actions %}
+  {% if action == "download" %}
+  <form method="post" action="/archives/{{ archive.slug }}/fetch" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    {% if archive.dvc_missing %}<button disabled>Download{% if archive.size_human %} {{ archive.size_human }}{% endif %}</button> <span class="dim">{{ archive.dvc_reason }}</span>{% else %}<button>Download{% if archive.size_human %} {{ archive.size_human }}{% endif %}</button>{% endif %}
+  </form>
+  {% elif action == "replace" %}
+  <form method="post" action="/archives/{{ archive.slug }}/fetch" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="replace" value="1">
+    {% if archive.dvc_missing %}<button disabled>Download again (replace){% if archive.size_human %} {{ archive.size_human }}{% endif %}</button> <span class="dim">{{ archive.dvc_reason }}</span>{% else %}<button>Download again (replace){% if archive.size_human %} {{ archive.size_human }}{% endif %}</button>{% endif %}
+  </form>
+  {% elif action == "verify" %}
+  <form method="post" action="/archives/{{ archive.slug }}/fetch" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <button>Verify</button>
+  </form>
+  {% elif action == "cancel" %}
+  <form method="post" action="/archives/{{ archive.slug }}/cancel" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <button>Cancel</button>
+  </form>
+  {% elif action == "browse" %}
+  <p><a href="/archives/{{ archive.slug }}/files">Browse files</a></p>
+  {% endif %}
+{% else %}
+  <p class="dim">Nothing to do for this archive in its current state.</p>
+{% endfor %}
+
+{% if archive.restore %}
+<h2>Restore</h2>
+<p class="dim">Unpacks the verified zip ({{ archive.restore.unpacked_human or "size unknown" }}) into {{ archive.restore.destination }}. Restore never writes over a run.</p>
+  {% if archive.restore.reason_text %}<p class="state-failed">{{ archive.restore.reason_text }}</p>{% endif %}
+  {% if archive.restore.disk %}
+    {% for group in archive.restore.disk.groups %}<p class="dim">{{ group.path }}: {{ group.needed }} needed, {{ group.free }} free</p>{% endfor %}
+  {% endif %}
+  {% if "restore" in archive.actions %}
+  <form method="post" action="/archives/{{ archive.slug }}/restore" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <button>Restore{% if archive.restore.unpacked_human %} {{ archive.restore.unpacked_human }}{% endif %}</button>
+  </form>
+  {% endif %}
+{% endif %}
+
+<h2>Manuscript</h2>
+<p class="dim">{{ archive.manuscript }}</p>
+{% endblock %}

@@ -75,3 +75,12 @@ functions:
   curation_history: {cli: "run curation history", new: true, args: ["r1"]}
   compile_preview: {cli: "run preview", new: true, args: ["r1", "agent:claude", "--compile"]}
   preview_of: {cli: "run preview", new: true, args: ["r1", "agent:claude"]}
+
+  # --- T-9 t4: archived runs (B2:5.11, plan 5.7); the terminal commands of core/archives_cli.py
+  archived_runs: {cli: "workspace archives", new: true, args: []}
+  archive_detail: {cli: "workspace archive show", new: true, args: ["r1"]}
+  archive_entries: {cli: "workspace archive ls", new: true, args: ["r1"]}
+  archive_member: {cli: "workspace archive cat", new: true, args: ["r1", "status.yml"]}
+  fetch_archive: {cli: "workspace archive fetch", new: true, args: ["r1"]}
+  restore_archive: {cli: "workspace archive restore", new: true, args: ["r1"]}
+  cancel_archive_job: {cli: "workspace archive cancel", new: true, args: ["r1"]}

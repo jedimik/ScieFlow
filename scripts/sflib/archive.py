@@ -4,6 +4,8 @@ Pure filesystem helpers: no dvc invocation, no network.
 """
 
 import fnmatch
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -149,6 +151,31 @@ def build_zip(
         partial.replace(dest_zip)
     except BaseException:
         partial.unlink(missing_ok=True)
+        raise
+
+
+def md5_file(path: Path, chunk: int) -> str:
+    """MD5 of a file, streamed in `chunk`-byte reads (the pointer's checksum, B2:5.8)."""
+    digest = hashlib.md5()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(chunk), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def write_record(path: Path, data: dict) -> None:
+    """Write a JSON record atomically: temp file in the same directory, fsync, os.replace."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(json.dumps(data, sort_keys=True) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
         raise
 
 

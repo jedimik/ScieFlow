@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ slug }} — {{ path }}{% endblock %}
+{% block nav %}<a href="/archives/{{ slug }}/files">← {{ slug }} files</a>{% endblock %}
+{% block content %}
+<h1>{{ slug }}/{{ path }}</h1>
+{% if reason_text %}<p class="state-failed" role="alert">{{ reason_text }}</p>{% endif %}
+{% if text is not none %}<pre class="log">{{ text }}</pre>{% endif %}
+<p><a href="/archives/{{ slug }}/file?path={{ path | urlencode }}&download=1">Download this member</a></p>
+{% endblock %}

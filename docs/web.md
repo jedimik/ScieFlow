@@ -451,6 +451,18 @@ Start page is the one exception: it still redirects on success, but a
 refusal re-renders the form directly rather than round-tripping through
 `?error=...` (see [Pages](#pages) above).
 
+### Archived runs
+
+The dashboard lists archived runs after the runs table, each with its size and state. A run that also exists locally gets an *archived* badge that links to its page at `/archives/<slug>`. Archived runs are listed from the pointer files git already carries; opening a page never contacts the DVC remote or starts `dvc`.
+
+The archive page says what is known without downloading: the size, the checksum, whether `dvc` is installed, and whether this checkout has a DVC remote configured. Download fetches the one zip and checks its size and checksum; it never unpacks it. Restore is a separate button and unpacks only into an absent or empty `workspace/<slug>`.
+
+At 1 GiB (1,073,741,824 bytes) or more the page asks you to confirm the exact size first; from the terminal the same needs `--yes`.
+
+Once a download has been verified, the run's folders and files open read-only from inside the zip, and its summary is read from the archive. A Cancel button stops a running download or restore.
+
+Manuscript history is not kept in archives. It is rebuilt from the run's drafts after you restore the run: open its drafts page, or complete a merge round.
+
 ## The API
 
 Everything under `/api/v1` mirrors the service layer as JSON, requires the
@@ -486,6 +498,12 @@ this app's own pages — it is a stable-enough surface to script against.
 | `POST /api/v1/runs/<slug>/charter` | Replace the charter, keeping the old version in its history — `service.set_charter`, same function `scieflow run charter <slug> --set` calls. |
 | `POST /api/v1/runs/<slug>/charter/revert` | Make an earlier version current again by appending a copy of it — `service.revert_charter`, same function `scieflow run charter <slug> --revert` calls. |
 | `POST /api/v1/jobs/<job_id>/cancel` | Cancel a running job and its whole process group — `service.cancel_job`; no CLI command mirrors this one (see "What it is" above). |
+| `GET /api/v1/archives` | The archived runs of this checkout, listed from their pointer files — `service.archived_runs`. |
+| `GET /api/v1/archives/<slug>` | One archived run: state, relation, disk, restore facts and run summary — `service.archive_detail`. |
+| `GET /api/v1/archives/<slug>/entries` | One directory of a verified archive, paginated with `?path=&page=`; nothing is extracted — `service.archive_entries`. |
+| `POST /api/v1/archives/<slug>/fetch` | Download the one zip of an archived run — `service.fetch_archive`; a refusal is 409 with `reason` and `message`. |
+| `POST /api/v1/archives/<slug>/restore` | Unpack a verified zip into an absent or empty `workspace/<slug>` — `service.restore_archive`. |
+| `POST /api/v1/archives/<slug>/cancel` | Cancel the running download or restore of an archived run — `service.cancel_archive_job`. |
 
 Every `POST` above needs the CSRF header as well as the session cookie (see
 [Security model](#security-model)); the HTML pages use the equivalent
@@ -554,6 +572,7 @@ A few things are terminal-only on purpose, not because nobody got to them:
 - **DVC uploads** — a run's workspace can be gigabytes, and the sync rule
   (`AGENTS.md`) requires asking before anything of that size moves. See
   [DVC storage](DVC_STORAGE.md).
+- **Pulls of old per-file DVC pointers** (`workspace/<slug>.dvc`) — one such pull can be tens of thousands of objects; use `uv run scripts/dvc_sync.py pull <slug>`.
 - **`--promote`** — the exception that lets a support-tier agent stand in
   for a primary on one role. It exists to be deliberate and explicit (see
   [Agent configuration](agents.md#support-agents-as-primary-per-role)); a

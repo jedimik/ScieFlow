@@ -11,24 +11,39 @@ workspace/_archives/<slug>.zip before push and unpacks it after pull, so one
 run is one remote object instead of tens of thousands. Per-file directory
 tracking still exists but must be asked for with --no-archive.
 
+Browser-facing archive steps (docs/web.md, T-9): `fetch` downloads one zip and verifies it, `restore`
+unpacks a verified zip into an absent or empty workspace/<slug>. Both take the archive operation lock of
+their slug; push and pull take it too. --state-dir defaults to the project's state directory.
+
 Usage:
     uv run scripts/dvc_sync.py track [SLUG ...] [--all]
     uv run scripts/dvc_sync.py push SLUG [SLUG ...] [--archive | --no-archive] [--keep-zip] [--remote NAME]
     uv run scripts/dvc_sync.py pull SLUG [SLUG ...] [--force] [--remote NAME]
+    uv run scripts/dvc_sync.py fetch SLUG [--replace] [--verify-only] [--remote NAME]
+    uv run scripts/dvc_sync.py restore SLUG
     uv run scripts/dvc_sync.py status
 """
 
 import argparse
+import codecs
+import errno
+import json
 import os
 import subprocess
 import sys
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from scieflow.core import archives as arch
 from scieflow.core import config
+from scieflow.core import control_read as cr
+from scieflow.core import store
+from scieflow.core.project import Project, ProjectError, clean_slug
 from sflib import archive
 
 
@@ -219,6 +234,287 @@ def pull_archive(
     return 0
 
 
+def run_cmd_tail(cmd: list[str], cwd: Path, tail: int = arch.DVC_OUTPUT_TAIL) -> tuple[int, bytes]:
+    """Run cmd with stdout and stderr merged: echo every line, keep only the last `tail` bytes.
+
+    The echo goes to this process's stdout, so the job log keeps dvc's full output (B2:5.9). A program
+    that is not installed returns 127, as the shell does; classify() maps that to dvc-missing.
+    """
+    print(f">> {' '.join(cmd)}")
+    try:
+        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    except FileNotFoundError:
+        return 127, b""
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    kept = bytearray()
+    while True:
+        chunk = proc.stdout.readline(65536)  # line by line, each line bounded (T9-D4)
+        if not chunk:
+            break
+        sys.stdout.write(decoder.decode(chunk))
+        sys.stdout.flush()
+        kept += chunk
+        if len(kept) > tail:
+            del kept[: len(kept) - tail]
+    sys.stdout.write(decoder.decode(b"", final=True))
+    sys.stdout.flush()
+    return proc.wait(), bytes(kept)
+
+
+def _state_dir(root: Path, state_dir: Path | None) -> Path:
+    return Path(state_dir) if state_dir is not None else Project(root).state_dir
+
+
+def _archive_dir(state_dir: Path) -> Path:
+    return Path(state_dir) / arch.ARCHIVE_STATE
+
+
+def _locked_slug(slug: str, arch_dir: Path, action) -> int:
+    """Run action() under the slug's operation lock; a held lock writes nothing and exits LOCKED_EXIT."""
+    arch_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with store.try_locked(arch.lock_path(arch_dir, slug)):
+            return action()
+    except store.Busy:
+        print(f"Error: {slug}: {arch.sentence('locked')}")
+        return arch.LOCKED_EXIT
+
+
+def _pointer(root: Path, slug: str) -> arch.Pointer:
+    """The zip pointer of slug, read bounded and no-follow (B2:5.5)."""
+    rel = f"_archives/{slug}.zip.dvc"
+    try:
+        fd = cr.open_dir(root, ("workspace", archive.ARCHIVE_DIR))
+    except OSError:
+        return arch.Pointer(slug, "unreadable", None, None, False, "missing", rel)
+    try:
+        return arch.read_pointer(fd, f"{slug}.zip.dvc", slug)
+    finally:
+        os.close(fd)
+
+
+def _read_record(state_dir: Path, slug: str) -> dict | None:
+    """The verification record of slug, or None when absent or unreadable (bounded, no-follow)."""
+    try:
+        fd = cr.open_dir(Path(state_dir), (arch.ARCHIVE_STATE,))
+    except OSError:
+        return None
+    try:
+        raw = cr.read_bytes(fd, f"{slug}.json", arch.RECORD_MAX_BYTES)
+    finally:
+        os.close(fd)
+    if raw.status != "ok":
+        return None
+    try:
+        doc = json.loads(raw.data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _write_record(state_dir: Path, slug: str, data: dict) -> None:
+    archive.write_record(arch.record_path(_archive_dir(state_dir), slug), data)
+
+
+def _stat(path: Path) -> os.stat_result | None:
+    try:
+        return os.stat(path)
+    except OSError:
+        return None
+
+
+def _stat_fields(st: os.stat_result) -> dict:
+    return {"size": st.st_size, "st_dev": st.st_dev, "st_ino": st.st_ino,
+            "st_mtime_ns": st.st_mtime_ns}
+
+
+def _same_file(record: dict | None, st: os.stat_result | None) -> bool:
+    if record is None or st is None:
+        return False
+    return all(record.get(key) == value for key, value in _stat_fields(st).items())
+
+
+def _outside_cache(zip_file: Path, root: Path) -> bool:
+    """A zip that is a link to somewhere other than the DVC cache is never opened (B2:5.5)."""
+    if not zip_file.is_symlink():
+        return False
+    cache = Path(os.path.realpath(root / ".dvc" / "cache"))
+    return not Path(os.path.realpath(zip_file)).is_relative_to(cache)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _io_failure(exc: OSError) -> tuple[str, str]:
+    """The failure code and sentence for a local I/O error. ENOSPC is disk-full (B2:5.9); any other error has
+    no code of its own in the closed set, so it is dvc-failed with the OS error text in its place."""
+    if exc.errno == errno.ENOSPC:
+        return "disk-full", arch.sentence("disk-full")
+    return "dvc-failed", f"the local file could not be read or written ({exc.strerror or exc})"
+
+
+def _write_failure(state_dir: Path, slug: str, prev: dict | None, st: os.stat_result | None,
+                   pointer_md5: str, code: str, exit_code: int | None, pid: int) -> None:
+    """Record a failure. A verification the file still matches is kept, so a failed re-download over an
+    untouched ready copy stays ready (B2:5.5); otherwise the record only names the file it saw."""
+    if _same_file(prev, st):
+        record = dict(prev)
+    elif st is not None:
+        record = {"pointer_md5": pointer_md5, **_stat_fields(st)}
+    else:
+        record = {}
+    record.update(outcome="failed", reason=code, exit_code=exit_code, pid=pid)
+    _write_record(state_dir, slug, record)
+
+
+def cmd_fetch(slug: str, root: Path, workspace_root: Path, state_dir: Path, *,
+              replace: bool = False, verify_only: bool = False, remote: str | None = None) -> int:
+    """Download one archive zip with dvc, then check its size and MD5 and record the verification.
+
+    Never unpacks and never deletes a zip. --verify-only checks the local file and never runs dvc.
+    """
+    arch_dir = _archive_dir(state_dir)
+    arch_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with store.try_locked(arch.lock_path(arch_dir, slug)):
+            return _fetch_locked(slug, root, workspace_root, state_dir, replace=replace,
+                                 verify_only=verify_only, remote=remote)
+    except store.Busy:
+        print(f"Error: {slug}: {arch.sentence('locked')}")
+        return arch.LOCKED_EXIT
+
+
+def _fetch_locked(slug: str, root: Path, workspace_root: Path, state_dir: Path, *,
+                  replace: bool, verify_only: bool, remote: str | None) -> int:
+    ptr = _pointer(root, slug)
+    if ptr.kind != "zip":
+        print(f"Error: {slug}: not a zip archive pointer ({ptr.reason or ptr.kind})")
+        return 1
+    zip_file = archive.archive_path(workspace_root, slug)
+    pointer = archive.pointer_path(workspace_root, slug)
+    if _outside_cache(zip_file, root) and (verify_only or not replace):
+        print(f"Error: {slug}: the local zip is a link outside the DVC cache")
+        return 1
+    prev = _read_record(state_dir, slug)
+    pid = os.getpid()
+    st = _stat(zip_file)
+    size_matches = st is not None and ptr.size is not None and st.st_size == ptr.size
+
+    def fail(code: str, exit_code: int | None, text: str | None = None) -> int:
+        try:
+            _write_failure(state_dir, slug, prev, _stat(zip_file), ptr.md5, code, exit_code, pid)
+        except OSError as exc:  # a full disk may refuse the record too: say so and keep the last good one
+            print(f"Error: {slug}: the failed record could not be written ({exc.strerror})")
+        print(f"Error: {slug}: "
+              f"{text or arch.sentence(code, n=exit_code, md5=ptr.md5, log_path='the job log')}")
+        return 1
+
+    rc = None
+    if not verify_only and not (size_matches and not replace):
+        cmd = ["dvc", "pull", *_remote_args(remote), *(["--force"] if replace else []),
+               str(pointer.relative_to(root))]
+        rc, tail = run_cmd_tail(cmd, cwd=root)
+        if rc != 0:
+            return fail(arch.classify(rc, tail), rc)
+    if _outside_cache(zip_file, root):  # --replace ran dvc and the link is still there: never opened (B2:5.5)
+        return fail("dvc-failed", rc, "the local zip is still a link outside the DVC cache after the pull")
+    st = _stat(zip_file)
+    if st is None or (ptr.size is not None and st.st_size != ptr.size):
+        return fail("verify-size", rc)
+    try:
+        digest = archive.md5_file(zip_file, arch.MD5_CHUNK_BYTES)
+    except OSError as exc:
+        code, text = _io_failure(exc)
+        return fail(code, rc, text)
+    if digest != ptr.md5:
+        return fail("verify-md5", rc)
+    try:
+        linked = archive.link_to_cache(zip_file, pointer, root / ".dvc" / "cache")
+        st = os.stat(zip_file)  # after the link: a hard link has its own inode
+        _write_record(state_dir, slug, {
+            "pointer_md5": ptr.md5, **_stat_fields(st), "verified_at": _now(), "linked": linked,
+            "outcome": "ready", "reason": None, "exit_code": 0, "pid": pid,
+        })
+    except OSError as exc:
+        code, text = _io_failure(exc)
+        return fail(code, rc, text)
+    print(f"Verified workspace/{archive.ARCHIVE_DIR}/{slug}.zip ({st.st_size} bytes)")
+    return 0
+
+
+RESTORE_MESSAGES = {
+    "run-exists": "workspace/{slug} exists and is not empty; restore needs it absent or empty.",
+    "corrupt-member": "the archive has a corrupt member (its CRC does not match).",
+    "unreadable-zip": "the archive is not a readable zip.",
+    "disk-full": arch.sentence("disk-full"),
+}
+
+
+def _ready_for_restore(record: dict | None, ptr: arch.Pointer, st: os.stat_result) -> bool:
+    """The verification the state machine calls ready (B2:5.5), re-checked under the lock (T9-D15)."""
+    if record is None or record.get("verified_at") is None:
+        return False
+    if record.get("pointer_md5") != ptr.md5 or not _same_file(record, st):
+        return False
+    if record.get("outcome") == "failed" and record.get("reason") == "verify-md5":
+        return False
+    return ptr.size is None or st.st_size == ptr.size
+
+
+def cmd_restore(slug: str, root: Path, workspace_root: Path, state_dir: Path) -> int:
+    """Unpack a verified zip into workspace/<slug>, only when that folder is absent or empty."""
+    arch_dir = _archive_dir(state_dir)
+    arch_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with store.try_locked(arch.lock_path(arch_dir, slug)):
+            return _restore_locked(slug, root, workspace_root, state_dir)
+    except store.Busy:
+        print(f"Error: {slug}: {arch.sentence('locked')}")
+        return arch.LOCKED_EXIT
+
+
+def _restore_locked(slug: str, root: Path, workspace_root: Path, state_dir: Path) -> int:
+    ptr = _pointer(root, slug)
+    zip_file = archive.archive_path(workspace_root, slug)
+    st = _stat(zip_file)
+    record = _read_record(state_dir, slug)
+    if (ptr.kind != "zip" or st is None or _outside_cache(zip_file, root)
+            or not _ready_for_restore(record, ptr, st)):
+        print(f"Error: {slug}: not ready to restore; fetch and verify the archive first.")
+        return 1
+    pid = os.getpid()
+    dest = workspace_root / slug
+
+    def fail(code: str, text: str | None = None) -> int:
+        try:
+            _write_record(state_dir, slug, {**record, "outcome": "failed", "reason": code,
+                                            "exit_code": None, "pid": pid})
+        except OSError as exc:  # a full disk may refuse the record too: say so and keep the last good one
+            print(f"Error: {slug}: the failed record could not be written ({exc.strerror})")
+        print(f"Error: {slug}: restore refused: "
+              + (text or RESTORE_MESSAGES[code].format(slug=slug)))
+        return 1
+
+    if os.path.lexists(dest) and not (dest.is_dir() and not os.path.islink(dest) and not any(dest.iterdir())):
+        return fail("run-exists")
+    try:
+        archive.verify_zip(zip_file)
+    except archive.ArchiveError as exc:
+        return fail("corrupt-member" if "corrupt member" in str(exc) else "unreadable-zip")
+    try:
+        archive.extract_zip(zip_file, dest, force=False)
+    except (archive.ArchiveError, zipfile.BadZipFile):
+        return fail("unreadable-zip")
+    except OSError as exc:
+        code, text = _io_failure(exc)
+        return fail(code, text)
+    _write_record(state_dir, slug, {**record, "outcome": "restored", "reason": None,
+                                    "exit_code": 0, "pid": pid})
+    print(f"Restored workspace/{slug} from {archive.ARCHIVE_DIR}/{slug}.zip")
+    return 0
+
+
 def _push_directories(
     slugs: list[str], root: Path, workspace_root: Path, remote: str | None = None
 ) -> int:
@@ -252,6 +548,7 @@ def cmd_push(
     archive_flag: bool | None = None,
     keep_zip: bool = False,
     remote: str | None = None,
+    state_dir: Path | None = None,
 ) -> int:
     archived = [s for s in slugs
                 if use_archive(s, root, workspace_root, command="push", archive_flag=archive_flag)]
@@ -269,8 +566,10 @@ def cmd_push(
         print(f"  uv run scripts/dvc_sync.py push --no-archive {' '.join(directories)}")
         return 1
     exit_code = 0
+    arch_dir = _archive_dir(_state_dir(root, state_dir))
     for slug in archived:
-        rc = push_archive(slug, root, workspace_root, keep_zip=keep_zip, remote=remote)
+        rc = _locked_slug(slug, arch_dir, lambda s=slug: push_archive(
+            s, root, workspace_root, keep_zip=keep_zip, remote=remote))
         exit_code = exit_code or rc
     if directories or not archived:
         rc = _push_directories(directories, root, workspace_root, remote)
@@ -304,12 +603,15 @@ def cmd_pull(
     *,
     force: bool = False,
     remote: str | None = None,
+    state_dir: Path | None = None,
 ) -> int:
     archived = [s for s in slugs if use_archive(s, root, workspace_root, command="pull")]
     directories = [s for s in slugs if s not in archived]
     exit_code = 0
+    arch_dir = _archive_dir(_state_dir(root, state_dir))
     for slug in archived:
-        rc = pull_archive(slug, root, workspace_root, force=force, remote=remote)
+        rc = _locked_slug(slug, arch_dir, lambda s=slug: pull_archive(
+            s, root, workspace_root, force=force, remote=remote))
         exit_code = exit_code or rc
     if directories or not archived:
         rc = _pull_directories(directories, root, workspace_root, remote)
@@ -373,6 +675,22 @@ def build_parser(default_env_path: Path) -> argparse.ArgumentParser:
                         help="Replace a non-empty workspace directory when extracting an archive")
     p_pull.add_argument("--remote", help="DVC remote name (default: core.remote)")
 
+    # fetch / restore (one archived run; the web app and `scieflow workspace archive` call these)
+    p_fetch = sub.add_parser("fetch", help="Download one archive zip and verify it (never unpacks)")
+    p_fetch.add_argument("slug", help="Archived run slug")
+    p_fetch.add_argument("--replace", action="store_true",
+                         help="Pull again over an existing zip (dvc pull --force)")
+    p_fetch.add_argument("--verify-only", action="store_true",
+                         help="Check the local zip only; never runs dvc")
+    p_fetch.add_argument("--remote", help="DVC remote name (default: core.remote)")
+
+    p_restore = sub.add_parser("restore", help="Unpack a verified zip into an absent or empty run")
+    p_restore.add_argument("slug", help="Archived run slug")
+
+    for p in (p_push, p_pull, p_fetch, p_restore):
+        p.add_argument("--state-dir", type=Path, default=None,
+                       help="Project state directory (default: the project's state directory)")
+
     # status
     sub.add_parser("status", help="Show DVC and workspace tracking status")
     return ap
@@ -390,6 +708,19 @@ def main() -> None:
     if args.command == "status":
         sys.exit(cmd_status(root, workspace_root))
 
+    if args.command in ("fetch", "restore"):
+        # One archived run, named by its slug; no workspace directory need exist (the pointer is enough).
+        try:
+            slug = clean_slug(_clean_slug(args.slug))
+        except ProjectError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+        state = _state_dir(root, args.state_dir)
+        if args.command == "fetch":
+            sys.exit(cmd_fetch(slug, root, workspace_root, state, replace=args.replace,
+                               verify_only=args.verify_only, remote=args.remote))
+        sys.exit(cmd_restore(slug, root, workspace_root, state))
+
     # push/pull are selection-only: `--all` exists for `track` alone, because
     # moving hundreds of gigabytes should never be one flag away.
     slugs = resolve_slugs(args.slugs, getattr(args, "all", False), workspace_root)
@@ -398,9 +729,11 @@ def main() -> None:
         sys.exit(cmd_track(slugs, root, workspace_root))
     elif args.command == "push":
         sys.exit(cmd_push(slugs, root, workspace_root, archive_flag=args.archive,
-                          keep_zip=args.keep_zip, remote=args.remote))
+                          keep_zip=args.keep_zip, remote=args.remote,
+                          state_dir=args.state_dir))
     elif args.command == "pull":
-        sys.exit(cmd_pull(slugs, root, workspace_root, force=args.force, remote=args.remote))
+        sys.exit(cmd_pull(slugs, root, workspace_root, force=args.force, remote=args.remote,
+                          state_dir=args.state_dir))
 
 
 if __name__ == "__main__":

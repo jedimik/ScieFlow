@@ -16,14 +16,15 @@ routes that genuinely need to run on the event loop.
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 import re
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from starlette.datastructures import FormData
 
+from scieflow.core import archives
 from scieflow.core import jobs as jobs_mod
 from scieflow.core import service
 from scieflow.core.project import ProjectError
@@ -211,10 +212,13 @@ def dashboard(request: Request) -> HTMLResponse:
     detail = {run["slug"]: {"remaining": {dim: _percent(value)
                                           for dim, value in (run["remaining"] or {}).items()}}
               for run in runs}
+    archived, archived_local = _archive_index(project)
     return TEMPLATES.TemplateResponse(request, "dashboard.html", {
         "runs": runs,
         "detail": detail,
         "gates": service.open_gates(project, slugs=[run["slug"] for run in runs]),
+        "archives": archived,
+        "archived_local": archived_local,
         "csrf": auth.csrf_token(request),
     })
 
@@ -1024,3 +1028,303 @@ def file_view(request: Request, slug: str, path: str, download: bool = False):
     finally:
         if owner is not None:
             owner.close()
+
+
+# -- archived runs (T-9 t5; B2:5.4, 5.7, 5.9; T9-D2, T9-D8, T9-D11) ---------------------------
+
+#: Page wording for the reasons that have no B2:5.9 sentence of their own (member and pointer reasons).
+ARCHIVE_REASON_TEXT = {
+    "corrupt-member": "This member is damaged in the archive: its stored bytes do not match the archive's "
+                      "checksum. Download the archive again.",
+    "no-such-member": "There is no such member in this archive.",
+    archives.NOT_IN_ARCHIVE: "There is no such member in this archive.",
+    archives.TOO_LARGE: "This member is too large to show here. Download it to read it.",
+    "not text": "This member is not text, so it cannot be shown here. Download it instead.",
+    "unreadable": "The pointer file cannot be read, so nothing can be downloaded from it.",
+    "ready": "Downloaded and verified.",
+}
+ARCHIVE_MISSING_REASONS = ("no-such-member", archives.NOT_IN_ARCHIVE)
+
+#: Browse refusals (B2:5.10): a too-large listing says how to look inside; a summary that cannot be read
+#: says so (it is not the pointer file, which `unreadable` means elsewhere on this page).
+ARCHIVE_BROWSE_TEXT = {
+    "too-many-entries": "The archive has more entries than ScieFlow reads: restore it from the terminal to look inside.",
+    "unreadable": "The run summary inside this archive cannot be read.",
+}
+
+#: Leftover sentences (B2:5.7.6). The names come from the service; these words are the page's.
+ARCHIVE_LEFTOVER_TEXT = {
+    ".zip.partial": ("an interrupted archive build left this file; it is not an archive and nothing reads it; "
+                     "delete it when no push is running"),
+    ".zip.link": "an interrupted cache link; delete it when no transfer is running",
+    "extract": "an interrupted restore or forced pull; not the run; delete it",
+    "replaced": "an interrupted restore or forced pull; not the run; delete it",
+}
+
+
+def _leftover_text(name: str) -> str:
+    if name.endswith(".zip.partial"):
+        return ARCHIVE_LEFTOVER_TEXT[".zip.partial"]
+    if name.endswith(".zip.link"):
+        return ARCHIVE_LEFTOVER_TEXT[".zip.link"]
+    if ".extract-" in name:
+        return ARCHIVE_LEFTOVER_TEXT["extract"]
+    return ARCHIVE_LEFTOVER_TEXT["replaced"]
+
+
+def _browse_text(reason: str | None) -> str | None:
+    if not reason:
+        return None
+    return ARCHIVE_BROWSE_TEXT.get(reason) or _archive_sentence(reason)
+
+
+def _archive_sentence(reason: str, *, md5: str = "", n: int | None = None, log_path: str | None = None) -> str:
+    """The fixed sentence for a reason code. Never dvc output and never a traceback."""
+    if reason in ARCHIVE_REASON_TEXT:
+        return ARCHIVE_REASON_TEXT[reason]
+    if reason in archives.SENTENCES:
+        return archives.sentence(reason, md5=md5, n=n, log_path=log_path or "the archive job's log (state directory)")
+    text = service.ARCHIVE_REFUSAL_TEXT.get(reason)
+    if text is not None and "{" not in text:
+        return text
+    return f"This archive cannot be used here ({reason})."
+
+
+def _outcome_text(outcome: str | None, md5: str = "", *, exit_code: int | None = None,
+                  log: str | None = None) -> str | None:
+    """The page's words for a job outcome: `failed:<code>` and the bare codes read as their sentences."""
+    if not outcome:
+        return None
+    code = outcome.split(":", 1)[1] if outcome.startswith("failed:") else outcome
+    if outcome.startswith("failed:") or code in archives.SENTENCES or code in ARCHIVE_REASON_TEXT:
+        return _archive_sentence(code, md5=md5, n=exit_code, log_path=log)
+    return outcome
+
+
+def _human(n: int | None) -> str | None:
+    if n is None:
+        return None
+    for unit, name in ((1 << 30, "GiB"), (1 << 20, "MiB"), (1 << 10, "KiB")):
+        if n >= unit:
+            return f"{n / unit:.1f} {name}"
+    return f"{n} bytes"
+
+
+def _size_text(n: int | None) -> str | None:
+    """The service's phrasing (`312.4 MiB (327155712 bytes)`); None stays None."""
+    return None if n is None else service._size_text(n)
+
+
+def _rel(project, path) -> str:
+    """A project-relative path for the page (the absolute checkout path is never shown)."""
+    try:
+        return str(Path(path).relative_to(Path(project.root)))
+    except ValueError:
+        return str(path)
+
+
+def _scrub(project, text: str) -> str:
+    """Replace the checkout's absolute path in a service sentence with the project-relative one."""
+    root = str(Path(project.root))
+    return text.replace(root + "/", "").replace(root, ".")
+
+
+def _groups_view(project, groups) -> list[dict]:
+    return [{"path": _rel(project, g["path"]), "needed": _human(g["needed"]), "free": _human(g["free"])}
+            for g in groups or []]
+
+
+def _disk_view(project, disk) -> dict | None:
+    if not disk:
+        return None
+    return {"ok": disk["ok"], "groups": _groups_view(project, disk["groups"])}
+
+
+def _refusal_view(project, exc: service.ArchiveRefused, action: str, replace: bool) -> dict:
+    details = exc.details
+    return {"reason": exc.reason, "message": _scrub(project, exc.message), "action": action,
+            "confirm": exc.reason == "confirm-required", "replace": replace,
+            "size": details.get("size"), "size_human": details.get("size_human"),
+            "size_text": _size_text(details.get("size")),
+            "destination": details.get("destination"), "groups": _groups_view(project, details.get("groups"))}
+
+
+def _detail_reason_text(detail: dict, md5: str) -> str | None:
+    """A pointer that cannot be read says so, with its fixed reason code; other reasons read as sentences."""
+    if detail["kind"] == "unreadable":
+        return (f"The pointer file cannot be read (reason: {detail['reason'] or 'unreadable'}). "
+                "Nothing can be downloaded from it until it is repaired.")
+    if not detail["reason"]:
+        return None
+    return _archive_sentence(detail["reason"], md5=md5, n=detail.get("exit_code"), log_path=detail.get("log"))
+
+
+def _summary_facts(summary: dict | None, totals: dict | None) -> list[tuple[str, str]]:
+    """The run summary as named facts (B2:5.7.3): words for every missing value, never a raw dict or None."""
+    if not summary:
+        return []
+    run, run_reason = summary["run"], summary["run_reason"]
+    budget = summary["budget"]
+
+    def field(key: str) -> str:
+        if run is None:
+            return run_reason or archives.UNREADABLE
+        value = run.get(key)
+        if value is None or value == []:
+            return "not recorded"
+        return str(value)
+
+    if budget["status"] != "ok":
+        budget_text = budget["status"]
+    else:
+        budget_text = ", ".join(f"{dim.replace('_', ' ')} {frac:.0%}"
+                                for dim, frac in (budget["remaining"] or {}).items()) or "not recorded"
+    facts = [("kind", field("kind")), ("state", field("state")), ("phase", field("phase")),
+             ("iteration", field("iteration")), ("stopped reason", field("stopped_reason")),
+             ("lineage", field("lineage")), ("budget remaining", budget_text),
+             ("packed", field("updated") if run is not None else (run_reason or archives.UNREADABLE))]
+    if totals is not None:
+        facts += [("members", str(totals["members"])), ("unpacked", _size_text(totals["uncompressed_bytes"]))]
+    return facts
+
+
+def _archive_view(project, slug: str, refusal: dict | None = None) -> dict:
+    detail = service.archive_detail(project, slug)
+    md5 = detail["md5_12"] or ""
+    outcome_text = _outcome_text(detail["outcome"], md5, exit_code=detail.get("exit_code"), log=detail.get("log"))
+    if detail["outcome"] == "ready" and detail["state"] != "ready" and outcome_text:
+        outcome_text = f"Last job: {outcome_text}"     # an old success must not read as the current state (6c)
+    view = {**detail,
+            "size_human": _human(detail["size"]),
+            "size_text": _size_text(detail["size"]),
+            "disk": _disk_view(project, detail["disk"]),
+            "outcome_text": outcome_text,
+            "outcome_failed": bool(detail["outcome"]) and detail["outcome"] != "ready",
+            "reason_text": _detail_reason_text(detail, md5),
+            "dvc_missing": detail["environment"]["dvc"] != "found",
+            "dvc_reason": _archive_sentence("dvc-missing"),
+            "browse_text": _browse_text(detail.get("browse_refusal")),
+            "leftovers": [{"name": name, "text": _leftover_text(name)} for name in detail["leftovers"]],
+            "file_count": (f"{detail['nfiles']} files" if detail.get("nfiles") is not None
+                           else "file count not recorded"),
+            "summary_facts": _summary_facts(detail["summary"], detail["totals"]),
+            "refusal": refusal}
+    if detail.get("restore"):
+        restore = detail["restore"]
+        view["restore"] = {**restore,
+                           "unpacked_human": _human(restore["unpacked"]),
+                           "disk": _disk_view(project, restore["disk"]),
+                           "reason_text": _archive_sentence(restore["reason"]) if restore["reason"] else None}
+    return view
+
+
+def _archive_response(request: Request, slug: str, *, refusal: dict | None = None,
+                      status_code: int = 200) -> HTMLResponse:
+    return TEMPLATES.TemplateResponse(request, "archive.html", {
+        "archive": _archive_view(_project(request), slug, refusal),
+        "csrf": auth.csrf_token(request),
+    }, status_code=status_code)
+
+
+def _archive_refused(request: Request, slug: str, exc: service.ArchiveRefused, action: str,
+                     replace: bool = False) -> HTMLResponse:
+    """A refusal re-renders the page (200) with its sentence; nothing was started (T9-D2)."""
+    return _archive_response(request, slug, refusal=_refusal_view(_project(request), exc, action, replace))
+
+
+def _archive_index(project) -> tuple[dict, set]:
+    doc = service.archived_runs(project)
+    rows = [{**row, "size_human": _human(row["size"]),
+             "outcome_text": _outcome_text(row["outcome"], row["md5_12"] or "", exit_code=row["exit_code"],
+                                           log=row["log"])} for row in doc["rows"]]
+    local = {row["slug"] for row in rows if row["relation"] == "also-local"}
+    return {**doc, "rows": rows}, local
+
+
+def _archive_back(slug: str) -> RedirectResponse:
+    return RedirectResponse(f"/archives/{quote(slug)}", status_code=303)
+
+
+@router.get("/archives/{slug}", response_class=HTMLResponse)
+def archive_page(request: Request, slug: str) -> HTMLResponse:
+    """One archived run: its state, facts, actions and the restore panel. Reads only (B2:5.6)."""
+    return _archive_response(request, slug)
+
+
+@router.get("/archives/{slug}/files", response_class=HTMLResponse)
+def archive_files_page(request: Request, slug: str, path: str = "", page: int = Query(1, ge=1)) -> HTMLResponse:
+    listing = service.archive_entries(_project(request), slug, path, page)
+    reason = listing.get("reason")
+    return TEMPLATES.TemplateResponse(request, "archive_files.html", {
+        "slug": slug, "listing": listing,
+        "reason_text": _browse_text(reason),
+    })
+
+
+def _attachment_disposition(name: str) -> str:
+    """An attachment name in both forms (RFC 6266 / 5987): an ASCII fallback, then the UTF-8 name.
+
+    A header value is latin-1 on the wire, so a Czech member name in the plain form alone would raise.
+    """
+    clean = re.sub(r'[\x00-\x1f\x7f"\\]', "_", name or "download")
+    ascii_name = "".join(ch if " " <= ch < "\x7f" else "_" for ch in clean)
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(clean, safe='')}"
+
+
+def _member_refusal(request: Request, slug: str, path: str, reason: str) -> HTMLResponse:
+    return TEMPLATES.TemplateResponse(request, "archive_file.html", {
+        "slug": slug, "path": path, "text": None, "reason_text": _archive_sentence(reason),
+    }, status_code=404 if reason in ARCHIVE_MISSING_REASONS else 200)
+
+
+@router.get("/archives/{slug}/file")
+def archive_file_page(request: Request, slug: str, path: str = "", download: bool = False):
+    """One member: a text member inline and escaped; others as their stream (T9-D11). No extraction."""
+    project = _project(request)
+    if not download and PurePosixPath(path).suffix.lower() in service.ARCHIVE_TEXT_SUFFIXES:
+        view = service.archive_member(project, slug, path, mode="view")
+        if view["reason"] is not None:
+            return _member_refusal(request, slug, path, view["reason"])
+        return TEMPLATES.TemplateResponse(request, "archive_file.html", {
+            "slug": slug, "path": path, "text": view["text"], "reason_text": None,
+        })
+    member = service.archive_member(project, slug, path, mode="raw")
+    if member["reason"] is not None:
+        return _member_refusal(request, slug, path, member["reason"])
+    media_type, attachment = member["media_type"], member["attachment"]
+    if download:
+        media_type, attachment = "application/octet-stream", True
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if attachment:
+        headers["Content-Disposition"] = _attachment_disposition(member["filename"])
+    return StreamingResponse(member["stream"], media_type=media_type, headers=headers)
+
+
+@router.post("/archives/{slug}/fetch", dependencies=MUTATE)
+def archive_fetch(request: Request, slug: str, confirm_size: str = Form(""), replace: str = Form("")):
+    """Download one zip. `yes` is never read from a form (the terminal's --yes is not the web's)."""
+    forced = replace == "1"
+    try:
+        service.fetch_archive(_project(request), slug, confirm_size=confirm_size or None, replace=forced)
+    except service.ArchiveRefused as exc:
+        return _archive_refused(request, slug, exc, "fetch", forced)
+    return _archive_back(slug)
+
+
+@router.post("/archives/{slug}/restore", dependencies=MUTATE)
+def archive_restore(request: Request, slug: str, confirm_size: str = Form("")):
+    try:
+        service.restore_archive(_project(request), slug, confirm_size=confirm_size or None)
+    except service.ArchiveRefused as exc:
+        return _archive_refused(request, slug, exc, "restore")
+    return _archive_back(slug)
+
+
+@router.post("/archives/{slug}/cancel", dependencies=MUTATE)
+def archive_cancel(request: Request, slug: str):
+    try:
+        service.cancel_archive_job(_project(request), slug)
+    except service.ArchiveRefused as exc:
+        return _archive_refused(request, slug, exc, "cancel")
+    return _archive_back(slug)
+

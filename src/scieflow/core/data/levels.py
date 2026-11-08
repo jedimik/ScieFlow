@@ -152,6 +152,11 @@ def read(ws) -> DataFile | Invalid:
         text = path.read_text()
     except (OSError, UnicodeDecodeError):
         return Invalid("data.yml: cannot be read")
+    return parse_text(text)
+
+
+def parse_text(text: str) -> DataFile | Invalid:
+    """The declaration parsed from its text (T9-D6): the same rules as read(), no file access."""
     try:
         raw = yaml.safe_load(text)
     except Exception:  # YAMLError, ValueError, RecursionError: all fail closed
@@ -164,15 +169,19 @@ def read(ws) -> DataFile | Invalid:
         return Invalid(str(exc))
 
 
-def level_info(ws) -> LevelInfo:
-    """The run's level: the maximum of default, declarations and L1.5 for imports."""
-    got = read(ws)
+def level_of(got: DataFile | Invalid) -> LevelInfo:
+    """The level of a parsed declaration (or of an invalid one, which is L2)."""
     if isinstance(got, Invalid):
         return LevelInfo("L2", got.reason)
     candidates = [got.default_level, *(entry["level"] for entry in got.levels)]
     if got.imports:
         candidates.append("L1.5")
     return LevelInfo(max(candidates, key=rank))
+
+
+def level_info(ws) -> LevelInfo:
+    """The run's level: the maximum of default, declarations and L1.5 for imports."""
+    return level_of(read(ws))
 
 
 def run_level(ws) -> str:

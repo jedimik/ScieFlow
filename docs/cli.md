@@ -505,7 +505,7 @@ changes a decision the user made. `merge-check` exits 1 while a blocker is open.
 
 ## `scieflow workspace`
 
-Read-only views over `workspace/`.
+Read-only views over `workspace/`, plus downloading and restoring archived runs (`archive fetch|restore`).
 
 ```bash
 uv run scieflow workspace list [--json]
@@ -535,6 +535,41 @@ uv run scieflow workspace sync-status [SLUG] [--big-gb N] [--json]
 ```
 What a run would upload: new files since its last sync, and files at or
 above `--big-gb` (default `1.0`).
+
+```bash
+uv run scieflow workspace archives [--json]
+```
+The archived runs of this checkout, from their pointer files. Opening the list never contacts the remote.
+
+```bash
+uv run scieflow workspace archive show SLUG [--json]
+```
+One archived run: state, size, checksum, disk, and its run summary once a download is verified.
+
+```bash
+uv run scieflow workspace archive ls SLUG [DIR] [--page N] [--json]
+```
+One directory of a verified archive, paginated, read from the zip without extracting it.
+
+```bash
+uv run scieflow workspace archive cat SLUG MEMBER [--out FILE]
+```
+One member of a verified archive. Text goes to the terminal; any other member needs `--out FILE`.
+
+```bash
+uv run scieflow workspace archive fetch SLUG [--yes] [--replace]
+```
+Downloads the one zip and checks its size and checksum; it never unpacks it. At 1 GiB or more, and for `--replace`, it needs `--yes`.
+
+```bash
+uv run scieflow workspace archive restore SLUG [--yes]
+```
+Unpacks a verified zip into `workspace/SLUG`, only when that folder is absent or empty. At 1 GiB or more it needs `--yes`.
+
+```bash
+uv run scieflow workspace archive cancel SLUG
+```
+Cancels a running download or restore of that run.
 
 ## `scieflow serve`
 
