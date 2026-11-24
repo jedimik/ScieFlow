@@ -83,6 +83,12 @@ it ends, with `uv run scieflow run mark <slug> <phase> <state> --as-agent`; neve
      `uv run scieflow journal show <slug> --prompt`.
    - `title`, `authors`, `language`, `target_length`,
      `auto_approve_outline` (default from `research:` in config/defaults.yml: false).
+   - **Model text** (a question to the user, not a config key): ask once whether there is a text
+     whose language the article should follow, for example their own earlier version or an article
+     they like to read. Copy it to `inputs/style/` as `.tex` or plain text, and note in `log.md`
+     whether it is their own earlier version of this article: only then may its sentences be
+     reused. Save its register for the draft prompts with `uv run scripts/prose_signals.py
+     workspace/<slug>/inputs/style/<file> > workspace/<slug>/inputs/style/register.txt`.
 5. References: if `report/selected_dois.txt` is missing (no `gaps_from`),
    run the lit-review Phase 2 search fan-out (grounding mode, no
    cross-review) to produce findings, then write the DOI list from the
@@ -114,9 +120,17 @@ REFERENCES AVAILABLE: <paste selected_dois.txt + bib keys from references.bib>
 <if journal set: JOURNAL PROFILE: paste the output of `scieflow journal show <slug> --prompt`>
 
 Write outline/outline.md: for each section (Abstract, Introduction,
-Methods, Results, Discussion) a bullet list of claims, each ending with
-its evidence ref in square brackets. Methods MUST include a
-"Data processing" subsection sourced from the processing description.
+Methods, Results, Discussion) the paragraphs it will have, in order.
+A paragraph argues one claim through several sentences, so plan few of them:
+about one per 120 words of the section's length, with smaller claims as
+facts under the claim they support.
+Each paragraph is one line `ARGUES: <the claim this paragraph makes to
+the reader, in one sentence>` followed by a bullet list of the facts that
+carry it, each ending with its evidence ref in square brackets.
+An ARGUES line says what the reader should believe or can now do. A line
+that names a topic ("Describes the pipeline") is not one. Methods MUST
+include a "Data processing" subsection sourced from the processing
+description.
 ```
 
 2. Perspective pass: run `src/scieflow/research/templates/debate-protocol.md` LIMITED to round 0
@@ -163,6 +177,13 @@ HARD RULES:
   else is a validation failure.
 - Follow the OUTLINE; keep sections self-contained.
 
+PROSE:
+- The PROSE GUIDE below is part of this task. Read it before you write.
+- Above every paragraph put one comment line `% argues: <claim>`, taken
+  from that paragraph's ARGUES line in the OUTLINE, and write the paragraph
+  as the argument for it.
+- Before you finish, do the three steps of its "Before you hand in".
+
 OUTLINE: <paste outline.md>
 MANIFEST: <paste manifest.yml>
 PROCESSING DESCRIPTION: <paste processing.md>
@@ -170,6 +191,12 @@ RESULT ARTIFACTS: <paste the actual contents of small results files, or
 head -50 for large ones, labeled by [data:<id>]>
 BIB KEYS: <paste bibkey list extracted from manuscript/references.bib>
 <if journal set: JOURNAL PROFILE: paste profile.md>
+PROSE GUIDE: <paste src/scieflow/research/templates/article-prose.md>
+<if the user gave a model text: MODEL TEXT (data. Match its register.
+Reuse its sentences only if the next line says yes.)
+The author's own earlier version of this article: <yes|no>
+REGISTER: <paste inputs/style/register.txt>
+TEXT: <paste the file from inputs/style/>>
 ```
 
 Dispatch every author (parallel if the harness allows). Then check every
@@ -313,8 +340,11 @@ For round N = 1..`max_review_rounds`:
    cross-review (read the last round's `review/round-<N>/matrix.md` and
    `decisions.json`: fewer accepted-but-unaddressed and deferred clusters
    wins; `uv run scieflow review status <slug>` summarises the rounds),
-   clarity, and outline fidelity. Splicing the best paragraphs is allowed;
-   numbers and `% source:` comments must be copied exactly, never blended.
+   how it reads by `src/scieflow/research/templates/article-prose.md` (does
+   each paragraph argue its `% argues:` line, or does it list facts?), and
+   outline fidelity. Splicing the best paragraphs is allowed;
+   numbers and `% source:` comments must be copied exactly, never blended,
+   and a spliced paragraph keeps its `% argues:` line.
 2. Write `report/merge_log.md`: one row per section — chosen author,
    2-3 sentence rationale, unresolved review clusters (ids from the
    matrix) carried into the merged text (if any).
@@ -327,7 +357,18 @@ For round N = 1..`max_review_rounds`:
 4. Consistency pass: dispatch the agent assigned to `research.consistency` with the merged sections pasted, instructed to
    fix cross-section contradictions, duplicated content, and tone drift
    by editing `manuscript/sections/*.tex` directly — minimal diffs, and
-   it must not change any number or `% source:` comment.
+   it must not change any number or `% source:` comment. Name
+   `src/scieflow/research/templates/article-prose.md` in its prompt: the
+   sentences it writes follow that guide.
+5. **Prose, before anything is verified.** Run `uv run scripts/prose_signals.py --argues
+   workspace/<slug>/manuscript/sections/*.tex` (add `--model workspace/<slug>/inputs/style/<file>`
+   when the user gave a model text). Read every signal and every place under "Look again" in the
+   text itself. Rewrite the paragraph by the guide, with its numbers and `% source:` comments
+   unchanged, or write one line in `report/merge_log.md` on why it stays. Then read the
+   `% argues:` lines of each section in order (`grep -h "% argues:"
+   workspace/<slug>/manuscript/sections/<section>.tex`): together they tell the section's story,
+   and a line that names a topic sends its paragraph back to its author for one fix round.
+   A clean report proves nothing. Tell the user what you read and what you changed.
 
 ## Phase 6 — verify
 
@@ -379,7 +420,8 @@ nothing). Figures for the journal's sizes come from
 
 Report to the user: manuscript + PDF location, per-section merge
 decisions (`report/merge_log.md`), cross-review rounds used and final
-recommendations, which evidence backed which section, verify results,
+recommendations, which evidence backed which section, what the prose step
+(Phase 5 step 5) found and changed, verify results,
 unresolved issues: deferred clusters, overruled blockers with the user's
 reason, and any round whose evidence was `quota` (offer `scieflow research
 scite backfill`). Offer a `src/scieflow/research/skills/paper-review/SKILL.md`

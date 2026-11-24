@@ -7,6 +7,12 @@ All notable changes to ScieFlow are documented in this file. The format follows
 
 ### Added
 
+- Article prose: one guide, `src/scieflow/research/templates/article-prose.md`, tells
+  every writer, reviser and reviewer of a manuscript that a paragraph argues a claim
+  and that a list of checked facts is a defect. The paper-draft outline plans one
+  argument per paragraph, each paragraph carries it in a `% argues:` comment, and
+  `scripts/prose_signals.py` lists the places that read like a list of facts. See
+  [Article Prose](docs/research/article-prose.md).
 - CI test gate: a `Tests` GitHub workflow runs the offline default suite on
   Ubuntu for every pull request and every push to `main`. `scripts/ci-tests.sh`
   runs the same command locally. See [Testing](docs/testing.md).

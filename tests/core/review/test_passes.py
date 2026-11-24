@@ -116,6 +116,13 @@ def test_blind_prompt_has_no_bundle_and_no_scite(project, reviewer, author):
     assert "{{" not in outside and not re.search(r"\$\{?[a-z_]+", outside)   # all filled in
 
 
+def test_blind_prompt_asks_whether_the_text_argues(project):
+    reviewer, author = PAIRS[0]
+    text = passes.blind_prompt(ws(project), 1, reviewer, author, slug=FX)
+    assert "Read as the journal's reader" in text                       # the persona's reader bullet
+    assert "the conclusion it owes the reader" in text
+
+
 def test_blind_prompt_needs_an_assigned_pair(project):
     with pytest.raises(passes.PassError, match="not assigned"):
         passes.blind_prompt(ws(project), 1, "agy", "codex-paper", slug=FX)
