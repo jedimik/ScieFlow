@@ -226,6 +226,9 @@ The reviewer persona was tried on a section that an author had rejected as a lis
 two reviews per persona. With the new persona both reviews named a paragraph that lists what exists
 and never says what it lets a reader do, once as a major comment. With the old persona neither did.
 In all four reviews most comments still asked for more qualification of single statements.
+The sentence that asks the reviewer to say in the summary what the manuscript argues was added after
+these four reviews. One further review with the final wording opened its summary with that statement
+and raised the listing paragraphs as a major comment.
 
 The trial is small. It used one model, two invented tasks and two drafts per cell, and the drafts
 were judged by the counts above and by the coordinator reading them, not by a human reader. Every
