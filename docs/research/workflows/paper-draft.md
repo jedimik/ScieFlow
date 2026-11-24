@@ -74,8 +74,11 @@ marked with `run mark`; see [the native paper-draft lifecycle](../../runs.md#nat
 
 ## Phase 2 — Outline
 
-`research.outline` outlines every section as claims-with-evidence (each
-bullet ends with `[data:<id>]` or a DOI); the `research.debate` agents run a
+`research.outline` outlines every section as its paragraphs. Each paragraph has
+an `ARGUES:` line with the claim it makes to the reader, and under it the facts
+that carry the claim (each bullet ends with `[data:<id>]` or a DOI). The
+`ARGUES:` lines read in order are the argument of the article, which is what you
+approve. The `research.debate` agents run a
 one-round [perspective pass](../debate.md) over it. Then — unless you set
 `auto_approve_outline: true` — the coordinator **shows you the outline and
 waits**. Drafting is the expensive phase; the approval gate is where you
@@ -87,13 +90,17 @@ Each author writes **all five sections** on its own; drafts are never shared
 during this phase. Hard rules in every prompt: numbers only from manifest
 artifacts, each with a `% source: [data:<id>]` comment; Methods must contain
 `\subsection{Data processing}` written from your `processing.md`; `\cite`
-keys only from the actual bib keys. A missing or empty section gets one
-re-dispatch, then the author is marked failed.
+keys only from the actual bib keys. Every prompt also carries the
+[article-prose guide](../article-prose.md): each paragraph argues one claim,
+stated in a `% argues:` comment above it, and a model text you named sets the
+register. A missing or empty section gets one re-dispatch, then the author is
+marked failed.
 
 ## Phase 4 — Adversarial cross-review
 
 Each author reviews the other's draft with the adversarial reviewer persona
-(`templates/adversarial-review.md`) and writes a `manuscript-review` JSON:
+(`templates/adversarial-review.md`), which also reads as the journal's reader
+and reports a paragraph that only lists facts, and writes a `manuscript-review` JSON:
 `ACCEPT`, `MINOR REVISION` or `MAJOR REVISION`, numbered major (`M1…`) and
 minor (`m1…`) points. Each author then revises **its own** draft and answers
 every point — a change or a rebuttal — in a response letter. The coordinator
@@ -104,12 +111,15 @@ edits really happened. Rounds repeat until both accept or
 ## Phase 5 — Merge
 
 The coordinator picks the stronger revised version of each section (judged
-on `% source:` density and correctness, unresolved review points, clarity,
-outline fidelity), may splice paragraphs, and **copies numbers and
+on `% source:` density and correctness, unresolved review points, how it reads
+by the [article-prose guide](../article-prose.md), outline fidelity), may splice
+paragraphs, and **copies numbers and
 `% source:` comments exactly** — never blended. Every choice is recorded in
 `report/merge_log.md`. It then fills `templates/paper/main.tex` (it will ask
 rather than invent an author list), and `research.consistency` removes
-cross-section contradictions without touching any number.
+cross-section contradictions without touching any number. Before anything is
+verified, a prose step runs `scripts/prose_signals.py` over the merged sections
+and the coordinator reads every place it lists.
 
 ## Phase 6 — Verify
 
