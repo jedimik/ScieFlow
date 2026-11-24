@@ -83,12 +83,21 @@ def test_the_guide_says_what_the_signals_cannot_do():
     assert PROVES_NOTHING in _read(GUIDE)
 
 
+def test_the_guide_carries_what_the_trial_with_the_writer_model_showed():
+    text = _read(GUIDE)
+    assert "four to eight sentences" in text            # one paragraph per claim is a list in disguise
+    assert "Keep to the length your task sets" in text  # an argued text grows
+    assert "manifest" in text                           # words of the task leaked into the text
+    assert "A consequence is a claim as well" in text   # a fact without a consequence got one invented
+
+
 # --- paper-draft: where the text is planned, written, merged ------------------------------------
 
 
 def test_the_outline_prompt_plans_one_argument_per_paragraph():
     block = _block(_read(PAPER_DRAFT_SKILL), "# ScieFlow research sub-agent task: article outline")
     assert "ARGUES:" in block
+    assert "plan few of them" in block                  # a paragraph per claim is a list in disguise
     assert "each ending with\nits evidence ref in square brackets" in block or \
         "each ending with its evidence ref in square brackets" in block       # provenance rule kept
 
@@ -130,6 +139,7 @@ def test_the_reviewer_persona_reads_as_the_journals_reader():
     text = _read(PERSONA)
     assert "- Read as the journal's reader:" in text
     assert "the conclusion it owes the reader" in text
+    assert "Say in your summary what the manuscript\n  argues." in text       # the whole text gets the reader's test
     assert "You are a highly demanding senior researcher" in text            # the persona is kept
 
 
@@ -170,6 +180,13 @@ def test_the_paper_draft_page_links_the_docs_page():
 def test_the_docs_page_reports_the_calibration_as_one_case():
     text = _read(DOC)
     assert "one article" in text          # the thresholds come from one case and the page says so
+
+
+def test_the_docs_page_reports_the_trial_and_what_it_does_not_show():
+    text = _read(DOC)
+    assert "## A trial with a writer model" in text
+    assert "two drafts per cell" in text
+    assert "not by a human reader" in text
 
 
 # --- what the argues line relies on --------------------------------------------------------------

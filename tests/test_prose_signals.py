@@ -218,6 +218,16 @@ def test_the_negation_rate_is_judged_from_300_words_on(tmp_path, capsys):
     assert any(s.startswith("many negations (66.7 per 1,000 words)") for s in long["signals"])
 
 
+def test_short_paragraphs_raise_a_signal_from_three_paragraphs_on(tmp_path, capsys):
+    # what a first trial of the guide produced: one short paragraph per claim, a list in disguise
+    claim = "Because the buffer counts every frame it drops, overload cannot pass unnoticed.\n"
+    _code, two = _report(capsys, _write(tmp_path, "two.tex", "\n".join([claim] * 2)))
+    assert not any("short paragraphs" in s for s in two["signals"])
+    _code, six = _report(capsys, _write(tmp_path, "six.tex", "\n".join([claim] * 6)))
+    assert (six["text"]["paragraphs"], six["text"]["words_per_paragraph"]) == (6, 12.0)
+    assert any(s.startswith("short paragraphs (12.0 words on average)") for s in six["signals"])
+
+
 # --- the command -----------------------------------------------------------------------------
 
 
@@ -250,6 +260,6 @@ def test_the_json_report_has_the_documented_keys(tmp_path, capsys):
     assert set(report["text"]) == {
         "paragraphs", "sentences", "words", "words_per_sentence", "relation_share",
         "negations_per_1000_words", "identifiers_per_100_words", "sentences_over_45_words",
-        "paragraphs_without_argues",
+        "paragraphs_without_argues", "words_per_paragraph",
     }
     assert all(set(item) == {"kind", "where", "why", "starts"} for item in report["look_again"])
